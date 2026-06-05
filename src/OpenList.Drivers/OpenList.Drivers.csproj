@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
+  </ItemGroup>
+</Project>

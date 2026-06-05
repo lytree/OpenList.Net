@@ -1,0 +1,11 @@
+@OpenList.Server_HostAddress = http://localhost:5211
+
+GET {{OpenList.Server_HostAddress}}/openapi/v1.json
+Accept: application/json
+
+###
+
+GET {{OpenList.Server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

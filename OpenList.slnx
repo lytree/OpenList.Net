@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OpenList.Core/OpenList.Core.csproj" />
+    <Project Path="src/OpenList.Drivers/OpenList.Drivers.csproj" />
+    <Project Path="src/OpenList.Infrastructure/OpenList.Infrastructure.csproj" />
+    <Project Path="src/OpenList.Server/OpenList.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OpenList.Tests/OpenList.Tests.csproj" />
+  </Folder>
+</Solution>
