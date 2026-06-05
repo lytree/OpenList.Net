@@ -125,6 +125,9 @@ if (!string.IsNullOrEmpty(config.DistDir) && Directory.Exists(config.DistDir))
     });
 }
 
+// Health check
+app.MapGet("/ping", () => Results.Json(new { code = 200, message = "pong" })).AllowAnonymous();
+
 // Minimal API endpoints
 app.MapAuthApi();
 app.MapFsApi();

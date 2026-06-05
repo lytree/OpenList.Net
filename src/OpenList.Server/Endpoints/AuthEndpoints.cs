@@ -14,6 +14,7 @@ public static class AuthEndpoints
     {
         var group = endpoints.MapGroup("/api/auth");
 
+        // Public endpoints (no auth required)
         group.MapPost("login", async (IAuthService auth, LoginReq req) =>
         {
             var token = await auth.LoginAsync(req.Username, req.Password, req.OtpCode);
@@ -38,19 +39,35 @@ public static class AuthEndpoints
                 : Results.Json(new Resp<LoginResp>(new LoginResp { Token = token }));
         });
 
-        group.MapGet("me", async (IUserService users, ClaimsPrincipal user) =>
+        // SSO endpoints (public)
+        group.MapGet("sso", (IAuthService auth, HttpContext ctx) =>
         {
-            var username = user.Identity?.Name;
-            if (string.IsNullOrEmpty(username))
-                return Results.Json(Resp<UserResp>.Error(401, "unauthorized"));
-            var u = await users.GetUserByNameAsync(username);
-            if (u == null) return Results.Json(Resp<UserResp>.Error(404, "user not found"));
-            return Results.Json(new Resp<UserResp>(new UserResp
-            {
-                Id = u.Id, Username = u.Username, Role = (int)u.Role,
-                BasePath = u.BasePath, Permission = u.Permission,
-                Disabled = u.Disabled, Otp = !string.IsNullOrEmpty(u.OtpSecret)
-            }));
+            // SSO redirect - return redirect URL or error if not configured
+            return Results.Json(Resp<object>.Error(501, "SSO not configured"));
+        });
+
+        group.MapGet("sso_callback", (IAuthService auth, HttpContext ctx) =>
+        {
+            return Results.Json(Resp<object>.Error(501, "SSO not configured"));
+        });
+
+        group.MapGet("get_sso_id", (IAuthService auth, HttpContext ctx) =>
+        {
+            return Results.Json(Resp<object>.Error(501, "SSO not configured"));
+        });
+
+        group.MapGet("sso_get_token", (IAuthService auth, HttpContext ctx) =>
+        {
+            return Results.Json(Resp<object>.Error(501, "SSO not configured"));
+        });
+
+        // Authenticated endpoints
+        group.MapGet("logout", async (IAuthService auth, HttpContext ctx) =>
+        {
+            var token = ctx.Request.Headers.Authorization.ToString().Replace("Bearer ", "");
+            if (!string.IsNullOrEmpty(token))
+                await auth.InvalidateTokenAsync(token);
+            return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
         group.MapPost("2fa/generate", async (IAuthService auth, ClaimsPrincipal user) =>

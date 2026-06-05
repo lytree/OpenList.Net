@@ -53,7 +53,7 @@ public class UserResp { public uint Id { get; set; } public string Username { ge
 // Me
 public class UpdateMeReq { public string? Username { get; set; } public string? Password { get; set; } public string? BasePath { get; set; } }
 public class AddSshKeyReq { public string Name { get; set; } = ""; public string Key { get; set; } = ""; }
-public class DeleteSshKeyReq { public string Name { get; set; } = ""; }
+public class DeleteSshKeyReq { public uint UserId { get; set; } public string Name { get; set; } = ""; }
 
 // Share
 public class CreateShareReq { public string FilesRaw { get; set; } = ""; public string? Pwd { get; set; } public DateTime? Expires { get; set; } public int MaxAccessed { get; set; } public string? Remark { get; set; } public string? Readme { get; set; } public string? Header { get; set; } public string? OrderBy { get; set; } public string? OrderDirection { get; set; } public string? ExtractFolder { get; set; } }
@@ -61,6 +61,14 @@ public class ShareGetResp { public List<string> Files { get; set; } = []; public
 
 // Task
 public class TaskIdReq { public string Id { get; set; } = ""; }
+
+// Archive
+public class ArchiveMetaReq { public string Path { get; set; } = ""; public string? Password { get; set; } }
+public class ArchiveListReq { public string Path { get; set; } = ""; public string? Password { get; set; } public string? Page { get; set; } public string? PerPage { get; set; } }
+
+// Settings
+public class DeleteSettingReq { public string Key { get; set; } = ""; }
+public class SetToolSettingReq { public object? Data { get; set; } }
 
 // Public
 public class PublicSettingsResp

@@ -1,11 +1,17 @@
+using System.Text.Json;
+using WebDav;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
 
 namespace OpenList.Drivers.WebDAV;
 
-public class WebDavDriver : RootPathDriver, IDriverGetter, IDriverMkdirResult, IDriverMove, IDriverRename, IDriverCopy, IDriverRemove, IDriverPutResult
+public class WebDavDriver : RootPathDriver,
+    IDriverGetter, IDriverMkdirResult, IDriverMove, IDriverRename,
+    IDriverCopy, IDriverRemove, IDriverPutResult
 {
+    private WebDavClient? _client;
+
     public override DriverConfig Config() => new()
     {
         Name = "WebDAV",
@@ -13,69 +19,151 @@ public class WebDavDriver : RootPathDriver, IDriverGetter, IDriverMkdirResult, I
         CheckStatus = true
     };
 
-    public override object GetAddition() => System.Text.Json.JsonSerializer.Deserialize<WebDavAddition>(_storage.Addition) ?? new WebDavAddition();
+    public override object GetAddition() => JsonSerializer.Deserialize<WebDavAddition>(_storage.Addition) ?? new WebDavAddition();
 
     public override Task InitAsync(CancellationToken ct = default)
     {
         var addition = (WebDavAddition)GetAddition();
         RootFolderPath = addition.RootFolderPath;
+
+        var clientParams = new WebDavClientParams
+        {
+            BaseAddress = new Uri(addition.WebdavURL),
+            Credentials = string.IsNullOrEmpty(addition.Username) ? null
+                : new System.Net.NetworkCredential(addition.Username, addition.Password)
+        };
+
+        _client = new WebDavClient(clientParams);
         return Task.CompletedTask;
     }
 
-    public override Task DropAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-    public override Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
+    public override Task DropAsync(CancellationToken ct = default)
     {
-        // WebDAV PROPFIND implementation would go here
-        return Task.FromResult(new List<IObj>());
-    }
-
-    public override Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
-    {
-        // WebDAV GET link generation
-        return Task.FromResult<Link?>(null);
-    }
-
-    public Task<IObj?> GetAsync(string path, CancellationToken ct = default)
-    {
-        // WebDAV PROPFIND for single resource
-        return Task.FromResult<IObj?>(null);
-    }
-
-    public Task<IObj> MakeDirAsync(IObj parentDir, string dirName, CancellationToken ct = default)
-    {
-        // WebDAV MKCOL
-        return Task.FromResult<IObj>(new ObjItem { Name = dirName, IsFolder = true, Path = parentDir.GetPath() + "/" + dirName });
-    }
-
-    public Task MoveAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
-    {
-        // WebDAV MOVE
+        _client = null;
         return Task.CompletedTask;
     }
 
-    public Task RenameAsync(IObj srcObj, string newName, CancellationToken ct = default)
+    public override async Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
     {
-        // WebDAV MOVE (rename)
-        return Task.CompletedTask;
+        var result = new List<IObj>();
+        var response = await _client!.Propfind(dir.GetPath());
+
+        if (!response.IsSuccessful) return result;
+
+        foreach (var resource in response.Resources)
+        {
+            var name = Uri.UnescapeDataString(resource.Uri.TrimEnd('/').Split('/').Last());
+            if (string.IsNullOrEmpty(name) || name == dir.GetPath().TrimEnd('/').Split('/').Last()) continue;
+
+            result.Add(new ObjItem
+            {
+                Name = name,
+                Size = resource.ContentLength ?? 0,
+                Modified = resource.LastModifiedDate ?? DateTime.MinValue,
+                CTime = resource.CreationDate ?? resource.LastModifiedDate ?? DateTime.MinValue,
+                IsFolder = resource.IsCollection,
+                Path = resource.Uri.TrimEnd('/')
+            });
+        }
+
+        return result;
     }
 
-    public Task CopyAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
+    public override async Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
     {
-        // WebDAV COPY
-        return Task.CompletedTask;
+        var addition = (WebDavAddition)GetAddition();
+        var url = addition.WebdavURL.TrimEnd('/') + file.GetPath();
+        return new Link
+        {
+            URL = url,
+            Header = string.IsNullOrEmpty(addition.Authorization) ? null
+                : new Dictionary<string, string> { { "Authorization", addition.Authorization } }
+        };
     }
 
-    public Task RemoveAsync(IObj obj, CancellationToken ct = default)
+    public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
     {
-        // WebDAV DELETE
-        return Task.CompletedTask;
+        var fullPath = string.Concat(RootFolderPath.TrimEnd('/'), "/", path.TrimStart('/'));
+        var response = await _client!.Propfind(fullPath);
+
+        if (!response.IsSuccessful) return null;
+
+        var resource = response.Resources.FirstOrDefault(r =>
+            r.Uri.TrimEnd('/') == fullPath.TrimEnd('/'));
+
+        if (resource == null) return null;
+
+        var name = Uri.UnescapeDataString(resource.Uri.TrimEnd('/').Split('/').Last());
+        return new ObjItem
+        {
+            Name = name,
+            Size = resource.ContentLength ?? 0,
+            Modified = resource.LastModifiedDate ?? DateTime.MinValue,
+            CTime = resource.CreationDate ?? resource.LastModifiedDate ?? DateTime.MinValue,
+            IsFolder = resource.IsCollection,
+            Path = fullPath
+        };
     }
 
-    public Task<IObj> PutAsync(IObj dstDir, FileStreamer file, Action<double> updateProgress, CancellationToken ct = default)
+    public async Task<IObj> MakeDirAsync(IObj parentDir, string dirName, CancellationToken ct = default)
     {
-        // WebDAV PUT
-        return Task.FromResult<IObj>(new ObjItem { Name = file.Obj.GetName(), IsFolder = false, Path = dstDir.GetPath() + "/" + file.Obj.GetName() });
+        var path = string.Concat(parentDir.GetPath().TrimEnd('/'), "/", dirName, "/");
+        await _client!.Mkcol(path);
+        return new ObjItem
+        {
+            Name = dirName,
+            IsFolder = true,
+            Path = path.TrimEnd('/'),
+            Modified = DateTime.UtcNow,
+            CTime = DateTime.UtcNow
+        };
+    }
+
+    public async Task MoveAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
+    {
+        var dstPath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", srcObj.GetName());
+        if (srcObj.IsDir()) dstPath += "/";
+        await _client!.Move(srcObj.GetPath(), dstPath, new MoveParameters { Overwrite = true });
+    }
+
+    public async Task RenameAsync(IObj srcObj, string newName, CancellationToken ct = default)
+    {
+        var parentPath = srcObj.GetPath().TrimEnd('/')[..srcObj.GetPath().TrimEnd('/').LastIndexOf('/')];
+        var dstPath = string.Concat(parentPath, "/", newName);
+        if (srcObj.IsDir()) dstPath += "/";
+        await _client!.Move(srcObj.GetPath(), dstPath, new MoveParameters { Overwrite = true });
+    }
+
+    public async Task CopyAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
+    {
+        var dstPath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", srcObj.GetName());
+        if (srcObj.IsDir()) dstPath += "/";
+        await _client!.Copy(srcObj.GetPath(), dstPath, new CopyParameters { Overwrite = true });
+    }
+
+    public async Task RemoveAsync(IObj obj, CancellationToken ct = default)
+    {
+        await _client!.Delete(obj.GetPath());
+    }
+
+    public async Task<IObj> PutAsync(IObj dstDir, FileStreamer file, Action<double> updateProgress, CancellationToken ct = default)
+    {
+        var remotePath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", file.Obj.GetName());
+
+        if (file.Stream != null)
+        {
+            await _client!.PutFile(remotePath, file.Stream);
+        }
+
+        return new ObjItem
+        {
+            Name = file.Obj.GetName(),
+            IsFolder = false,
+            Path = remotePath,
+            Size = file.Size,
+            Modified = DateTime.UtcNow,
+            CTime = DateTime.UtcNow
+        };
     }
 }
 
@@ -87,4 +175,6 @@ public class WebDavAddition
     public string? Password { get; set; }
     public string? ProxyAddress { get; set; }
     public string? Authorization { get; set; }
+    public string? Vendor { get; set; }
+    public bool TlsInsecureSkipVerify { get; set; }
 }

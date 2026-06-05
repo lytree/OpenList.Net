@@ -13,7 +13,7 @@ All responses are wrapped in `Resp<T>` (see `src/OpenList.Server/Models/Resp.cs:
 
 ## Reference Implementation
 
-C# port of [OpenList](https://github.com/OpenListTeam/OpenList) (Go/Gin, v4). The Go source is authoritative for API behavior, route structure, and driver semantics.
+C# port of [OpenList](https://github.com/OpenListTeam/OpenList)(local: F:\Code\Dotnet\OpenList) (Go/Gin, v4). The Go source is authoritative for API behavior, route structure, and driver semantics.
 
 ## Build System
 
@@ -35,7 +35,7 @@ dotnet test
 | `src/OpenList.Drivers` | Storage driver implementations — `Local/`, `S3/`, `WebDAV/`, `FtpSftpSmb/`, `Cloud/`, `Stubs/` |
 | `src/OpenList.Infrastructure` | EF Core `DbContext`, service implementations, JWT auth, `DriverFactory`, SQLite/MySQL/PostgreSQL/MSSQL support |
 | `src/OpenList.Server` | ASP.NET Core entrypoint (`Program.cs`), `Endpoints/` (Minimal APIs), `Middleware/`, `Models/` (DTOs + Resp<T>) |
-| `tests/OpenList.Tests` | xUnit test project (placeholder — only UnitTest1.cs stub) |
+| `tests/OpenList.Tests` | NUnit test project (placeholder — only UnitTest1.cs stub) |
 
 ## Driver System
 
