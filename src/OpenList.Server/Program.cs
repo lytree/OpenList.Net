@@ -8,15 +8,50 @@ using OpenList.Infrastructure.Auth;
 using OpenList.Infrastructure.Services;
 using OpenList.Server.Endpoints;
 using OpenList.Server.Middleware;
+using Serilog;
 using System.Text;
 
+// Configure Serilog before building the host
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(new ConfigurationBuilder()
+        .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+        .AddEnvironmentVariables()
+        .Build())
+    .Enrich.FromLogContext()
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}{NewLine}{Message:lj}{NewLine}{Exception}")
+    .WriteTo.File(
+        path: "data/logs/openlist-.log",
+        rollingInterval: RollingInterval.Day,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}{NewLine}{Message:lj}{NewLine}{Exception}",
+        retainedFileCountLimit: 30,
+        fileSizeLimitBytes: 50 * 1024 * 1024)
+    .CreateLogger();
+
+try
+{
+    Log.Information("Starting OpenList.Net");
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Use Serilog for logging
+builder.Host.UseSerilog();
 
 // Configuration
 var config = new AppConfiguration();
 builder.Configuration.Bind(config);
 if (string.IsNullOrEmpty(config.JwtSecret))
     config.JwtSecret = Guid.NewGuid().ToString("N")[..16];
+
+// Configuration validation
+var configErrors = new List<string>();
+if (config.MaxConnections < 0) configErrors.Add("MaxConnections must be >= 0");
+if (config.Database?.Port is int p and (> 0 and (< 1 or > 65535))) configErrors.Add("Database.Port must be between 1 and 65535");
+if (configErrors.Count > 0)
+{
+    var logger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger("ConfigValidation");
+    foreach (var err in configErrors) logger.LogError("Configuration error: {Error}", err);
+    throw new InvalidOperationException($"Invalid configuration: {string.Join("; ", configErrors)}");
+}
 
 builder.Services.AddSingleton(config);
 
@@ -62,6 +97,16 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =
 builder.Services.Configure<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>(options =>
 {
     options.Limits.MaxRequestBodySize = 10L * 1024 * 1024 * 1024; // 10GB
+
+    // HTTPS configuration
+    if (config.Scheme.HttpsPort > 0 && !string.IsNullOrEmpty(config.Scheme.CertFile) && File.Exists(config.Scheme.CertFile))
+    {
+        options.ListenAnyIP(config.Scheme.HttpPort > 0 ? config.Scheme.HttpPort : 80);
+        options.ListenAnyIP(config.Scheme.HttpsPort, listenOptions =>
+        {
+            listenOptions.UseHttps(config.Scheme.CertFile, config.Scheme.CertPassword ?? "");
+        });
+    }
 });
 
 // Swagger
@@ -98,14 +143,25 @@ using (var scope = app.Services.CreateScope())
     var storageService = scope.ServiceProvider.GetRequiredService<IStorageService>();
     await storageService.LoadAllStoragesAsync();
 }
+StoragesLoadedMiddleware.MarkLoaded();
 
 // Middleware
 app.UseCors();
+app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseMiddleware<CorsMiddleware>();
+if (config.Scheme.ForceHttps && config.Scheme.HttpPort != -1 && config.Scheme.HttpsPort != -1)
+    app.UseMiddleware<ForceHttpsMiddleware>();
+if (config.MaxConnections > 0)
+    app.UseMiddleware<MaxConnectionsMiddleware>();
+app.UseMiddleware<StoragesLoadedMiddleware>();
+app.UseMiddleware<FsUpMiddleware>();
 app.UseMiddleware<RateLimitMiddleware>();
-app.UseMiddleware<SignMiddleware>();
+app.UseMiddleware<DownloadRateLimiterMiddleware>();
+app.UseMiddleware<UploadRateLimiterMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseWhen(ctx => ctx.Request.Path.StartsWithSegments("/dav"), builder =>
+    builder.UseMiddleware<WebDavAuthMiddleware>());
 
 // Swagger
 if (app.Environment.IsDevelopment())
@@ -126,7 +182,37 @@ if (!string.IsNullOrEmpty(config.DistDir) && Directory.Exists(config.DistDir))
 }
 
 // Health check
-app.MapGet("/ping", () => Results.Json(new { code = 200, message = "pong" })).AllowAnonymous();
+app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
+
+// Static meta endpoints
+app.MapGet("/favicon.ico", (ISettingService settings) =>
+{
+    var favicon = settings.GetString("favicon");
+    if (!string.IsNullOrEmpty(favicon) && Uri.TryCreate(favicon, UriKind.Absolute, out var uri))
+        return Results.Redirect(uri.ToString());
+    return Results.NoContent();
+}).AllowAnonymous();
+
+app.MapGet("/robots.txt", (ISettingService settings) =>
+{
+    var robotsTxt = settings.GetString("robots_txt");
+    return string.IsNullOrEmpty(robotsTxt)
+        ? Results.Text("User-agent: *\nAllow: /\n", "text/plain")
+        : Results.Text(robotsTxt, "text/plain");
+}).AllowAnonymous();
+
+app.MapGet("/manifest.json", (ISettingService settings) =>
+    Results.Json(new
+    {
+        name = settings.GetString("title") ?? "OpenList",
+        display = "standalone",
+        scope = "/",
+        start_url = "/",
+        icons = new[]
+        {
+            new { src = (settings.GetString("logo") ?? "").Split('\n')[0], sizes = "512x512", type = "image/png" }
+        }
+    }, statusCode: 200)).AllowAnonymous();
 
 // Minimal API endpoints
 app.MapAuthApi();
@@ -147,4 +233,20 @@ if (!string.IsNullOrEmpty(config.DistDir) && Directory.Exists(config.DistDir))
     app.MapFallbackToFile("index.html");
 }
 
+// Graceful shutdown
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStopping.Register(() =>
+{
+    Log.Information("Application is shutting down gracefully...");
+});
+
 app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}

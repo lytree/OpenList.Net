@@ -43,7 +43,14 @@ public static class PublicEndpoints
             AudioTypes = settings.GetString("audio_types") ?? "",
             TextTypes = settings.GetString("text_types") ?? "",
             SsoEnabled = settings.GetBool("sso_login_enabled"),
-            LdapEnabled = settings.GetBool("ldap_login_enabled")
+            SsoLoginPlatform = settings.GetString("sso_login_platform") ?? "",
+            SsoCompatibilityMode = settings.GetBool("sso_compatibility_mode"),
+            LdapEnabled = settings.GetBool("ldap_login_enabled"),
+            LdapLoginTips = settings.GetString("ldap_login_tips") ?? "",
+            WebauthnLoginEnabled = settings.GetBool("webauthn_login_enabled"),
+            SharePreview = settings.GetBool("share_preview"),
+            ShareArchivePreview = settings.GetBool("share_archive_preview"),
+            ShowDiskUsageInPlainText = settings.GetBool("show_disk_usage_in_plain_text")
         }));
     }
 }

@@ -1,8 +1,10 @@
-﻿namespace OpenList.Tests;
+﻿using NUnit.Framework;
+
+namespace OpenList.Tests;
 
 public class UnitTest1
 {
-    [Fact]
+    [Test]
     public void Test1()
     {
 

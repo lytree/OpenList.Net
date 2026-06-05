@@ -292,32 +292,49 @@ public static class AdminEndpoints
         });
 
         // === Search index management ===
-        group.MapPost("index/build", (ISearchService search) =>
+        group.MapPost("index/build", (ISearchService search, IConfiguration config) =>
         {
+            var searchIndex = config["SearchIndex"] ?? "none";
+            if (searchIndex == "none")
+                return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
             _ = Task.Run(() => search.BuildIndexAsync());
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("index/update", (ISearchService search) =>
+        group.MapPost("index/update", (ISearchService search, IConfiguration config) =>
         {
+            var searchIndex = config["SearchIndex"] ?? "none";
+            if (searchIndex == "none")
+                return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
             _ = Task.Run(() => search.UpdateIndexAsync("/", []));
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("index/stop", async (ISearchService search) =>
+        group.MapPost("index/stop", async (ISearchService search, IConfiguration config) =>
         {
+            var searchIndex = config["SearchIndex"] ?? "none";
+            if (searchIndex == "none")
+                return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
             await search.StopIndexAsync();
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("index/clear", async (ISearchService search) =>
+        group.MapPost("index/clear", async (ISearchService search, IConfiguration config) =>
         {
+            var searchIndex = config["SearchIndex"] ?? "none";
+            if (searchIndex == "none")
+                return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
             await search.ClearIndexAsync();
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapGet("index/progress", async (ISearchService search) =>
-            Results.Json(new Resp<IndexProgress>(await search.GetProgressAsync())));
+        group.MapGet("index/progress", async (ISearchService search, IConfiguration config) =>
+        {
+            var searchIndex = config["SearchIndex"] ?? "none";
+            if (searchIndex == "none")
+                return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
+            return Results.Json(new Resp<IndexProgress>(await search.GetProgressAsync()));
+        });
 
         // === Message management ===
         group.MapPost("message/get", async (IMessageService messages, ClaimsPrincipal user) =>

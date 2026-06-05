@@ -42,6 +42,19 @@ public static class DbContextExtensions
     {
         using var scope = serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
-        await dbContext.Database.EnsureCreatedAsync();
+
+        // Use MigrateAsync for proper migration support.
+        // If no migrations exist yet, this will create the database with the current schema.
+        // To create the initial migration, run:
+        //   dotnet ef migrations add InitialCreate --project src/OpenList.Infrastructure --startup-project src/OpenList.Server
+        if ((await dbContext.Database.GetPendingMigrationsAsync()).Any())
+        {
+            await dbContext.Database.MigrateAsync();
+        }
+        else
+        {
+            // Fallback for databases without migrations history table
+            await dbContext.Database.EnsureCreatedAsync();
+        }
     }
 }

@@ -8,7 +8,7 @@ public class TwoFAResp { public string QR { get; set; } = ""; public string Secr
 public class Verify2FAReq { public string Code { get; set; } = ""; public string Secret { get; set; } = ""; }
 
 // Fs
-public class ListReq { public string Path { get; set; } = "/"; public bool Refresh { get; set; } public bool WithStorageDetails { get; set; } public string? Password { get; set; } public string? Page { get; set; } public string? PerPage { get; set; } }
+public class ListReq { public string Path { get; set; } = "/"; public bool Refresh { get; set; } public bool WithStorageDetails { get; set; } public string? Password { get; set; } public int Page { get; set; } = 1; public int PerPage { get; set; } = 0; }
 public class GetReq { public string Path { get; set; } = "/"; public string? Password { get; set; } }
 public class MkdirReq { public string Path { get; set; } = ""; public int Permission { get; set; } }
 public class RenameReq { public string Path { get; set; } = ""; public string Name { get; set; } = ""; }
@@ -23,14 +23,14 @@ public class RemoveEmptyDirReq { public string Path { get; set; } = ""; }
 public class PutReq { public string Dir { get; set; } = "/"; public string? Remotepath { get; set; } }
 public class LinkReq { public string Path { get; set; } = ""; }
 public class SearchReq { public string Parent { get; set; } = "/"; public string Keywords { get; set; } = ""; public int Page { get; set; } = 1; public int PerPage { get; set; } = 20; }
-public class DirsReq { public string Path { get; set; } = "/"; public string? Password { get; set; } }
+public class DirsReq { public string Path { get; set; } = "/"; public string? Password { get; set; } public bool ForceRoot { get; set; } }
 public class OtherReq { public string Path { get; set; } = ""; public string Method { get; set; } = ""; public object? Data { get; set; } }
 public class AddOfflineDownloadReq { public List<string>? Urls { get; set; } public string DstDir { get; set; } = ""; public string Tool { get; set; } = "aria2"; }
-public class ArchiveDecompressReq { public string SrcDir { get; set; } = ""; public string Name { get; set; } = ""; public string DstDir { get; set; } = ""; public string? Password { get; set; } }
-public class DirectUploadReq { public string Path { get; set; } = ""; }
+public class ArchiveDecompressReq { public string SrcDir { get; set; } = ""; public string Name { get; set; } = ""; public string DstDir { get; set; } = ""; public string? Password { get; set; } public string? ArchivePass { get; set; } public string? InnerPath { get; set; } public bool CacheFull { get; set; } public bool PutIntoNewDir { get; set; } public bool Overwrite { get; set; } }
+public class DirectUploadReq { public string Path { get; set; } = ""; public string? FileName { get; set; } public long? FileSize { get; set; } public string? Tool { get; set; } }
 
 // Fs responses
-public class ListResp { public List<ObjResp> Content { get; set; } = []; public string? Total { get; set; } public string? Readme { get; set; } public string? Header { get; set; } public string? Write { get; set; } public string? Provider { get; set; } }
+public class ListResp { public List<ObjResp> Content { get; set; } = []; public int Total { get; set; } public string? Readme { get; set; } public string? Header { get; set; } public string? Write { get; set; } public string? Provider { get; set; } public List<string>? DirectUploadTools { get; set; } }
 public class GetResp { public ObjResp Obj { get; set; } = new(); public string? RawURL { get; set; } public Dictionary<string, string>? Header { get; set; } }
 public class ObjResp { public string Name { get; set; } = ""; public long Size { get; set; } public bool IsDir { get; set; } public DateTime Modified { get; set; } public DateTime Created { get; set; } public string Hash { get; set; } = ""; public string ID { get; set; } = ""; public string Path { get; set; } = ""; public string? Thumbnail { get; set; } public string? Type { get; set; } }
 public class LinkResp { public string URL { get; set; } = ""; public Dictionary<string, string>? Header { get; set; } }
@@ -63,8 +63,11 @@ public class ShareGetResp { public List<string> Files { get; set; } = []; public
 public class TaskIdReq { public string Id { get; set; } = ""; }
 
 // Archive
-public class ArchiveMetaReq { public string Path { get; set; } = ""; public string? Password { get; set; } }
-public class ArchiveListReq { public string Path { get; set; } = ""; public string? Password { get; set; } public string? Page { get; set; } public string? PerPage { get; set; } }
+public class ArchiveMetaReq { public string Path { get; set; } = ""; public string? Password { get; set; } public bool Refresh { get; set; } public string? ArchivePass { get; set; } }
+public class ArchiveListReq { public string Path { get; set; } = ""; public string? Password { get; set; } public string? InnerPath { get; set; } public string? Page { get; set; } public string? PerPage { get; set; } }
+public class ArchiveMetaResp { public string Comment { get; set; } = ""; public bool IsEncrypted { get; set; } public List<ArchiveEntryResp> Content { get; set; } = []; }
+public class ArchiveEntryResp { public string Name { get; set; } = ""; public long Size { get; set; } public bool IsDir { get; set; } }
+public class ArchiveListResp { public List<ArchiveEntryResp> Content { get; set; } = []; public int Total { get; set; } }
 
 // Settings
 public class DeleteSettingReq { public string Key { get; set; } = ""; }
@@ -82,5 +85,12 @@ public class PublicSettingsResp
     public string AudioTypes { get; set; } = "";
     public string TextTypes { get; set; } = "";
     public bool SsoEnabled { get; set; }
+    public string SsoLoginPlatform { get; set; } = "";
+    public bool SsoCompatibilityMode { get; set; }
     public bool LdapEnabled { get; set; }
+    public string LdapLoginTips { get; set; } = "";
+    public bool WebauthnLoginEnabled { get; set; }
+    public bool SharePreview { get; set; }
+    public bool ShareArchivePreview { get; set; }
+    public bool ShowDiskUsageInPlainText { get; set; }
 }

@@ -66,6 +66,11 @@ public class UserService : IUserService
         await Task.CompletedTask;
     }
 
+    public async Task<User?> GetUserBySsoIdAsync(string ssoId, CancellationToken ct = default)
+    {
+        return await _db.Users.FirstOrDefaultAsync(u => u.SsoID == ssoId, ct);
+    }
+
     public async Task<List<SshKey>> ListSshKeysAsync(uint userId, CancellationToken ct = default)
     {
         return await _db.SshKeys.Where(k => k.UserId == userId).ToListAsync(ct);

@@ -9,6 +9,9 @@
     <PackageReference Include="Swashbuckle.AspNetCore" />
     <PackageReference Include="Otp.NET" />
     <PackageReference Include="QRCoder" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />

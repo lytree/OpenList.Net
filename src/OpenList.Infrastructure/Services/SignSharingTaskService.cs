@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
@@ -10,17 +11,23 @@ namespace OpenList.Infrastructure.Services;
 
 public class SignService : ISignService
 {
-    private static readonly byte[] _key = SHA256.HashData(Encoding.UTF8.GetBytes("openlist-sign-key"));
+    private readonly byte[] _key;
+    private readonly int _linkExpirationHours;
+
+    public SignService(IConfiguration config)
+    {
+        var secret = config["SignKey"] ?? "openlist-sign-key";
+        _key = SHA256.HashData(Encoding.UTF8.GetBytes(secret));
+        _linkExpirationHours = config.GetValue("LinkExpiration", 0); // 0 = never expires
+    }
 
     public string Sign(string path)
     {
-        var data = Encoding.UTF8.GetBytes(path);
-        using var hmac = new HMACSHA256(_key);
-        var hash = hmac.ComputeHash(data);
-        var expiry = DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeSeconds();
-        var expiryBytes = BitConverter.GetBytes(expiry);
-        var combined = hash.Concat(expiryBytes).ToArray();
-        return Convert.ToHexString(combined).ToLowerInvariant();
+        var expire = _linkExpirationHours > 0
+            ? DateTimeOffset.UtcNow.AddHours(_linkExpirationHours).ToUnixTimeSeconds()
+            : 0L;
+
+        return ComputeSign(path, expire);
     }
 
     public string SignArchive(string path) => Sign("archive:" + path);
@@ -30,19 +37,32 @@ public class SignService : ISignService
         if (string.IsNullOrEmpty(sign)) return false;
         try
         {
-            var bytes = Convert.FromHexString(sign);
-            if (bytes.Length < 40) return false;
-            var expiry = BitConverter.ToInt64(bytes, 32);
-            if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() > expiry) return false;
-            var data = Encoding.UTF8.GetBytes(path);
-            using var hmac = new HMACSHA256(_key);
-            var expectedHash = hmac.ComputeHash(data);
-            return bytes[..32].SequenceEqual(expectedHash);
+            // Format: base64url(hmac):expireTimestamp
+            var colonIndex = sign.LastIndexOf(':');
+            if (colonIndex < 0) return false;
+
+            var expireStr = sign[(colonIndex + 1)..];
+            if (!long.TryParse(expireStr, out var expire)) return false;
+
+            // Check expiration (0 = never expires)
+            if (expire != 0 && DateTimeOffset.UtcNow.ToUnixTimeSeconds() > expire) return false;
+
+            // Verify signature
+            var expected = ComputeSign(path, expire);
+            return sign == expected;
         }
         catch { return false; }
     }
 
     public bool VerifyArchive(string sign, string path) => Verify(sign, "archive:" + path);
+
+    private string ComputeSign(string data, long expire)
+    {
+        var payload = $"{data}:{expire}";
+        using var hmac = new HMACSHA256(_key);
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToBase64String(hash).Replace('+', '-').Replace('/', '_').TrimEnd('=') + ":" + expire;
+    }
 }
 
 public class SharingService : ISharingService
@@ -51,8 +71,14 @@ public class SharingService : ISharingService
 
     public SharingService(OpenListDbContext db) => _db = db;
 
-    public async Task<List<Sharing>> ListSharingsAsync(uint userId, CancellationToken ct = default)
-        => await _db.Sharings.Where(s => s.CreatorId == userId).ToListAsync(ct);
+    public async Task<List<Sharing>> ListSharingsAsync(uint userId, int page = 1, int perPage = 100, CancellationToken ct = default)
+    {
+        var query = userId == 0
+            ? _db.Sharings.AsQueryable()
+            : _db.Sharings.Where(s => s.CreatorId == userId);
+        return await query.OrderByDescending(s => s.Id)
+            .Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+    }
 
     public async Task<Sharing?> GetSharingAsync(string id, CancellationToken ct = default)
         => await _db.Sharings.FindAsync([id], ct);
@@ -111,6 +137,33 @@ public class TaskService : ITaskService
     {
         var task = new TaskInfo { Type = type, Description = description, State = "pending" };
         _tasks[task.Id] = task;
+        return Task.FromResult(task);
+    }
+
+    public Task<TaskInfo> CreateTaskAsync(string type, string description, Func<string, CancellationToken, Task> execute, CancellationToken ct = default)
+    {
+        var task = new TaskInfo { Type = type, Description = description, State = "running" };
+        _tasks[task.Id] = task;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await execute(task.Id, ct);
+                task.State = "succeeded";
+                task.Progress = 100;
+            }
+            catch (OperationCanceledException)
+            {
+                task.State = "canceled";
+            }
+            catch (Exception ex)
+            {
+                task.State = "errored";
+                task.Error = ex.Message;
+            }
+        }, ct);
+
         return Task.FromResult(task);
     }
 

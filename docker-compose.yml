@@ -1,0 +1,97 @@
+services:
+  openlist:
+    build: .
+    container_name: openlist
+    ports:
+      - "5244:5244"
+    volumes:
+      - openlist-data:/app/data
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - OpenList__Database__Type=sqlite3
+      - OpenList__Database__DBFile=/app/data/data.db
+    restart: unless-stopped
+
+  openlist-mysql:
+    build: .
+    container_name: openlist-mysql
+    profiles:
+      - mysql
+    ports:
+      - "5244:5244"
+    volumes:
+      - openlist-data:/app/data
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - OpenList__Database__Type=mysql
+      - OpenList__Database__Host=mysql
+      - OpenList__Database__Port=3306
+      - OpenList__Database__Name=openlist
+      - OpenList__Database__User=openlist
+      - OpenList__Database__Password=openlist_password
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    profiles:
+      - mysql
+    container_name: openlist-mysql-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=openlist
+      - MYSQL_USER=openlist
+      - MYSQL_PASSWORD=openlist_password
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  openlist-postgres:
+    build: .
+    container_name: openlist-postgres
+    profiles:
+      - postgres
+    ports:
+      - "5244:5244"
+    volumes:
+      - openlist-data:/app/data
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - OpenList__Database__Type=postgres
+      - OpenList__Database__Host=postgres
+      - OpenList__Database__Port=5432
+      - OpenList__Database__Name=openlist
+      - OpenList__Database__User=openlist
+      - OpenList__Database__Password=openlist_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    profiles:
+      - postgres
+    container_name: openlist-postgres-db
+    environment:
+      - POSTGRES_DB=openlist
+      - POSTGRES_USER=openlist
+      - POSTGRES_PASSWORD=openlist_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openlist"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  openlist-data:
+  mysql-data:
+  postgres-data:

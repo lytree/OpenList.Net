@@ -91,7 +91,7 @@ public class DriverFactory : IDriverFactory
         if (_driverFactories.TryGetValue(driverName, out var factory))
         {
             var d = factory();
-            return new DriverInfo { Config = d.Config() };
+            return d.Info();
         }
         return new DriverInfo();
     }
@@ -100,7 +100,7 @@ public class DriverFactory : IDriverFactory
         => _driverFactories.Values.Select(f =>
         {
             var d = f();
-            return new DriverInfo { Config = d.Config() };
+            return d.Info();
         }).ToList();
 
     public List<string> ListDriverNames() => [.. _driverFactories.Keys.OrderBy(k => k)];

@@ -8,11 +8,8 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <PackageReference Include="xunit" />
-    <PackageReference Include="xunit.runner.visualstudio">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="NUnit3TestAdapter" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\OpenList.Core\OpenList.Core.csproj" />
@@ -20,6 +17,5 @@
     <ProjectReference Include="..\..\src\OpenList.Server\OpenList.Server.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Using Include="Xunit" />
   </ItemGroup>
 </Project>

@@ -18,6 +18,27 @@ public class LocalDriver : RootPathDriver,
         CheckStatus = true
     };
 
+    public override DriverInfo Info() => new()
+    {
+        Common =
+        [
+            new DriverItem { Name = "root_folder_path", Type = "string", Default = "/", Required = true, Help = "Root folder path" }
+        ],
+        Additional =
+        [
+            new DriverItem { Name = "show_hidden", Type = "bool", Default = "true", Help = "Show hidden files" },
+            new DriverItem { Name = "recursion", Type = "bool", Default = "false", Help = "Recursive listing" },
+            new DriverItem { Name = "directory_size", Type = "bool", Default = "false", Help = "Calculate directory size" },
+            new DriverItem { Name = "thumbnail", Type = "bool", Default = "false", Help = "Enable thumbnail" },
+            new DriverItem { Name = "thumb_cache_folder", Type = "string", Help = "Thumbnail cache folder" },
+            new DriverItem { Name = "thumb_concurrency", Type = "number", Help = "Thumbnail concurrency" },
+            new DriverItem { Name = "video_thumb_pos", Type = "string", Help = "Video thumbnail position" },
+            new DriverItem { Name = "mkdir_perm", Type = "string", Default = "777", Help = "Mkdir permission (octal)" },
+            new DriverItem { Name = "recycle_bin_path", Type = "string", Help = "Recycle bin path" }
+        ],
+        Config = Config()
+    };
+
     public override object GetAddition() => JsonSerializer.Deserialize<LocalAddition>(_storage.Addition) ?? new LocalAddition();
 
     public override Task InitAsync(CancellationToken ct = default)

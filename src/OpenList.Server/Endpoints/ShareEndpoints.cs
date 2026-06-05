@@ -14,10 +14,13 @@ public static class ShareEndpoints
     {
         var group = endpoints.MapGroup("/api/share");
 
-        group.MapGet("list", async (ISharingService sharings, int page = 1, int perPage = 100) =>
+        group.MapGet("list", async (ISharingService sharings, ClaimsPrincipal user, int page = 1, int perPage = 100) =>
         {
-            var list = await sharings.ListSharingsAsync(0);
-            return Results.Json(new Resp<List<Sharing>>(list));
+            var userId = GetUserId(user);
+            var isAdmin = user.IsInRole("2");
+            // Admin sees all, regular user sees own
+            var list = await sharings.ListSharingsAsync(isAdmin ? 0 : userId ?? 0, page, perPage);
+            return Results.Json(new Resp<PagedListResp<Sharing>>(new PagedListResp<Sharing> { Content = list, Total = list.Count }));
         });
 
         group.MapGet("get", async (ISharingService sharings, string id, string? pwd = null) =>
@@ -63,6 +66,18 @@ public static class ShareEndpoints
         group.MapPost("delete", async (ISharingService sharings, DeleteShareReq req) =>
         {
             await sharings.DeleteSharingAsync(req.Id);
+            return Results.Json(new Resp<object>(null));
+        }).RequireAuthorization();
+
+        group.MapPost("enable", async (ISharingService sharings, DeleteShareReq req) =>
+        {
+            await sharings.EnableSharingAsync(req.Id);
+            return Results.Json(new Resp<object>(null));
+        }).RequireAuthorization();
+
+        group.MapPost("disable", async (ISharingService sharings, DeleteShareReq req) =>
+        {
+            await sharings.DisableSharingAsync(req.Id);
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 

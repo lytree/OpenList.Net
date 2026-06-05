@@ -17,8 +17,28 @@ public class SftpDriver : RootPathDriver,
     public override DriverConfig Config() => new()
     {
         Name = "SFTP",
+        LocalSort = true,
+        OnlyProxy = true,
         DefaultRoot = "/",
         CheckStatus = true
+    };
+
+    public override DriverInfo Info() => new()
+    {
+        Common =
+        [
+            new DriverItem { Name = "root_folder_path", Type = "string", Default = "/", Required = true, Help = "Root folder path" }
+        ],
+        Additional =
+        [
+            new DriverItem { Name = "address", Type = "string", Required = true, Help = "SFTP server address (host:port)" },
+            new DriverItem { Name = "username", Type = "string", Required = true, Help = "Username" },
+            new DriverItem { Name = "password", Type = "string", Help = "Password" },
+            new DriverItem { Name = "private_key", Type = "text", Help = "Private key content" },
+            new DriverItem { Name = "passphrase", Type = "string", Help = "Private key passphrase" },
+            new DriverItem { Name = "ignore_symlink_error", Type = "bool", Default = "false", Help = "Ignore symlink errors" }
+        ],
+        Config = Config()
     };
 
     public override object GetAddition() => JsonSerializer.Deserialize<SftpAddition>(_storage.Addition) ?? new SftpAddition();
@@ -54,8 +74,27 @@ public class SftpDriver : RootPathDriver,
 
     public override async Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
     {
-        // SFTP doesn't support direct links
-        return null;
+        await ReconnectIfNeededAsync();
+        var path = file.GetPath();
+
+        // Download to temp file and serve (SFTP doesn't support direct URL links)
+        var tempFile = Path.Combine(Path.GetTempPath(), $"sftp_{Guid.NewGuid():N}_{file.GetName()}");
+        try
+        {
+            using var remoteStream = _client!.OpenRead(path);
+            using var localStream = new FileStream(tempFile, FileMode.Create, FileAccess.Write);
+            await remoteStream.CopyToAsync(localStream, 81920, ct);
+            return new Link
+            {
+                URL = tempFile,
+                Header = new Dictionary<string, string> { { "Content-Type", "application/octet-stream" } }
+            };
+        }
+        catch
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+            return null;
+        }
     }
 
     public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
@@ -233,4 +272,5 @@ public class SftpAddition
     public string Password { get; set; } = "";
     public string? PrivateKey { get; set; }
     public string? Passphrase { get; set; }
+    public bool IgnoreSymlinkError { get; set; }
 }

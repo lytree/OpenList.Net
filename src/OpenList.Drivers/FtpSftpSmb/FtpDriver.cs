@@ -15,8 +15,26 @@ public class FtpDriver : RootPathDriver,
     public override DriverConfig Config() => new()
     {
         Name = "FTP",
+        LocalSort = true,
+        OnlyProxy = true,
         DefaultRoot = "/",
         CheckStatus = true
+    };
+
+    public override DriverInfo Info() => new()
+    {
+        Common =
+        [
+            new DriverItem { Name = "root_folder_path", Type = "string", Default = "/", Required = true, Help = "Root folder path" }
+        ],
+        Additional =
+        [
+            new DriverItem { Name = "address", Type = "string", Required = true, Help = "FTP server address (host:port)" },
+            new DriverItem { Name = "username", Type = "string", Required = true, Help = "Username" },
+            new DriverItem { Name = "password", Type = "string", Help = "Password" },
+            new DriverItem { Name = "encoding", Type = "string", Default = "UTF-8", Help = "Encoding" }
+        ],
+        Config = Config()
     };
 
     public override object GetAddition() => JsonSerializer.Deserialize<FtpAddition>(_storage.Addition) ?? new FtpAddition();
@@ -62,7 +80,25 @@ public class FtpDriver : RootPathDriver,
 
     public override async Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
     {
-        return null;
+        await EnsureConnectedAsync(ct);
+        var path = file.GetPath();
+
+        // Download to temp file and serve (FTP doesn't support direct URL links)
+        var tempFile = Path.Combine(Path.GetTempPath(), $"ftp_{Guid.NewGuid():N}_{file.GetName()}");
+        try
+        {
+            await _client!.DownloadFile(tempFile, path, FtpLocalExists.Overwrite, FtpVerify.None, null, ct);
+            return new Link
+            {
+                URL = tempFile,
+                Header = new Dictionary<string, string> { { "Content-Type", "application/octet-stream" } }
+            };
+        }
+        catch
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+            return null;
+        }
     }
 
     public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)

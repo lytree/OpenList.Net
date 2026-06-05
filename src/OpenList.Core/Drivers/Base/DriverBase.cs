@@ -1,3 +1,4 @@
+using System.Reflection;
 using OpenList.Core.Drivers;
 using OpenList.Core.Models;
 
@@ -20,6 +21,54 @@ public abstract class DriverBase : IDriver
 
     public virtual Storage GetStorage() => _storage;
     public virtual void SetStorage(Storage storage) => _storage = storage;
+
+    public virtual DriverInfo Info()
+    {
+        var cfg = Config();
+        var addition = GetAddition();
+        var additionalItems = BuildItemsFromObject(addition);
+
+        // Build common items based on driver type
+        var commonItems = new List<DriverItem>();
+        if (this is RootPathDriver)
+            commonItems.Add(new DriverItem { Name = "root_folder_path", Type = "string", Default = cfg.DefaultRoot, Required = true, Help = "Root folder path" });
+        if (this is RootIdDriver)
+            commonItems.Add(new DriverItem { Name = "root_folder_id", Type = "string", Default = cfg.DefaultRoot, Required = true, Help = "Root folder ID" });
+
+        return new DriverInfo
+        {
+            Common = commonItems,
+            Additional = additionalItems,
+            Config = cfg
+        };
+    }
+
+    private static List<DriverItem> BuildItemsFromObject(object obj)
+    {
+        var items = new List<DriverItem>();
+        var type = obj.GetType();
+        var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+        foreach (var prop in props)
+        {
+            var jsonName = ToSnakeCase(prop.Name);
+            var item = new DriverItem
+            {
+                Name = jsonName,
+                Type = prop.PropertyType.Name.ToLowerInvariant(),
+                Default = prop.GetValue(obj)?.ToString(),
+                Required = prop.GetCustomAttributes<System.ComponentModel.DataAnnotations.RequiredAttribute>().Any()
+            };
+            items.Add(item);
+        }
+
+        return items;
+    }
+
+    private static string ToSnakeCase(string name)
+        => string.Concat(name.Select((c, i) =>
+            i > 0 && (char.IsUpper(c) || char.IsDigit(c)) ? "_" + char.ToLower(c) : char.ToLower(c).ToString()))
+            .Replace("__", "_");
 }
 
 /// <summary>

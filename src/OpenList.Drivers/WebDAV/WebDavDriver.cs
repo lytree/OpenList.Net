@@ -19,6 +19,25 @@ public class WebDavDriver : RootPathDriver,
         CheckStatus = true
     };
 
+    public override DriverInfo Info() => new()
+    {
+        Common =
+        [
+            new DriverItem { Name = "root_folder_path", Type = "string", Default = "/", Required = true, Help = "Root folder path" }
+        ],
+        Additional =
+        [
+            new DriverItem { Name = "webdav_url", Type = "string", Required = true, Help = "WebDAV server URL" },
+            new DriverItem { Name = "username", Type = "string", Help = "Username" },
+            new DriverItem { Name = "password", Type = "string", Help = "Password" },
+            new DriverItem { Name = "proxy_address", Type = "string", Help = "Proxy address" },
+            new DriverItem { Name = "authorization", Type = "string", Help = "Authorization header" },
+            new DriverItem { Name = "vendor", Type = "string", Help = "WebDAV vendor type" },
+            new DriverItem { Name = "tls_insecure_skip_verify", Type = "bool", Default = "false", Help = "Skip TLS certificate verification" }
+        ],
+        Config = Config()
+    };
+
     public override object GetAddition() => JsonSerializer.Deserialize<WebDavAddition>(_storage.Addition) ?? new WebDavAddition();
 
     public override Task InitAsync(CancellationToken ct = default)

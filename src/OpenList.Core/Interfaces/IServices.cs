@@ -16,6 +16,7 @@ public interface IFileSystemService
     Task PutAsync(string dstDir, FileStreamer file, Action<double> progress, CancellationToken ct = default);
     Task<object?> OtherAsync(OtherArgs args, CancellationToken ct = default);
     Task<Storage?> GetStorageAsync(string path, CancellationToken ct = default);
+    Task<StorageDetails?> GetStorageDetailsAsync(string path, CancellationToken ct = default);
 }
 
 public interface IStorageService
@@ -44,6 +45,7 @@ public interface IUserService
     Task DeleteUserAsync(uint id, CancellationToken ct = default);
     Task Cancel2FAAsync(uint id, CancellationToken ct = default);
     Task DeleteUserCacheAsync(uint id, CancellationToken ct = default);
+    Task<User?> GetUserBySsoIdAsync(string ssoId, CancellationToken ct = default);
     Task<List<SshKey>> ListSshKeysAsync(uint userId, CancellationToken ct = default);
     Task AddSshKeyAsync(uint userId, string name, string key, CancellationToken ct = default);
     Task DeleteSshKeyAsync(uint userId, string name, CancellationToken ct = default);
@@ -73,7 +75,7 @@ public interface ISettingService
 
 public interface ISharingService
 {
-    Task<List<Sharing>> ListSharingsAsync(uint userId, CancellationToken ct = default);
+    Task<List<Sharing>> ListSharingsAsync(uint userId, int page = 1, int perPage = 100, CancellationToken ct = default);
     Task<Sharing?> GetSharingAsync(string id, CancellationToken ct = default);
     Task<Sharing> CreateSharingAsync(Sharing sharing, CancellationToken ct = default);
     Task UpdateSharingAsync(Sharing sharing, CancellationToken ct = default);
@@ -92,11 +94,13 @@ public interface IAuthService
     Task<bool> Verify2FAAsync(uint userId, string code, string secret, CancellationToken ct = default);
     Task InvalidateTokenAsync(string token, CancellationToken ct = default);
     string HashPassword(string password);
+    string GenerateToken(User user);
 }
 
 public interface ITaskService
 {
     Task<TaskInfo> CreateTaskAsync(string type, string description, CancellationToken ct = default);
+    Task<TaskInfo> CreateTaskAsync(string type, string description, Func<string, CancellationToken, Task> execute, CancellationToken ct = default);
     Task<List<TaskInfo>> ListTasksAsync(string? type = null, CancellationToken ct = default);
     Task<TaskInfo?> GetTaskAsync(string id, CancellationToken ct = default);
     Task CancelTaskAsync(string id, CancellationToken ct = default);

@@ -12,6 +12,7 @@ public interface IDriver : IDriverMeta, IDriverReader
 public interface IDriverMeta
 {
     DriverConfig Config();
+    DriverInfo Info();
     Storage GetStorage();
     void SetStorage(Storage storage);
     object GetAddition();

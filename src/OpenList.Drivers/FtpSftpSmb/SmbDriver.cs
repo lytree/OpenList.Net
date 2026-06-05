@@ -25,8 +25,27 @@ public class SmbDriver : RootPathDriver,
     public override DriverConfig Config() => new()
     {
         Name = "SMB",
-        DefaultRoot = "/",
+        LocalSort = true,
+        OnlyProxy = true,
+        DefaultRoot = ".",
         CheckStatus = true
+    };
+
+    public override DriverInfo Info() => new()
+    {
+        Common =
+        [
+            new DriverItem { Name = "root_folder_path", Type = "string", Default = ".", Required = true, Help = "Root folder path" }
+        ],
+        Additional =
+        [
+            new DriverItem { Name = "address", Type = "string", Required = true, Help = "SMB server address (host:port)" },
+            new DriverItem { Name = "username", Type = "string", Required = true, Help = "Username" },
+            new DriverItem { Name = "password", Type = "string", Help = "Password" },
+            new DriverItem { Name = "share_name", Type = "string", Required = true, Help = "Share name" },
+            new DriverItem { Name = "domain", Type = "string", Help = "Domain" }
+        ],
+        Config = Config()
     };
 
     public override object GetAddition() => JsonSerializer.Deserialize<SmbAddition>(_storage.Addition) ?? new SmbAddition();
@@ -105,7 +124,64 @@ public class SmbDriver : RootPathDriver,
 
     public override async Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
     {
-        return null;
+        await EnsureConnectedAsync();
+        var smbPath = file.GetPath().Replace('/', '\\');
+
+        var status = _fileStore!.CreateFile(
+            out var fileHandle,
+            out _,
+            smbPath,
+            SmbAccessMask.GENERIC_READ,
+            SmbFileAttribute.Normal,
+            SmbShareAccess.Read,
+            SmbCreateDisposition.FILE_OPEN,
+            SmbCreateOptions.FILE_NON_DIRECTORY_FILE,
+            null);
+
+        if (status != NTStatus.STATUS_SUCCESS) return null;
+
+        try
+        {
+            // Get file size
+            status = _fileStore.GetFileInformation(out var fileInfo, fileHandle, SmbFileInformationClass.FileStandardInformation);
+            if (status != NTStatus.STATUS_SUCCESS) return null;
+
+            var fileStdInfo = (FileStandardInformation)fileInfo;
+            var fileSize = fileStdInfo.EndOfFile;
+
+            // Download to temp file
+            var tempDir = Path.Combine(Path.GetTempPath(), "openlist-smb");
+            Directory.CreateDirectory(tempDir);
+            var tempFile = Path.Combine(tempDir, Guid.NewGuid().ToString("N") + "_" + file.GetName());
+
+            using (var fs = new FileStream(tempFile, FileMode.Create))
+            {
+                var offset = 0L;
+                var bufferSize = 1024 * 1024; // 1MB chunks
+                while (offset < fileSize)
+                {
+                    var readSize = (int)Math.Min(bufferSize, fileSize - offset);
+                    status = _fileStore.ReadFile(out var data, fileHandle, offset, readSize);
+                    if (status != NTStatus.STATUS_SUCCESS) break;
+                    if (data == null || data.Length == 0) break;
+                    await fs.WriteAsync(data, 0, data.Length, ct);
+                    offset += data.Length;
+                }
+            }
+
+            _fileStore.CloseFile(fileHandle);
+
+            return new Link
+            {
+                URL = tempFile,
+                ContentLength = fileSize
+            };
+        }
+        catch
+        {
+            _fileStore.CloseFile(fileHandle);
+            return null;
+        }
     }
 
     public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)

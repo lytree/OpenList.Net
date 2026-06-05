@@ -1,0 +1,11 @@
+bin/
+obj/
+data/
+*.user
+*.suo
+.vs/
+.idea/
+.git/
+tests/
+*.md
+!README.md

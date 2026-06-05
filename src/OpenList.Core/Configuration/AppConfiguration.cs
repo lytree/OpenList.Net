@@ -58,6 +58,7 @@ public class SchemeConfig
     public int HttpsPort { get; set; } = -1;
     public bool ForceHttps { get; set; }
     public string CertFile { get; set; } = "";
+    public string CertPassword { get; set; } = "";
     public string KeyFile { get; set; } = "";
     public string UnixFile { get; set; } = "";
     public string UnixFilePerm { get; set; } = "";
