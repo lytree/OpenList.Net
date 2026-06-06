@@ -10,6 +10,7 @@
     <PackageReference Include="Otp.NET" />
     <PackageReference Include="QRCoder" />
     <PackageReference Include="Novell.Directory.Ldap.NETStandard" />
+    <PackageReference Include="Fido2" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />

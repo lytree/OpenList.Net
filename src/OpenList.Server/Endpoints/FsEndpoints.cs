@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Routing;
 using OpenList.Core.Drivers;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Infrastructure.Services;
 using OpenList.Server.Models;
 
 namespace OpenList.Server.Endpoints;
@@ -405,10 +406,17 @@ public static class FsEndpoints
             return Results.Json(new Resp<object>(result));
         }).RequireAuthorization();
 
-        group.MapPost("add_offline_download", async (ITaskService taskService, AddOfflineDownloadReq req) =>
+        group.MapPost("add_offline_download", async (OfflineDownloadService downloadService, AddOfflineDownloadReq req, CancellationToken ct) =>
         {
-            var task = await taskService.CreateTaskAsync("offline_download", $"Download {string.Join(", ", req.Urls ?? [])}");
-            return Results.Json(new Resp<object>(new { task_id = task.Id }));
+            try
+            {
+                var tasks = await downloadService.AddUrlsAsync(req.Urls ?? [], req.DstDir, req.Tool, ct);
+                return Results.Json(new Resp<object>(new { tasks = tasks.Select(t => new { t.Id, t.Description, t.State }).ToList() }));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Json(Resp<object>.Error(400, ex.Message));
+            }
         }).RequireAuthorization();
 
         group.MapPost("archive/decompress", async (IFileSystemService fs, ITaskService taskService, ArchiveDecompressReq req) =>

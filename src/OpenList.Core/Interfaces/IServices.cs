@@ -106,6 +106,7 @@ public interface ITaskService
     Task CancelTaskAsync(string id, CancellationToken ct = default);
     Task RetryTaskAsync(string id, CancellationToken ct = default);
     Task DeleteTaskAsync(string id, CancellationToken ct = default);
+    Task UpdateProgressAsync(string id, double progress, CancellationToken ct = default);
 }
 
 public interface ISearchService

@@ -88,10 +88,10 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 ### P5：数据库与持久化（中优先级）
 
 - [x] **数据库迁移** — 改用 EF Core Migrations（InitialCreate 迁移已创建，支持 MigrateAsync + EnsureCreatedAsync 回退）
-- [ ] **Task 持久化** — 任务存储到数据库
-- [ ] **Search 索引持久化** — 索引存储到数据库
-- [ ] **Message 持久化** — 消息存储到数据库（当前无 DB 表）
-- [ ] **Token 黑名单持久化** — 黑名单存储到数据库
+- [x] **Task 持久化** — 任务存储到数据库（内存缓存运行中任务 + DB 持久化）
+- [x] **Search 索引持久化** — 索引存储到数据库（内存缓存 + DB 双层）
+- [x] **Message 持久化** — 消息存储到数据库
+- [x] **Token 黑名单持久化** — 黑名单存储到数据库（内存 + DB 双写）
 
 ### P6：WebDAV 服务端完善（中优先级）
 

@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Fido2NetLib;
+using Fido2NetLib.Objects;
 using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
 using OpenList.Infrastructure.Data;
@@ -71,6 +73,23 @@ builder.Services.AddScoped<IFileSystemService, FileSystemService>();
 builder.Services.AddSingleton<IDriverFactory, DriverFactory>();
 builder.Services.AddSingleton<ISearchService, SearchService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
+builder.Services.AddScoped<OfflineDownloadService>();
+
+// WebAuthn / FIDO2
+builder.Services.AddScoped<WebAuthnService>();
+builder.Services.AddSingleton<IFido2>(sp =>
+{
+    var origin = string.IsNullOrEmpty(config.SiteURL)
+        ? $"http://localhost:{config.Scheme.HttpPort}"
+        : config.SiteURL.TrimEnd('/');
+    return new Fido2(new Fido2Configuration
+    {
+        ServerDomain = new Uri(origin).Host,
+        ServerName = "OpenList",
+        Origins = new HashSet<string> { origin },
+        TimestampDriftTolerance = 300000
+    });
+});
 
 // Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

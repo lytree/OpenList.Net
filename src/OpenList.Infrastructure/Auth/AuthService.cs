@@ -223,10 +223,27 @@ public class AuthService : IAuthService
         return true;
     }
 
-    public Task InvalidateTokenAsync(string token, CancellationToken ct = default)
+    public async Task InvalidateTokenAsync(string token, CancellationToken ct = default)
     {
-        _blacklistedTokens[token.Replace("Bearer ", "")] = DateTime.UtcNow;
-        return Task.CompletedTask;
+        var rawToken = token.Replace("Bearer ", "");
+        _blacklistedTokens[rawToken] = DateTime.UtcNow;
+
+        // Persist to database
+        var handler = new JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(rawToken);
+        var jti = jwt.Claims.FirstOrDefault(c => c.Type == "jti")?.Value ?? rawToken.GetHashCode().ToString();
+        var userIdClaim = jwt.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier);
+        var userId = userIdClaim != null && uint.TryParse(userIdClaim.Value, out var uid) ? uid : 0;
+        var expiresAt = jwt.ValidTo > DateTime.MinValue ? jwt.ValidTo : DateTime.UtcNow.AddHours(_tokenExpiresIn);
+
+        _db.TokenBlacklist.Add(new TokenBlacklistEntry
+        {
+            Jti = jti,
+            UserId = userId,
+            ExpiresAt = expiresAt,
+            CreatedAt = DateTime.UtcNow
+        });
+        await _db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -279,25 +296,27 @@ public class AuthService : IAuthService
         token = token.Replace("Bearer ", "");
         if (_blacklistedTokens.ContainsKey(token)) return null;
 
-        // Lazy cleanup: remove expired blacklist entries periodically
-        if (_blacklistedTokens.Count > 0 && DateTime.UtcNow.Minute == 0) // roughly once per hour
-        {
-            CleanupExpiredEntries();
-        }
-
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSecret));
         var handler = new JwtSecurityTokenHandler();
 
         try
         {
-            return handler.ValidateToken(token, new TokenValidationParameters
+            var principal = handler.ValidateToken(token, new TokenValidationParameters
             {
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = key,
                 ValidateIssuer = false,
                 ValidateAudience = false,
                 ClockSkew = TimeSpan.Zero
-            }, out _);
+            }, out var validatedToken);
+
+            // Check database blacklist
+            var jwt = (JwtSecurityToken)validatedToken;
+            var jti = jwt.Claims.FirstOrDefault(c => c.Type == "jti")?.Value;
+            if (jti != null && _db.TokenBlacklist.Any(b => b.Jti == jti))
+                return null;
+
+            return principal;
         }
         catch
         {

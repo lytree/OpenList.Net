@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Infrastructure.Services;
 using OpenList.Server.Models;
 
 namespace OpenList.Server.Endpoints;
@@ -210,11 +211,29 @@ public static class AdminEndpoints
         });
 
         // Offline download tool settings
-        group.MapPost("setting/set_aria2", (SetToolSettingReq req) =>
-            Results.Json(Resp<object>.Error(501, "not implemented")));
+        group.MapPost("setting/set_aria2", async (OfflineDownloadService downloadService, ISettingService settings, SetToolSettingReq req, CancellationToken ct) =>
+        {
+            if (req.Data is Dictionary<string, object> dict)
+            {
+                var items = dict.Select(kv => new SettingItem { Key = $"aria2_{kv.Key}", Value = kv.Value?.ToString() ?? "" }).ToList();
+                await settings.SaveSettingsAsync(items, ct);
+                var result = await downloadService.ReinitToolAsync("aria2", ct);
+                return Results.Json(new Resp<object>(result ?? "ok"));
+            }
+            return Results.Json(Resp<object>.Error(400, "invalid data"));
+        });
 
-        group.MapPost("setting/set_qbit", (SetToolSettingReq req) =>
-            Results.Json(Resp<object>.Error(501, "not implemented")));
+        group.MapPost("setting/set_qbit", async (OfflineDownloadService downloadService, ISettingService settings, SetToolSettingReq req, CancellationToken ct) =>
+        {
+            if (req.Data is Dictionary<string, object> dict)
+            {
+                var items = dict.Select(kv => new SettingItem { Key = $"qbittorrent_{kv.Key}", Value = kv.Value?.ToString() ?? "" }).ToList();
+                await settings.SaveSettingsAsync(items, ct);
+                var result = await downloadService.ReinitToolAsync("qBittorrent", ct);
+                return Results.Json(new Resp<object>(result ?? "ok"));
+            }
+            return Results.Json(Resp<object>.Error(400, "invalid data"));
+        });
 
         group.MapPost("setting/set_transmission", (SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));

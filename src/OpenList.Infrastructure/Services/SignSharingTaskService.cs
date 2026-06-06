@@ -131,19 +131,27 @@ public class SharingService : ISharingService
 
 public class TaskService : ITaskService
 {
-    private readonly ConcurrentDictionary<string, TaskInfo> _tasks = new();
+    private readonly OpenListDbContext _db;
+    private readonly ConcurrentDictionary<string, TaskInfo> _runningTasks = new();
 
-    public Task<TaskInfo> CreateTaskAsync(string type, string description, CancellationToken ct = default)
+    public TaskService(OpenListDbContext db) => _db = db;
+
+    public async Task<TaskInfo> CreateTaskAsync(string type, string description, CancellationToken ct = default)
     {
         var task = new TaskInfo { Type = type, Description = description, State = "pending" };
-        _tasks[task.Id] = task;
-        return Task.FromResult(task);
+        var record = TaskRecord.FromTaskInfo(task);
+        _db.TaskRecords.Add(record);
+        await _db.SaveChangesAsync(ct);
+        return task;
     }
 
-    public Task<TaskInfo> CreateTaskAsync(string type, string description, Func<string, CancellationToken, Task> execute, CancellationToken ct = default)
+    public async Task<TaskInfo> CreateTaskAsync(string type, string description, Func<string, CancellationToken, Task> execute, CancellationToken ct = default)
     {
         var task = new TaskInfo { Type = type, Description = description, State = "running" };
-        _tasks[task.Id] = task;
+        var record = TaskRecord.FromTaskInfo(task);
+        _db.TaskRecords.Add(record);
+        await _db.SaveChangesAsync(ct);
+        _runningTasks[task.Id] = task;
 
         _ = Task.Run(async () =>
         {
@@ -162,44 +170,108 @@ public class TaskService : ITaskService
                 task.State = "errored";
                 task.Error = ex.Message;
             }
+            finally
+            {
+                _runningTasks.TryRemove(task.Id, out _);
+                // Persist final state
+                var dbRecord = await _db.TaskRecords.FindAsync([task.Id], ct);
+                if (dbRecord != null)
+                {
+                    dbRecord.State = task.State;
+                    dbRecord.Progress = task.Progress;
+                    dbRecord.Error = task.Error;
+                    try { await _db.SaveChangesAsync(ct); } catch { /* best effort */ }
+                }
+            }
         }, ct);
 
-        return Task.FromResult(task);
+        return task;
     }
 
-    public Task<List<TaskInfo>> ListTasksAsync(string? type = null, CancellationToken ct = default)
+    public async Task<List<TaskInfo>> ListTasksAsync(string? type = null, CancellationToken ct = default)
     {
-        var tasks = _tasks.Values.AsEnumerable();
+        var query = _db.TaskRecords.AsQueryable();
         if (!string.IsNullOrEmpty(type))
-            tasks = tasks.Where(t => t.Type == type);
-        return Task.FromResult(tasks.OrderByDescending(t => t.CreatedAt).ToList());
+            query = query.Where(t => t.Type == type);
+
+        var records = await query.OrderByDescending(t => t.CreatedAt).ToListAsync(ct);
+        var result = records.Select(r => r.ToTaskInfo()).ToList();
+
+        // Merge running tasks (in-memory state is more up-to-date)
+        foreach (var running in _runningTasks.Values)
+        {
+            var idx = result.FindIndex(t => t.Id == running.Id);
+            if (idx >= 0) result[idx] = running;
+        }
+
+        return result;
     }
 
-    public Task<TaskInfo?> GetTaskAsync(string id, CancellationToken ct = default)
-        => Task.FromResult(_tasks.GetValueOrDefault(id));
-
-    public Task CancelTaskAsync(string id, CancellationToken ct = default)
+    public async Task<TaskInfo?> GetTaskAsync(string id, CancellationToken ct = default)
     {
-        if (_tasks.TryGetValue(id, out var task))
+        // Check running tasks first (more up-to-date)
+        if (_runningTasks.TryGetValue(id, out var running))
+            return running;
+
+        var record = await _db.TaskRecords.FindAsync([id], ct);
+        return record?.ToTaskInfo();
+    }
+
+    public async Task CancelTaskAsync(string id, CancellationToken ct = default)
+    {
+        if (_runningTasks.TryGetValue(id, out var task))
             task.State = "canceled";
-        return Task.CompletedTask;
+
+        var record = await _db.TaskRecords.FindAsync([id], ct);
+        if (record != null)
+        {
+            record.State = "canceled";
+            await _db.SaveChangesAsync(ct);
+        }
     }
 
-    public Task RetryTaskAsync(string id, CancellationToken ct = default)
+    public async Task RetryTaskAsync(string id, CancellationToken ct = default)
     {
-        if (_tasks.TryGetValue(id, out var task))
+        if (_runningTasks.TryGetValue(id, out var task))
         {
             task.State = "pending";
             task.Progress = 0;
             task.Error = null;
         }
-        return Task.CompletedTask;
+
+        var record = await _db.TaskRecords.FindAsync([id], ct);
+        if (record != null)
+        {
+            record.State = "pending";
+            record.Progress = 0;
+            record.Error = null;
+            await _db.SaveChangesAsync(ct);
+        }
     }
 
-    public Task DeleteTaskAsync(string id, CancellationToken ct = default)
+    public async Task DeleteTaskAsync(string id, CancellationToken ct = default)
     {
-        _tasks.TryRemove(id, out _);
-        return Task.CompletedTask;
+        _runningTasks.TryRemove(id, out _);
+        var record = await _db.TaskRecords.FindAsync([id], ct);
+        if (record != null)
+        {
+            _db.TaskRecords.Remove(record);
+            await _db.SaveChangesAsync(ct);
+        }
+    }
+
+    public async Task UpdateProgressAsync(string id, double progress, CancellationToken ct = default)
+    {
+        if (_runningTasks.TryGetValue(id, out var info))
+        {
+            info.Progress = progress;
+        }
+        var record = await _db.TaskRecords.FindAsync([id], ct);
+        if (record != null)
+        {
+            record.Progress = progress;
+            await _db.SaveChangesAsync(ct);
+        }
     }
 
     public static string GenerateNanoId(int size)

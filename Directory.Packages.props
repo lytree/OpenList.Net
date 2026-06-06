@@ -24,6 +24,8 @@
     <!-- Auth / Security -->
     <PackageVersion Include="Otp.NET" Version="1.4.1" />
     <PackageVersion Include="QRCoder" Version="1.6.0" />
+    <PackageVersion Include="Fido2" Version="4.0.0" />
+    <PackageVersion Include="Fido2.AspNet" Version="4.0.0" />
 
     <!-- Drivers -->
     <PackageVersion Include="FluentFTP" Version="52.0.0" />
@@ -37,8 +39,7 @@
     <PackageVersion Include="Serilog.Sinks.File" Version="6.0.0" />
 
     <!-- Testing -->
-    <PackageVersion Include="NUnit" Version="3.14.0" />
-    <PackageVersion Include="NUnit3TestAdapter" Version="4.5.0" />
+    <PackageVersion Include="TUnit" Version="0.19.74" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
   </ItemGroup>

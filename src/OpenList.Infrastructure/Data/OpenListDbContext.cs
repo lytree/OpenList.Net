@@ -14,6 +14,11 @@ public class OpenListDbContext : DbContext
     public DbSet<SettingItem> Settings => Set<SettingItem>();
     public DbSet<Sharing> Sharings => Set<Sharing>();
     public DbSet<SshKey> SshKeys => Set<SshKey>();
+    public DbSet<TaskRecord> TaskRecords => Set<TaskRecord>();
+    public DbSet<SearchIndex> SearchIndices => Set<SearchIndex>();
+    public DbSet<MessageRecord> Messages => Set<MessageRecord>();
+    public DbSet<TokenBlacklistEntry> TokenBlacklist => Set<TokenBlacklistEntry>();
+    public DbSet<WebAuthnCredential> WebAuthnCredentials => Set<WebAuthnCredential>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -82,6 +87,53 @@ public class OpenListDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // TaskRecord
+        modelBuilder.Entity<TaskRecord>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Type);
+            entity.HasIndex(e => e.State);
+            entity.HasIndex(e => e.CreatedAt);
+            entity.Property(e => e.Error).HasColumnType("text");
+            entity.Property(e => e.PersistData).HasColumnType("text");
+        });
+
+        // SearchIndex
+        modelBuilder.Entity<SearchIndex>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Parent);
+            entity.HasIndex(e => e.Name);
+            entity.Property(e => e.Parent).IsRequired();
+            entity.Property(e => e.Name).IsRequired();
+        });
+
+        // MessageRecord
+        modelBuilder.Entity<MessageRecord>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.Read);
+        });
+
+        // TokenBlacklistEntry
+        modelBuilder.Entity<TokenBlacklistEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Jti);
+            entity.HasIndex(e => e.ExpiresAt);
+        });
+
+        // WebAuthnCredential
+        modelBuilder.Entity<WebAuthnCredential>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.CredentialId);
+            entity.Property(e => e.PublicKey).HasColumnType("text");
+            entity.Property(e => e.Transports).HasColumnType("text");
         });
     }
 }

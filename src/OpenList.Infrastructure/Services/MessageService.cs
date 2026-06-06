@@ -1,27 +1,44 @@
+using Microsoft.EntityFrameworkCore;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Infrastructure.Data;
 
 namespace OpenList.Infrastructure.Services;
 
 public class MessageService : IMessageService
 {
-    private readonly List<Message> _messages = [];
+    private readonly OpenListDbContext _db;
 
-    public Task SendMessageAsync(uint userId, string title, string content, CancellationToken ct = default)
+    public MessageService(OpenListDbContext db) => _db = db;
+
+    public async Task SendMessageAsync(uint userId, string title, string content, CancellationToken ct = default)
     {
-        _messages.Add(new Message
+        var record = new MessageRecord
         {
-            Id = (uint)(_messages.Count + 1),
             UserId = userId,
+            Type = "notification",
             Title = title,
             Content = content,
             CreatedAt = DateTime.UtcNow
-        });
-        return Task.CompletedTask;
+        };
+        _db.Messages.Add(record);
+        await _db.SaveChangesAsync(ct);
     }
 
-    public Task<List<Message>> GetMessagesAsync(uint userId, CancellationToken ct = default)
+    public async Task<List<Message>> GetMessagesAsync(uint userId, CancellationToken ct = default)
     {
-        return Task.FromResult(_messages.Where(m => m.UserId == userId).ToList());
+        return await _db.Messages
+            .Where(m => m.UserId == userId)
+            .OrderByDescending(m => m.CreatedAt)
+            .Select(m => new Message
+            {
+                Id = (uint)m.Id,
+                UserId = m.UserId,
+                Title = m.Title,
+                Content = m.Content,
+                Read = m.Read,
+                CreatedAt = m.CreatedAt
+            })
+            .ToListAsync(ct);
     }
 }
