@@ -73,6 +73,7 @@ builder.Services.AddScoped<IFileSystemService, FileSystemService>();
 builder.Services.AddSingleton<IDriverFactory, DriverFactory>();
 builder.Services.AddSingleton<ISearchService, SearchService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
+builder.Services.AddScoped<IScanService, ScanService>();
 builder.Services.AddScoped<OfflineDownloadService>();
 
 // WebAuthn / FIDO2

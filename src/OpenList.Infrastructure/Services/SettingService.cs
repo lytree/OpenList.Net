@@ -67,7 +67,7 @@ public class SettingService : ISettingService
         await SaveSettingsAsync(defaults, ct);
     }
 
-    public async Task ResetTokenAsync(CancellationToken ct = default)
+    public async Task<string> ResetTokenAsync(CancellationToken ct = default)
     {
         var newSecret = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         var item = await _db.Settings.FindAsync(["jwt_secret"], ct);
@@ -77,6 +77,7 @@ public class SettingService : ISettingService
             await _db.SaveChangesAsync(ct);
             _cache["jwt_secret"] = newSecret;
         }
+        return newSecret;
     }
 
     public bool GetBool(string key)

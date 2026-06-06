@@ -68,8 +68,9 @@ public class SignService : ISignService
 public class SharingService : ISharingService
 {
     private readonly OpenListDbContext _db;
+    private readonly IFileSystemService _fs;
 
-    public SharingService(OpenListDbContext db) => _db = db;
+    public SharingService(OpenListDbContext db, IFileSystemService fs) { _db = db; _fs = fs; }
 
     public async Task<List<Sharing>> ListSharingsAsync(uint userId, int page = 1, int perPage = 100, CancellationToken ct = default)
     {
@@ -125,6 +126,68 @@ public class SharingService : ISharingService
         {
             sharing.Disabled = true;
             await _db.SaveChangesAsync(ct);
+        }
+    }
+
+    public async Task<(Sharing? sharing, List<IObj> objs)> ListSharingObjectsAsync(string sid, string path, string? pwd = null, bool refresh = false, CancellationToken ct = default)
+    {
+        var sharing = await _db.Sharings.FindAsync([sid], ct);
+        if (sharing == null || !sharing.Valid() || !sharing.Verify(pwd))
+            return (sharing, []);
+
+        var files = sharing.Files ?? [];
+        path = path.TrimStart('/');
+
+        if (files.Count == 1 || !string.IsNullOrEmpty(path))
+        {
+            // Navigate into a shared directory
+            var basePath = files.Count == 1 ? files[0] : "";
+            var fullPath = string.IsNullOrEmpty(path) ? basePath : $"{basePath}/{path}".Trim('/');
+            try
+            {
+                var objs = await _fs.ListAsync($"/{fullPath}", new ListArgs { Refresh = refresh }, ct);
+                return (sharing, objs);
+            }
+            catch
+            {
+                return (sharing, []);
+            }
+        }
+
+        // List root shared files
+        var result = new List<IObj>();
+        foreach (var f in files.Where(f => f != "/"))
+        {
+            try
+            {
+                var obj = await _fs.GetAsync(f, ct);
+                if (obj != null) result.Add(obj);
+            }
+            catch { /* skip inaccessible files */ }
+        }
+        return (sharing, result);
+    }
+
+    public async Task<(Sharing? sharing, IObj? obj)> GetSharingObjectAsync(string sid, string path, string? pwd = null, CancellationToken ct = default)
+    {
+        var sharing = await _db.Sharings.FindAsync([sid], ct);
+        if (sharing == null || !sharing.Valid() || !sharing.Verify(pwd))
+            return (sharing, null);
+
+        var files = sharing.Files ?? [];
+        path = path.TrimStart('/');
+
+        var basePath = files.Count == 1 ? files[0] : "";
+        var fullPath = string.IsNullOrEmpty(path) ? basePath : $"{basePath}/{path}".Trim('/');
+
+        try
+        {
+            var obj = await _fs.GetAsync($"/{fullPath}", ct);
+            return (sharing, obj);
+        }
+        catch
+        {
+            return (sharing, null);
         }
     }
 }
@@ -272,6 +335,71 @@ public class TaskService : ITaskService
             record.Progress = progress;
             await _db.SaveChangesAsync(ct);
         }
+    }
+
+    private static readonly HashSet<string> UndoneStates = ["pending", "running", "canceling", "errored", "failing", "waiting_retry", "before_retry"];
+    private static readonly HashSet<string> DoneStates = ["canceled", "failed", "succeeded"];
+
+    public async Task<List<TaskInfo>> ListUndoneTasksAsync(string? type = null, CancellationToken ct = default)
+    {
+        var all = await ListTasksAsync(type, ct);
+        return all.Where(t => UndoneStates.Contains(t.State)).ToList();
+    }
+
+    public async Task<List<TaskInfo>> ListDoneTasksAsync(string? type = null, CancellationToken ct = default)
+    {
+        var all = await ListTasksAsync(type, ct);
+        return all.Where(t => DoneStates.Contains(t.State)).ToList();
+    }
+
+    public async Task CancelSomeAsync(List<string> ids, CancellationToken ct = default)
+    {
+        foreach (var id in ids)
+            await CancelTaskAsync(id, ct);
+    }
+
+    public async Task DeleteSomeAsync(List<string> ids, CancellationToken ct = default)
+    {
+        foreach (var id in ids)
+            await DeleteTaskAsync(id, ct);
+    }
+
+    public async Task RetrySomeAsync(List<string> ids, CancellationToken ct = default)
+    {
+        foreach (var id in ids)
+            await RetryTaskAsync(id, ct);
+    }
+
+    public async Task ClearDoneAsync(string? type = null, CancellationToken ct = default)
+    {
+        var done = await ListDoneTasksAsync(type, ct);
+        foreach (var task in done)
+            await DeleteTaskAsync(task.Id, ct);
+    }
+
+    public async Task ClearSucceededAsync(string? type = null, CancellationToken ct = default)
+    {
+        var query = _db.TaskRecords.AsQueryable();
+        if (!string.IsNullOrEmpty(type))
+            query = query.Where(t => t.Type == type);
+        var succeeded = await query.Where(t => t.State == "succeeded").ToListAsync(ct);
+        _db.TaskRecords.RemoveRange(succeeded);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task RetryFailedAsync(string? type = null, CancellationToken ct = default)
+    {
+        var query = _db.TaskRecords.AsQueryable();
+        if (!string.IsNullOrEmpty(type))
+            query = query.Where(t => t.Type == type);
+        var failed = await query.Where(t => t.State == "errored" || t.State == "failed").ToListAsync(ct);
+        foreach (var record in failed)
+        {
+            record.State = "pending";
+            record.Progress = 0;
+            record.Error = null;
+        }
+        await _db.SaveChangesAsync(ct);
     }
 
     public static string GenerateNanoId(int size)

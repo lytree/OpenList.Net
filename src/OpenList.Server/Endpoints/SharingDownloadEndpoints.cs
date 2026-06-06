@@ -26,6 +26,10 @@ public static class SharingDownloadEndpoints
             await HandleSharingArchiveDownload(sharing, fs, ctx, sid, null)).AllowAnonymous();
         endpoints.MapGet("/sad/{sid}/{*path}", async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid, string path) =>
             await HandleSharingArchiveDownload(sharing, fs, ctx, sid, path)).AllowAnonymous();
+        endpoints.MapMethods("/sad/{sid}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid) =>
+            await HandleSharingArchiveDownload(sharing, fs, ctx, sid, null)).AllowAnonymous();
+        endpoints.MapMethods("/sad/{sid}/{*path}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid, string path) =>
+            await HandleSharingArchiveDownload(sharing, fs, ctx, sid, path)).AllowAnonymous();
 
         return endpoints;
     }

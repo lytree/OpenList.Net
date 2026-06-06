@@ -19,13 +19,36 @@ public static class FsEndpoints
         var group = endpoints.MapGroup("/api/fs");
 
         // fs/list - supports both GET and POST, allows guest (Go: Auth(true))
-        group.MapMethods("list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IMetaService metaSvc, HttpContext ctx, ListReq req) =>
+        group.MapMethods("list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IMetaService metaSvc, ISharingService sharings, HttpContext ctx, ListReq req) =>
         {
             // Support sharing path: /@s prefix routes to sharing logic
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
             {
-                // TODO: implement sharing list (SharingList in Go)
-                return Results.Json(Resp<ListResp>.Error(501, "sharing list not implemented"));
+                var sharingPath = req.Path[3..]; // strip /@s
+                var (sid, subPath) = SplitSharingPath(sharingPath);
+                if (string.IsNullOrEmpty(sid))
+                    return Results.Json(Resp<ListResp>.Error(400, "invalid share id"));
+
+                var (sharing, sharingObjs) = await sharings.ListSharingObjectsAsync(sid, subPath, req.Password, req.Refresh);
+                if (sharing == null) return Results.Json(Resp<ListResp>.Error(404, "share not found"));
+                if (!sharing.Valid()) return Results.Json(Resp<ListResp>.Error(403, "share expired or disabled"));
+                if (!sharing.Verify(req.Password)) return Results.Json(Resp<ListResp>.Error(403, "wrong password"));
+
+                var sAllItems = sharingObjs.Select(MapObj).ToList();
+                var sTotal = sAllItems.Count;
+                if (req.Page < 1) req.Page = 1;
+                if (req.PerPage < 1) req.PerPage = int.MaxValue;
+                var sStart = (req.Page - 1) * req.PerPage;
+                var sPaged = sStart >= sTotal ? [] : sAllItems.Skip(sStart).Take(req.PerPage).ToList();
+
+                return Results.Json(new Resp<ListResp>(new ListResp
+                {
+                    Content = sPaged,
+                    Total = sTotal,
+                    Readme = sharing.Readme,
+                    Header = sharing.Header,
+                    Provider = "unknown"
+                }));
             }
 
             // Password check (Go: common.CanAccess)
@@ -55,7 +78,7 @@ public static class FsEndpoints
             {
                 if (meta.Readme != null && (meta.Path == req.Path || meta.RSub)) resp.Readme = meta.Readme;
                 if (meta.Header != null && (meta.Path == req.Path || meta.HeaderSub)) resp.Header = meta.Header;
-                if (meta.Write && (meta.Path == req.Path || meta.WSub)) resp.Write = "true";
+                if (meta.Write && (meta.Path == req.Path || meta.WSub)) resp.Write = true;
             }
 
             // Add direct upload tools if driver supports it (Go: direct_upload_tools)
@@ -71,13 +94,32 @@ public static class FsEndpoints
         }).AllowAnonymous();
 
         // fs/get - supports both GET and POST, allows guest (Go: Auth(true))
-        group.MapMethods("get", ["GET", "POST"], async (IFileSystemService fs, IMetaService metaSvc, ISignService sign, HttpContext ctx, GetReq req) =>
+        group.MapMethods("get", ["GET", "POST"], async (IFileSystemService fs, IMetaService metaSvc, ISignService sign, ISharingService sharings, HttpContext ctx, GetReq req) =>
         {
             // Support sharing path: /@s prefix routes to sharing logic
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
             {
-                // TODO: implement sharing get (SharingGet in Go)
-                return Results.Json(Resp<GetResp>.Error(501, "sharing get not implemented"));
+                var sharingPath = req.Path[3..]; // strip /@s
+                var (sid, subPath) = SplitSharingPath(sharingPath);
+                if (string.IsNullOrEmpty(sid))
+                    return Results.Json(Resp<GetResp>.Error(400, "invalid share id"));
+
+                var (sharing, sObj) = await sharings.GetSharingObjectAsync(sid, subPath, req.Password);
+                if (sharing == null) return Results.Json(Resp<GetResp>.Error(404, "share not found"));
+                if (!sharing.Valid()) return Results.Json(Resp<GetResp>.Error(403, "share expired or disabled"));
+                if (!sharing.Verify(req.Password)) return Results.Json(Resp<GetResp>.Error(403, "wrong password"));
+                if (sObj == null) return Results.Json(Resp<GetResp>.Error(404, "object not found"));
+
+                var sResp = MapGetResp(sObj);
+                if (!sObj.IsDir())
+                {
+                    var fakePath = $"/{sid}/{subPath}".TrimEnd('/');
+                    sResp.RawURL = $"/sd{fakePath}";
+                    if (!string.IsNullOrEmpty(sharing.Pwd)) sResp.RawURL += $"?pwd={sharing.Pwd}";
+                }
+                sResp.Readme = sharing.Readme;
+                sResp.Provider = "unknown";
+                return Results.Json(new Resp<GetResp>(sResp));
             }
 
             // Password check (Go: common.CanAccess)
@@ -90,14 +132,13 @@ public static class FsEndpoints
 
             var obj = await fs.GetAsync(req.Path);
             if (obj == null) return Results.Json(Resp<GetResp>.Error(404, "object not found"));
-            var resp = new GetResp { Obj = MapObj(obj) };
+            var resp = MapGetResp(obj);
             if (!obj.IsDir())
             {
                 var link = await fs.LinkAsync(req.Path, new LinkArgs { IP = ctx.Connection.RemoteIpAddress?.ToString() ?? "" });
                 if (link != null)
                 {
                     resp.RawURL = link.URL;
-                    resp.Header = link.Header;
                 }
             }
             return Results.Json(new Resp<GetResp>(resp));
@@ -386,7 +427,10 @@ public static class FsEndpoints
             if (searchIndex == "none")
                 return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
             var results = await search.SearchAsync(req.Parent, req.Keywords, req.Page, req.PerPage);
-            return Results.Json(new Resp<SearchResp>(new SearchResp { Content = results }));
+            // Scope filter: 0=all, 1=dir only, 2=file only
+            if (req.Scope > 0)
+                results = results.Where(r => req.Scope == 1 ? r.IsDir : !r.IsDir).ToList();
+            return Results.Json(new Resp<SearchResp>(new SearchResp { Content = results, Total = results.Count }));
         }).RequireAuthorization();
 
         // fs/dirs - requires auth
@@ -523,7 +567,19 @@ public static class FsEndpoints
         IsDir = obj.IsDir(),
         Modified = obj.GetModTime(),
         Created = obj.GetCreateTime(),
-        Hash = obj.GetHash(),
+        HashInfoStr = obj.GetHash(),
+        ID = obj.GetID(),
+        Path = obj.GetPath()
+    };
+
+    private static GetResp MapGetResp(IObj obj) => new()
+    {
+        Name = obj.GetName(),
+        Size = obj.GetSize(),
+        IsDir = obj.IsDir(),
+        Modified = obj.GetModTime(),
+        Created = obj.GetCreateTime(),
+        HashInfoStr = obj.GetHash(),
         ID = obj.GetID(),
         Path = obj.GetPath()
     };
@@ -544,6 +600,15 @@ public static class FsEndpoints
         if (metaPath == targetPath) return true;
         if (!sub) return false;
         return targetPath.StartsWith(metaPath + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static (string sid, string path) SplitSharingPath(string sharingPath)
+    {
+        var trimmed = sharingPath.TrimStart('/');
+        var slashIdx = trimmed.IndexOf('/');
+        return slashIdx < 0
+            ? (trimmed, "")
+            : (trimmed[..slashIdx], trimmed[(slashIdx + 1)..]);
     }
 
     private static async Task<List<ArchiveEntryInfo>?> ReadArchiveEntriesAsync(IFileSystemService fs, string path, string? password)

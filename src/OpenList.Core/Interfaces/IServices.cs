@@ -68,7 +68,7 @@ public interface ISettingService
     Task SaveSettingsAsync(List<SettingItem> settings, CancellationToken ct = default);
     Task DeleteSettingAsync(string key, CancellationToken ct = default);
     Task DefaultSettingsAsync(CancellationToken ct = default);
-    Task ResetTokenAsync(CancellationToken ct = default);
+    Task<string> ResetTokenAsync(CancellationToken ct = default);
     bool GetBool(string key);
     string? GetString(string key);
 }
@@ -82,6 +82,8 @@ public interface ISharingService
     Task DeleteSharingAsync(string id, CancellationToken ct = default);
     Task EnableSharingAsync(string id, CancellationToken ct = default);
     Task DisableSharingAsync(string id, CancellationToken ct = default);
+    Task<(Sharing? sharing, List<IObj> objs)> ListSharingObjectsAsync(string sid, string path, string? pwd = null, bool refresh = false, CancellationToken ct = default);
+    Task<(Sharing? sharing, IObj? obj)> GetSharingObjectAsync(string sid, string path, string? pwd = null, CancellationToken ct = default);
 }
 
 public interface IAuthService
@@ -102,11 +104,19 @@ public interface ITaskService
     Task<TaskInfo> CreateTaskAsync(string type, string description, CancellationToken ct = default);
     Task<TaskInfo> CreateTaskAsync(string type, string description, Func<string, CancellationToken, Task> execute, CancellationToken ct = default);
     Task<List<TaskInfo>> ListTasksAsync(string? type = null, CancellationToken ct = default);
+    Task<List<TaskInfo>> ListUndoneTasksAsync(string? type = null, CancellationToken ct = default);
+    Task<List<TaskInfo>> ListDoneTasksAsync(string? type = null, CancellationToken ct = default);
     Task<TaskInfo?> GetTaskAsync(string id, CancellationToken ct = default);
     Task CancelTaskAsync(string id, CancellationToken ct = default);
     Task RetryTaskAsync(string id, CancellationToken ct = default);
     Task DeleteTaskAsync(string id, CancellationToken ct = default);
     Task UpdateProgressAsync(string id, double progress, CancellationToken ct = default);
+    Task CancelSomeAsync(List<string> ids, CancellationToken ct = default);
+    Task DeleteSomeAsync(List<string> ids, CancellationToken ct = default);
+    Task RetrySomeAsync(List<string> ids, CancellationToken ct = default);
+    Task ClearDoneAsync(string? type = null, CancellationToken ct = default);
+    Task ClearSucceededAsync(string? type = null, CancellationToken ct = default);
+    Task RetryFailedAsync(string? type = null, CancellationToken ct = default);
 }
 
 public interface ISearchService
@@ -131,6 +141,14 @@ public interface IMessageService
 {
     Task SendMessageAsync(uint userId, string title, string content, CancellationToken ct = default);
     Task<List<Message>> GetMessagesAsync(uint userId, CancellationToken ct = default);
+}
+
+public interface IScanService
+{
+    Task StartScanAsync(string path, double limit = 0, CancellationToken ct = default);
+    Task StopScanAsync(CancellationToken ct = default);
+    bool IsRunning { get; }
+    long ScannedCount { get; }
 }
 
 // DTOs

@@ -14,7 +14,7 @@ public static class ShareEndpoints
     {
         var group = endpoints.MapGroup("/api/share");
 
-        group.MapGet("list", async (ISharingService sharings, ClaimsPrincipal user, int page = 1, int perPage = 100) =>
+        group.MapMethods("list", ["GET", "POST"], async (ISharingService sharings, ClaimsPrincipal user, int page = 1, int perPage = 100) =>
         {
             var userId = GetUserId(user);
             var isAdmin = user.IsInRole("2");
@@ -42,7 +42,7 @@ public static class ShareEndpoints
                 OrderDirection = sharing.OrderDirection,
                 ExtractFolder = sharing.ExtractFolder
             }));
-        });
+        }).RequireAuthorization();
 
         group.MapPost("create", async (ISharingService sharings, ClaimsPrincipal user, CreateShareReq req) =>
         {

@@ -206,8 +206,8 @@ public static class AdminEndpoints
 
         group.MapPost("setting/reset_token", async (ISettingService settings) =>
         {
-            await settings.ResetTokenAsync();
-            return Results.Json(new Resp<object>(null));
+            var token = await settings.ResetTokenAsync();
+            return Results.Json(new Resp<string>(token));
         });
 
         // Offline download tool settings
@@ -370,9 +370,32 @@ public static class AdminEndpoints
         });
 
         // === Scan management ===
-        group.MapPost("scan/start", () => Results.Json(new Resp<object>(null)));
-        group.MapPost("scan/stop", () => Results.Json(new Resp<object>(null)));
-        group.MapGet("scan/progress", () => Results.Json(new Resp<object>(new { progress = 0, state = "idle" })));
+        group.MapPost("scan/start", async (IScanService scan, ScanReq req, CancellationToken ct) =>
+        {
+            try
+            {
+                await scan.StartScanAsync(req.Path ?? "/", req.Limit, ct);
+                return Results.Json(new Resp<object>(null));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Json(Resp<object>.Error(400, ex.Message));
+            }
+        });
+        group.MapPost("scan/stop", async (IScanService scan, CancellationToken ct) =>
+        {
+            try
+            {
+                await scan.StopScanAsync(ct);
+                return Results.Json(new Resp<object>(null));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Json(Resp<object>.Error(400, ex.Message));
+            }
+        });
+        group.MapGet("scan/progress", (IScanService scan) =>
+            Results.Json(new Resp<object>(new { obj_count = scan.ScannedCount, is_done = !scan.IsRunning })));
 
         // === Admin task routes (legacy compatibility) ===
         group.MapGet("task/list", async (ITaskService tasks, string? type = null) =>

@@ -33,9 +33,13 @@ public static class SignEndpoints
         // /ap/*path - signed archive proxy (proxy inner file from archive)
         endpoints.MapGet("/ap/{*path}", async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
             await HandleArchiveProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+        endpoints.MapMethods("/ap/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
+            await HandleArchiveProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous();
 
         // /ae/*path - signed archive extract (download extracted file)
         endpoints.MapGet("/ae/{*path}", async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
+            await HandleArchiveExtract(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+        endpoints.MapMethods("/ae/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
             await HandleArchiveExtract(fs, sign, ctx, path, sign_query)).AllowAnonymous();
 
         // /i/:link_name - iOS Plist for streaming IPA
