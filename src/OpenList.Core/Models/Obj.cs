@@ -1,5 +1,51 @@
 namespace OpenList.Core.Models;
 
+public enum ObjType
+{
+    Unknown = 0,
+    Folder = 1,
+    Video = 2,
+    Audio = 3,
+    Text = 4,
+    Image = 5,
+}
+
+public static class ObjTypeHelper
+{
+    private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".3gp", ".ts"
+    };
+    private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".wma", ".opus", ".ape", ".alac"
+    };
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".avif"
+    };
+    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".txt", ".md", ".json", ".xml", ".yaml", ".yml", ".csv", ".log", ".ini", ".cfg", ".conf",
+        ".sh", ".bat", ".ps1", ".py", ".js", ".ts", ".go", ".cs", ".java", ".c", ".cpp", ".h",
+        ".html", ".css", ".sql", ".rb", ".php", ".rs", ".swift", ".kt", ".toml", ".env"
+    };
+
+    public static int GetObjType(string name, bool isDir)
+    {
+        if (isDir) return (int)ObjType.Folder;
+        var ext = System.IO.Path.GetExtension(name);
+        if (VideoExtensions.Contains(ext)) return (int)ObjType.Video;
+        if (AudioExtensions.Contains(ext)) return (int)ObjType.Audio;
+        if (ImageExtensions.Contains(ext)) return (int)ObjType.Image;
+        if (TextExtensions.Contains(ext)) return (int)ObjType.Text;
+        return (int)ObjType.Unknown;
+    }
+
+    public static string? GetThumb(IObj obj) => obj is ObjThumb t ? t.Thumbnail :
+        obj is ObjThumbURL tu ? tu.Thumbnail : null;
+}
+
 public enum ObjMask
 {
     None = 0,

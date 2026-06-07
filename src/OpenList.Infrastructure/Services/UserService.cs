@@ -20,8 +20,12 @@ public class UserService : IUserService
     public async Task<User?> GetUserByIdAsync(uint id, CancellationToken ct = default)
         => await _db.Users.FindAsync([id], ct);
 
-    public async Task<List<User>> ListUsersAsync(int page, int perPage, CancellationToken ct = default)
-        => await _db.Users.Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+    public async Task<(List<User> Users, int Total)> ListUsersAsync(int page, int perPage, CancellationToken ct = default)
+    {
+        var total = await _db.Users.CountAsync(ct);
+        var users = await _db.Users.Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+        return (users, total);
+    }
 
     public async Task<User> CreateUserAsync(User user, CancellationToken ct = default)
     {
@@ -50,6 +54,15 @@ public class UserService : IUserService
         }
     }
 
+    public async Task SetPasswordAsync(User user, string password, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(user.Salt))
+            user.Salt = GenerateSalt();
+        user.PwdHash = HashPwd(StaticHash(password), user.Salt);
+        _db.Users.Update(user);
+        await _db.SaveChangesAsync(ct);
+    }
+
     public async Task Cancel2FAAsync(uint id, CancellationToken ct = default)
     {
         var user = await _db.Users.FindAsync([id], ct);
@@ -66,6 +79,12 @@ public class UserService : IUserService
         await Task.CompletedTask;
     }
 
+    public async Task DeleteUserCacheByUsernameAsync(string username, CancellationToken ct = default)
+    {
+        // Cache clearing would be implemented with the cache service
+        await Task.CompletedTask;
+    }
+
     public async Task<User?> GetUserBySsoIdAsync(string ssoId, CancellationToken ct = default)
     {
         return await _db.Users.FirstOrDefaultAsync(u => u.SsoID == ssoId, ct);
@@ -74,6 +93,14 @@ public class UserService : IUserService
     public async Task<List<SshKey>> ListSshKeysAsync(uint userId, CancellationToken ct = default)
     {
         return await _db.SshKeys.Where(k => k.UserId == userId).ToListAsync(ct);
+    }
+
+    public async Task<(List<SshKey> Keys, int Total)> ListSshKeysPagedAsync(uint userId, int page, int perPage, CancellationToken ct = default)
+    {
+        var query = _db.SshKeys.Where(k => k.UserId == userId);
+        var total = await query.CountAsync(ct);
+        var keys = await query.Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+        return (keys, total);
     }
 
     public async Task AddSshKeyAsync(uint userId, string name, string key, CancellationToken ct = default)
@@ -85,6 +112,16 @@ public class UserService : IUserService
     public async Task DeleteSshKeyAsync(uint userId, string name, CancellationToken ct = default)
     {
         var key = await _db.SshKeys.FirstOrDefaultAsync(k => k.UserId == userId && k.Name == name, ct);
+        if (key != null)
+        {
+            _db.SshKeys.Remove(key);
+            await _db.SaveChangesAsync(ct);
+        }
+    }
+
+    public async Task DeleteSshKeyByIdAsync(uint id, CancellationToken ct = default)
+    {
+        var key = await _db.SshKeys.FindAsync([id], ct);
         if (key != null)
         {
             _db.SshKeys.Remove(key);

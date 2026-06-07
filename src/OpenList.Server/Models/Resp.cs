@@ -1,5 +1,7 @@
 namespace OpenList.Server.Models;
 
+using System.Text.Json.Serialization;
+
 public class Resp<T>
 {
     public int Code { get; set; } = 200;

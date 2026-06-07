@@ -1,27 +1,38 @@
 namespace OpenList.Core.Models;
 
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
+
 public class Sharing
 {
     public string Id { get; set; } = string.Empty;
-    public string FilesRaw { get; set; } = string.Empty;
+    [JsonIgnore] public string FilesRaw { get; set; } = string.Empty;
     public DateTime? Expires { get; set; }
     public string? Pwd { get; set; }
     public int Accessed { get; set; }
-    public int MaxAccessed { get; set; }
-    public uint CreatorId { get; set; }
+    [JsonPropertyName("max_accessed")] public int MaxAccessed { get; set; }
+    [JsonIgnore] public uint CreatorId { get; set; }
     public bool Disabled { get; set; }
     public string? Remark { get; set; }
     public string? Readme { get; set; }
     public string? Header { get; set; }
 
     // Sort
-    public string? OrderBy { get; set; }
-    public string? OrderDirection { get; set; }
-    public string? ExtractFolder { get; set; }
+    [JsonPropertyName("order_by")] public string? OrderBy { get; set; }
+    [JsonPropertyName("order_direction")] public string? OrderDirection { get; set; }
+    [JsonPropertyName("extract_folder")] public string? ExtractFolder { get; set; }
 
     // Navigation
     public List<string> Files { get; set; } = [];
-    public User? Creator { get; set; }
+    [JsonIgnore] public User? Creator { get; set; }
+
+    // Computed (not stored in DB)
+    [NotMapped]
+    [JsonPropertyName("creator")]
+    public string? CreatorName { get; set; }
+    [NotMapped]
+    [JsonPropertyName("creator_role")]
+    public int CreatorRole { get; set; }
 
     public bool Valid()
     {

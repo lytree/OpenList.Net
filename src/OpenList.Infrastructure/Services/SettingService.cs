@@ -23,8 +23,20 @@ public class SettingService : ISettingService
         return item?.Value;
     }
 
+    public async Task<SettingItem?> GetSettingItemAsync(string key, CancellationToken ct = default)
+        => await _db.Settings.FindAsync([key], ct);
+
+    public async Task<List<SettingItem>> GetSettingsInKeysAsync(List<string> keys, CancellationToken ct = default)
+        => await _db.Settings.Where(s => keys.Contains(s.Key)).OrderBy(s => s.Group).ThenBy(s => s.Index).ToListAsync(ct);
+
     public async Task<List<SettingItem>> ListSettingsAsync(CancellationToken ct = default)
         => await _db.Settings.OrderBy(s => s.Group).ThenBy(s => s.Index).ToListAsync(ct);
+
+    public async Task<List<SettingItem>> ListSettingsByGroupsAsync(List<int> groups, CancellationToken ct = default)
+    {
+        var groupEnums = groups.Select(g => (SettingGroup)g).ToList();
+        return await _db.Settings.Where(s => groupEnums.Contains(s.Group)).OrderBy(s => s.Group).ThenBy(s => s.Index).ToListAsync(ct);
+    }
 
     public async Task SaveSettingsAsync(List<SettingItem> settings, CancellationToken ct = default)
     {
@@ -61,10 +73,17 @@ public class SettingService : ISettingService
         }
     }
 
-    public async Task DefaultSettingsAsync(CancellationToken ct = default)
+    public async Task<List<SettingItem>> DefaultSettingsAsync(CancellationToken ct = default)
     {
         var defaults = GetDefaultSettings();
-        await SaveSettingsAsync(defaults, ct);
+        return defaults;
+    }
+
+    public Task<List<SettingItem>> DefaultSettingsByGroupsAsync(List<int> groups, CancellationToken ct = default)
+    {
+        var groupEnums = groups.Select(g => (SettingGroup)g).ToList();
+        var defaults = GetDefaultSettings().Where(s => groupEnums.Contains(s.Group)).ToList();
+        return Task.FromResult(defaults);
     }
 
     public async Task<string> ResetTokenAsync(CancellationToken ct = default)
@@ -120,4 +139,5 @@ public class SettingService : ISettingService
         new() { Key = "ldap_search_filter", Value = "", Type = "string", Group = SettingGroup.LDAP, Flag = SettingFlag.Private, Index = 3 },
         new() { Key = "ldap_base_dn", Value = "", Type = "string", Group = SettingGroup.LDAP, Flag = SettingFlag.Private, Index = 4 },
     ];
+
 }

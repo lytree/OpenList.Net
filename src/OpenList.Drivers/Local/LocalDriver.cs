@@ -366,11 +366,8 @@ public class LocalDriver : RootPathDriver,
             var driveInfo = new DriveInfo(root);
             return Task.FromResult<StorageDetails?>(new StorageDetails
             {
-                DiskUsage = new DiskUsage
-                {
-                    TotalSpace = driveInfo.TotalSize,
-                    UsedSpace = driveInfo.TotalSize - driveInfo.AvailableFreeSpace
-                }
+                TotalSpace = driveInfo.TotalSize,
+                UsedSpace = driveInfo.TotalSize - driveInfo.AvailableFreeSpace
             });
         }
         catch

@@ -1,5 +1,6 @@
 using OpenList.Core.Drivers;
 using OpenList.Core.Models;
+using System.Text.Json.Serialization;
 
 namespace OpenList.Core.Interfaces;
 
@@ -11,9 +12,11 @@ public interface IFileSystemService
     Task MakeDirAsync(string path, CancellationToken ct = default);
     Task MoveAsync(string srcPath, string dstDir, CancellationToken ct = default);
     Task CopyAsync(string srcPath, string dstDir, CancellationToken ct = default);
+    Task MergeAsync(string srcPath, string dstDir, CancellationToken ct = default);
     Task RenameAsync(string path, string newName, CancellationToken ct = default);
     Task RemoveAsync(string path, CancellationToken ct = default);
     Task PutAsync(string dstDir, FileStreamer file, Action<double> progress, CancellationToken ct = default);
+    Task<TaskInfo?> PutAsTaskAsync(string dstDir, FileStreamer file, CancellationToken ct = default);
     Task<object?> OtherAsync(OtherArgs args, CancellationToken ct = default);
     Task<Storage?> GetStorageAsync(string path, CancellationToken ct = default);
     Task<StorageDetails?> GetStorageDetailsAsync(string path, CancellationToken ct = default);
@@ -21,7 +24,7 @@ public interface IFileSystemService
 
 public interface IStorageService
 {
-    Task<List<Storage>> ListStoragesAsync(int page, int perPage, CancellationToken ct = default);
+    Task<(List<Storage> Storages, int Total)> ListStoragesAsync(int page, int perPage, CancellationToken ct = default);
     Task<Storage?> GetStorageByIdAsync(uint id, CancellationToken ct = default);
     Task<uint> CreateStorageAsync(Storage storage, CancellationToken ct = default);
     Task UpdateStorageAsync(Storage storage, CancellationToken ct = default);
@@ -39,35 +42,45 @@ public interface IUserService
 {
     Task<User?> GetUserByNameAsync(string username, CancellationToken ct = default);
     Task<User?> GetUserByIdAsync(uint id, CancellationToken ct = default);
-    Task<List<User>> ListUsersAsync(int page, int perPage, CancellationToken ct = default);
+    Task<(List<User> Users, int Total)> ListUsersAsync(int page, int perPage, CancellationToken ct = default);
     Task<User> CreateUserAsync(User user, CancellationToken ct = default);
     Task UpdateUserAsync(User user, CancellationToken ct = default);
     Task DeleteUserAsync(uint id, CancellationToken ct = default);
+    Task SetPasswordAsync(User user, string password, CancellationToken ct = default);
     Task Cancel2FAAsync(uint id, CancellationToken ct = default);
     Task DeleteUserCacheAsync(uint id, CancellationToken ct = default);
+    Task DeleteUserCacheByUsernameAsync(string username, CancellationToken ct = default);
     Task<User?> GetUserBySsoIdAsync(string ssoId, CancellationToken ct = default);
     Task<List<SshKey>> ListSshKeysAsync(uint userId, CancellationToken ct = default);
+    Task<(List<SshKey> Keys, int Total)> ListSshKeysPagedAsync(uint userId, int page, int perPage, CancellationToken ct = default);
     Task AddSshKeyAsync(uint userId, string name, string key, CancellationToken ct = default);
     Task DeleteSshKeyAsync(uint userId, string name, CancellationToken ct = default);
+    Task DeleteSshKeyByIdAsync(uint id, CancellationToken ct = default);
 }
 
 public interface IMetaService
 {
-    Task<List<Meta>> ListMetasAsync(CancellationToken ct = default);
+    Task<(List<Meta> Metas, int Total)> ListMetasAsync(int page = 1, int perPage = 100, CancellationToken ct = default);
     Task<Meta?> GetMetaAsync(string path, CancellationToken ct = default);
+    Task<Meta?> GetMetaByIdAsync(uint id, CancellationToken ct = default);
     Task<Meta?> GetNearestMetaAsync(string path, CancellationToken ct = default);
     Task CreateMetaAsync(Meta meta, CancellationToken ct = default);
     Task UpdateMetaAsync(Meta meta, CancellationToken ct = default);
     Task DeleteMetaAsync(string path, CancellationToken ct = default);
+    Task DeleteMetaByIdAsync(uint id, CancellationToken ct = default);
 }
 
 public interface ISettingService
 {
     Task<string?> GetSettingAsync(string key, CancellationToken ct = default);
+    Task<SettingItem?> GetSettingItemAsync(string key, CancellationToken ct = default);
+    Task<List<SettingItem>> GetSettingsInKeysAsync(List<string> keys, CancellationToken ct = default);
     Task<List<SettingItem>> ListSettingsAsync(CancellationToken ct = default);
+    Task<List<SettingItem>> ListSettingsByGroupsAsync(List<int> groups, CancellationToken ct = default);
     Task SaveSettingsAsync(List<SettingItem> settings, CancellationToken ct = default);
     Task DeleteSettingAsync(string key, CancellationToken ct = default);
-    Task DefaultSettingsAsync(CancellationToken ct = default);
+    Task<List<SettingItem>> DefaultSettingsAsync(CancellationToken ct = default);
+    Task<List<SettingItem>> DefaultSettingsByGroupsAsync(List<int> groups, CancellationToken ct = default);
     Task<string> ResetTokenAsync(CancellationToken ct = default);
     bool GetBool(string key);
     string? GetString(string key);
@@ -75,15 +88,17 @@ public interface ISettingService
 
 public interface ISharingService
 {
-    Task<List<Sharing>> ListSharingsAsync(uint userId, int page = 1, int perPage = 100, CancellationToken ct = default);
+    Task<(List<Sharing> Sharings, int Total)> ListSharingsAsync(uint userId, int page = 1, int perPage = 100, CancellationToken ct = default);
     Task<Sharing?> GetSharingAsync(string id, CancellationToken ct = default);
     Task<Sharing> CreateSharingAsync(Sharing sharing, CancellationToken ct = default);
     Task UpdateSharingAsync(Sharing sharing, CancellationToken ct = default);
+    Task UpdateSharingIdAsync(string oldId, string newId, CancellationToken ct = default);
     Task DeleteSharingAsync(string id, CancellationToken ct = default);
     Task EnableSharingAsync(string id, CancellationToken ct = default);
     Task DisableSharingAsync(string id, CancellationToken ct = default);
     Task<(Sharing? sharing, List<IObj> objs)> ListSharingObjectsAsync(string sid, string path, string? pwd = null, bool refresh = false, CancellationToken ct = default);
     Task<(Sharing? sharing, IObj? obj)> GetSharingObjectAsync(string sid, string path, string? pwd = null, CancellationToken ct = default);
+    Task IncrementAccessAsync(string id, string ip, CancellationToken ct = default);
 }
 
 public interface IAuthService
@@ -114,9 +129,9 @@ public interface ITaskService
     Task CancelSomeAsync(List<string> ids, CancellationToken ct = default);
     Task DeleteSomeAsync(List<string> ids, CancellationToken ct = default);
     Task RetrySomeAsync(List<string> ids, CancellationToken ct = default);
-    Task ClearDoneAsync(string? type = null, CancellationToken ct = default);
-    Task ClearSucceededAsync(string? type = null, CancellationToken ct = default);
-    Task RetryFailedAsync(string? type = null, CancellationToken ct = default);
+    Task ClearDoneAsync(uint? userId = null, string? type = null, CancellationToken ct = default);
+    Task ClearSucceededAsync(uint? userId = null, string? type = null, CancellationToken ct = default);
+    Task RetryFailedAsync(uint? userId = null, string? type = null, CancellationToken ct = default);
 }
 
 public interface ISearchService
@@ -152,15 +167,37 @@ public interface IScanService
 }
 
 // DTOs
+public enum TaskState
+{
+    Pending = 0,
+    Running = 1,
+    Succeeded = 2,
+    Canceling = 3,
+    Canceled = 4,
+    Errored = 5,
+    Failing = 6,
+    WaitingRetry = 7,
+    BeforeRetry = 8,
+    Failed = 9
+}
+
 public class TaskInfo
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string Name { get; set; } = string.Empty;
+    public string? Creator { get; set; }
+    [JsonIgnore] public uint? CreatorId { get; set; }
+    [JsonPropertyName("creator_role")] public int CreatorRole { get; set; } = -1;
+    public int State { get; set; } = 0;
+    public string? Status { get; set; }
+    public double Progress { get; set; }
+    [JsonPropertyName("start_time")] public DateTime? StartTime { get; set; }
+    [JsonPropertyName("end_time")] public DateTime? EndTime { get; set; }
+    [JsonPropertyName("total_bytes")] public long TotalBytes { get; set; }
+    public string? Error { get; set; }
     public string Type { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public string State { get; set; } = "pending";
-    public double Progress { get; set; }
-    public string? Error { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    [JsonPropertyName("created_at")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string? PersistData { get; set; }
 }
 
@@ -168,9 +205,10 @@ public class SearchResult
 {
     public string Parent { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
-    public bool IsDir { get; set; }
+    [JsonPropertyName("is_dir")] public bool IsDir { get; set; }
     public long Size { get; set; }
     public DateTime Modified { get; set; }
+    public int Type { get; set; }
 }
 
 public class IndexProgress

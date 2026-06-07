@@ -2,6 +2,7 @@ using System.IO.Compression;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 
@@ -12,44 +13,70 @@ public static class SharingDownloadEndpoints
     public static IEndpointRouteBuilder MapSharingDownloadRoutes(this IEndpointRouteBuilder endpoints)
     {
         // /sd/:sid - sharing download
-        endpoints.MapGet("/sd/{sid}", async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid) =>
-            await HandleSharingDownload(sharing, fs, ctx, sid, null)).AllowAnonymous();
-        endpoints.MapGet("/sd/{sid}/{*path}", async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid, string path) =>
-            await HandleSharingDownload(sharing, fs, ctx, sid, path)).AllowAnonymous();
-        endpoints.MapMethods("/sd/{sid}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid) =>
-            await HandleSharingDownload(sharing, fs, ctx, sid, null)).AllowAnonymous();
-        endpoints.MapMethods("/sd/{sid}/{*path}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid, string path) =>
-            await HandleSharingDownload(sharing, fs, ctx, sid, path)).AllowAnonymous();
+        endpoints.MapGet("/sd/{sid}", async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid) =>
+            await HandleSharingDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous();
+        endpoints.MapGet("/sd/{sid}/{*path}", async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string path) =>
+            await HandleSharingDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous();
+        endpoints.MapMethods("/sd/{sid}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid) =>
+            await HandleSharingDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous();
+        endpoints.MapMethods("/sd/{sid}/{*path}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string path) =>
+            await HandleSharingDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous();
 
         // /sad/:sid - sharing archive download
-        endpoints.MapGet("/sad/{sid}", async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid) =>
-            await HandleSharingArchiveDownload(sharing, fs, ctx, sid, null)).AllowAnonymous();
-        endpoints.MapGet("/sad/{sid}/{*path}", async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid, string path) =>
-            await HandleSharingArchiveDownload(sharing, fs, ctx, sid, path)).AllowAnonymous();
-        endpoints.MapMethods("/sad/{sid}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid) =>
-            await HandleSharingArchiveDownload(sharing, fs, ctx, sid, null)).AllowAnonymous();
-        endpoints.MapMethods("/sad/{sid}/{*path}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid, string path) =>
-            await HandleSharingArchiveDownload(sharing, fs, ctx, sid, path)).AllowAnonymous();
+        endpoints.MapGet("/sad/{sid}", async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid) =>
+            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous();
+        endpoints.MapGet("/sad/{sid}/{*path}", async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string path) =>
+            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous();
+        endpoints.MapMethods("/sad/{sid}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid) =>
+            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous();
+        endpoints.MapMethods("/sad/{sid}/{*path}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string path) =>
+            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous();
 
         return endpoints;
     }
 
-    private static async Task<IResult> HandleSharingDownload(ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid, string? path)
+    private static async Task<IResult> HandleSharingDownload(ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string? path)
     {
         var s = await sharing.GetSharingAsync(sid);
-        if (s == null || s.Disabled)
+        if (s == null)
             return Results.NotFound("sharing not found");
+
+        // Go: s.Valid() checks Disabled, MaxAccessed, Expires, Files, Creator
+        if (s.Disabled)
+            return Results.StatusCode(403);
+        if (s.MaxAccessed > 0 && s.Accessed >= s.MaxAccessed)
+            return Results.StatusCode(403);
+        if (s.Files == null || s.Files.Count == 0)
+            return Results.StatusCode(403);
+        if (s.Expires.HasValue && s.Expires.Value < DateTime.UtcNow)
+            return Results.StatusCode(403);
 
         if (!string.IsNullOrEmpty(s.Pwd))
         {
-            if (!ctx.Request.Headers.TryGetValue("X-Sharing-Password", out var pwd) || pwd != s.Pwd)
+            // Go: uses query param "pwd"
+            var pwd = ctx.Request.Query["pwd"].ToString();
+            if (string.IsNullOrEmpty(pwd))
+            {
+                // Also support header for compatibility
+                ctx.Request.Headers.TryGetValue("X-Sharing-Password", out var headerPwd);
+                pwd = headerPwd.ToString();
+            }
+            if (pwd != s.Pwd)
                 return Results.StatusCode(403);
         }
 
+        // Go: cannot get sharing root link if multiple files
         var basePath = s.Files.FirstOrDefault() ?? "/";
-        var fullPath = string.IsNullOrEmpty(path) ? basePath : $"{basePath}/{path}";
+        if (s.Files.Count != 1 && string.IsNullOrEmpty(path))
+            return Results.StatusCode(403);
 
-        var link = await fs.LinkAsync(fullPath, new LinkArgs { IP = ctx.Connection.RemoteIpAddress?.ToString() ?? "" });
+        var fullPath = string.IsNullOrEmpty(path) ? basePath : $"{basePath.TrimEnd('/')}/{path}";
+
+        // Go: countAccess - increment accessed count per unique IP
+        var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "";
+        await sharing.IncrementAccessAsync(sid, ip);
+
+        var link = await fs.LinkAsync(fullPath, new LinkArgs { IP = ip });
         if (link == null) return Results.NotFound();
 
         if (link.URL.StartsWith("http"))
@@ -61,20 +88,45 @@ public static class SharingDownloadEndpoints
         return Results.NotFound();
     }
 
-    private static async Task<IResult> HandleSharingArchiveDownload(ISharingService sharing, IFileSystemService fs, HttpContext ctx, string sid, string? path)
+    private static async Task<IResult> HandleSharingArchiveDownload(ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string? path)
     {
+        // Go: checks ShareArchivePreview setting
+        if (!config.GetValue("ShareArchivePreview", true))
+            return Results.StatusCode(403);
+
         var s = await sharing.GetSharingAsync(sid);
-        if (s == null || s.Disabled)
+        if (s == null)
             return Results.NotFound("sharing not found");
+
+        // Go: s.Valid() checks
+        if (s.Disabled)
+            return Results.StatusCode(403);
+        if (s.MaxAccessed > 0 && s.Accessed >= s.MaxAccessed)
+            return Results.StatusCode(403);
+        if (s.Files == null || s.Files.Count == 0)
+            return Results.StatusCode(403);
+        if (s.Expires.HasValue && s.Expires.Value < DateTime.UtcNow)
+            return Results.StatusCode(403);
 
         if (!string.IsNullOrEmpty(s.Pwd))
         {
-            if (!ctx.Request.Headers.TryGetValue("X-Sharing-Password", out var pwd) || pwd != s.Pwd)
+            // Go: uses query param "pwd"
+            var pwd = ctx.Request.Query["pwd"].ToString();
+            if (string.IsNullOrEmpty(pwd))
+            {
+                ctx.Request.Headers.TryGetValue("X-Sharing-Password", out var headerPwd);
+                pwd = headerPwd.ToString();
+            }
+            if (pwd != s.Pwd)
                 return Results.StatusCode(403);
         }
 
+        // Go: cannot extract sharing root if multiple files
         var basePath = s.Files.FirstOrDefault() ?? "/";
-        var fullPath = string.IsNullOrEmpty(path) ? basePath : $"{basePath}/{path}";
+        if (s.Files.Count != 1 && string.IsNullOrEmpty(path))
+            return Results.StatusCode(403);
+
+        var fullPath = string.IsNullOrEmpty(path) ? basePath : $"{basePath.TrimEnd('/')}/{path}";
 
         var innerPath = ctx.Request.Query["inner"].ToString();
         var password = ctx.Request.Query["pass"].ToString();

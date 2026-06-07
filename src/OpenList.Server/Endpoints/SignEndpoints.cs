@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Core.Drivers;
+using OpenList.Infrastructure.Services;
 
 namespace OpenList.Server.Endpoints;
 
@@ -12,11 +14,11 @@ public static class SignEndpoints
 {
     public static IEndpointRouteBuilder MapSignRoutes(this IEndpointRouteBuilder endpoints)
     {
-        // /d/*path - signed download
-        endpoints.MapGet("/d/{*path}", async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleSignedRequest(fs, sign, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous();
-        endpoints.MapMethods("/d/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleSignedRequest(fs, sign, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous();
+        // /d/*path - signed download (Go: checks ShouldProxy first)
+        endpoints.MapGet("/d/{*path}", async (IFileSystemService fs, ISignService sign, IDriverFactory driverFactory, ISettingService settings, HttpContext ctx, string path, string? sign_query) =>
+            await HandleSignedDownload(fs, sign, driverFactory, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous();
+        endpoints.MapMethods("/d/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, IDriverFactory driverFactory, ISettingService settings, HttpContext ctx, string path, string? sign_query) =>
+            await HandleSignedDownload(fs, sign, driverFactory, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous();
 
         // /p/*path - signed proxy
         endpoints.MapGet("/p/{*path}", async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
@@ -118,6 +120,46 @@ public static class SignEndpoints
         }).AllowAnonymous();
 
         return endpoints;
+    }
+
+    private static async Task<IResult> HandleSignedDownload(IFileSystemService fs, ISignService sign, IDriverFactory driverFactory, ISettingService settings, HttpContext ctx, string path, string? signValue, bool verifyArchive)
+    {
+        if (string.IsNullOrEmpty(signValue) || !(verifyArchive ? sign.VerifyArchive(signValue, path) : sign.Verify(signValue, path)))
+            return Results.StatusCode(403);
+
+        // Go: check ShouldProxy before deciding redirect vs proxy
+        var storage = await fs.GetStorageAsync(path);
+        if (storage != null)
+        {
+            var driver = driverFactory.GetDriver(storage.MountPath);
+            var proxyTypes = await settings.GetSettingAsync("proxy_types");
+            if (ShouldProxy(driver, storage, path, proxyTypes))
+                return await HandleSignedProxy(fs, sign, ctx, path, signValue);
+        }
+
+        var link = await fs.LinkAsync(path, new LinkArgs { IP = ctx.Connection.RemoteIpAddress?.ToString() ?? "", Redirect = true });
+        if (link == null) return Results.NotFound();
+
+        if (link.URL.StartsWith("http"))
+            return Results.Redirect(link.URL);
+
+        if (System.IO.File.Exists(link.URL))
+            return Results.File(link.URL, GetContentType(path), enableRangeProcessing: true);
+
+        return Results.NotFound();
+    }
+
+    private static bool ShouldProxy(IDriver? driver, Storage storage, string path, string? proxyTypes)
+    {
+        if (driver != null && driver.Config().MustProxy()) return true;
+        if (storage.WebProxy) return true;
+        if (!string.IsNullOrEmpty(proxyTypes))
+        {
+            var ext = Path.GetExtension(path).TrimStart('.');
+            var types = proxyTypes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (types.Contains(ext)) return true;
+        }
+        return false;
     }
 
     private static async Task<IResult> HandleSignedRequest(IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? signValue, bool verifyArchive)

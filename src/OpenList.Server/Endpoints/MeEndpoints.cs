@@ -24,7 +24,8 @@ public static class MeEndpoints
             {
                 Id = u.Id, Username = u.Username, Role = (int)u.Role,
                 BasePath = u.BasePath, Permission = u.Permission,
-                Disabled = u.Disabled, Otp = !string.IsNullOrEmpty(u.OtpSecret)
+                Disabled = u.Disabled, Otp = !string.IsNullOrEmpty(u.OtpSecret),
+                SsoID = u.SsoID, AllowLdap = u.AllowLdap, Password = ""
             }));
         });
 
@@ -34,20 +35,23 @@ public static class MeEndpoints
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(404, "user not found"));
+            if (u.IsGuest) return Results.Json(Resp<object>.Error(403, "guest cannot update profile"));
 
-            if (req.Username != null) u.Username = req.Username;
-            if (req.Password != null) u.PwdHash = auth.HashPassword(req.Password);
-            if (req.BasePath != null) u.BasePath = req.BasePath;
+            // Go: always set username and sso_id (even if empty)
+            u.Username = req.Username ?? u.Username;
+            if (!string.IsNullOrEmpty(req.Password)) await users.SetPasswordAsync(u, req.Password);
+            u.SsoID = req.SsoID ?? u.SsoID;
 
             await users.UpdateUserAsync(u);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapGet("sshkey/list", async (IUserService users, ClaimsPrincipal user) =>
+        group.MapGet("sshkey/list", async (IUserService users, ClaimsPrincipal user, int page = 1, int perPage = 100) =>
         {
             var userId = GetUserId(user);
-            if (userId == null) return Results.Json(Resp<List<SshKey>>.Error(401, "unauthorized"));
-            return Results.Json(new Resp<List<SshKey>>(await users.ListSshKeysAsync(userId.Value)));
+            if (userId == null) return Results.Json(Resp<PagedListResp<SshKey>>.Error(401, "unauthorized"));
+            var (keys, total) = await users.ListSshKeysPagedAsync(userId.Value, page, perPage);
+            return Results.Json(new Resp<PagedListResp<SshKey>>(new PagedListResp<SshKey> { Content = keys, Total = total }));
         });
 
         group.MapPost("sshkey/add", async (IUserService users, ClaimsPrincipal user, AddSshKeyReq req) =>
@@ -58,11 +62,11 @@ public static class MeEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("sshkey/delete", async (IUserService users, ClaimsPrincipal user, DeleteSshKeyReq req) =>
+        group.MapPost("sshkey/delete", async (IUserService users, ClaimsPrincipal user, uint id) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
-            await users.DeleteSshKeyAsync(userId.Value, req.Name);
+            await users.DeleteSshKeyByIdAsync(id);
             return Results.Json(new Resp<object>(null));
         });
 

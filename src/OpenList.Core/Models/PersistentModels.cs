@@ -8,11 +8,12 @@ public class TaskRecord
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string Type { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public string State { get; set; } = "pending";
+    public int State { get; set; } = 0;
     public double Progress { get; set; }
     public string? Error { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string? PersistData { get; set; }
+    public uint? CreatorId { get; set; }
 
     public TaskInfo ToTaskInfo() => new()
     {
@@ -23,7 +24,8 @@ public class TaskRecord
         Progress = Progress,
         Error = Error,
         CreatedAt = CreatedAt,
-        PersistData = PersistData
+        PersistData = PersistData,
+        CreatorId = CreatorId
     };
 
     public static TaskRecord FromTaskInfo(TaskInfo info) => new()
@@ -35,7 +37,8 @@ public class TaskRecord
         Progress = info.Progress,
         Error = info.Error,
         CreatedAt = info.CreatedAt,
-        PersistData = info.PersistData
+        PersistData = info.PersistData,
+        CreatorId = info.CreatorId
     };
 }
 

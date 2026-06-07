@@ -1,5 +1,8 @@
 namespace OpenList.Core.Models;
 
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
+
 public enum UserRole
 {
     General = 0,
@@ -33,17 +36,19 @@ public class User
 {
     public uint Id { get; set; }
     public string Username { get; set; } = string.Empty;
-    public string PwdHash { get; set; } = string.Empty;
-    public long PwdTS { get; set; }
-    public string Salt { get; set; } = string.Empty;
-    public string BasePath { get; set; } = "/";
+    [JsonIgnore] public string PwdHash { get; set; } = string.Empty;
+    [JsonIgnore] public long PwdTS { get; set; }
+    [JsonIgnore] public string Salt { get; set; } = string.Empty;
+    [NotMapped]
+    public string Password { get; set; } = string.Empty;
+    [JsonPropertyName("base_path")] public string BasePath { get; set; } = "/";
     public UserRole Role { get; set; } = UserRole.General;
     public bool Disabled { get; set; }
     public int Permission { get; set; }
-    public string? OtpSecret { get; set; }
-    public string? SsoID { get; set; }
-    public string? Authn { get; set; }
-    public bool AllowLdap { get; set; } = true;
+    [JsonIgnore] public string? OtpSecret { get; set; }
+    [JsonPropertyName("sso_id")] public string? SsoID { get; set; }
+    [JsonIgnore] public string? Authn { get; set; }
+    [JsonPropertyName("allow_ldap")] public bool AllowLdap { get; set; } = true;
 
     public bool IsGuest => Role == UserRole.Guest;
     public bool IsAdmin => Role == UserRole.Admin;

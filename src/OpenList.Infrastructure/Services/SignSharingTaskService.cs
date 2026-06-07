@@ -72,17 +72,19 @@ public class SharingService : ISharingService
 
     public SharingService(OpenListDbContext db, IFileSystemService fs) { _db = db; _fs = fs; }
 
-    public async Task<List<Sharing>> ListSharingsAsync(uint userId, int page = 1, int perPage = 100, CancellationToken ct = default)
+    public async Task<(List<Sharing> Sharings, int Total)> ListSharingsAsync(uint userId, int page = 1, int perPage = 100, CancellationToken ct = default)
     {
         var query = userId == 0
             ? _db.Sharings.AsQueryable()
             : _db.Sharings.Where(s => s.CreatorId == userId);
-        return await query.OrderByDescending(s => s.Id)
+        var total = await query.CountAsync(ct);
+        var sharings = await query.Include(s => s.Creator).OrderByDescending(s => s.Id)
             .Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+        return (sharings, total);
     }
 
     public async Task<Sharing?> GetSharingAsync(string id, CancellationToken ct = default)
-        => await _db.Sharings.FindAsync([id], ct);
+        => await _db.Sharings.Include(s => s.Creator).FirstOrDefaultAsync(s => s.Id == id, ct);
 
     public async Task<Sharing> CreateSharingAsync(Sharing sharing, CancellationToken ct = default)
     {
@@ -96,6 +98,16 @@ public class SharingService : ISharingService
     public async Task UpdateSharingAsync(Sharing sharing, CancellationToken ct = default)
     {
         _db.Sharings.Update(sharing);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task UpdateSharingIdAsync(string oldId, string newId, CancellationToken ct = default)
+    {
+        var sharing = await _db.Sharings.FindAsync([oldId], ct);
+        if (sharing == null) return;
+        _db.Sharings.Remove(sharing);
+        sharing.Id = newId;
+        _db.Sharings.Add(sharing);
         await _db.SaveChangesAsync(ct);
     }
 
@@ -190,6 +202,24 @@ public class SharingService : ISharingService
             return (sharing, null);
         }
     }
+
+    // Go: countAccess - per-IP dedup with cache, increment Accessed
+    private static readonly ConcurrentDictionary<string, byte> _accessCache = new();
+    public async Task IncrementAccessAsync(string id, string ip, CancellationToken ct = default)
+    {
+        var cacheKey = $"{id}:{ip}";
+        if (_accessCache.TryAdd(cacheKey, 0))
+        {
+            var sharing = await _db.Sharings.FindAsync([id], ct);
+            if (sharing != null)
+            {
+                sharing.Accessed++;
+                await _db.SaveChangesAsync(ct);
+            }
+            // Auto-remove cache entry after delay (Go: AccessCountDelay)
+            _ = Task.Delay(TimeSpan.FromMinutes(5)).ContinueWith(_ => _accessCache.TryRemove(cacheKey, out var _));
+        }
+    }
 }
 
 public class TaskService : ITaskService
@@ -201,7 +231,7 @@ public class TaskService : ITaskService
 
     public async Task<TaskInfo> CreateTaskAsync(string type, string description, CancellationToken ct = default)
     {
-        var task = new TaskInfo { Type = type, Description = description, State = "pending" };
+        var task = new TaskInfo { Type = type, Description = description, State = (int)TaskState.Pending };
         var record = TaskRecord.FromTaskInfo(task);
         _db.TaskRecords.Add(record);
         await _db.SaveChangesAsync(ct);
@@ -210,7 +240,7 @@ public class TaskService : ITaskService
 
     public async Task<TaskInfo> CreateTaskAsync(string type, string description, Func<string, CancellationToken, Task> execute, CancellationToken ct = default)
     {
-        var task = new TaskInfo { Type = type, Description = description, State = "running" };
+        var task = new TaskInfo { Type = type, Description = description, State = (int)TaskState.Running };
         var record = TaskRecord.FromTaskInfo(task);
         _db.TaskRecords.Add(record);
         await _db.SaveChangesAsync(ct);
@@ -221,16 +251,16 @@ public class TaskService : ITaskService
             try
             {
                 await execute(task.Id, ct);
-                task.State = "succeeded";
+                task.State = (int)TaskState.Succeeded;
                 task.Progress = 100;
             }
             catch (OperationCanceledException)
             {
-                task.State = "canceled";
+                task.State = (int)TaskState.Canceled;
             }
             catch (Exception ex)
             {
-                task.State = "errored";
+                task.State = (int)TaskState.Errored;
                 task.Error = ex.Message;
             }
             finally
@@ -283,12 +313,12 @@ public class TaskService : ITaskService
     public async Task CancelTaskAsync(string id, CancellationToken ct = default)
     {
         if (_runningTasks.TryGetValue(id, out var task))
-            task.State = "canceled";
+            task.State = (int)TaskState.Canceled;
 
         var record = await _db.TaskRecords.FindAsync([id], ct);
         if (record != null)
         {
-            record.State = "canceled";
+            record.State = (int)TaskState.Canceled;
             await _db.SaveChangesAsync(ct);
         }
     }
@@ -297,7 +327,7 @@ public class TaskService : ITaskService
     {
         if (_runningTasks.TryGetValue(id, out var task))
         {
-            task.State = "pending";
+            task.State = (int)TaskState.Pending;
             task.Progress = 0;
             task.Error = null;
         }
@@ -305,7 +335,7 @@ public class TaskService : ITaskService
         var record = await _db.TaskRecords.FindAsync([id], ct);
         if (record != null)
         {
-            record.State = "pending";
+            record.State = (int)TaskState.Pending;
             record.Progress = 0;
             record.Error = null;
             await _db.SaveChangesAsync(ct);
@@ -337,8 +367,8 @@ public class TaskService : ITaskService
         }
     }
 
-    private static readonly HashSet<string> UndoneStates = ["pending", "running", "canceling", "errored", "failing", "waiting_retry", "before_retry"];
-    private static readonly HashSet<string> DoneStates = ["canceled", "failed", "succeeded"];
+    private static readonly HashSet<int> UndoneStates = [(int)TaskState.Pending, (int)TaskState.Running, (int)TaskState.Canceling, (int)TaskState.Errored, (int)TaskState.Failing, (int)TaskState.WaitingRetry, (int)TaskState.BeforeRetry];
+    private static readonly HashSet<int> DoneStates = [(int)TaskState.Canceled, (int)TaskState.Failed, (int)TaskState.Succeeded];
 
     public async Task<List<TaskInfo>> ListUndoneTasksAsync(string? type = null, CancellationToken ct = default)
     {
@@ -370,32 +400,39 @@ public class TaskService : ITaskService
             await RetryTaskAsync(id, ct);
     }
 
-    public async Task ClearDoneAsync(string? type = null, CancellationToken ct = default)
+    public async Task ClearDoneAsync(uint? userId = null, string? type = null, CancellationToken ct = default)
     {
         var done = await ListDoneTasksAsync(type, ct);
+        // Go: only clear tasks belonging to the user (or all if admin/null)
+        if (userId.HasValue)
+            done = done.Where(t => t.CreatorId == userId.Value).ToList();
         foreach (var task in done)
             await DeleteTaskAsync(task.Id, ct);
     }
 
-    public async Task ClearSucceededAsync(string? type = null, CancellationToken ct = default)
+    public async Task ClearSucceededAsync(uint? userId = null, string? type = null, CancellationToken ct = default)
     {
         var query = _db.TaskRecords.AsQueryable();
         if (!string.IsNullOrEmpty(type))
             query = query.Where(t => t.Type == type);
-        var succeeded = await query.Where(t => t.State == "succeeded").ToListAsync(ct);
+        if (userId.HasValue)
+            query = query.Where(t => t.CreatorId == userId.Value);
+        var succeeded = await query.Where(t => t.State == (int)TaskState.Succeeded).ToListAsync(ct);
         _db.TaskRecords.RemoveRange(succeeded);
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task RetryFailedAsync(string? type = null, CancellationToken ct = default)
+    public async Task RetryFailedAsync(uint? userId = null, string? type = null, CancellationToken ct = default)
     {
         var query = _db.TaskRecords.AsQueryable();
         if (!string.IsNullOrEmpty(type))
             query = query.Where(t => t.Type == type);
-        var failed = await query.Where(t => t.State == "errored" || t.State == "failed").ToListAsync(ct);
+        if (userId.HasValue)
+            query = query.Where(t => t.CreatorId == userId.Value);
+        var failed = await query.Where(t => t.State == (int)TaskState.Errored || t.State == (int)TaskState.Failed).ToListAsync(ct);
         foreach (var record in failed)
         {
-            record.State = "pending";
+            record.State = (int)TaskState.Pending;
             record.Progress = 0;
             record.Error = null;
         }

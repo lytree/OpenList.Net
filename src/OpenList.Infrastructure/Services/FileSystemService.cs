@@ -2,6 +2,7 @@ using OpenList.Core.Drivers;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace OpenList.Infrastructure.Services;
@@ -11,12 +12,14 @@ public class FileSystemService : IFileSystemService
     private readonly IDriverFactory _driverFactory;
     private readonly IMemoryCache _cache;
     private readonly ILogger<FileSystemService> _logger;
+    private readonly IServiceProvider _serviceProvider;
 
-    public FileSystemService(IDriverFactory driverFactory, IMemoryCache cache, ILogger<FileSystemService> logger)
+    public FileSystemService(IDriverFactory driverFactory, IMemoryCache cache, ILogger<FileSystemService> logger, IServiceProvider serviceProvider)
     {
         _driverFactory = driverFactory;
         _cache = cache;
         _logger = logger;
+        _serviceProvider = serviceProvider;
     }
 
     public async Task<List<IObj>> ListAsync(string path, ListArgs? args = null, CancellationToken ct = default)
@@ -134,6 +137,24 @@ public class FileSystemService : IFileSystemService
         }
     }
 
+    public async Task MergeAsync(string srcPath, string dstDir, CancellationToken ct = default)
+    {
+        // Go: fs.Merge uses transfer(merge, ...) which recursively merges directory contents
+        // At the driver level, merge uses the same IDriverCopy interface
+        var (srcDriver, srcActual) = ResolveDriver(srcPath);
+        var (dstDriver, dstActual) = ResolveDriver(dstDir);
+        if (srcDriver is IDriverCopy copy && srcDriver == dstDriver)
+        {
+            var srcObj = await GetObjAsync(srcDriver, srcActual, ct);
+            var dstObj = await GetObjAsync(dstDriver, dstActual, ct);
+            if (srcObj != null && dstObj != null)
+            {
+                await copy.CopyAsync(srcObj, dstObj, ct);
+                InvalidateDirectoryCache(dstDriver, dstActual);
+            }
+        }
+    }
+
     public async Task RenameAsync(string path, string newName, CancellationToken ct = default)
     {
         var (driver, actualPath) = ResolveDriver(path);
@@ -176,6 +197,17 @@ public class FileSystemService : IFileSystemService
                 InvalidateDirectoryCache(driver, actualPath);
             }
         }
+    }
+
+    public async Task<TaskInfo?> PutAsTaskAsync(string dstDir, FileStreamer file, CancellationToken ct = default)
+    {
+        var taskService = _serviceProvider.GetService<ITaskService>();
+        if (taskService == null) return null;
+        var task = await taskService.CreateTaskAsync("upload", $"Upload {dstDir}/{file.Obj.GetName()}", async (taskId, innerCt) =>
+        {
+            await PutAsync(dstDir, file, _ => { }, innerCt);
+        }, ct);
+        return task;
     }
 
     public async Task<object?> OtherAsync(OtherArgs args, CancellationToken ct = default)

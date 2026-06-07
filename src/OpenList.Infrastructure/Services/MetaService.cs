@@ -13,11 +13,18 @@ public class MetaService : IMetaService
 
     public MetaService(OpenListDbContext db) => _db = db;
 
-    public async Task<List<Meta>> ListMetasAsync(CancellationToken ct = default)
-        => await _db.Metas.ToListAsync(ct);
+    public async Task<(List<Meta> Metas, int Total)> ListMetasAsync(int page = 1, int perPage = 100, CancellationToken ct = default)
+    {
+        var total = await _db.Metas.CountAsync(ct);
+        var metas = await _db.Metas.Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+        return (metas, total);
+    }
 
     public async Task<Meta?> GetMetaAsync(string path, CancellationToken ct = default)
         => await _db.Metas.FirstOrDefaultAsync(m => m.Path == path, ct);
+
+    public async Task<Meta?> GetMetaByIdAsync(uint id, CancellationToken ct = default)
+        => await _db.Metas.FindAsync([id], ct);
 
     public async Task<Meta?> GetNearestMetaAsync(string path, CancellationToken ct = default)
     {
@@ -44,6 +51,16 @@ public class MetaService : IMetaService
     public async Task DeleteMetaAsync(string path, CancellationToken ct = default)
     {
         var meta = await _db.Metas.FirstOrDefaultAsync(m => m.Path == path, ct);
+        if (meta != null)
+        {
+            _db.Metas.Remove(meta);
+            await _db.SaveChangesAsync(ct);
+        }
+    }
+
+    public async Task DeleteMetaByIdAsync(uint id, CancellationToken ct = default)
+    {
+        var meta = await _db.Metas.FindAsync([id], ct);
         if (meta != null)
         {
             _db.Metas.Remove(meta);

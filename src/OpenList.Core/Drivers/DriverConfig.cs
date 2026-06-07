@@ -1,22 +1,24 @@
 namespace OpenList.Core.Drivers;
 
+using System.Text.Json.Serialization;
+
 public class DriverConfig
 {
     public string Name { get; set; } = string.Empty;
-    public bool LocalSort { get; set; }
-    public bool OnlyProxy { get; set; }
-    public bool NoCache { get; set; }
-    public bool NoUpload { get; set; }
-    public bool NeedMs { get; set; }
-    public string DefaultRoot { get; set; } = string.Empty;
-    public bool CheckStatus { get; set; }
+    [JsonPropertyName("local_sort")] public bool LocalSort { get; set; }
+    [JsonPropertyName("only_proxy")] public bool OnlyProxy { get; set; }
+    [JsonPropertyName("no_cache")] public bool NoCache { get; set; }
+    [JsonPropertyName("no_upload")] public bool NoUpload { get; set; }
+    [JsonPropertyName("need_ms")] public bool NeedMs { get; set; }
+    [JsonPropertyName("default_root")] public string DefaultRoot { get; set; } = string.Empty;
+    [JsonPropertyName("check_status")] public bool CheckStatus { get; set; }
     public string? Alert { get; set; }
-    public bool NoOverwriteUpload { get; set; }
-    public bool ProxyRangeOption { get; set; }
-    public bool NoLinkURL { get; set; }
-    public LinkCacheMode LinkCacheMode { get; set; }
-    public bool OnlyIndices { get; set; }
-    public bool PreferProxy { get; set; }
+    [JsonPropertyName("no_overwrite_upload")] public bool NoOverwriteUpload { get; set; }
+    [JsonPropertyName("proxy_range_option")] public bool ProxyRangeOption { get; set; }
+    [JsonPropertyName("no_link_url")] public bool NoLinkURL { get; set; }
+    [JsonPropertyName("link_cache_mode")] public LinkCacheMode LinkCacheMode { get; set; }
+    [JsonPropertyName("only_indices")] public bool OnlyIndices { get; set; }
+    [JsonPropertyName("prefer_proxy")] public bool PreferProxy { get; set; }
 
     public bool MustProxy() => OnlyProxy || NoLinkURL;
     public bool DefaultProxy() => PreferProxy;

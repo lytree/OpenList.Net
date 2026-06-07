@@ -22,7 +22,7 @@ public static class S3Endpoints
         group.MapGet("", async (HttpContext ctx, IStorageService storage) =>
         {
             if (!await VerifyS3AuthAsync(ctx)) return Results.StatusCode(403);
-            var storages = await storage.ListStoragesAsync(1, 100);
+            var (storages, _) = await storage.ListStoragesAsync(1, 100);
             var xml = BuildListBucketsXml(storages);
             return Results.Text(xml, "application/xml");
         });
@@ -31,7 +31,7 @@ public static class S3Endpoints
         group.MapMethods("{bucket}", ["HEAD"], async (HttpContext ctx, IStorageService storage, string bucket) =>
         {
             if (!await VerifyS3AuthAsync(ctx)) return Results.StatusCode(403);
-            var storages = await storage.ListStoragesAsync(1, 100);
+            var (storages, _) = await storage.ListStoragesAsync(1, 100);
             return storages.Any(s => s.MountPath.Trim('/') == bucket) ? Results.Ok() : Results.NotFound();
         });
 

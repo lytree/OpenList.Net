@@ -1,7 +1,10 @@
 using System.Security.Claims;
+using System.Linq;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
+using OpenList.Core.Drivers;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
@@ -18,16 +21,17 @@ public static class AdminEndpoints
         // === User management ===
         group.MapGet("user/list", async (IUserService users, int page = 1, int perPage = 100) =>
         {
-            var list = await users.ListUsersAsync(page, perPage);
+            var (userList, total) = await users.ListUsersAsync(page, perPage);
             return Results.Json(new Resp<PagedListResp<UserResp>>(new PagedListResp<UserResp>
             {
-                Content = list.Select(u => new UserResp
+                Content = userList.Select(u => new UserResp
                 {
                     Id = u.Id, Username = u.Username, Role = (int)u.Role,
                     BasePath = u.BasePath, Permission = u.Permission,
-                    Disabled = u.Disabled, Otp = !string.IsNullOrEmpty(u.OtpSecret)
+                    Disabled = u.Disabled, Otp = !string.IsNullOrEmpty(u.OtpSecret),
+                    SsoID = u.SsoID, AllowLdap = u.AllowLdap
                 }).ToList(),
-                Total = list.Count
+                Total = total
             }));
         });
 
@@ -39,13 +43,19 @@ public static class AdminEndpoints
             {
                 Id = u.Id, Username = u.Username, Role = (int)u.Role,
                 BasePath = u.BasePath, Permission = u.Permission,
-                Disabled = u.Disabled, Otp = !string.IsNullOrEmpty(u.OtpSecret)
+                Disabled = u.Disabled, Otp = !string.IsNullOrEmpty(u.OtpSecret),
+                SsoID = u.SsoID, AllowLdap = u.AllowLdap
             }));
         });
 
         group.MapPost("user/create", async (IUserService users, CreateUserReq req) =>
         {
-            var user = new User { Username = req.Username, BasePath = req.BasePath ?? "/", Role = (UserRole)req.Role, Permission = req.Permission, Disabled = req.Disabled };
+            // Go: admin or guest user can not be created
+            if (req.Role == 1 || req.Role == 2)
+                return Results.Json(Resp<object>.Error(400, "admin or guest user can not be created"));
+            var user = new User { Username = req.Username, BasePath = req.BasePath ?? "/", Role = (UserRole)req.Role, Permission = req.Permission, Disabled = req.Disabled, AllowLdap = req.AllowLdap, Authn = "[]" };
+            // Go: always call SetPassword (even for empty password)
+            await users.SetPasswordAsync(user, req.Password ?? "");
             await users.CreateUserAsync(user);
             return Results.Json(new Resp<object>(null));
         });
@@ -54,59 +64,91 @@ public static class AdminEndpoints
         {
             var user = await users.GetUserByIdAsync(req.Id);
             if (user == null) return Results.Json(Resp<object>.Error(404, "user not found"));
+            // Go: role can not be changed
+            if (req.Role != null && req.Role != (int)user.Role)
+                return Results.Json(Resp<object>.Error(400, "role can not be changed"));
+            // Go: admin user can not be disabled
+            if (req.Disabled == true && user.Role == UserRole.Admin)
+                return Results.Json(Resp<object>.Error(400, "admin user can not be disabled"));
             if (req.Username != null) user.Username = req.Username;
             if (req.BasePath != null) user.BasePath = req.BasePath;
-            if (req.Role != null) user.Role = (UserRole)req.Role.Value;
             if (req.Permission != null) user.Permission = req.Permission.Value;
             if (req.Disabled != null) user.Disabled = req.Disabled.Value;
+            if (req.AllowLdap != null) user.AllowLdap = req.AllowLdap.Value;
+            // Go: if password is empty, keep old password hash
+            if (!string.IsNullOrEmpty(req.Password))
+            {
+                await users.SetPasswordAsync(user, req.Password);
+            }
             await users.UpdateUserAsync(user);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("user/delete", async (IUserService users, DeleteReq req) =>
+        // Go: uses query param "id"
+        group.MapPost("user/delete", async (IUserService users, uint id) =>
         {
-            await users.DeleteUserAsync(req.Id);
+            await users.DeleteUserAsync(id);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("user/cancel_2fa", async (IUserService users, DeleteReq req) =>
+        group.MapPost("user/cancel_2fa", async (IUserService users, uint id) =>
         {
-            await users.Cancel2FAAsync(req.Id);
+            await users.Cancel2FAAsync(id);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("user/del_cache", async (IUserService users, DeleteReq req) =>
+        // Go: uses query param "username"
+        group.MapPost("user/del_cache", async (IUserService users, string username) =>
         {
-            await users.DeleteUserCacheAsync(req.Id);
+            await users.DeleteUserCacheByUsernameAsync(username);
             return Results.Json(new Resp<object>(null));
         });
 
-        // Admin SSH key management
-        group.MapGet("user/sshkey/list", async (IUserService users, uint? id) =>
+        // Admin SSH key management (Go: uid is required query param, supports pagination)
+        group.MapGet("user/sshkey/list", async (IUserService users, uint uid, int page = 1, int perPage = 100) =>
         {
-            if (id.HasValue)
-                return Results.Json(new Resp<List<SshKey>>(await users.ListSshKeysAsync(id.Value)));
-            return Results.Json(new Resp<List<SshKey>>([]));
+            var (keys, total) = await users.ListSshKeysPagedAsync(uid, page, perPage);
+            return Results.Json(new Resp<PagedListResp<SshKey>>(new PagedListResp<SshKey> { Content = keys, Total = total }));
         });
 
-        group.MapPost("user/sshkey/delete", async (IUserService users, DeleteSshKeyReq req) =>
+        group.MapPost("user/sshkey/delete", async (IUserService users, uint id) =>
         {
-            // Admin can delete any user's SSH key - userId passed in request
-            await users.DeleteSshKeyAsync(req.UserId, req.Name);
+            await users.DeleteSshKeyByIdAsync(id);
             return Results.Json(new Resp<object>(null));
         });
 
         // === Storage management ===
-        group.MapGet("storage/list", async (IStorageService storages, int page = 1, int perPage = 100) =>
+        group.MapGet("storage/list", async (IStorageService storages, IDriverFactory driverFactory, ISettingService settings, int page = 1, int perPage = 100) =>
         {
-            var list = await storages.ListStoragesAsync(page, perPage);
-            return Results.Json(new Resp<PagedListResp<Storage>>(new PagedListResp<Storage> { Content = list, Total = list.Count }));
+            var (storageList, total) = await storages.ListStoragesAsync(page, perPage);
+            // Fill MountDetails for each storage (Go: makeStorageResp)
+            var hideDetails = settings.GetBool("hide_storage_details_in_manage_page");
+            if (!hideDetails)
+            {
+                foreach (var s in storageList)
+                {
+                    var driver = driverFactory.GetDriver(s.MountPath);
+                    if (driver is IDriverWithDetails withDetails)
+                    {
+                        try { s.MountDetails = await withDetails.GetDetailsAsync(); }
+                        catch { /* ignore errors for storage details */ }
+                    }
+                }
+            }
+            return Results.Json(new Resp<PagedListResp<Storage>>(new PagedListResp<Storage> { Content = storageList, Total = total }));
         });
 
-        group.MapGet("storage/get", async (IStorageService storages, uint id) =>
+        group.MapGet("storage/get", async (IStorageService storages, IDriverFactory driverFactory, uint id) =>
         {
             var storage = await storages.GetStorageByIdAsync(id);
             if (storage == null) return Results.Json(Resp<Storage>.Error(404, "storage not found"));
+            // Fill MountDetails (Go: makeStorageResp)
+            var driver = driverFactory.GetDriver(storage.MountPath);
+            if (driver is IDriverWithDetails withDetails)
+            {
+                try { storage.MountDetails = await withDetails.GetDetailsAsync(); }
+                catch { /* ignore */ }
+            }
             return Results.Json(new Resp<Storage>(storage));
         });
 
@@ -122,21 +164,21 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("storage/delete", async (IStorageService storages, DeleteReq req) =>
+        group.MapPost("storage/delete", async (IStorageService storages, uint id) =>
         {
-            await storages.DeleteStorageAsync(req.Id);
+            await storages.DeleteStorageAsync(id);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("storage/enable", async (IStorageService storages, DeleteReq req) =>
+        group.MapPost("storage/enable", async (IStorageService storages, uint id) =>
         {
-            await storages.EnableStorageAsync(req.Id);
+            await storages.EnableStorageAsync(id);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("storage/disable", async (IStorageService storages, DeleteReq req) =>
+        group.MapPost("storage/disable", async (IStorageService storages, uint id) =>
         {
-            await storages.DisableStorageAsync(req.Id);
+            await storages.DisableStorageAsync(id);
             return Results.Json(new Resp<object>(null));
         });
 
@@ -147,43 +189,73 @@ public static class AdminEndpoints
         });
 
         // === Meta management ===
-        group.MapGet("meta/list", async (IMetaService metas) =>
-            Results.Json(new Resp<List<Meta>>(await metas.ListMetasAsync())));
-
-        group.MapGet("meta/get", async (IMetaService metas, string path) =>
+        group.MapGet("meta/list", async (IMetaService metas, int page = 1, int perPage = 100) =>
         {
-            var meta = await metas.GetMetaAsync(path);
+            var (metaList, total) = await metas.ListMetasAsync(page, perPage);
+            return Results.Json(new Resp<PagedListResp<Meta>>(new PagedListResp<Meta> { Content = metaList, Total = total }));
+        });
+
+        group.MapGet("meta/get", async (IMetaService metas, uint id) =>
+        {
+            var meta = await metas.GetMetaByIdAsync(id);
             if (meta == null) return Results.Json(Resp<Meta>.Error(404, "meta not found"));
             return Results.Json(new Resp<Meta>(meta));
         });
 
         group.MapPost("meta/create", async (IMetaService metas, Meta req) =>
         {
+            // Go: validHide - validate each line of Hide as regex
+            var hideError = ValidateHide(req.Hide);
+            if (hideError != null) return Results.Json(Resp<object>.Error(400, $"{hideError} is illegal"));
             await metas.CreateMetaAsync(req);
             return Results.Json(new Resp<object>(null));
         });
 
         group.MapPost("meta/update", async (IMetaService metas, Meta req) =>
         {
+            // Go: validHide - validate each line of Hide as regex
+            var hideError = ValidateHide(req.Hide);
+            if (hideError != null) return Results.Json(Resp<object>.Error(400, $"{hideError} is illegal"));
             await metas.UpdateMetaAsync(req);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("meta/delete", async (IMetaService metas, DeleteMetaReq req) =>
+        group.MapPost("meta/delete", async (IMetaService metas, uint id) =>
         {
-            await metas.DeleteMetaAsync(req.Path);
+            await metas.DeleteMetaByIdAsync(id);
             return Results.Json(new Resp<object>(null));
         });
 
         // === Settings management ===
-        group.MapGet("setting/list", async (ISettingService settings) =>
-            Results.Json(new Resp<List<SettingItem>>(await settings.ListSettingsAsync())));
-
-        group.MapGet("setting/get", async (ISettingService settings, string key) =>
+        // Go: group/groups are int query params
+        group.MapGet("setting/list", async (ISettingService settings, int? group = null, string? groups = null) =>
         {
-            var value = await settings.GetSettingAsync(key);
-            if (value == null) return Results.Json(Resp<string>.Error(404, "setting not found"));
-            return Results.Json(new Resp<string>(value));
+            if (!string.IsNullOrEmpty(groups) || group.HasValue)
+            {
+                var groupList = !string.IsNullOrEmpty(groups)
+                    ? groups.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).ToList()
+                    : [group!.Value];
+                return Results.Json(new Resp<List<SettingItem>>(await settings.ListSettingsByGroupsAsync(groupList)));
+            }
+            return Results.Json(new Resp<List<SettingItem>>(await settings.ListSettingsAsync()));
+        });
+
+        // Go: supports key (single) and keys (comma-separated) query params
+        group.MapGet("setting/get", async (ISettingService settings, string? key = null, string? keys = null) =>
+        {
+            if (!string.IsNullOrEmpty(key))
+            {
+                var item = await settings.GetSettingItemAsync(key);
+                if (item == null) return Results.Json(Resp<SettingItem>.Error(404, "setting not found"));
+                return Results.Json(new Resp<SettingItem>(item));
+            }
+            if (!string.IsNullOrEmpty(keys))
+            {
+                var keyList = keys.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+                var items = await settings.GetSettingsInKeysAsync(keyList);
+                return Results.Json(new Resp<List<SettingItem>>(items));
+            }
+            return Results.Json(Resp<object>.Error(400, "key or keys is required"));
         });
 
         group.MapPost("setting/save", async (ISettingService settings, List<SettingItem> items) =>
@@ -192,16 +264,24 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("setting/delete", async (ISettingService settings, DeleteSettingReq req) =>
+        // Go: uses query param "key"
+        group.MapPost("setting/delete", async (ISettingService settings, string key) =>
         {
-            await settings.DeleteSettingAsync(req.Key);
+            await settings.DeleteSettingAsync(key);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("setting/default", async (ISettingService settings) =>
+        // Go: group/groups are int query params
+        group.MapPost("setting/default", async (ISettingService settings, int? group = null, string? groups = null) =>
         {
-            await settings.DefaultSettingsAsync();
-            return Results.Json(new Resp<object>(null));
+            if (!string.IsNullOrEmpty(groups) || group.HasValue)
+            {
+                var groupList = !string.IsNullOrEmpty(groups)
+                    ? groups.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).ToList()
+                    : [group!.Value];
+                return Results.Json(new Resp<List<SettingItem>>(await settings.DefaultSettingsByGroupsAsync(groupList)));
+            }
+            return Results.Json(new Resp<List<SettingItem>>(await settings.DefaultSettingsAsync()));
         });
 
         group.MapPost("setting/reset_token", async (ISettingService settings) =>
@@ -266,8 +346,16 @@ public static class AdminEndpoints
         group.MapGet("share/list", async (ISharingService sharings, int page = 1, int perPage = 100) =>
         {
             // Admin sees all sharings
-            var list = await sharings.ListSharingsAsync(0);
-            return Results.Json(new Resp<PagedListResp<Sharing>>(new PagedListResp<Sharing> { Content = list, Total = list.Count }));
+            var (sharingList, total) = await sharings.ListSharingsAsync(0, page, perPage);
+            foreach (var s in sharingList)
+            {
+                if (s.Creator != null)
+                {
+                    s.CreatorName = s.Creator.Username;
+                    s.CreatorRole = (int)s.Creator.Role;
+                }
+            }
+            return Results.Json(new Resp<PagedListResp<Sharing>>(new PagedListResp<Sharing> { Content = sharingList, Total = total }));
         });
 
         group.MapPost("share/create", async (ISharingService sharings, Sharing req) =>
@@ -282,9 +370,9 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("share/delete", async (ISharingService sharings, DeleteShareReq req) =>
+        group.MapPost("share/delete", async (ISharingService sharings, string id) =>
         {
-            await sharings.DeleteSharingAsync(req.Id);
+            await sharings.DeleteSharingAsync(id);
             return Results.Json(new Resp<object>(null));
         });
 
@@ -320,12 +408,13 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("index/update", (ISearchService search, IConfiguration config) =>
+        group.MapPost("index/update", (ISearchService search, IConfiguration config, UpdateIndexReq req) =>
         {
             var searchIndex = config["SearchIndex"] ?? "none";
             if (searchIndex == "none")
                 return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
-            _ = Task.Run(() => search.UpdateIndexAsync("/", []));
+            var paths = req.Paths ?? ["/"];
+            _ = Task.Run(() => search.UpdateIndexAsync(paths.FirstOrDefault() ?? "/", []));
             return Results.Json(new Resp<object>(null));
         });
 
@@ -426,6 +515,87 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
+        // === Archive management (Go: admin/archive) ===
+        group.MapMethods("archive/meta", ["GET", "POST"], async (IFileSystemService fs, ArchiveMetaReq req) =>
+        {
+            var obj = await fs.GetAsync(req.Path);
+            if (obj == null) return Results.Json(Resp<object>.Error(404, "file not found"));
+            if (obj.IsDir()) return Results.Json(Resp<object>.Error(400, "path is a directory"));
+
+            var archiveEntries = await FsEndpoints.ReadArchiveEntriesAsync(fs, req.Path, req.Password);
+            if (archiveEntries == null)
+                return Results.Json(Resp<object>.Error(500, "failed to read archive"));
+
+            var isEncrypted = archiveEntries.Any(e => e.IsEncrypted);
+            return Results.Json(new Resp<ArchiveMetaResp>(new ArchiveMetaResp
+            {
+                Comment = "",
+                IsEncrypted = isEncrypted,
+                Content = archiveEntries.Select(e => new ArchiveContentResp
+                {
+                    Name = e.Name,
+                    Size = e.Size,
+                    IsDir = e.IsDir
+                }).ToList()
+            }));
+        });
+
+        group.MapMethods("archive/list", ["GET", "POST"], async (IFileSystemService fs, ArchiveListReq req) =>
+        {
+            var obj = await fs.GetAsync(req.Path);
+            if (obj == null) return Results.Json(Resp<object>.Error(404, "file not found"));
+            if (obj.IsDir()) return Results.Json(Resp<object>.Error(400, "path is a directory"));
+
+            var archiveEntries = await FsEndpoints.ReadArchiveEntriesAsync(fs, req.Path, req.Password);
+            if (archiveEntries == null)
+                return Results.Json(Resp<object>.Error(500, "failed to read archive"));
+
+            IEnumerable<ArchiveEntryInfo> filtered = archiveEntries;
+            if (!string.IsNullOrEmpty(req.InnerPath))
+            {
+                var prefix = req.InnerPath.TrimStart('/');
+                filtered = filtered.Where(e => e.Name.StartsWith(prefix) && e.Name != prefix);
+            }
+
+            var entries = filtered.ToList();
+            var result = new List<ObjResp>();
+            foreach (var entry in entries)
+            {
+                var relativePath = entry.Name;
+                if (!string.IsNullOrEmpty(req.InnerPath))
+                {
+                    var prefix = req.InnerPath.TrimStart('/');
+                    if (relativePath.StartsWith(prefix))
+                        relativePath = relativePath[prefix.Length..].TrimStart('/');
+                }
+
+                var parts = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0) continue;
+
+                if (parts.Length == 1 || (parts.Length > 1 && !result.Any(r => r.Name == parts[0])))
+                {
+                    result.Add(new ObjResp
+                    {
+                        Name = parts[0],
+                        Size = parts.Length == 1 ? entry.Size : 0,
+                        IsDir = parts.Length > 1,
+                        Modified = DateTime.MinValue,
+                        Type = parts.Length > 1 ? 1 : 0
+                    });
+                }
+            }
+
+            var total = result.Count;
+            if (req.PerPage > 0)
+                result = result.Skip((req.Page - 1) * req.PerPage).Take(req.PerPage).ToList();
+
+            return Results.Json(new Resp<ArchiveListResp>(new ArchiveListResp
+            {
+                Content = result,
+                Total = total
+            }));
+        });
+
         return endpoints;
     }
 
@@ -433,5 +603,17 @@ public static class AdminEndpoints
     {
         var claim = user.FindFirst(ClaimTypes.NameIdentifier);
         return claim != null && uint.TryParse(claim.Value, out var id) ? id : null;
+    }
+
+    /// <summary>Go: validHide - validate each line of Hide as regex</summary>
+    private static string? ValidateHide(string? hide)
+    {
+        if (string.IsNullOrEmpty(hide)) return null;
+        foreach (var line in hide.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            try { _ = new System.Text.RegularExpressions.Regex(line); }
+            catch (ArgumentException) { return line; }
+        }
+        return null;
     }
 }

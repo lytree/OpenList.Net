@@ -17,8 +17,12 @@ public class StorageService : IStorageService
         _driverFactory = driverFactory;
     }
 
-    public async Task<List<Storage>> ListStoragesAsync(int page, int perPage, CancellationToken ct = default)
-        => await _db.Storages.OrderBy(s => s.Order).Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+    public async Task<(List<Storage> Storages, int Total)> ListStoragesAsync(int page, int perPage, CancellationToken ct = default)
+    {
+        var total = await _db.Storages.CountAsync(ct);
+        var storages = await _db.Storages.OrderBy(s => s.Order).Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
+        return (storages, total);
+    }
 
     public async Task<Storage?> GetStorageByIdAsync(uint id, CancellationToken ct = default)
         => await _db.Storages.FindAsync([id], ct);
