@@ -14,13 +14,17 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 
 完整对齐 Go 版本所有 API 路由，确保前端可正常对接。
 
+- [ ] **`/api/fs/list`、`/api/fs/get` 匿名访问** — Go 使用 `Auth(true)` 允许匿名/Guest 用户访问，.NET 使用 `RequireAuthorization()` 阻止匿名请求。需改为 `AllowAnonymous()` + 内部手动解析 JWT + Guest 禁用检查
+- [ ] **`/api/fs/archive/meta`、`/api/fs/archive/list` 匿名访问** — 同上，Go 允许匿名访问，.NET 阻止
+- [ ] **`/api/fs/archive/meta`、`/api/fs/archive/list` 共享路径 `/@s`** — Go 支持 `/@s` 前缀路由到 `SharingArchiveMeta`/`SharingArchiveList`，.NET 不支持。需添加共享路径检测，调用 `ISharingService` 归档方法
+- [ ] **`/api/fs/add_offline_download` DeletePolicy** — Go 传递 `DeletePolicy` 给下载工具控制临时文件删除策略，.NET 模型有字段但 `AddUrlsAsync` 未使用
 - [ ] **`/api/authn/*`** — WebAuthn 端点路由已注册（返回 501），完整实现需 FIDO2 库
-- [ ] **`/api/fs/torrent/parse`** — 种子解析（返回 501）
+- [ ] **`/api/fs/torrent/parse`** — 种子解析（返回 501，需 MonoTorrent 等库）
 - [ ] **`/api/fs/torrent/upload_parse`** — 上传种子并解析（返回 501）
-- [ ] **`/api/fs/torrent/rapid_upload`** — 种子快速上传（返回 501）
+- [ ] **`/api/fs/torrent/rapid_upload`** — 种子快速上传（返回 501，需特定网盘 API）
 - [ ] **`/api/fs/torrent/generate`** — 生成种子（返回 501）
 - [x] **`/api/fs/archive/meta`** — 归档元数据端点，支持 ZIP 格式
-- [x] **`/api/fs/archive/list`** — 归档内文件列表端点，支持 ZIP 格式
+- [x] **`/api/fs/archive/list`** — 归档内文件列表端点，支持 ZIP 格式，分页返回 PageResp{Content, Total}
 - [x] **`/api/fs/archive/decompress`** — 归档解压端点，支持 ZIP 格式异步解压
 - [x] **`/api/share/list` 分页与用户过滤** — 已实现数据库层分页 + 管理员看全部/普通用户看自己
 - [ ] **`/api/admin/setting/set_aria2`** — 设置 Aria2 配置端点（返回 501）
@@ -34,6 +38,9 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 - [ ] **`/api/admin/setting/set_thunder`** — 设置 Thunder 配置端点（返回 501）
 - [ ] **`/api/admin/setting/set_thunderx`** — 设置 ThunderX 配置端点（返回 501）
 - [ ] **`/api/admin/setting/set_thunder_browser`** — 设置 ThunderBrowser 配置端点（返回 501）
+- [ ] **`/sad/:sid` 归档预览完善** — Go 支持代理模式、重定向模式和内部提取模式，.NET 仅支持本地 ZIP 提取
+- [ ] **`/ae/*path` 归档内部提取完善** — Go 完整实现 `ArchiveInternalExtract`，.NET 当前仅支持 ZIP 格式本地文件
+- [ ] **`IDriverArchiveDecompress` 实现** — 接口已定义但无实现，需 SharpCompress 等库支持 7z/tar.gz 等格式
 - [x] **`/d/*path` 下载限流** — DownloadRateLimiterMiddleware 全局注册，已覆盖签名路由
 - [x] **`/p/*path` 代理限流** — 同上
 - [x] **`/ad/*path`** — 归档下载，支持从 ZIP 中提取内部文件
@@ -82,7 +89,7 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 - [x] **DriverItem 配置定义** — 每个驱动已补充完整的 Common/Additional 配置项（Local/S3/WebDAV/FTP/SFTP/SMB）
 - [x] **驱动缓存机制** — 已实现带过期时间的内存缓存（目录缓存 + 链接缓存 + 详情缓存）
 - [ ] **驱动登录/刷新 Token** — OAuth2 refresh token 自动续期
-- [x] **IDriverDirectUploader 实现** — get_direct_upload_info 端点已对接驱动直传接口
+- [ ] **IDriverDirectUploader 实现** — get_direct_upload_info 端点已对接驱动直传接口，但各驱动直传逻辑为 stub
 - [x] **IDriverWithDetails 实现** — 返回 StorageDetails（磁盘用量等），带 30 分钟缓存
 
 ### P5：数据库与持久化（中优先级）
@@ -265,3 +272,7 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 - [x] `/api/admin/message/*` — 消息管理端点
 - [x] `/api/admin/driver/*` — 驱动信息端点
 - [x] `/api/admin/storage/enable` 和 `/api/admin/storage/disable` — 存储启用/禁用
+- [x] **TaskEndpoints 权限控制** — info/cancel/delete/retry 端点添加用户权限检查（管理员操作全部，普通用户仅操作自己的任务）
+- [x] **TaskEndpoints clear_done/clear_succeeded/retry_failed 用户过滤** — 管理员清除全部，普通用户仅清除自己的任务
+- [x] **TaskRecord.CreatorId** — 任务记录添加 CreatorId 字段，支持按用户过滤
+- [x] **PageResp\<T\> 通用分页模型** — 对齐 Go 版本 PageResp{Content, Total}，用于 archive/list 等分页端点
