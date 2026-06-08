@@ -32,16 +32,13 @@ public class AppConfiguration
 
 public class DatabaseConfig
 {
-    public string Type { get; set; } = "sqlite3";
-    public string Host { get; set; } = "";
-    public int Port { get; set; }
+    public string Host { get; set; } = "localhost";
+    public int Port { get; set; } = 5432;
     public string User { get; set; } = "";
     public string Password { get; set; } = "";
-    public string Name { get; set; } = "";
-    public string DBFile { get; set; } = "data/data.db";
+    public string Name { get; set; } = "openlist";
     public string TablePrefix { get; set; } = "x_";
-    public string SSLMode { get; set; } = "";
-    public string DSN { get; set; } = "";
+    public string SSLMode { get; set; } = "Prefer";
 }
 
 public class MeilisearchConfig

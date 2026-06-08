@@ -33,7 +33,7 @@ dotnet test
 |---|---|
 | `src/OpenList.Core` | Models (`IObj`, `User`, `Storage`), driver interfaces (`IDriver`, role-based sub-interfaces), service interfaces (`IService`) |
 | `src/OpenList.Drivers` | Storage driver implementations — `Local/`, `S3/`, `WebDAV/`, `FtpSftpSmb/`, `Cloud/`, `Stubs/` |
-| `src/OpenList.Infrastructure` | EF Core `DbContext`, service implementations, JWT auth, `DriverFactory`, SQLite/MySQL/PostgreSQL/MSSQL support |
+| `src/OpenList.Infrastructure` | EF Core `DbContext`, service implementations, JWT auth, `DriverFactory`, PostgreSQL support |
 | `src/OpenList.Server` | ASP.NET Core entrypoint (`Program.cs`), `Endpoints/` (Minimal APIs), `Middleware/`, `Models/` (DTOs + Resp<T>) |
 | `tests/OpenList.Tests` | NUnit test project (placeholder — only UnitTest1.cs stub) |
 
@@ -69,7 +69,7 @@ Each API group maps to a file in `src/OpenList.Server/Endpoints/`:
 - **Auth**: JWT Bearer with configurable secret (auto-generated 16-char `Guid` if empty in config)
 - **CORS**: `AllowAnyOrigin/Method/Header` (also a custom `CorsMiddleware` handles OPTIONS preflight)
 - **Rate limit**: 100 req/min per IP (`RateLimitMiddleware` at `src/OpenList.Server/Middleware/Middleware.cs:105`)
-- **Database**: SQLite by default (`data/data.db`); supports MySQL, PostgreSQL, MSSQL via config. DB init uses `EnsureCreatedAsync()` — no migrations, schema dropped + recreated on schema changes. Default table prefix: `x_`
+- **Database**: PostgreSQL only (via Npgsql). DB init uses `MigrateAsync()` with EF Core migrations, falling back to `EnsureCreatedAsync()` for databases without migrations history. Default table prefix: `x_`
 - **Swagger**: at `/swagger` in Development only
 - **SPA fallback**: serves `index.html` from `DistDir` if configured
 - **Server listens on**: `http://localhost:5211` (dev) / `http://0.0.0.0:5244` (default config)

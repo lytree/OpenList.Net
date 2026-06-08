@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
@@ -8,11 +9,11 @@ namespace OpenList.Infrastructure.Services;
 
 public class SearchService : ISearchService
 {
-    private readonly OpenListDbContext _db;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ConcurrentDictionary<string, List<SearchResult>> _cache = new();
     private IndexProgress _progress = new() { State = "idle" };
 
-    public SearchService(OpenListDbContext db) => _db = db;
+    public SearchService(IServiceScopeFactory scopeFactory) => _scopeFactory = scopeFactory;
 
     public async Task BuildIndexAsync(CancellationToken ct = default)
     {
@@ -39,10 +40,12 @@ public class SearchService : ISearchService
         _cache.AddOrUpdate(parent, results, (_, _) => results);
 
         // Persist to database
-        var existing = await _db.SearchIndices.Where(s => s.Parent == parent).ToListAsync(ct);
-        _db.SearchIndices.RemoveRange(existing);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+        var existing = await db.SearchIndices.Where(s => s.Parent == parent).ToListAsync(ct);
+        db.SearchIndices.RemoveRange(existing);
 
-        _db.SearchIndices.AddRange(results.Select(r => new SearchIndex
+        db.SearchIndices.AddRange(results.Select(r => new SearchIndex
         {
             Parent = r.Parent,
             Name = r.Name,
@@ -51,7 +54,7 @@ public class SearchService : ISearchService
             Modified = r.Modified
         }));
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<List<SearchResult>> SearchAsync(string parent, string keywords, int page, int perPage, CancellationToken ct = default)
@@ -64,7 +67,9 @@ public class SearchService : ISearchService
         }
 
         // Fall back to database
-        var query = _db.SearchIndices.AsQueryable();
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+        var query = db.SearchIndices.AsQueryable();
         if (!string.IsNullOrEmpty(parent))
             query = query.Where(s => s.Parent == parent);
 
@@ -95,8 +100,10 @@ public class SearchService : ISearchService
     public async Task ClearIndexAsync(CancellationToken ct = default)
     {
         _cache.Clear();
-        _db.SearchIndices.RemoveRange(_db.SearchIndices);
-        await _db.SaveChangesAsync(ct);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+        db.SearchIndices.RemoveRange(db.SearchIndices);
+        await db.SaveChangesAsync(ct);
     }
 
     public Task<IndexProgress> GetProgressAsync(CancellationToken ct = default)

@@ -10,30 +10,8 @@ public static class DbContextExtensions
     {
         services.AddDbContext<OpenListDbContext>(options =>
         {
-            switch (dbConfig.Type.ToLower())
-            {
-                case "sqlite3":
-                case "sqlite":
-                    options.UseSqlite($"Data Source={dbConfig.DBFile}");
-                    break;
-                case "mysql":
-                    var mysqlConn = $"Server={dbConfig.Host};Port={dbConfig.Port};Database={dbConfig.Name};User={dbConfig.User};Password={dbConfig.Password};";
-                    options.UseMySql(mysqlConn, ServerVersion.AutoDetect(mysqlConn));
-                    break;
-                case "postgres":
-                case "postgresql":
-                    var pgConn = $"Host={dbConfig.Host};Port={dbConfig.Port};Database={dbConfig.Name};Username={dbConfig.User};Password={dbConfig.Password};SSL Mode={dbConfig.SSLMode}";
-                    options.UseNpgsql(pgConn);
-                    break;
-                case "mssql":
-                case "sqlserver":
-                    var mssqlConn = $"Server={dbConfig.Host},{dbConfig.Port};Database={dbConfig.Name};User Id={dbConfig.User};Password={dbConfig.Password};TrustServerCertificate=True;";
-                    options.UseSqlServer(mssqlConn);
-                    break;
-                default:
-                    options.UseSqlite($"Data Source={dbConfig.DBFile}");
-                    break;
-            }
+            var pgConn = $"Host={dbConfig.Host};Port={dbConfig.Port};Database={dbConfig.Name};Username={dbConfig.User};Password={dbConfig.Password};SSL Mode={dbConfig.SSLMode}";
+            options.UseNpgsql(pgConn);
         });
         return services;
     }

@@ -9,7 +9,6 @@ public class OpenListDbContextFactory : IDesignTimeDbContextFactory<OpenListDbCo
     public OpenListDbContext CreateDbContext(string[] args)
     {
         var optionsBuilder = new DbContextOptionsBuilder<OpenListDbContext>();
-        optionsBuilder.UseSqlite("Data Source=data/data.db");
 
         return new OpenListDbContext(optionsBuilder.Options);
     }
