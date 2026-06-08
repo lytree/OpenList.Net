@@ -14,33 +14,33 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 
 完整对齐 Go 版本所有 API 路由，确保前端可正常对接。
 
-- [ ] **`/api/fs/list`、`/api/fs/get` 匿名访问** — Go 使用 `Auth(true)` 允许匿名/Guest 用户访问，.NET 使用 `RequireAuthorization()` 阻止匿名请求。需改为 `AllowAnonymous()` + 内部手动解析 JWT + Guest 禁用检查
-- [ ] **`/api/fs/archive/meta`、`/api/fs/archive/list` 匿名访问** — 同上，Go 允许匿名访问，.NET 阻止
-- [ ] **`/api/fs/archive/meta`、`/api/fs/archive/list` 共享路径 `/@s`** — Go 支持 `/@s` 前缀路由到 `SharingArchiveMeta`/`SharingArchiveList`，.NET 不支持。需添加共享路径检测，调用 `ISharingService` 归档方法
-- [ ] **`/api/fs/add_offline_download` DeletePolicy** — Go 传递 `DeletePolicy` 给下载工具控制临时文件删除策略，.NET 模型有字段但 `AddUrlsAsync` 未使用
-- [ ] **`/api/authn/*`** — WebAuthn 端点路由已注册（返回 501），完整实现需 FIDO2 库
-- [ ] **`/api/fs/torrent/parse`** — 种子解析（返回 501，需 MonoTorrent 等库）
-- [ ] **`/api/fs/torrent/upload_parse`** — 上传种子并解析（返回 501）
-- [ ] **`/api/fs/torrent/rapid_upload`** — 种子快速上传（返回 501，需特定网盘 API）
-- [ ] **`/api/fs/torrent/generate`** — 生成种子（返回 501）
-- [x] **`/api/fs/archive/meta`** — 归档元数据端点，支持 ZIP 格式
-- [x] **`/api/fs/archive/list`** — 归档内文件列表端点，支持 ZIP 格式，分页返回 PageResp{Content, Total}
-- [x] **`/api/fs/archive/decompress`** — 归档解压端点，支持 ZIP 格式异步解压
+- [x] **`/api/fs/list`、`/api/fs/get` 匿名访问** — 已实现 ResolveUserAsync 方法，支持 JWT 用户和匿名 Guest 用户，对齐 Go `Auth(true)` 逻辑
+- [x] **`/api/fs/archive/meta`、`/api/fs/archive/list` 匿名访问** — 已改为 AllowAnonymous + ResolveUserAsync
+- [x] **`/api/fs/archive/meta`、`/api/fs/archive/list` 共享路径 `/@s`** — 已实现 /@s 前缀路由，调用 ISharingService 归档方法
+- [x] **`/api/fs/add_offline_download` DeletePolicy** — 已传递 DeletePolicy 给 AddUrlsAsync
+- [ ] **`/api/authn/*`** — WebAuthn 端点路由已注册（返回 501）。**困难点**：Fido2 库（v4.0.0）已在依赖中，需实现注册/认证流程（attestation/assertion）、凭证存储到数据库、挑战码管理；Go 版本使用 `go-webauthn` 库，逻辑可参考但 API 差异较大
+- [ ] **`/api/fs/torrent/parse`** — 种子解析（返回 501）。**困难点**：需集成 MonoTorrent 库解析 .torrent 文件元数据（文件列表、大小、Tracker 等）；MonoTorrent（v3.0.2）已在 CPM 中声明
+- [ ] **`/api/fs/torrent/upload_parse`** — 上传种子并解析（返回 501）。**困难点**：同上 + 需实现文件上传解析流程
+- [ ] **`/api/fs/torrent/rapid_upload`** — 种子快速上传（返回 501）。**困难点**：依赖特定网盘 API（115 网盘秒传），需先实现对应云盘驱动
+- [ ] **`/api/fs/torrent/generate`** — 生成种子（返回 501）。**困难点**：需 MonoTorrent 创建 .torrent 文件，涉及 Tracker/-piece 大小配置
+- [x] **`/api/fs/archive/meta`** — 归档元数据端点，支持 ZIP/tar.gz/rar/7z 格式，AllowAnonymous + /@s 共享路径
+- [x] **`/api/fs/archive/list`** — 归档内文件列表端点，支持 ZIP/tar.gz/rar/7z 格式，分页返回 PageResp{Content, Total}，AllowAnonymous + /@s 共享路径
+- [x] **`/api/fs/archive/decompress`** — 归档解压端点，集成 SharpCompress 支持 ZIP/tar.gz/rar/7z 等格式异步解压
 - [x] **`/api/share/list` 分页与用户过滤** — 已实现数据库层分页 + 管理员看全部/普通用户看自己
-- [ ] **`/api/admin/setting/set_aria2`** — 设置 Aria2 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_qbit`** — 设置 qBittorrent 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_transmission`** — 设置 Transmission 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_115`** — 设置 115 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_115_open`** — 设置 115 Open 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_123_pan`** — 设置 123Pan 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_123_open`** — 设置 123Open 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_pikpak`** — 设置 PikPak 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_thunder`** — 设置 Thunder 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_thunderx`** — 设置 ThunderX 配置端点（返回 501）
-- [ ] **`/api/admin/setting/set_thunder_browser`** — 设置 ThunderBrowser 配置端点（返回 501）
-- [ ] **`/sad/:sid` 归档预览完善** — Go 支持代理模式、重定向模式和内部提取模式，.NET 仅支持本地 ZIP 提取
-- [ ] **`/ae/*path` 归档内部提取完善** — Go 完整实现 `ArchiveInternalExtract`，.NET 当前仅支持 ZIP 格式本地文件
-- [ ] **`IDriverArchiveDecompress` 实现** — 接口已定义但无实现，需 SharpCompress 等库支持 7z/tar.gz 等格式
+- [ ] **`/api/admin/setting/set_aria2`** — 设置 Aria2 配置端点（返回 501）。**困难点**：需实现 aria2 JSON-RPC 客户端连接测试
+- [ ] **`/api/admin/setting/set_qbit`** — 设置 qBittorrent 配置端点（返回 501）。**困难点**：需实现 qBittorrent Web API 客户端连接测试
+- [ ] **`/api/admin/setting/set_transmission`** — 设置 Transmission 配置端点（返回 501）。**困难点**：需实现 Transmission RPC 客户端
+- [ ] **`/api/admin/setting/set_115`** — 设置 115 配置端点（返回 501）。**困难点**：依赖 Pan115 云盘驱动实现
+- [ ] **`/api/admin/setting/set_115_open`** — 设置 115 Open 配置端点（返回 501）。**困难点**：依赖 Pan115Open 云盘驱动实现
+- [ ] **`/api/admin/setting/set_123_pan`** — 设置 123Pan 配置端点（返回 501）。**困难点**：依赖 123Pan 云盘驱动实现
+- [ ] **`/api/admin/setting/set_123_open`** — 设置 123Open 配置端点（返回 501）。**困难点**：依赖 123Open 云盘驱动实现
+- [ ] **`/api/admin/setting/set_pikpak`** — 设置 PikPak 配置端点（返回 501）。**困难点**：依赖 PikPak 云盘驱动实现
+- [ ] **`/api/admin/setting/set_thunder`** — 设置 Thunder 配置端点（返回 501）。**困难点**：依赖 Thunder 云盘驱动实现
+- [ ] **`/api/admin/setting/set_thunderx`** — 设置 ThunderX 配置端点（返回 501）。**困难点**：依赖 ThunderX 云盘驱动实现
+- [ ] **`/api/admin/setting/set_thunder_browser`** — 设置 ThunderBrowser 配置端点（返回 501）。**困难点**：依赖 ThunderBrowser 云盘驱动实现
+- [x] **`/sad/:sid` 归档预览完善** — 已集成 SharpCompress 支持 ZIP/tar.gz/rar/7z 等多格式归档提取
+- [x] **`/ae/*path` 归档内部提取完善** — 已集成 SharpCompress 支持多格式归档内部文件提取
+- [x] **`IDriverArchiveDecompress` 实现** — archive/decompress 端点已使用 SharpCompress 支持 ZIP/tar.gz/rar/7z 等格式解压
 - [x] **`/d/*path` 下载限流** — DownloadRateLimiterMiddleware 全局注册，已覆盖签名路由
 - [x] **`/p/*path` 代理限流** — 同上
 - [x] **`/ad/*path`** — 归档下载，支持从 ZIP 中提取内部文件
@@ -69,8 +69,8 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 - [x] **文件系统缓存** — 已实现基于 IMemoryCache 的目录缓存和链接缓存，支持 TTL 和缓存失效
 - [x] **跨存储 Copy/Move** — Go 版本也不支持跨存储，同存储内已实现
 - [x] **Put 流式上传** — 已实现 FsStream（流式上传）和 FsForm（表单上传），对齐 Go 版本 File-Path/Overwrite/X-File-Size/Last-Modified 请求头
-- [ ] **离线下载实现** — 对接 aria2/qBittorrent 实现离线下载
-- [x] **Archive 读取/解压** — 已实现 ZIP 格式的 meta/list/decompress 端点（基于 System.IO.Compression）
+- [ ] **离线下载实现** — 对接 aria2/qBittorrent 实现离线下载。**困难点**：需实现 aria2 JSON-RPC 客户端和 qBittorrent Web API 客户端；Go 版本通过 `net/rpc` 和 HTTP 调用，.NET 需自建或引入第三方库；还需实现下载完成后的自动上传回调逻辑
+- [x] **Archive 读取/解压** — 已实现 meta/list/decompress 端点，集成 SharpCompress 支持 ZIP/tar.gz/rar/7z 等多格式
 - [x] **密码保护目录** — fs list/get 支持 Meta 密码验证 + Readme/Header/Write 信息返回
 - [x] **排序功能** — 按 Storage 配置的 OrderBy/OrderDirection 排序 + ExtractFolder（front/back）
 - [x] **分页功能** — fs list 支持 Page/PerPage 分页（对齐 Go 版本 PageReq）
@@ -80,7 +80,7 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 - [x] **TOTP 2FA 验证** — 实现 TOTP 验证逻辑（Otp.NET 库）+ QR 码图片生成（QRCoder），登录时 402 状态码提示需要 2FA
 - [x] **LDAP 登录** — 实现 LDAP 认证（Novell.Directory.Ldap.NETStandard），支持 ManagerDN 绑定、用户搜索、自动注册
 - [x] **SSO 登录** — 实现 SSO/OAuth2 登录流程，支持 GitHub/Microsoft/Google/Dingtalk/Casdoor
-- [ ] **WebAuthn** — 实现 WebAuthn/FIDO2 认证
+- [ ] **WebAuthn** — 实现 WebAuthn/FIDO2 认证。**困难点**：Fido2 库（v4.0.0）已在依赖中，需实现注册/认证流程（attestation/assertion）、凭证存储到数据库、挑战码管理；Go 版本使用 `go-webauthn` 库，逻辑可参考但 API 差异较大
 - [x] **Token 黑名单清理** — 惰性清理过期 token（ValidateToken 时触发）
 - [ ] **登录限流优化** — 配置化限流 + 持久化
 
@@ -232,12 +232,12 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 - [x] `/ping` 健康检查端点
 - [x] `/api/auth/logout` — GET logout 端点（使 token 失效）
 - [x] `/api/auth/sso` 系列 — SSO 路由已注册（返回 501 待实现逻辑）
-- [x] `/api/fs/list` 和 `/api/fs/get` — 支持 GET+POST，需认证
+- [x] `/api/fs/list` 和 `/api/fs/get` — 支持 GET+POST，AllowAnonymous + ResolveUserAsync 支持匿名/Guest 访问
 - [x] `/api/fs/search`、`/api/fs/dirs`、`/api/fs/other` — 需认证
 - [x] `/api/fs/put` — PUT 方法流式上传
 - [x] `/api/fs/form` — PUT 方法表单上传
 - [x] `/api/fs/link` — Admin 权限（RequireRole("2")）
-- [x] `/api/fs/archive/meta` 和 `/api/fs/archive/list` — 路由已注册（返回 501 待实现逻辑）
+- [x] `/api/fs/archive/meta` 和 `/api/fs/archive/list` — 支持 ZIP/tar.gz/rar/7z 格式，AllowAnonymous + /@s 共享路径支持
 - [x] `/api/admin/meta/get` — 获取单个 Meta
 - [x] `/api/admin/user/get` — 获取单个 User
 - [x] `/api/admin/user/del_cache` — 删除用户缓存
@@ -276,3 +276,8 @@ OpenList 的 C# / .NET 移植版本。参考实现：[OpenListTeam/OpenList](htt
 - [x] **TaskEndpoints clear_done/clear_succeeded/retry_failed 用户过滤** — 管理员清除全部，普通用户仅清除自己的任务
 - [x] **TaskRecord.CreatorId** — 任务记录添加 CreatorId 字段，支持按用户过滤
 - [x] **PageResp\<T\> 通用分页模型** — 对齐 Go 版本 PageResp{Content, Total}，用于 archive/list 等分页端点
+- [x] **ResolveUserAsync 匿名访问** — 对齐 Go `Auth(true)` 逻辑，支持 JWT 用户和匿名 Guest 用户
+- [x] **FsList/FsGet AllowAnonymous** — 改为 AllowAnonymous + ResolveUserAsync，支持匿名/Guest 访问
+- [x] **archive/meta、archive/list /@s 共享路径** — 支持 /@s 前缀路由到共享归档方法
+- [x] **SharpCompress 多格式归档** — 集成 SharpCompress 支持 ZIP/tar.gz/rar/7z 等格式解压和提取
+- [x] **DeletePolicy 传递** — 离线下载 DeletePolicy 参数从端点传递到驱动层

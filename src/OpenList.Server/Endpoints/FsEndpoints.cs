@@ -20,7 +20,7 @@ public static class FsEndpoints
         var group = endpoints.MapGroup("/api/fs");
 
         // fs/list - supports both GET and POST, allows guest (Go: Auth(true))
-        group.MapMethods("list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISignService signSvc, IMetaService metaSvc, ISharingService sharings, ISettingService settings, HttpContext ctx, ClaimsPrincipal user, ListReq req) =>
+        group.MapMethods("list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISignService signSvc, IMetaService metaSvc, ISharingService sharings, ISettingService settings, HttpContext ctx, ListReq req) =>
         {
             // Support sharing path: /@s prefix routes to sharing logic
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
@@ -57,13 +57,11 @@ public static class FsEndpoints
                 }));
             }
 
-            // Go: user.JoinPath
-            var userId = GetUserId(user);
-            var u = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
+            // Go: Auth(true) - resolve user (allow anonymous/Guest)
+            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: true);
+            if (resolveError != null) return resolveError;
 
-            // Go: user.IsGuest() && user.Disabled → 401
-            if (u != null && u.IsGuest && u.Disabled)
-                return Results.Json(Resp<ListResp>.Error(401, "Guest user is disabled, login please"));
+            // Go: user.IsGuest() && user.Disabled → already handled in ResolveUserAsync with allowDisabledGuest=true
 
             var reqPath = JoinPath(u, req.Path);
 
@@ -139,10 +137,10 @@ public static class FsEndpoints
             }
 
             return Results.Json(new Resp<ListResp>(resp));
-        }).RequireAuthorization();
+        }).AllowAnonymous();
 
         // fs/get - supports both GET and POST, allows guest (Go: Auth(true))
-        group.MapMethods("get", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, ISignService sign, ISharingService sharings, ISettingService settings, HttpContext ctx, ClaimsPrincipal userPrincipal, GetReq req) =>
+        group.MapMethods("get", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, ISignService sign, ISharingService sharings, ISettingService settings, HttpContext ctx, GetReq req) =>
         {
             // Support sharing path: /@s prefix routes to sharing logic
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
@@ -176,13 +174,9 @@ public static class FsEndpoints
                 return Results.Json(new Resp<GetResp>(sResp));
             }
 
-            // Go: user.JoinPath
-            var userId = GetUserId(userPrincipal);
-            var u = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
-
-            // Go: user.IsGuest() && user.Disabled → 401
-            if (u != null && u.IsGuest && u.Disabled)
-                return Results.Json(Resp<GetResp>.Error(401, "Guest user is disabled, login please"));
+            // Go: Auth(true) - resolve user (allow anonymous/Guest)
+            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: true);
+            if (resolveError != null) return resolveError;
 
             var reqPath = JoinPath(u, req.Path);
 
@@ -275,7 +269,7 @@ public static class FsEndpoints
             }
 
             return Results.Json(new Resp<GetResp>(resp));
-        }).RequireAuthorization();
+        }).AllowAnonymous();
 
         // Archive endpoints (allows guest, Go: Auth(true))
         // Write operations (requires auth, not guest)
@@ -907,16 +901,17 @@ public static class FsEndpoints
             return Results.Json(new Resp<LinkResp>(new LinkResp { URL = link.URL, Header = link.Header, Concurrency = link.Concurrency, PartSize = link.PartSize, ContentLength = link.ContentLength }));
         }).RequireAuthorization(policy => policy.RequireRole("2"));
 
-        // fs/search - requires auth + search index enabled
-        group.MapMethods("search", ["GET", "POST"], async (ISearchService search, IConfiguration config, IUserService users, IMetaService metaSvc, HttpContext ctx, ClaimsPrincipal userPrincipal, SearchReq req) =>
+        // fs/search - Auth(false): allows guest but not disabled guest
+        group.MapMethods("search", ["GET", "POST"], async (ISearchService search, IConfiguration config, IUserService users, IMetaService metaSvc, HttpContext ctx, SearchReq req) =>
         {
             var searchIndex = config["SearchIndex"] ?? "none";
             if (searchIndex == "none")
                 return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
 
-            // Go: user.JoinPath(req.Parent)
-            var userId = GetUserId(userPrincipal);
-            var u = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
+            // Go: Auth(false) - resolve user (allow anonymous/Guest, but not disabled guest)
+            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: false);
+            if (resolveError != null) return resolveError;
+
             req.Parent = JoinPath(u, req.Parent);
 
             var results = await search.SearchAsync(req.Parent, req.Keywords, req.Page, req.PerPage);
@@ -942,42 +937,41 @@ public static class FsEndpoints
             }
 
             return Results.Json(new Resp<SearchResp>(new SearchResp { Content = filtered, Total = total }));
-        }).RequireAuthorization();
+        }).AllowAnonymous();
 
-        // fs/dirs - requires auth
+        // fs/dirs - Auth(false): allows guest but not disabled guest
         group.MapMethods("dirs", ["GET", "POST"], async (IFileSystemService fs, IMetaService metaSvc, IUserService users, HttpContext ctx, DirsReq req) =>
         {
+            // Go: Auth(false) - resolve user (allow anonymous/Guest, but not disabled guest)
+            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: false);
+            if (resolveError != null) return resolveError;
+
             // Go: ForceRoot check - admin only
-            var userId = GetUserId(ctx.User);
-            var isAdmin = ctx.User.IsInRole("2");
+            var isAdmin = userId.HasValue && u?.Role == UserRole.Admin;
             if (req.ForceRoot && !isAdmin)
                 return Results.Json(Resp<object>.Error(403, "Permission denied"));
 
             var reqPath = req.Path;
-            if (!req.ForceRoot && userId.HasValue)
-            {
-                var u = await users.GetUserByIdAsync(userId.Value);
-                if (u != null && !string.IsNullOrEmpty(u.BasePath) && u.BasePath != "/")
-                    reqPath = u.BasePath.TrimEnd('/') + "/" + req.Path.TrimStart('/');
-            }
+            if (!req.ForceRoot)
+                reqPath = JoinPath(u, req.Path);
 
             // Go: CanAccess - checks Hide, CanRead, and password
-            var dirsUser = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanAccess(dirsUser, meta, reqPath, req.Password, ctx))
+            if (!CanAccess(u, meta, reqPath, req.Password, ctx))
                 return Results.Json(Resp<object>.Error(403, "password is incorrect or you have no permission"));
 
             var objs = await fs.ListAsync(reqPath);
             var dirs = objs.Where(o => o.IsDir()).Select(o => new DirResp { Name = o.GetName(), Modified = o.GetModTime() }).ToList();
             return Results.Json(new Resp<List<DirResp>>(dirs));
-        }).RequireAuthorization();
+        }).AllowAnonymous();
 
-        // fs/other - requires auth
-        group.MapMethods("other", ["GET", "POST"], async (IFileSystemService fs, IUserService users, IMetaService metaSvc, HttpContext ctx, ClaimsPrincipal userPrincipal, OtherReq req) =>
+        // fs/other - Auth(false): allows guest but not disabled guest
+        group.MapMethods("other", ["GET", "POST"], async (IFileSystemService fs, IUserService users, IMetaService metaSvc, HttpContext ctx, OtherReq req) =>
         {
-            // Go: user.JoinPath
-            var userId = GetUserId(userPrincipal);
-            var u = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
+            // Go: Auth(false) - resolve user (allow anonymous/Guest, but not disabled guest)
+            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: false);
+            if (resolveError != null) return resolveError;
+
             var reqPath = JoinPath(u, req.Path);
 
             // Go: common.CanAccess - checks Hide, CanRead, and password
@@ -989,7 +983,7 @@ public static class FsEndpoints
             if (obj == null) return Results.Json(Resp<object>.Error(404, "object not found"));
             var result = await fs.OtherAsync(new OtherArgs { Obj = obj, Method = req.Method, Data = req.Data });
             return Results.Json(new Resp<object>(result));
-        }).RequireAuthorization();
+        }).AllowAnonymous();
 
         group.MapPost("add_offline_download", async (OfflineDownloadService downloadService, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, AddOfflineDownloadReq req, CancellationToken ct) =>
         {
@@ -1011,7 +1005,7 @@ public static class FsEndpoints
 
             try
             {
-                var tasks = await downloadService.AddUrlsAsync(req.Urls ?? [], reqPath, req.Tool, ct);
+                var tasks = await downloadService.AddUrlsAsync(req.Urls ?? [], reqPath, req.Tool, req.DeletePolicy, ct);
                 return Results.Json(new Resp<object>(new { tasks }));
             }
             catch (InvalidOperationException ex)
@@ -1020,11 +1014,46 @@ public static class FsEndpoints
             }
         }).RequireAuthorization();
 
-        // Archive endpoints (Go: /api/fs/archive/meta, /api/fs/archive/list)
-        group.MapMethods("archive/meta", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, HttpContext ctx, ClaimsPrincipal userPrincipal, ArchiveMetaReq req) =>
+        // Archive endpoints (Go: /api/fs/archive/meta, /api/fs/archive/list) — Auth(true) allows guest
+        group.MapMethods("archive/meta", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISharingService sharings, ISettingService settings, IMetaService metaSvc, HttpContext ctx, ArchiveMetaReq req) =>
         {
-            var userId = GetUserId(userPrincipal);
-            var u = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
+            // Go: FsArchiveMetaSplit — support /@s sharing path
+            if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
+            {
+                var sharingPath = req.Path[3..];
+                var (sid, subPath) = SplitSharingPath(sharingPath);
+                if (string.IsNullOrEmpty(sid))
+                    return Results.Json(Resp<object>.Error(400, "invalid share id"));
+
+                if (!settings.GetBool("share_archive_preview"))
+                    return Results.Json(Resp<object>.Error(403, "sharing archives previewing is not allowed"));
+
+                var (sharing, sharingObjs) = await sharings.ListSharingObjectsAsync(sid, subPath, req.Password, req.Refresh);
+                if (sharing == null) return Results.Json(Resp<object>.Error(404, "share not found"));
+                if (!sharing.Valid()) return Results.Json(Resp<object>.Error(403, "share expired or disabled"));
+                if (!sharing.Verify(req.Password)) return Results.Json(Resp<object>.Error(403, "wrong password"));
+
+                var sObj = sharingObjs.FirstOrDefault();
+                if (sObj == null) return Results.Json(Resp<object>.Error(404, "object not found"));
+
+                // Get archive meta via the sharing's storage driver
+                var sObjPath = sObj.GetPath();
+                var sStorage = await fs.GetStorageAsync(sObjPath);
+                if (sStorage == null) return Results.Json(Resp<object>.Error(500, "storage not found"));
+                var sDriver = storageService.GetDriverByMountPath(sStorage.MountPath);
+                if (sDriver is not IDriverArchiveReader sArchiveReader)
+                    return Results.Json(Resp<object>.Error(500, "driver does not support archive reading"));
+
+                var sArchiveArgs = new ArchiveArgs { Password = req.ArchivePass };
+                var sArchiveMeta = await sArchiveReader.GetArchiveMetaAsync(sObj, sArchiveArgs);
+
+                return Results.Json(new Resp<ArchiveMeta>(sArchiveMeta));
+            }
+
+            // Go: Auth(true) - resolve user (allow anonymous/Guest)
+            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: true);
+            if (resolveError != null) return resolveError;
+
             var reqPath = JoinPath(u, req.Path);
 
             // Go: CanReadArchives permission check
@@ -1049,12 +1078,51 @@ public static class FsEndpoints
             var archiveArgs = new ArchiveArgs { Password = req.ArchivePass };
             var archiveMeta = await archiveReader.GetArchiveMetaAsync(obj, archiveArgs);
             return Results.Json(new Resp<ArchiveMeta>(archiveMeta));
-        }).RequireAuthorization();
+        }).AllowAnonymous();
 
-        group.MapMethods("archive/list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, HttpContext ctx, ClaimsPrincipal userPrincipal, ArchiveListReq req) =>
+        group.MapMethods("archive/list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISharingService sharings, ISettingService settings, IMetaService metaSvc, HttpContext ctx, ArchiveListReq req) =>
         {
-            var userId = GetUserId(userPrincipal);
-            var u = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
+            // Go: FsArchiveListSplit — support /@s sharing path
+            if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
+            {
+                var sharingPath = req.Path[3..];
+                var (sid, subPath) = SplitSharingPath(sharingPath);
+                if (string.IsNullOrEmpty(sid))
+                    return Results.Json(Resp<object>.Error(400, "invalid share id"));
+
+                if (!settings.GetBool("share_archive_preview"))
+                    return Results.Json(Resp<object>.Error(403, "sharing archives previewing is not allowed"));
+
+                var (sharing, sharingObjs) = await sharings.ListSharingObjectsAsync(sid, subPath, req.Password, req.Refresh);
+                if (sharing == null) return Results.Json(Resp<object>.Error(404, "share not found"));
+                if (!sharing.Valid()) return Results.Json(Resp<object>.Error(403, "share expired or disabled"));
+                if (!sharing.Verify(req.Password)) return Results.Json(Resp<object>.Error(403, "wrong password"));
+
+                var sObj = sharingObjs.FirstOrDefault();
+                if (sObj == null) return Results.Json(Resp<object>.Error(404, "object not found"));
+
+                var sObjPath = sObj.GetPath();
+                var sStorage = await fs.GetStorageAsync(sObjPath);
+                if (sStorage == null) return Results.Json(Resp<object>.Error(500, "storage not found"));
+                var sDriver = storageService.GetDriverByMountPath(sStorage.MountPath);
+                if (sDriver is not IDriverArchiveReader sArchiveReader)
+                    return Results.Json(Resp<object>.Error(500, "driver does not support archive reading"));
+
+                var sArchiveArgs = new ArchiveInnerArgs { Password = req.ArchivePass, InnerPath = req.InnerPath };
+                var sEntries = await sArchiveReader.ListArchiveAsync(sObj, sArchiveArgs);
+                var sTotal = sEntries.Count;
+                var sStart = (req.Page - 1) * req.PerPage;
+                if (sStart > sTotal) sStart = sTotal;
+                var sEnd = sStart + req.PerPage;
+                if (sEnd > sTotal) sEnd = sTotal;
+                var sPageEntries = sEntries.GetRange(sStart, sEnd - sStart);
+                return Results.Json(new Resp<PageResp<List<IObj>>>(new PageResp<List<IObj>> { Content = sPageEntries, Total = sTotal }));
+            }
+
+            // Go: Auth(true) - resolve user (allow anonymous/Guest)
+            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: true);
+            if (resolveError != null) return resolveError;
+
             var reqPath = JoinPath(u, req.Path);
 
             if (u != null && !u.HasPermission(UserPermission.CanReadArchives))
@@ -1085,7 +1153,7 @@ public static class FsEndpoints
             if (end > total) end = total;
             var pageEntries = entries.GetRange(start, end - start);
             return Results.Json(new Resp<PageResp<List<IObj>>>(new PageResp<List<IObj>> { Content = pageEntries, Total = total }));
-        }).RequireAuthorization();
+        }).AllowAnonymous();
 
         group.MapPost("archive/decompress", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ITaskService taskService, ClaimsPrincipal userPrincipal, ArchiveDecompressReq req) =>
         {
@@ -1138,27 +1206,26 @@ public static class FsEndpoints
                         }
                         else continue;
 
-                        var ext = Path.GetExtension(name).ToLowerInvariant();
+                        var extractDir = req.PutIntoNewDir
+                            ? Path.Combine(dstDir, Path.GetFileNameWithoutExtension(name))
+                            : dstDir;
 
-                        if (ext == ".zip")
+                        // Use SharpCompress for all archive formats (zip, tar.gz, rar, 7z, etc.)
+                        using var factory = SharpCompress.Readers.ReaderFactory.Open(archiveStream);
+                        while (factory.MoveToNextEntry())
                         {
-                            using var archive = new System.IO.Compression.ZipArchive(archiveStream, System.IO.Compression.ZipArchiveMode.Read);
-                            var extractDir = req.PutIntoNewDir
-                                ? Path.Combine(dstDir, Path.GetFileNameWithoutExtension(name))
-                                : dstDir;
+                            if (factory.Entry.IsDirectory) continue;
+                            if (!req.Overwrite && File.Exists(Path.Combine(extractDir, factory.Entry.Key ?? ""))) continue;
 
-                            foreach (var entry in archive.Entries)
-                            {
-                                if (entry.FullName.EndsWith('/')) continue; // skip directories
-                                var destPath = Path.Combine(extractDir, entry.FullName);
-                                var destDir2 = Path.GetDirectoryName(destPath);
-                                if (destDir2 != null) Directory.CreateDirectory(destDir2);
+                            var entryPath = factory.Entry.Key ?? "";
+                            var destPath = Path.Combine(extractDir, entryPath);
+                            var destDir2 = Path.GetDirectoryName(destPath);
+                            if (destDir2 != null) Directory.CreateDirectory(destDir2);
 
-                                if (!req.Overwrite && File.Exists(destPath)) continue;
-                                entry.ExtractToFile(destPath, req.Overwrite);
-                            }
+                            using var entryStream = factory.OpenEntryStream();
+                            using var destFs = File.Create(destPath);
+                            await entryStream.CopyToAsync(destFs, ct);
                         }
-                        // TODO: .tar.gz, .rar, .7z support
                     }
                     catch { /* log error */ }
                     finally
@@ -1292,6 +1359,33 @@ public static class FsEndpoints
     {
         var claim = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
         return claim != null && uint.TryParse(claim.Value, out var id) ? id : null;
+    }
+
+    /// <summary>
+    /// Go: Auth(true) equivalent - resolves user from JWT if present, otherwise returns Guest user.
+    /// allowDisabledGuest: when false, disabled guest users get 401 (Go: Auth(false)).
+    /// </summary>
+    private static async Task<(User? User, uint? UserId, IResult? Error)> ResolveUserAsync(
+        HttpContext ctx, IUserService users, bool allowDisabledGuest = true)
+    {
+        // Try to get user from authenticated claims
+        var userId = GetUserId(ctx.User);
+        if (userId.HasValue)
+        {
+            var u = await users.GetUserByIdAsync(userId.Value);
+            if (u == null) return (null, null, Results.Json(Resp<object>.Error(401, "user not found")));
+            if (u.Disabled)
+                return (null, null, Results.Json(Resp<object>.Error(401, "Current user is disabled, replace please")));
+            return (u, userId, null);
+        }
+
+        // No token → treat as Guest user (Go: Auth gets guest when token is empty)
+        var guest = await users.GetGuestUserAsync();
+        if (guest == null)
+            return (null, null, Results.Json(Resp<object>.Error(500, "guest user not found")));
+        if (!allowDisabledGuest && guest.Disabled)
+            return (null, null, Results.Json(Resp<object>.Error(401, "Guest user is disabled, login please")));
+        return (guest, guest.Id, null);
     }
 
     /// <summary>

@@ -51,6 +51,7 @@ public interface IUserService
     Task DeleteUserCacheAsync(uint id, CancellationToken ct = default);
     Task DeleteUserCacheByUsernameAsync(string username, CancellationToken ct = default);
     Task<User?> GetUserBySsoIdAsync(string ssoId, CancellationToken ct = default);
+    Task<User?> GetGuestUserAsync(CancellationToken ct = default);
     Task<List<SshKey>> ListSshKeysAsync(uint userId, CancellationToken ct = default);
     Task<(List<SshKey> Keys, int Total)> ListSshKeysPagedAsync(uint userId, int page, int perPage, CancellationToken ct = default);
     Task AddSshKeyAsync(uint userId, string name, string key, CancellationToken ct = default);

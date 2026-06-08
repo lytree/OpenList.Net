@@ -13,6 +13,7 @@
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Serilog.Sinks.Console" />
     <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="SharpCompress" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />

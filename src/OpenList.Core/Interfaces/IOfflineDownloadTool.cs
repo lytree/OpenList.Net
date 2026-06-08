@@ -17,6 +17,8 @@ public class AddUrlArgs
     public string Url { get; set; } = "";
     public string TempDir { get; set; } = "";
     public string TaskId { get; set; } = "";
+    /// <summary>Go: DeletePolicy — controls temp file deletion after upload</summary>
+    public string DeletePolicy { get; set; } = "delete_on_upload_succeed";
 }
 
 /// <summary>Interface for offline download tools (aria2, qBittorrent, etc.)</summary>

@@ -155,26 +155,30 @@ public static class SharingDownloadEndpoints
     {
         if (string.IsNullOrEmpty(archivePath) || !System.IO.File.Exists(archivePath)) return null;
 
-        var ext = System.IO.Path.GetExtension(archivePath).ToLowerInvariant();
-        if (ext != ".zip") return null;
-
         try
         {
-            var archive = ZipFile.OpenRead(archivePath);
-            var entry = archive.GetEntry(innerPath.TrimStart('/'));
-            if (entry == null)
-                entry = archive.Entries.FirstOrDefault(e => e.FullName == innerPath.TrimStart('/') || e.Name == System.IO.Path.GetFileName(innerPath));
-            if (entry == null || entry.FullName.EndsWith('/'))
+            // Use SharpCompress to support multiple archive formats (zip, tar.gz, rar, 7z, etc.)
+            await using var fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
+            using var reader = SharpCompress.Readers.ReaderFactory.Open(fileStream);
+            var normalizedName = innerPath.TrimStart('/');
+
+            while (reader.MoveToNextEntry())
             {
-                archive.Dispose();
-                return null;
+                if (reader.Entry.IsDirectory) continue;
+                var entryKey = reader.Entry.Key ?? "";
+                if (entryKey == normalizedName ||
+                    entryKey.EndsWith("/" + normalizedName, StringComparison.Ordinal) ||
+                    System.IO.Path.GetFileName(entryKey) == System.IO.Path.GetFileName(normalizedName))
+                {
+                    var ms = new MemoryStream();
+                    using var entryStream = reader.OpenEntryStream();
+                    await entryStream.CopyToAsync(ms);
+                    ms.Position = 0;
+                    return ms;
+                }
             }
 
-            var ms = new MemoryStream();
-            await entry.Open().CopyToAsync(ms);
-            ms.Position = 0;
-            archive.Dispose();
-            return ms;
+            return null;
         }
         catch { return null; }
     }

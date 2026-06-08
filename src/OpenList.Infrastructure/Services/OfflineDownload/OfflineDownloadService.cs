@@ -71,7 +71,7 @@ public class OfflineDownloadService
     }
 
     /// <summary>Add URLs for offline download</summary>
-    public async Task<List<TaskInfo>> AddUrlsAsync(List<string> urls, string dstDir, string toolName, CancellationToken ct = default)
+    public async Task<List<TaskInfo>> AddUrlsAsync(List<string> urls, string dstDir, string toolName, string deletePolicy = "delete_on_upload_succeed", CancellationToken ct = default)
     {
         var tool = await GetToolAsync(toolName, ct)
             ?? throw new InvalidOperationException($"Download tool '{toolName}' is not available. Please configure it first.");
@@ -94,7 +94,8 @@ public class OfflineDownloadService
                         {
                             Url = url,
                             TempDir = taskTempDir,
-                            TaskId = taskId
+                            TaskId = taskId,
+                            DeletePolicy = deletePolicy
                         }, innerCt);
 
                         // Poll for completion

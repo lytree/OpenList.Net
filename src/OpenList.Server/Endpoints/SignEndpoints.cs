@@ -292,29 +292,31 @@ public static class SignEndpoints
     {
         if (!System.IO.File.Exists(archivePath)) return null;
 
-        var ext = System.IO.Path.GetExtension(archivePath).ToLowerInvariant();
-        if (ext != ".zip") return null; // Only ZIP supported for now
-
         try
         {
-            var archive = System.IO.Compression.ZipFile.OpenRead(archivePath);
-            var entry = archive.GetEntry(innerPath.TrimStart('/'));
-            if (entry == null)
+            // Use SharpCompress to support multiple archive formats (zip, tar.gz, rar, 7z, etc.)
+            await using var fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
+            using var reader = SharpCompress.Readers.ReaderFactory.Open(fileStream);
+            var normalizedName = innerPath.TrimStart('/');
+
+            while (reader.MoveToNextEntry())
             {
-                // Try finding by name only
-                entry = archive.Entries.FirstOrDefault(e => e.FullName == innerPath.TrimStart('/') || e.Name == System.IO.Path.GetFileName(innerPath));
-            }
-            if (entry == null || entry.FullName.EndsWith('/'))
-            {
-                archive.Dispose();
-                return null;
+                if (reader.Entry.IsDirectory) continue;
+                var entryKey = reader.Entry.Key ?? "";
+                // Match by full path or just filename
+                if (entryKey == normalizedName ||
+                    entryKey.EndsWith("/" + normalizedName, StringComparison.Ordinal) ||
+                    System.IO.Path.GetFileName(entryKey) == System.IO.Path.GetFileName(normalizedName))
+                {
+                    var ms = new MemoryStream();
+                    using var entryStream = reader.OpenEntryStream();
+                    await entryStream.CopyToAsync(ms);
+                    ms.Position = 0;
+                    return ms;
+                }
             }
 
-            var ms = new MemoryStream();
-            await entry.Open().CopyToAsync(ms);
-            ms.Position = 0;
-            archive.Dispose();
-            return ms;
+            return null;
         }
         catch
         {
