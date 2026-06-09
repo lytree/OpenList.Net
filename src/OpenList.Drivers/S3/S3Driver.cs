@@ -23,32 +23,8 @@ public class S3Driver : RootPathDriver,
         LinkCacheMode = LinkCacheMode.IP | LinkCacheMode.UA
     };
 
-    public override DriverInfo Info() => new()
-    {
-        Common =
-        [
-            new DriverItem { Name = "root_folder_path", Type = "string", Default = "/", Required = true, Help = "Root folder path" }
-        ],
-        Additional =
-        [
-            new DriverItem { Name = "bucket", Type = "string", Required = true, Help = "Bucket name" },
-            new DriverItem { Name = "endpoint", Type = "string", Required = true, Help = "S3 endpoint URL" },
-            new DriverItem { Name = "region", Type = "string", Help = "Region" },
-            new DriverItem { Name = "access_key_id", Type = "string", Required = true, Help = "Access Key ID" },
-            new DriverItem { Name = "secret_access_key", Type = "string", Required = true, Help = "Secret Access Key" },
-            new DriverItem { Name = "session_token", Type = "string", Help = "Session Token" },
-            new DriverItem { Name = "force_path_style", Type = "bool", Default = "false", Help = "Force path-style access" },
-            new DriverItem { Name = "custom_host", Type = "string", Help = "Custom host for presigned URLs" },
-            new DriverItem { Name = "enable_custom_host_presign", Type = "bool", Default = "false", Help = "Use custom host for presigned URLs" },
-            new DriverItem { Name = "sign_url_expire", Type = "number", Default = "4", Help = "Presigned URL expiration (hours)" },
-            new DriverItem { Name = "placeholder", Type = "string", Help = "Placeholder file pattern" },
-            new DriverItem { Name = "list_object_version", Type = "select", Default = "v1", Options = "v1,v2", Help = "List objects API version" },
-            new DriverItem { Name = "remove_bucket", Type = "bool", Default = "false", Help = "Remove bucket from path" }
-        ],
-        Config = Config()
-    };
-
     public override object GetAddition() => System.Text.Json.JsonSerializer.Deserialize<S3Addition>(_storage.Addition) ?? new S3Addition();
+    protected override Type? GetAdditionType() => typeof(S3Addition);
 
     public override Task InitAsync(CancellationToken ct = default)
     {
@@ -456,20 +432,42 @@ public class S3Driver : RootPathDriver,
 public class S3Addition
 {
     public string RootFolderPath { get; set; } = "/";
+    [System.ComponentModel.Description("Bucket name")]
+    [System.ComponentModel.DataAnnotations.Required]
     public string Bucket { get; set; } = "";
+    [System.ComponentModel.Description("S3 endpoint URL")]
+    [System.ComponentModel.DataAnnotations.Required]
     public string Endpoint { get; set; } = "";
+    [System.ComponentModel.Description("Region")]
     public string Region { get; set; } = "";
+    [System.ComponentModel.Description("Access Key ID")]
+    [System.ComponentModel.DataAnnotations.Required]
     public string AccessKeyID { get; set; } = "";
+    [System.ComponentModel.Description("Secret Access Key")]
+    [System.ComponentModel.DataAnnotations.Required]
     public string SecretAccessKey { get; set; } = "";
+    [System.ComponentModel.Description("Session Token")]
     public string? SessionToken { get; set; }
+    [System.ComponentModel.Description("Force path-style access")]
     public bool ForcePathStyle { get; set; }
+    [System.ComponentModel.Description("Custom host for presigned URLs")]
     public string? CustomHost { get; set; }
+    [System.ComponentModel.Description("Use custom host for presigned URLs")]
     public bool EnableCustomHostPresign { get; set; }
+    [System.ComponentModel.Description("Presigned URL expiration (hours)")]
     public string SignURLExpire { get; set; } = "4";
+    [System.ComponentModel.Description("Placeholder file pattern")]
     public string? Placeholder { get; set; }
+    [System.ComponentModel.Description("List objects API version")]
+    [DriverItemType("select")]
+    [DriverItemOptions("v1,v2")]
     public string ListObjectVersion { get; set; } = "v1";
+    [System.ComponentModel.Description("Remove bucket from path")]
     public bool RemoveBucket { get; set; }
+    [System.ComponentModel.Description("Add filename to Content-Disposition header")]
     public bool AddFilenameToDisposition { get; set; }
+    [System.ComponentModel.Description("Enable direct upload")]
     public bool EnableDirectUpload { get; set; }
+    [System.ComponentModel.Description("Direct upload host")]
     public string? DirectUploadHost { get; set; }
 }

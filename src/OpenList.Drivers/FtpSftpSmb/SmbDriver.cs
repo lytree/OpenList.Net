@@ -31,24 +31,8 @@ public class SmbDriver : RootPathDriver,
         CheckStatus = true
     };
 
-    public override DriverInfo Info() => new()
-    {
-        Common =
-        [
-            new DriverItem { Name = "root_folder_path", Type = "string", Default = ".", Required = true, Help = "Root folder path" }
-        ],
-        Additional =
-        [
-            new DriverItem { Name = "address", Type = "string", Required = true, Help = "SMB server address (host:port)" },
-            new DriverItem { Name = "username", Type = "string", Required = true, Help = "Username" },
-            new DriverItem { Name = "password", Type = "string", Help = "Password" },
-            new DriverItem { Name = "share_name", Type = "string", Required = true, Help = "Share name" },
-            new DriverItem { Name = "domain", Type = "string", Help = "Domain" }
-        ],
-        Config = Config()
-    };
-
     public override object GetAddition() => JsonSerializer.Deserialize<SmbAddition>(_storage.Addition) ?? new SmbAddition();
+    protected override Type? GetAdditionType() => typeof(SmbAddition);
 
     public override Task InitAsync(CancellationToken ct = default)
     {
@@ -532,9 +516,15 @@ public class SmbDriver : RootPathDriver,
 public class SmbAddition
 {
     public string RootFolderPath { get; set; } = "/";
+    [System.ComponentModel.Description("SMB server address (host:port)")]
+    [System.ComponentModel.DataAnnotations.Required]
     public string Address { get; set; } = "";
+    [System.ComponentModel.DataAnnotations.Required]
     public string Username { get; set; } = "";
     public string Password { get; set; } = "";
+    [System.ComponentModel.Description("Share name")]
+    [System.ComponentModel.DataAnnotations.Required]
     public string ShareName { get; set; } = "";
+    [System.ComponentModel.Description("Domain")]
     public string? Domain { get; set; }
 }

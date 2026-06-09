@@ -25,27 +25,8 @@ public class LocalDriver : RootPathDriver,
         CheckStatus = true
     };
 
-    public override DriverInfo Info() => new()
-    {
-        Common =
-        [
-            new DriverItem { Name = "root_folder_path", Type = "string", Default = "/", Required = true, Help = "Root folder path" }
-        ],
-        Additional =
-        [
-            new DriverItem { Name = "show_hidden", Type = "bool", Default = "true", Required = false, Help = "show hidden directories and files" },
-            new DriverItem { Name = "directory_size", Type = "bool", Default = "false", Required = false, Help = "This might impact host performance" },
-            new DriverItem { Name = "thumbnail", Type = "bool", Default = "false", Required = true, Help = "enable thumbnail" },
-            new DriverItem { Name = "thumb_cache_folder", Type = "string", Required = false, Help = "Thumbnail cache folder" },
-            new DriverItem { Name = "thumb_concurrency", Type = "string", Default = "16", Required = false, Help = "Number of concurrent thumbnail generation goroutines" },
-            new DriverItem { Name = "video_thumb_pos", Type = "string", Default = "20%", Required = false, Help = "The position of the video thumbnail" },
-            new DriverItem { Name = "mkdir_perm", Type = "string", Default = "777", Help = "Mkdir permission (octal)" },
-            new DriverItem { Name = "recycle_bin_path", Type = "string", Default = "delete permanently", Help = "path to recycle bin, delete permanently if empty or keep 'delete permanently'" }
-        ],
-        Config = Config()
-    };
-
     public override object GetAddition() => JsonSerializer.Deserialize<LocalAddition>(_storage.Addition) ?? new LocalAddition();
+    protected override Type? GetAdditionType() => typeof(LocalAddition);
 
     public override Task InitAsync(CancellationToken ct = default)
     {
@@ -440,12 +421,20 @@ public class LocalDriver : RootPathDriver,
 public class LocalAddition
 {
     public string RootFolderPath { get; set; } = "/";
+    [System.ComponentModel.Description("show hidden directories and files")]
     public bool ShowHidden { get; set; } = true;
+    [System.ComponentModel.Description("This might impact host performance")]
     public bool DirectorySize { get; set; }
+    [System.ComponentModel.Description("enable thumbnail")]
     public bool Thumbnail { get; set; }
+    [System.ComponentModel.Description("Thumbnail cache folder")]
     public string? ThumbCacheFolder { get; set; }
+    [System.ComponentModel.Description("Number of concurrent thumbnail generation goroutines")]
     public string? ThumbConcurrency { get; set; } = "16";
+    [System.ComponentModel.Description("The position of the video thumbnail. If the value is a number, it represents seconds. If it ends with '%', it represents the percentage of the video duration.")]
     public string? VideoThumbPos { get; set; } = "20%";
+    [System.ComponentModel.Description("Mkdir permission (octal)")]
     public string? MkdirPerm { get; set; } = "777";
+    [System.ComponentModel.Description("path to recycle bin, delete permanently if empty or keep 'delete permanently'")]
     public string? RecycleBinPath { get; set; } = "delete permanently";
 }

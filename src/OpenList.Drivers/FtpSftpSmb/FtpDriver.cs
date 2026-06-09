@@ -25,23 +25,8 @@ public class FtpDriver : RootPathDriver,
         CheckStatus = true
     };
 
-    public override DriverInfo Info() => new()
-    {
-        Common =
-        [
-            new DriverItem { Name = "root_folder_path", Type = "string", Default = "/", Required = true, Help = "Root folder path" }
-        ],
-        Additional =
-        [
-            new DriverItem { Name = "address", Type = "string", Required = true, Help = "FTP server address (host:port)" },
-            new DriverItem { Name = "username", Type = "string", Required = true, Help = "Username" },
-            new DriverItem { Name = "password", Type = "string", Help = "Password" },
-            new DriverItem { Name = "encoding", Type = "string", Default = "UTF-8", Help = "Encoding" }
-        ],
-        Config = Config()
-    };
-
     public override object GetAddition() => JsonSerializer.Deserialize<FtpAddition>(_storage.Addition) ?? new FtpAddition();
+    protected override Type? GetAdditionType() => typeof(FtpAddition);
 
     public override async Task InitAsync(CancellationToken ct = default)
     {
@@ -210,8 +195,12 @@ public class FtpDriver : RootPathDriver,
 public class FtpAddition
 {
     public string RootFolderPath { get; set; } = "/";
+    [System.ComponentModel.Description("FTP server address (host:port)")]
+    [System.ComponentModel.DataAnnotations.Required]
     public string Address { get; set; } = "";
+    [System.ComponentModel.DataAnnotations.Required]
     public string Username { get; set; } = "";
     public string Password { get; set; } = "";
+    [System.ComponentModel.Description("Encoding")]
     public string? Encoding { get; set; }
 }

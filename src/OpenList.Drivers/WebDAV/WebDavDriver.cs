@@ -19,26 +19,8 @@ public class WebDavDriver : RootPathDriver,
         CheckStatus = true
     };
 
-    public override DriverInfo Info() => new()
-    {
-        Common =
-        [
-            new DriverItem { Name = "root_folder_path", Type = "string", Default = "/", Required = true, Help = "Root folder path" }
-        ],
-        Additional =
-        [
-            new DriverItem { Name = "webdav_url", Type = "string", Required = true, Help = "WebDAV server URL" },
-            new DriverItem { Name = "username", Type = "string", Help = "Username" },
-            new DriverItem { Name = "password", Type = "string", Help = "Password" },
-            new DriverItem { Name = "proxy_address", Type = "string", Help = "Proxy address" },
-            new DriverItem { Name = "authorization", Type = "string", Help = "Authorization header" },
-            new DriverItem { Name = "vendor", Type = "string", Help = "WebDAV vendor type" },
-            new DriverItem { Name = "tls_insecure_skip_verify", Type = "bool", Default = "false", Help = "Skip TLS certificate verification" }
-        ],
-        Config = Config()
-    };
-
     public override object GetAddition() => JsonSerializer.Deserialize<WebDavAddition>(_storage.Addition) ?? new WebDavAddition();
+    protected override Type? GetAdditionType() => typeof(WebDavAddition);
 
     public override Task InitAsync(CancellationToken ct = default)
     {
@@ -189,11 +171,17 @@ public class WebDavDriver : RootPathDriver,
 public class WebDavAddition
 {
     public string RootFolderPath { get; set; } = "/";
+    [System.ComponentModel.Description("WebDAV server URL")]
+    [System.ComponentModel.DataAnnotations.Required]
     public string WebdavURL { get; set; } = "";
     public string? Username { get; set; }
     public string? Password { get; set; }
+    [System.ComponentModel.Description("Proxy address")]
     public string? ProxyAddress { get; set; }
+    [System.ComponentModel.Description("Authorization header")]
     public string? Authorization { get; set; }
+    [System.ComponentModel.Description("WebDAV vendor type")]
     public string? Vendor { get; set; }
+    [System.ComponentModel.Description("Skip TLS certificate verification")]
     public bool TlsInsecureSkipVerify { get; set; }
 }

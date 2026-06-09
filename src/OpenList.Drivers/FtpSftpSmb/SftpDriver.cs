@@ -27,25 +27,8 @@ public class SftpDriver : RootPathDriver,
         CheckStatus = true
     };
 
-    public override DriverInfo Info() => new()
-    {
-        Common =
-        [
-            new DriverItem { Name = "root_folder_path", Type = "string", Default = "/", Required = true, Help = "Root folder path" }
-        ],
-        Additional =
-        [
-            new DriverItem { Name = "address", Type = "string", Required = true, Help = "SFTP server address (host:port)" },
-            new DriverItem { Name = "username", Type = "string", Required = true, Help = "Username" },
-            new DriverItem { Name = "password", Type = "string", Help = "Password" },
-            new DriverItem { Name = "private_key", Type = "text", Help = "Private key content" },
-            new DriverItem { Name = "passphrase", Type = "string", Help = "Private key passphrase" },
-            new DriverItem { Name = "ignore_symlink_error", Type = "bool", Default = "false", Help = "Ignore symlink errors" }
-        ],
-        Config = Config()
-    };
-
     public override object GetAddition() => JsonSerializer.Deserialize<SftpAddition>(_storage.Addition) ?? new SftpAddition();
+    protected override Type? GetAdditionType() => typeof(SftpAddition);
 
     public override Task InitAsync(CancellationToken ct = default)
     {
@@ -269,10 +252,17 @@ public class SftpDriver : RootPathDriver,
 public class SftpAddition
 {
     public string RootFolderPath { get; set; } = "/";
+    [System.ComponentModel.Description("SFTP server address (host:port)")]
+    [System.ComponentModel.DataAnnotations.Required]
     public string Address { get; set; } = "";
+    [System.ComponentModel.DataAnnotations.Required]
     public string Username { get; set; } = "";
     public string Password { get; set; } = "";
+    [System.ComponentModel.Description("Private key content")]
+    [DriverItemType("text")]
     public string? PrivateKey { get; set; }
+    [System.ComponentModel.Description("Private key passphrase")]
     public string? Passphrase { get; set; }
+    [System.ComponentModel.Description("Ignore symlink errors")]
     public bool IgnoreSymlinkError { get; set; }
 }
