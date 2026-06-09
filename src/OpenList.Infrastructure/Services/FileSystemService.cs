@@ -26,6 +26,24 @@ public class FileSystemService : IFileSystemService
     {
         args ??= new ListArgs();
         var (driver, actualPath) = ResolveDriver(path);
+
+        // Root path: return virtual directory entries for all storages (Go: virtualFiles)
+        if (driver == null && path == "/")
+        {
+            var storages = _driverFactory.GetAllStorages();
+            return storages
+                .Where(s => !s.Disabled)
+                .OrderBy(s => s.Order)
+                .Select(s => new ObjItem
+                {
+                    Name = s.MountPath.Trim('/'),
+                    Path = s.MountPath,
+                    IsFolder = true,
+                    Modified = s.Modified,
+                    Mask = ObjMask.ReadOnly | ObjMask.Virtual
+                }).ToList<IObj>();
+        }
+
         if (driver == null) return [];
 
         var dir = await GetObjAsync(driver, actualPath, ct);
@@ -61,7 +79,13 @@ public class FileSystemService : IFileSystemService
     public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
     {
         var (driver, actualPath) = ResolveDriver(path);
-        if (driver == null) return null;
+        if (driver == null)
+        {
+            // Root path: return virtual root object (Go: model.Object{Name: "root", IsFolder: true})
+            if (path == "/")
+                return new ObjItem { Name = "root", Path = "/", IsFolder = true, Mask = ObjMask.ReadOnly | ObjMask.Virtual };
+            return null;
+        }
         return await GetObjAsync(driver, actualPath, ct);
     }
 

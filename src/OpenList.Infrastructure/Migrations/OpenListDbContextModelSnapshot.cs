@@ -17,6 +17,42 @@ namespace OpenList.Infrastructure.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
 
+            modelBuilder.Entity("OpenList.Core.Models.MessageRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Read")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<uint>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Read");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("Messages");
+                });
+
             modelBuilder.Entity("OpenList.Core.Models.Meta", b =>
                 {
                     b.Property<uint>("Id")
@@ -24,19 +60,22 @@ namespace OpenList.Infrastructure.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("HSub")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("h_sub");
 
                     b.Property<string>("Header")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("HeaderSub")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("header_sub");
 
                     b.Property<string>("Hide")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("PSub")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("p_sub");
 
                     b.Property<string>("Password")
                         .HasColumnType("TEXT");
@@ -46,30 +85,36 @@ namespace OpenList.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("RSub")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("r_sub");
 
                     b.Property<string>("ReadUsers")
                         .IsRequired()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("read_users");
 
                     b.Property<bool>("ReadUsersSub")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("read_users_sub");
 
                     b.Property<string>("Readme")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("WSub")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("w_sub");
 
                     b.Property<bool>("Write")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("WriteUsers")
                         .IsRequired()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("write_users");
 
                     b.Property<bool>("WriteUsersSub")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("write_users_sub");
 
                     b.HasKey("Id");
 
@@ -77,6 +122,38 @@ namespace OpenList.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Metas");
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.SearchIndex", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDir")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("Modified")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Parent")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name");
+
+                    b.HasIndex("Parent");
+
+                    b.ToTable("SearchIndices");
                 });
 
             modelBuilder.Entity("OpenList.Core.Models.SettingItem", b =>
@@ -129,7 +206,8 @@ namespace OpenList.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ExtractFolder")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("extract_folder");
 
                     b.Property<string>("FilesRaw")
                         .IsRequired()
@@ -139,13 +217,16 @@ namespace OpenList.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("MaxAccessed")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("max_accessed");
 
                     b.Property<string>("OrderBy")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("order_by");
 
                     b.Property<string>("OrderDirection")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("order_direction");
 
                     b.Property<string>("Pwd")
                         .HasColumnType("TEXT");
@@ -167,13 +248,22 @@ namespace OpenList.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime>("AddedTime")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("added_time");
+
                     b.Property<string>("Fingerprint")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime>("LastUsedTime")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("last_used_time");
+
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("title");
 
                     b.Property<string>("PublicKey")
                         .IsRequired()
@@ -200,51 +290,62 @@ namespace OpenList.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("CacheExpiration")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("cache_expiration");
 
                     b.Property<string>("CustomCachePolicies")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasJsonPropertyName("custom_cache_policies");
 
                     b.Property<bool>("DisableIndex")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("disable_index");
 
                     b.Property<bool>("DisableProxySign")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("disable_proxy_sign");
 
                     b.Property<bool>("Disabled")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("DownProxyURL")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("down_proxy_url");
 
                     b.Property<string>("Driver")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("EnableSign")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("enable_sign");
 
                     b.Property<string>("ExtractFolder")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("extract_folder");
 
                     b.Property<DateTime>("Modified")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("MountPath")
                         .IsRequired()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("mount_path");
 
                     b.Property<int>("Order")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("OrderBy")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("order_by");
 
                     b.Property<string>("OrderDirection")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("order_direction");
 
                     b.Property<bool>("ProxyRange")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("proxy_range");
 
                     b.Property<string>("Remark")
                         .HasColumnType("TEXT");
@@ -256,13 +357,15 @@ namespace OpenList.Infrastructure.Migrations
                         .HasDefaultValue("");
 
                     b.Property<bool>("WebProxy")
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("web_proxy");
 
                     b.Property<string>("WebdavPolicy")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
-                        .HasDefaultValue("native_proxy");
+                        .HasDefaultValue("native_proxy")
+                        .HasJsonPropertyName("webdav_policy");
 
                     b.HasKey("Id");
 
@@ -270,6 +373,76 @@ namespace OpenList.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Storages");
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.TaskRecord", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<uint?>("CreatorId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PersistData")
+                        .HasColumnType("text");
+
+                    b.Property<double>("Progress")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("State");
+
+                    b.HasIndex("Type");
+
+                    b.ToTable("TaskRecords");
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.TokenBlacklistEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Jti")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<uint>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("Jti");
+
+                    b.ToTable("TokenBlacklist");
                 });
 
             modelBuilder.Entity("OpenList.Core.Models.User", b =>
@@ -281,7 +454,8 @@ namespace OpenList.Infrastructure.Migrations
                     b.Property<bool>("AllowLdap")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
-                        .HasDefaultValue(true);
+                        .HasDefaultValue(true)
+                        .HasJsonPropertyName("allow_ldap");
 
                     b.Property<string>("Authn")
                         .HasColumnType("TEXT");
@@ -290,7 +464,8 @@ namespace OpenList.Infrastructure.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
-                        .HasDefaultValue("/");
+                        .HasDefaultValue("/")
+                        .HasJsonPropertyName("base_path");
 
                     b.Property<bool>("Disabled")
                         .HasColumnType("INTEGER");
@@ -320,7 +495,8 @@ namespace OpenList.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SsoID")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("sso_id");
 
                     b.Property<string>("Username")
                         .IsRequired()
@@ -332,6 +508,57 @@ namespace OpenList.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.WebAuthnCredential", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AaGuid")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CredentialId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastUsedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublicKey")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("RegisteredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SignCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Transports")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserHandle")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<uint>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CredentialId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("WebAuthnCredentials");
                 });
 
             modelBuilder.Entity("OpenList.Core.Models.SshKey", b =>

@@ -78,13 +78,13 @@ public class SharingService : ISharingService
             ? _db.Sharings.AsQueryable()
             : _db.Sharings.Where(s => s.CreatorId == userId);
         var total = await query.CountAsync(ct);
-        var sharings = await query.Include(s => s.Creator).OrderByDescending(s => s.Id)
+        var sharings = await query.OrderByDescending(s => s.Id)
             .Skip((page - 1) * perPage).Take(perPage).ToListAsync(ct);
         return (sharings, total);
     }
 
     public async Task<Sharing?> GetSharingAsync(string id, CancellationToken ct = default)
-        => await _db.Sharings.Include(s => s.Creator).FirstOrDefaultAsync(s => s.Id == id, ct);
+        => await _db.Sharings.FirstOrDefaultAsync(s => s.Id == id, ct);
 
     public async Task<Sharing> CreateSharingAsync(Sharing sharing, CancellationToken ct = default)
     {

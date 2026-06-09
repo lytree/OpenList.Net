@@ -5,7 +5,7 @@ public class AppConfiguration
     public bool Force { get; set; }
     public string SiteURL { get; set; } = "";
     public string Cdn { get; set; } = "";
-    public string JwtSecret { get; set; } = Guid.NewGuid().ToString("N")[..16];
+    public string JwtSecret { get; set; } = "";
     public int TokenExpiresIn { get; set; } = 48;
     public DatabaseConfig Database { get; set; } = new();
     public MeilisearchConfig Meilisearch { get; set; } = new();
@@ -28,15 +28,19 @@ public class AppConfiguration
     public SftpConfig SFTP { get; set; } = new();
     public string LastLaunchedVersion { get; set; } = "";
     public string? ProxyAddress { get; set; }
+    public string AdminUsername { get; set; } = "admin";
+    public string AdminPassword { get; set; } = "admin";
 }
 
 public class DatabaseConfig
 {
+    public string Type { get; set; } = "sqlite";
     public string Host { get; set; } = "localhost";
     public int Port { get; set; } = 5432;
     public string User { get; set; } = "";
     public string Password { get; set; } = "";
     public string Name { get; set; } = "openlist";
+    public string DBFile { get; set; } = "data/data.db";
     public string TablePrefix { get; set; } = "x_";
     public string SSLMode { get; set; } = "Prefer";
 }

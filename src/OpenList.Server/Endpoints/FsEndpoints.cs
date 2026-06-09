@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using OpenList.Core.Drivers;
 using OpenList.Core.Interfaces;
@@ -20,7 +21,7 @@ public static class FsEndpoints
         var group = endpoints.MapGroup("/api/fs");
 
         // fs/list - supports both GET and POST, allows guest (Go: Auth(true))
-        group.MapMethods("list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISignService signSvc, IMetaService metaSvc, ISharingService sharings, ISettingService settings, HttpContext ctx, ListReq req) =>
+        group.MapMethods("list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISignService signSvc, IMetaService metaSvc, ISharingService sharings, ISettingService settings, HttpContext ctx, [FromBody] ListReq req) =>
         {
             // Support sharing path: /@s prefix routes to sharing logic
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
@@ -140,7 +141,7 @@ public static class FsEndpoints
         }).AllowAnonymous();
 
         // fs/get - supports both GET and POST, allows guest (Go: Auth(true))
-        group.MapMethods("get", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, ISignService sign, ISharingService sharings, ISettingService settings, HttpContext ctx, GetReq req) =>
+        group.MapMethods("get", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, ISignService sign, ISharingService sharings, ISettingService settings, HttpContext ctx, [FromBody] GetReq req) =>
         {
             // Support sharing path: /@s prefix routes to sharing logic
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
@@ -273,7 +274,7 @@ public static class FsEndpoints
 
         // Archive endpoints (allows guest, Go: Auth(true))
         // Write operations (requires auth, not guest)
-        group.MapPost("mkdir", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, MkdirReq req) =>
+        group.MapPost("mkdir", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] MkdirReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -298,7 +299,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
-        group.MapPost("rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, RenameReq req) =>
+        group.MapPost("rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RenameReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -338,7 +339,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
-        group.MapPost("batch_rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, BatchRenameReq req) =>
+        group.MapPost("batch_rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] BatchRenameReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -370,7 +371,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
-        group.MapPost("regex_rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, RegexRenameReq req) =>
+        group.MapPost("regex_rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RegexRenameReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -409,7 +410,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
-        group.MapPost("move", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, MoveReq req) =>
+        group.MapPost("move", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] MoveReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -464,7 +465,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
-        group.MapPost("recursive_move", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, RecursiveMoveReq req) =>
+        group.MapPost("recursive_move", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RecursiveMoveReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -547,7 +548,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<string>($"Successfully moved {count} {(count == 1 ? "file" : "files")}"));
         }).RequireAuthorization();
 
-        group.MapPost("copy", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, CopyReq req) =>
+        group.MapPost("copy", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] CopyReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -609,7 +610,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
-        group.MapPost("remove", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, RemoveReq req) =>
+        group.MapPost("remove", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RemoveReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -642,7 +643,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
-        group.MapPost("remove_empty_directory", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, RemoveEmptyDirReq req) =>
+        group.MapPost("remove_empty_directory", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RemoveEmptyDirReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -878,7 +879,7 @@ public static class FsEndpoints
         }).RequireAuthorization();
 
         // fs/link - admin only (Go: middlewares.AuthAdmin)
-        group.MapPost("link", async (IFileSystemService fs, IStorageService storageService, ISignService sign, HttpContext ctx, LinkReq req) =>
+        group.MapPost("link", async (IFileSystemService fs, IStorageService storageService, ISignService sign, HttpContext ctx, [FromBody] LinkReq req) =>
         {
             // Go: Link is admin-only, path is full path (no JoinPath needed)
             var rawPath = req.Path;
@@ -902,7 +903,7 @@ public static class FsEndpoints
         }).RequireAuthorization(policy => policy.RequireRole("2"));
 
         // fs/search - Auth(false): allows guest but not disabled guest
-        group.MapMethods("search", ["GET", "POST"], async (ISearchService search, IConfiguration config, IUserService users, IMetaService metaSvc, HttpContext ctx, SearchReq req) =>
+        group.MapMethods("search", ["GET", "POST"], async (ISearchService search, IConfiguration config, IUserService users, IMetaService metaSvc, HttpContext ctx, [FromBody] SearchReq req) =>
         {
             var searchIndex = config["SearchIndex"] ?? "none";
             if (searchIndex == "none")
@@ -940,7 +941,7 @@ public static class FsEndpoints
         }).AllowAnonymous();
 
         // fs/dirs - Auth(false): allows guest but not disabled guest
-        group.MapMethods("dirs", ["GET", "POST"], async (IFileSystemService fs, IMetaService metaSvc, IUserService users, HttpContext ctx, DirsReq req) =>
+        group.MapMethods("dirs", ["GET", "POST"], async (IFileSystemService fs, IMetaService metaSvc, IUserService users, HttpContext ctx, [FromBody] DirsReq req) =>
         {
             // Go: Auth(false) - resolve user (allow anonymous/Guest, but not disabled guest)
             var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: false);
@@ -966,7 +967,7 @@ public static class FsEndpoints
         }).AllowAnonymous();
 
         // fs/other - Auth(false): allows guest but not disabled guest
-        group.MapMethods("other", ["GET", "POST"], async (IFileSystemService fs, IUserService users, IMetaService metaSvc, HttpContext ctx, OtherReq req) =>
+        group.MapMethods("other", ["GET", "POST"], async (IFileSystemService fs, IUserService users, IMetaService metaSvc, HttpContext ctx, [FromBody] OtherReq req) =>
         {
             // Go: Auth(false) - resolve user (allow anonymous/Guest, but not disabled guest)
             var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: false);
@@ -1015,7 +1016,7 @@ public static class FsEndpoints
         }).RequireAuthorization();
 
         // Archive endpoints (Go: /api/fs/archive/meta, /api/fs/archive/list) — Auth(true) allows guest
-        group.MapMethods("archive/meta", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISharingService sharings, ISettingService settings, IMetaService metaSvc, HttpContext ctx, ArchiveMetaReq req) =>
+        group.MapMethods("archive/meta", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISharingService sharings, ISettingService settings, IMetaService metaSvc, HttpContext ctx, [FromBody] ArchiveMetaReq req) =>
         {
             // Go: FsArchiveMetaSplit — support /@s sharing path
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
@@ -1080,7 +1081,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<ArchiveMeta>(archiveMeta));
         }).AllowAnonymous();
 
-        group.MapMethods("archive/list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISharingService sharings, ISettingService settings, IMetaService metaSvc, HttpContext ctx, ArchiveListReq req) =>
+        group.MapMethods("archive/list", ["GET", "POST"], async (IFileSystemService fs, IStorageService storageService, IUserService users, ISharingService sharings, ISettingService settings, IMetaService metaSvc, HttpContext ctx, [FromBody] ArchiveListReq req) =>
         {
             // Go: FsArchiveListSplit — support /@s sharing path
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
@@ -1155,7 +1156,7 @@ public static class FsEndpoints
             return Results.Json(new Resp<PageResp<List<IObj>>>(new PageResp<List<IObj>> { Content = pageEntries, Total = total }));
         }).AllowAnonymous();
 
-        group.MapPost("archive/decompress", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ITaskService taskService, ClaimsPrincipal userPrincipal, ArchiveDecompressReq req) =>
+        group.MapPost("archive/decompress", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ITaskService taskService, ClaimsPrincipal userPrincipal, [FromBody] ArchiveDecompressReq req) =>
         {
             // Go: user.CanDecompress() permission check
             var userId = GetUserId(userPrincipal);
@@ -1246,7 +1247,7 @@ public static class FsEndpoints
         group.MapPost("torrent/generate", () => Results.Json(Resp<object>.Error(501, "not implemented"))).RequireAuthorization();
 
         // Direct upload info
-        group.MapPost("get_direct_upload_info", async (IFileSystemService fs, IStorageService storageService, IUserService users, HttpContext ctx, DirectUploadReq req) =>
+        group.MapPost("get_direct_upload_info", async (IFileSystemService fs, IStorageService storageService, IUserService users, HttpContext ctx, [FromBody] DirectUploadReq req) =>
         {
             // Go: url.PathUnescape + user.JoinPath
             var dirPath = Uri.UnescapeDataString(req.Path ?? "/");

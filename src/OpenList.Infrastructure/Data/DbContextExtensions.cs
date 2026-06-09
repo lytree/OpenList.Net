@@ -10,8 +10,25 @@ public static class DbContextExtensions
     {
         services.AddDbContext<OpenListDbContext>(options =>
         {
-            var pgConn = $"Host={dbConfig.Host};Port={dbConfig.Port};Database={dbConfig.Name};Username={dbConfig.User};Password={dbConfig.Password};SSL Mode={dbConfig.SSLMode}";
-            options.UseNpgsql(pgConn);
+            var dbType = dbConfig.Type?.ToLowerInvariant() ?? "sqlite";
+
+            switch (dbType)
+            {
+                case "postgres":
+                case "postgresql":
+                    var pgConn = $"Host={dbConfig.Host};Port={dbConfig.Port};Database={dbConfig.Name};Username={dbConfig.User};Password={dbConfig.Password};SSL Mode={dbConfig.SSLMode}";
+                    options.UseNpgsql(pgConn);
+                    break;
+
+                case "sqlite":
+                default:
+                    var dbFile = string.IsNullOrEmpty(dbConfig.DBFile) ? "data/data.db" : dbConfig.DBFile;
+                    var dir = Path.GetDirectoryName(dbFile);
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                        Directory.CreateDirectory(dir);
+                    options.UseSqlite($"Data Source={dbFile}");
+                    break;
+            }
         });
         return services;
     }

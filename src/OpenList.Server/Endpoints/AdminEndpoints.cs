@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Linq;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using OpenList.Core.Drivers;
@@ -48,7 +49,7 @@ public static class AdminEndpoints
             }));
         });
 
-        group.MapPost("user/create", async (IUserService users, CreateUserReq req) =>
+        group.MapPost("user/create", async (IUserService users, [FromBody] CreateUserReq req) =>
         {
             // Go: admin or guest user can not be created
             if (req.Role == 1 || req.Role == 2)
@@ -60,7 +61,7 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("user/update", async (IUserService users, UpdateUserReq req) =>
+        group.MapPost("user/update", async (IUserService users, [FromBody] UpdateUserReq req) =>
         {
             var user = await users.GetUserByIdAsync(req.Id);
             if (user == null) return Results.Json(Resp<object>.Error(404, "user not found"));
@@ -315,31 +316,31 @@ public static class AdminEndpoints
             return Results.Json(Resp<object>.Error(400, "invalid data"));
         });
 
-        group.MapPost("setting/set_transmission", (SetToolSettingReq req) =>
+        group.MapPost("setting/set_transmission", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
 
-        group.MapPost("setting/set_115", (SetToolSettingReq req) =>
+        group.MapPost("setting/set_115", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
 
-        group.MapPost("setting/set_115_open", (SetToolSettingReq req) =>
+        group.MapPost("setting/set_115_open", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
 
-        group.MapPost("setting/set_123_pan", (SetToolSettingReq req) =>
+        group.MapPost("setting/set_123_pan", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
 
-        group.MapPost("setting/set_123_open", (SetToolSettingReq req) =>
+        group.MapPost("setting/set_123_open", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
 
-        group.MapPost("setting/set_pikpak", (SetToolSettingReq req) =>
+        group.MapPost("setting/set_pikpak", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
 
-        group.MapPost("setting/set_thunder", (SetToolSettingReq req) =>
+        group.MapPost("setting/set_thunder", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
 
-        group.MapPost("setting/set_thunderx", (SetToolSettingReq req) =>
+        group.MapPost("setting/set_thunderx", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
 
-        group.MapPost("setting/set_thunder_browser", (SetToolSettingReq req) =>
+        group.MapPost("setting/set_thunder_browser", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
 
         // === Sharing management (admin view) ===
@@ -380,10 +381,13 @@ public static class AdminEndpoints
         group.MapGet("driver/list", (IStorageService storages) =>
         {
             var infos = storages.ListDriverInfos();
-            return Results.Json(new Resp<List<DriverInfoResp>>(infos.Select(i => new DriverInfoResp
-            {
-                Name = i.Config.Name, Common = i.Common, Additional = i.Additional, Config = i.Config
-            }).ToList()));
+            var map = infos.ToDictionary(
+                i => i.Config.Name,
+                i => new DriverInfoResp
+                {
+                    Common = i.Common, Additional = i.Additional, Config = i.Config
+                });
+            return Results.Json(new Resp<Dictionary<string, DriverInfoResp>>(map));
         });
 
         group.MapGet("driver/names", (IStorageService storages) =>
@@ -408,7 +412,7 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("index/update", (ISearchService search, IConfiguration config, UpdateIndexReq req) =>
+        group.MapPost("index/update", (ISearchService search, IConfiguration config, [FromBody] UpdateIndexReq req) =>
         {
             var searchIndex = config["SearchIndex"] ?? "none";
             if (searchIndex == "none")
@@ -452,7 +456,7 @@ public static class AdminEndpoints
             return Results.Json(new Resp<List<Message>>(await messages.GetMessagesAsync(userId.Value)));
         });
 
-        group.MapPost("message/send", async (IMessageService messages, SendMessageReq req) =>
+        group.MapPost("message/send", async (IMessageService messages, [FromBody] SendMessageReq req) =>
         {
             await messages.SendMessageAsync(req.UserId, req.Title, req.Content);
             return Results.Json(new Resp<object>(null));
@@ -497,26 +501,26 @@ public static class AdminEndpoints
             return Results.Json(new Resp<TaskInfo>(task));
         });
 
-        group.MapPost("task/cancel", async (ITaskService tasks, TaskIdReq req) =>
+        group.MapPost("task/cancel", async (ITaskService tasks, [FromBody] TaskIdReq req) =>
         {
             await tasks.CancelTaskAsync(req.Id);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("task/retry", async (ITaskService tasks, TaskIdReq req) =>
+        group.MapPost("task/retry", async (ITaskService tasks, [FromBody] TaskIdReq req) =>
         {
             await tasks.RetryTaskAsync(req.Id);
             return Results.Json(new Resp<object>(null));
         });
 
-        group.MapPost("task/delete", async (ITaskService tasks, TaskIdReq req) =>
+        group.MapPost("task/delete", async (ITaskService tasks, [FromBody] TaskIdReq req) =>
         {
             await tasks.DeleteTaskAsync(req.Id);
             return Results.Json(new Resp<object>(null));
         });
 
         // === Archive management (Go: admin/archive) ===
-        group.MapMethods("archive/meta", ["GET", "POST"], async (IFileSystemService fs, ArchiveMetaReq req) =>
+        group.MapMethods("archive/meta", ["GET", "POST"], async (IFileSystemService fs, [FromBody] ArchiveMetaReq req) =>
         {
             var obj = await fs.GetAsync(req.Path);
             if (obj == null) return Results.Json(Resp<object>.Error(404, "file not found"));
@@ -540,7 +544,7 @@ public static class AdminEndpoints
             }));
         });
 
-        group.MapMethods("archive/list", ["GET", "POST"], async (IFileSystemService fs, ArchiveListReq req) =>
+        group.MapMethods("archive/list", ["GET", "POST"], async (IFileSystemService fs, [FromBody] ArchiveListReq req) =>
         {
             var obj = await fs.GetAsync(req.Path);
             if (obj == null) return Results.Json(Resp<object>.Error(404, "file not found"));
@@ -616,4 +620,9 @@ public static class AdminEndpoints
         }
         return null;
     }
+
+    private static string SnakeCase(string name) =>
+        string.Concat(name.Select((c, i) =>
+            i > 0 && (char.IsUpper(c) || char.IsDigit(c)) ? "_" + char.ToLower(c) : char.ToLower(c).ToString()))
+            .Replace("__", "_");
 }

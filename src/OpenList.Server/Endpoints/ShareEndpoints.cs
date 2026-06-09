@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
@@ -53,7 +54,7 @@ public static class ShareEndpoints
             return Results.Json(new Resp<Sharing>(sharing));
         });
 
-        group.MapPost("create", async (ISharingService sharings, IUserService users, ClaimsPrincipal user, CreateShareReq req) =>
+        group.MapPost("create", async (ISharingService sharings, IUserService users, ClaimsPrincipal user, [FromBody] CreateShareReq req) =>
         {
             // Go: AuthNotGuest
             var createUserId = GetUserId(user);
@@ -126,7 +127,7 @@ public static class ShareEndpoints
             return Results.Json(new Resp<Sharing>(created));
         });
 
-        group.MapPost("update", async (ISharingService sharings, IUserService users, ClaimsPrincipal user, UpdateShareReq req) =>
+        group.MapPost("update", async (ISharingService sharings, IUserService users, ClaimsPrincipal user, [FromBody] UpdateShareReq req) =>
         {
             // Go: must add at least 1 object
             if (req.Files == null || req.Files.Count == 0 || (req.Files.Count == 1 && string.IsNullOrEmpty(req.Files[0])))

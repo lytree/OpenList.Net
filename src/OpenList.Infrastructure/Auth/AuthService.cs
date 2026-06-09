@@ -10,6 +10,7 @@ using Microsoft.IdentityModel.Tokens;
 using Novell.Directory.Ldap;
 using OtpNet;
 using QRCoder;
+using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
@@ -21,6 +22,7 @@ public class AuthService : IAuthService
 {
     private readonly OpenListDbContext _db;
     private readonly IConfiguration _config;
+    private readonly AppConfiguration _appConfig;
     private readonly string _jwtSecret;
     private readonly int _tokenExpiresIn;
     private readonly ConcurrentDictionary<string, DateTime> _blacklistedTokens = new();
@@ -28,12 +30,13 @@ public class AuthService : IAuthService
     private static readonly TimeSpan _lockDuration = TimeSpan.FromMinutes(5);
     private const int MaxAuthRetries = 5;
 
-    public AuthService(OpenListDbContext db, IConfiguration config)
+    public AuthService(OpenListDbContext db, IConfiguration config, AppConfiguration appConfig)
     {
         _db = db;
         _config = config;
-        _jwtSecret = config["JwtSecret"] ?? Guid.NewGuid().ToString("N")[..16];
-        _tokenExpiresIn = config.GetValue("TokenExpiresIn", 48);
+        _appConfig = appConfig;
+        _jwtSecret = appConfig.JwtSecret;
+        _tokenExpiresIn = appConfig.TokenExpiresIn;
     }
 
     public async Task<string?> LoginAsync(string username, string password, string? otpCode = null, CancellationToken ct = default)
@@ -279,7 +282,7 @@ public class AuthService : IAuthService
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Name, user.Username),
-            new Claim(ClaimTypes.Role, user.Role.ToString()),
+            new Claim(ClaimTypes.Role, ((int)user.Role).ToString()),
         };
 
         var token = new JwtSecurityToken(

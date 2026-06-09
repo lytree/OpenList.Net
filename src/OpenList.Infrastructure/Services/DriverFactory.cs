@@ -14,6 +14,7 @@ public interface IDriverFactory
     List<DriverInfo> ListDriverInfos();
     List<string> ListDriverNames();
     Storage? FindStorageByPath(string path);
+    List<Storage> GetAllStorages();
 }
 
 public class DriverFactory : IDriverFactory
@@ -28,6 +29,13 @@ public class DriverFactory : IDriverFactory
 
     private void RegisterDrivers()
     {
+        // Ensure the Drivers assembly is loaded
+        try
+        {
+            Assembly.Load("OpenList.Drivers");
+        }
+        catch { }
+
         // Auto-discover all IDriver implementations via reflection
         var assemblies = AppDomain.CurrentDomain.GetAssemblies()
             .Where(a => a.GetName().Name?.StartsWith("OpenList") == true);
@@ -46,10 +54,7 @@ public class DriverFactory : IDriverFactory
                     {
                         var instance = (IDriver)Activator.CreateInstance(type)!;
                         var config = instance.Config();
-                        var key = type.Name.ToLowerInvariant();
-                        // Use config name as key if available
-                        if (!string.IsNullOrEmpty(config.Name))
-                            key = ToSnakeCase(config.Name);
+                        var key = !string.IsNullOrEmpty(config.Name) ? config.Name : type.Name;
 
                         _driverFactories[key] = () => (IDriver)Activator.CreateInstance(type)!;
                     }
@@ -114,7 +119,12 @@ public class DriverFactory : IDriverFactory
         return match.Value?.GetStorage();
     }
 
-    private static string ToSnakeCase(string name)
+    public List<Storage> GetAllStorages()
+    {
+        return _drivers.Values.Select(d => d.GetStorage()).Where(s => s != null).ToList()!;
+    }
+
+    internal static string ToSnakeCase(string name)
     {
         return string.Concat(name.Select((c, i) =>
             i > 0 && (char.IsUpper(c) || char.IsDigit(c)) ? "_" + char.ToLower(c) : char.ToLower(c).ToString()))

@@ -5,6 +5,7 @@ using Fido2NetLib;
 using Fido2NetLib.Objects;
 using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
+using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
 using OpenList.Infrastructure.Auth;
 using OpenList.Infrastructure.Services;
@@ -42,7 +43,7 @@ builder.Host.UseSerilog();
 var config = new AppConfiguration();
 builder.Configuration.Bind(config);
 if (string.IsNullOrEmpty(config.JwtSecret))
-    config.JwtSecret = Guid.NewGuid().ToString("N")[..16];
+    config.JwtSecret = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
 
 // Configuration validation
 var configErrors = new List<string>();
@@ -104,13 +105,26 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = false,
             ClockSkew = TimeSpan.Zero
         };
+        // Frontend sends token without "Bearer " prefix
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var token = context.Request.Headers.Authorization.ToString();
+                if (!string.IsNullOrEmpty(token) && !token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Token = token;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 builder.Services.AddAuthorization();
 
-// JSON options for Minimal APIs (PascalCase)
+// JSON options for Minimal APIs (camelCase to match frontend)
 builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
 {
-    options.SerializerOptions.PropertyNamingPolicy = null;
+    options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
 });
 
 // WebDAV HTTP methods support
@@ -150,11 +164,28 @@ var app = builder.Build();
 // Initialize database
 await app.Services.InitializeDatabaseAsync();
 
-// Initialize default settings
+// Initialize default settings and admin user
 using (var scope = app.Services.CreateScope())
 {
     var settings = scope.ServiceProvider.GetRequiredService<ISettingService>();
     await settings.DefaultSettingsAsync();
+
+    var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
+    var existingAdmin = await userService.GetUserByNameAsync(config.AdminUsername);
+    if (existingAdmin == null)
+    {
+        var adminUser = new User
+        {
+            Username = config.AdminUsername,
+            Role = UserRole.Admin,
+            Permission = -1,
+            BasePath = "/"
+        };
+        adminUser = await userService.CreateUserAsync(adminUser);
+        await userService.SetPasswordAsync(adminUser, config.AdminPassword);
+        var initLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        initLogger.LogInformation("Initial admin user '{Username}' created", config.AdminUsername);
+    }
 }
 
 // Load storages
@@ -191,14 +222,23 @@ if (app.Environment.IsDevelopment())
 }
 
 // Static files for frontend
-if (!string.IsNullOrEmpty(config.DistDir) && Directory.Exists(config.DistDir))
+if (!string.IsNullOrEmpty(config.DistDir))
 {
-    app.UseDefaultFiles(config.DistDir);
-    app.UseStaticFiles(new StaticFileOptions
+    var distPath = Path.GetFullPath(config.DistDir);
+    if (Directory.Exists(distPath))
     {
-        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(config.DistDir),
-        RequestPath = ""
-    });
+        var distFileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(distPath);
+        app.UseDefaultFiles(new DefaultFilesOptions
+        {
+            FileProvider = distFileProvider,
+            RequestPath = ""
+        });
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = distFileProvider,
+            RequestPath = ""
+        });
+    }
 }
 
 // Health check
@@ -248,9 +288,16 @@ app.MapS3Api();
 app.MapWebDavApi();
 
 // Fallback for SPA
-if (!string.IsNullOrEmpty(config.DistDir) && Directory.Exists(config.DistDir))
+if (!string.IsNullOrEmpty(config.DistDir))
 {
-    app.MapFallbackToFile("index.html");
+    var distPath = Path.GetFullPath(config.DistDir);
+    if (Directory.Exists(distPath))
+    {
+        app.MapFallbackToFile("index.html", new StaticFileOptions
+        {
+            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(distPath)
+        });
+    }
 }
 
 // Graceful shutdown

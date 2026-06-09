@@ -4,6 +4,7 @@ using Fido2NetLib;
 using Fido2NetLib.Objects;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
@@ -24,7 +25,7 @@ public static class AuthEndpoints
         var group = endpoints.MapGroup("/api/auth");
 
         // Public endpoints (no auth required)
-        group.MapPost("login", async (IAuthService auth, HttpContext ctx, LoginReq req) =>
+        group.MapPost("login", async (IAuthService auth, HttpContext ctx, [FromBody] LoginReq req) =>
         {
             // Go: check login attempt count by IP
             var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -49,7 +50,7 @@ public static class AuthEndpoints
             return Results.Json(new Resp<LoginResp>(new LoginResp { Token = token }));
         });
 
-        group.MapPost("login/hash", async (IAuthService auth, HttpContext ctx, LoginHashReq req) =>
+        group.MapPost("login/hash", async (IAuthService auth, HttpContext ctx, [FromBody] LoginHashReq req) =>
         {
             var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             if (_loginCache.TryGetValue(ip, out var count) && count >= MaxAuthRetries)
@@ -72,7 +73,7 @@ public static class AuthEndpoints
             return Results.Json(new Resp<LoginResp>(new LoginResp { Token = token }));
         });
 
-        group.MapPost("login/ldap", async (IAuthService auth, HttpContext ctx, LoginReq req) =>
+        group.MapPost("login/ldap", async (IAuthService auth, HttpContext ctx, [FromBody] LoginReq req) =>
         {
             var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             if (_loginCache.TryGetValue(ip, out var count) && count >= MaxAuthRetries)
@@ -181,10 +182,9 @@ public static class AuthEndpoints
 
         // WebAuthn endpoints (Go: /api/authn/*)
         var authn = endpoints.MapGroup("/api/authn");
-        var webAuthnService = endpoints.ServiceProvider.GetRequiredService<WebAuthnService>();
 
         // Public: login endpoints
-        authn.MapGet("webauthn_begin_login", async (string? username, CancellationToken ct) =>
+        authn.MapGet("webauthn_begin_login", async (WebAuthnService webAuthnService, string? username, CancellationToken ct) =>
         {
             var options = await webAuthnService.BeginLoginAsync(username, ct);
             if (!string.IsNullOrEmpty(username))
@@ -192,7 +192,7 @@ public static class AuthEndpoints
             return Results.Json(new Resp<object>(options));
         });
 
-        authn.MapPost("webauthn_finish_login", async (HttpContext ctx, IUserService userService, IAuthService authService, string? username, CancellationToken ct) =>
+        authn.MapPost("webauthn_finish_login", async (WebAuthnService webAuthnService, HttpContext ctx, IUserService userService, IAuthService authService, string? username, CancellationToken ct) =>
         {
             var body = await ctx.Request.ReadFromJsonAsync<AuthenticatorAssertionRawResponse>(ct);
             if (body == null) return Results.Json(Resp<object>.Error(400, "invalid request"));
@@ -209,7 +209,7 @@ public static class AuthEndpoints
         });
 
         // Authenticated: registration/management
-        authn.MapGet("webauthn_begin_registration", async (ClaimsPrincipal user, string? credentialName, CancellationToken ct) =>
+        authn.MapGet("webauthn_begin_registration", async (WebAuthnService webAuthnService, ClaimsPrincipal user, string? credentialName, CancellationToken ct) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -220,7 +220,7 @@ public static class AuthEndpoints
             return Results.Json(new Resp<object>(options));
         }).RequireAuthorization();
 
-        authn.MapPost("webauthn_finish_registration", async (HttpContext ctx, ClaimsPrincipal user, CancellationToken ct) =>
+        authn.MapPost("webauthn_finish_registration", async (WebAuthnService webAuthnService, HttpContext ctx, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -233,7 +233,7 @@ public static class AuthEndpoints
             return Results.Json(new Resp<object>(credential));
         }).RequireAuthorization();
 
-        authn.MapPost("delete_authn", async (ClaimsPrincipal user, int credentialId, CancellationToken ct) =>
+        authn.MapPost("delete_authn", async (WebAuthnService webAuthnService, ClaimsPrincipal user, int credentialId, CancellationToken ct) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -242,7 +242,7 @@ public static class AuthEndpoints
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
-        authn.MapGet("getcredentials", async (ClaimsPrincipal user, CancellationToken ct) =>
+        authn.MapGet("getcredentials", async (WebAuthnService webAuthnService, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));

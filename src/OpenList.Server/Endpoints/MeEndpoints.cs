@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
@@ -29,7 +30,7 @@ public static class MeEndpoints
             }));
         });
 
-        group.MapPost("update", async (IUserService users, IAuthService auth, ClaimsPrincipal user, UpdateMeReq req) =>
+        group.MapPost("update", async (IUserService users, IAuthService auth, ClaimsPrincipal user, [FromBody] UpdateMeReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
@@ -54,7 +55,7 @@ public static class MeEndpoints
             return Results.Json(new Resp<PagedListResp<SshKey>>(new PagedListResp<SshKey> { Content = keys, Total = total }));
         });
 
-        group.MapPost("sshkey/add", async (IUserService users, ClaimsPrincipal user, AddSshKeyReq req) =>
+        group.MapPost("sshkey/add", async (IUserService users, ClaimsPrincipal user, [FromBody] AddSshKeyReq req) =>
         {
             var userId = GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
