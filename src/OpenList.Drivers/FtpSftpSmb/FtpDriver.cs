@@ -1,5 +1,8 @@
+using System.Net;
 using System.Text.Json;
 using FluentFTP;
+using FluentStorage;
+using FluentStorage.Blobs;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
@@ -11,6 +14,7 @@ public class FtpDriver : RootPathDriver,
     IDriverRemove, IDriverPutResult
 {
     private AsyncFtpClient? _client;
+    private IBlobStorage _blobStorage = null!;
 
     public override DriverConfig Config() => new()
     {
@@ -59,20 +63,23 @@ public class FtpDriver : RootPathDriver,
     public override async Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct);
-        var items = await _client!.GetListing(dir.GetPath(), ct);
+        var virtualPath = dir.GetPath();
+        var relativePath = virtualPath.TrimStart('/');
 
         var result = new List<IObj>();
-        foreach (var item in items)
+        var blobs = await _blobStorage.ListAsync(new ListOptions { FolderPath = relativePath }, ct);
+
+        foreach (var blob in blobs)
         {
-            if (item.Name == "." || item.Name == "..") continue;
+            if (blob.Name == "." || blob.Name == "..") continue;
             result.Add(new ObjItem
             {
-                Name = item.Name,
-                Size = item.Size,
-                Modified = item.Modified,
-                CTime = item.Modified,
-                IsFolder = item.Type == FtpObjectType.Directory,
-                Path = string.Concat(dir.GetPath().TrimEnd('/'), "/", item.Name)
+                Name = blob.Name,
+                Size = blob.Size ?? 0,
+                Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+                CTime = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+                IsFolder = blob.IsFolder,
+                Path = string.Concat(virtualPath.TrimEnd('/'), "/", blob.Name)
             });
         }
         return result;
@@ -81,13 +88,14 @@ public class FtpDriver : RootPathDriver,
     public override async Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct);
-        var path = file.GetPath();
+        var relativePath = file.GetPath().TrimStart('/');
 
-        // Download to temp file and serve (FTP doesn't support direct URL links)
         var tempFile = Path.Combine(Path.GetTempPath(), $"ftp_{Guid.NewGuid():N}_{file.GetName()}");
         try
         {
-            await _client!.DownloadFile(tempFile, path, FtpLocalExists.Overwrite, FtpVerify.None, null, ct);
+            using var remoteStream = await _blobStorage.OpenReadAsync(relativePath, ct);
+            using var localStream = new FileStream(tempFile, FileMode.Create, FileAccess.Write);
+            await remoteStream.CopyToAsync(localStream, 81920, ct);
             return new Link
             {
                 URL = tempFile,
@@ -104,18 +112,18 @@ public class FtpDriver : RootPathDriver,
     public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct);
-        var parentPath = Path.GetDirectoryName(path)?.Replace('\\', '/') ?? "/";
-        var name = Path.GetFileName(path);
-        var items = await _client!.GetListing(parentPath, ct);
-        var item = items.FirstOrDefault(i => i.Name == name);
-        if (item == null) return null;
+        var relativePath = path.TrimStart('/');
+
+        var blob = await _blobStorage.GetBlobAsync(relativePath, ct);
+        if (blob == null) return null;
+
         return new ObjItem
         {
-            Name = item.Name,
-            Size = item.Size,
-            Modified = item.Modified,
-            CTime = item.Modified,
-            IsFolder = item.Type == FtpObjectType.Directory,
+            Name = blob.Name,
+            Size = blob.Size ?? 0,
+            Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+            CTime = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+            IsFolder = blob.IsFolder,
             Path = path
         };
     }
@@ -194,6 +202,8 @@ public class FtpDriver : RootPathDriver,
         _client.Config.DataConnectionConnectTimeout = 10000;
         _client.Config.ReadTimeout = 10000;
         await _client.Connect(ct);
+
+        _blobStorage = StorageFactory.Blobs.FtpFromFluentFtpClient(_client);
     }
 }
 

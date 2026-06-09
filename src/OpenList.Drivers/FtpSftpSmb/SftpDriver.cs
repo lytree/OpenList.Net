@@ -1,9 +1,12 @@
 using System.Text.Json;
 using Renci.SshNet;
 using Renci.SshNet.Sftp;
+using FluentStorage;
+using FluentStorage.Blobs;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
+using OpenList.Core.Interfaces;
 
 namespace OpenList.Drivers.Sftp;
 
@@ -12,6 +15,7 @@ public class SftpDriver : RootPathDriver,
     IDriverRemove, IDriverPutResult, IDriverWithDetails
 {
     private SftpClient? _client;
+    private IBlobStorage _blobStorage = null!;
     private Exception? _connectionError;
 
     public override DriverConfig Config() => new()
@@ -62,12 +66,24 @@ public class SftpDriver : RootPathDriver,
     public override async Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
     {
         await ReconnectIfNeededAsync();
-        var items = await Task.Run(() => _client!.ListDirectory(dir.GetPath()), ct);
+        var virtualPath = dir.GetPath();
+        var relativePath = virtualPath.TrimStart('/');
+
         var result = new List<IObj>();
-        foreach (var item in items)
+        var blobs = await _blobStorage.ListAsync(new ListOptions { FolderPath = relativePath }, ct);
+
+        foreach (var blob in blobs)
         {
-            if (item.Name == "." || item.Name == "..") continue;
-            result.Add(FileToObj(item, dir.GetPath()));
+            if (blob.Name == "." || blob.Name == "..") continue;
+            result.Add(new ObjItem
+            {
+                Name = blob.Name,
+                Size = blob.Size ?? 0,
+                Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+                CTime = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+                IsFolder = blob.IsFolder,
+                Path = string.Concat(virtualPath.TrimEnd('/'), "/", blob.Name)
+            });
         }
         return result;
     }
@@ -75,13 +91,12 @@ public class SftpDriver : RootPathDriver,
     public override async Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
     {
         await ReconnectIfNeededAsync();
-        var path = file.GetPath();
+        var relativePath = file.GetPath().TrimStart('/');
 
-        // Download to temp file and serve (SFTP doesn't support direct URL links)
         var tempFile = Path.Combine(Path.GetTempPath(), $"sftp_{Guid.NewGuid():N}_{file.GetName()}");
         try
         {
-            using var remoteStream = _client!.OpenRead(path);
+            using var remoteStream = await _blobStorage.OpenReadAsync(relativePath, ct);
             using var localStream = new FileStream(tempFile, FileMode.Create, FileAccess.Write);
             await remoteStream.CopyToAsync(localStream, 81920, ct);
             return new Link
@@ -100,19 +115,19 @@ public class SftpDriver : RootPathDriver,
     public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
     {
         await ReconnectIfNeededAsync();
-        var fullPath = string.Concat(RootFolderPath.TrimEnd('/'), "/", path.TrimStart('/'));
-        if (!await Task.Run(() => _client!.Exists(fullPath), ct))
-            return null;
-        var attr = await Task.Run(() => _client!.GetAttributes(fullPath), ct);
-        if (attr == null) return null;
+        var relativePath = path.TrimStart('/');
+
+        var blob = await _blobStorage.GetBlobAsync(relativePath, ct);
+        if (blob == null) return null;
+
         return new ObjItem
         {
-            Name = Path.GetFileName(fullPath),
-            Size = attr.Size,
-            Modified = attr.LastWriteTime,
-            CTime = attr.LastWriteTime,
-            IsFolder = attr.IsDirectory,
-            Path = fullPath
+            Name = blob.Name,
+            Size = blob.Size ?? 0,
+            Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+            CTime = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+            IsFolder = blob.IsFolder,
+            Path = path
         };
     }
 
@@ -188,8 +203,6 @@ public class SftpDriver : RootPathDriver,
 
     public Task<StorageDetails?> GetDetailsAsync(CancellationToken ct = default)
     {
-        // SFTP doesn't have a standard way to get disk usage
-        // StatVFS is not supported by SSH.NET
         return Task.FromResult<StorageDetails?>(null);
     }
 
@@ -198,6 +211,11 @@ public class SftpDriver : RootPathDriver,
         var addition = (SftpAddition)GetAddition();
         ConnectionInfo connInfo;
 
+        // Parse host and port from address
+        var parts = addition.Address.Split(':');
+        var host = parts[0];
+        var port = parts.Length > 1 && int.TryParse(parts[1], out var p) ? p : 22;
+
         if (!string.IsNullOrEmpty(addition.PrivateKey))
         {
             var keyBytes = Convert.FromBase64String(addition.PrivateKey);
@@ -205,12 +223,12 @@ public class SftpDriver : RootPathDriver,
             var keyFile = string.IsNullOrEmpty(addition.Passphrase)
                 ? new PrivateKeyFile(keyStream)
                 : new PrivateKeyFile(keyStream, addition.Passphrase);
-            connInfo = new ConnectionInfo(addition.Address, addition.Username,
+            connInfo = new ConnectionInfo(host, port, addition.Username,
                 new PrivateKeyAuthenticationMethod(addition.Username, keyFile));
         }
         else
         {
-            connInfo = new ConnectionInfo(addition.Address, addition.Username,
+            connInfo = new ConnectionInfo(host, port, addition.Username,
                 new PasswordAuthenticationMethod(addition.Username, addition.Password));
         }
 
@@ -218,11 +236,8 @@ public class SftpDriver : RootPathDriver,
         _client.Connect();
         _connectionError = null;
 
-        // Monitor connection errors
-        Task.Run(async () =>
-        {
-            try { await Task.Delay(-1); } catch { }
-        });
+        // Create IBlobStorage from the same connection info
+        _blobStorage = StorageFactory.Blobs.Sftp(connInfo);
     }
 
     private async Task ReconnectIfNeededAsync()
@@ -248,19 +263,6 @@ public class SftpDriver : RootPathDriver,
                 await Task.Run(() => _client!.DeleteFile(itemPath), ct);
         }
         await Task.Run(() => _client!.DeleteDirectory(path), ct);
-    }
-
-    private static IObj FileToObj(ISftpFile file, string parentPath)
-    {
-        return new ObjItem
-        {
-            Name = file.Name,
-            Size = file.Length,
-            Modified = file.LastWriteTime,
-            CTime = file.LastWriteTime,
-            IsFolder = file.IsDirectory,
-            Path = string.Concat(parentPath.TrimEnd('/'), "/", file.Name)
-        };
     }
 }
 
