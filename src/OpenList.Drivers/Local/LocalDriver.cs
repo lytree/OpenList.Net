@@ -1,4 +1,6 @@
 using System.Text.Json;
+using FluentStorage;
+using FluentStorage.Blobs;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
@@ -10,11 +12,16 @@ public class LocalDriver : RootPathDriver,
     IDriverGetter, IDriverMkdirResult, IDriverMove, IDriverRename,
     IDriverCopy, IDriverRemove, IDriverPutResult, IDriverWithDetails
 {
+    private IBlobStorage _blobStorage = null!;
+
     public override DriverConfig Config() => new()
     {
         Name = "Local",
         LocalSort = true,
+        OnlyProxy = true,
+        NoCache = true,
         DefaultRoot = "/",
+        NoLinkURL = true,
         CheckStatus = true
     };
 
@@ -26,15 +33,14 @@ public class LocalDriver : RootPathDriver,
         ],
         Additional =
         [
-            new DriverItem { Name = "show_hidden", Type = "bool", Default = "true", Help = "Show hidden files" },
-            new DriverItem { Name = "recursion", Type = "bool", Default = "false", Help = "Recursive listing" },
-            new DriverItem { Name = "directory_size", Type = "bool", Default = "false", Help = "Calculate directory size" },
-            new DriverItem { Name = "thumbnail", Type = "bool", Default = "false", Help = "Enable thumbnail" },
-            new DriverItem { Name = "thumb_cache_folder", Type = "string", Help = "Thumbnail cache folder" },
-            new DriverItem { Name = "thumb_concurrency", Type = "number", Help = "Thumbnail concurrency" },
-            new DriverItem { Name = "video_thumb_pos", Type = "string", Help = "Video thumbnail position" },
+            new DriverItem { Name = "show_hidden", Type = "bool", Default = "true", Required = false, Help = "show hidden directories and files" },
+            new DriverItem { Name = "directory_size", Type = "bool", Default = "false", Required = false, Help = "This might impact host performance" },
+            new DriverItem { Name = "thumbnail", Type = "bool", Default = "false", Required = true, Help = "enable thumbnail" },
+            new DriverItem { Name = "thumb_cache_folder", Type = "string", Required = false, Help = "Thumbnail cache folder" },
+            new DriverItem { Name = "thumb_concurrency", Type = "string", Default = "16", Required = false, Help = "Number of concurrent thumbnail generation goroutines" },
+            new DriverItem { Name = "video_thumb_pos", Type = "string", Default = "20%", Required = false, Help = "The position of the video thumbnail" },
             new DriverItem { Name = "mkdir_perm", Type = "string", Default = "777", Help = "Mkdir permission (octal)" },
-            new DriverItem { Name = "recycle_bin_path", Type = "string", Help = "Recycle bin path" }
+            new DriverItem { Name = "recycle_bin_path", Type = "string", Default = "delete permanently", Help = "path to recycle bin, delete permanently if empty or keep 'delete permanently'" }
         ],
         Config = Config()
     };
@@ -46,15 +52,15 @@ public class LocalDriver : RootPathDriver,
         var addition = (LocalAddition)GetAddition();
         RootFolderPath = addition.RootFolderPath;
 
-        // Validate root path exists
         if (!Directory.Exists(RootFolderPath))
             throw new DirectoryNotFoundException($"Root folder {RootFolderPath} not exists");
 
-        // Resolve to absolute path
         if (!Path.IsPathRooted(RootFolderPath))
             RootFolderPath = Path.GetFullPath(RootFolderPath);
 
-        // Create thumbnail cache folder if configured
+        // Initialize FluentStorage local disk provider
+        _blobStorage = StorageFactory.Blobs.DirectoryFiles(RootFolderPath);
+
         if (!string.IsNullOrEmpty(addition.ThumbCacheFolder) && !Directory.Exists(addition.ThumbCacheFolder))
             Directory.CreateDirectory(addition.ThumbCacheFolder);
 
@@ -63,113 +69,57 @@ public class LocalDriver : RootPathDriver,
 
     public override Task DropAsync(CancellationToken ct = default) => Task.CompletedTask;
 
-    public override Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
+    public override async Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
-        var path = GetActualPath(dir.GetPath());
-        if (!Directory.Exists(path)) return Task.FromResult(new List<IObj>());
+        var virtualPath = dir.GetPath();
+        var relativePath = ToRelativePath(virtualPath);
 
         var result = new List<IObj>();
-        var dirInfo = new DirectoryInfo(path);
 
-        try
+        // Use FluentStorage to list blobs
+        var blobs = await _blobStorage.ListAsync(new ListOptions { FolderPath = relativePath, BrowseFilter = null }, ct);
+
+        foreach (var blob in blobs)
         {
-            foreach (var d in dirInfo.EnumerateDirectories())
+            if (blob.IsFolder)
             {
-                // Skip hidden files if ShowHidden is false
-                if (!addition.ShowHidden && IsHidden(d)) continue;
-
-                var isFolder = true;
-                // Handle symlinks - check if symlink target is a directory
-                if (d.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                {
-                    try
-                    {
-                        var target = d.ResolveLinkTarget(true);
-                        isFolder = target != null && (target.Attributes & FileAttributes.Directory) != 0;
-                    }
-                    catch { continue; }
-                }
+                // Skip hidden if configured
+                if (!addition.ShowHidden && IsHiddenName(blob.Name)) continue;
 
                 var size = 0L;
-                if (addition.DirectorySize && isFolder)
+                if (addition.DirectorySize)
                 {
-                    try { size = GetDirectorySize(d.FullName); } catch { }
+                    try { size = GetDirectorySize(GetActualPath(virtualPath + "/" + blob.Name)); } catch { }
                 }
 
                 result.Add(new ObjItem
                 {
-                    Name = d.Name,
-                    Size = size,
-                    Modified = d.LastWriteTimeUtc,
-                    CTime = d.CreationTimeUtc,
-                    IsFolder = isFolder,
-                    Path = dir.GetPath() + "/" + d.Name
+                    Name = blob.Name,
+                    Size = blob.Size ?? 0,
+                    Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+                    CTime = GetCreationTime(GetActualPath(virtualPath + "/" + blob.Name)),
+                    IsFolder = true,
+                    Path = virtualPath + "/" + blob.Name
                 });
             }
-        }
-        catch (UnauthorizedAccessException) { }
-
-        try
-        {
-            foreach (var f in dirInfo.EnumerateFiles())
+            else
             {
-                // Skip hidden files if ShowHidden is false
-                if (!addition.ShowHidden && IsHidden(f)) continue;
+                if (!addition.ShowHidden && IsHiddenName(blob.Name)) continue;
 
                 result.Add(new ObjItem
                 {
-                    Name = f.Name,
-                    Size = f.Length,
-                    Modified = f.LastWriteTimeUtc,
-                    CTime = f.CreationTimeUtc,
+                    Name = blob.Name,
+                    Size = blob.Size ?? 0,
+                    Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+                    CTime = GetCreationTime(GetActualPath(virtualPath + "/" + blob.Name)),
                     IsFolder = false,
-                    Path = dir.GetPath() + "/" + f.Name
+                    Path = virtualPath + "/" + blob.Name
                 });
             }
         }
-        catch (UnauthorizedAccessException) { }
 
-        // Recursion: include subdirectory contents
-        if (addition.Recursion)
-        {
-            var subItems = new List<IObj>();
-            foreach (var item in result.Where(o => o.IsDir()).ToList())
-            {
-                try
-                {
-                    var subPath = GetActualPath(item.GetPath());
-                    var subDirInfo = new DirectoryInfo(subPath);
-                    foreach (var sub in subDirInfo.EnumerateFileSystemInfos())
-                    {
-                        if (!addition.ShowHidden && IsHidden(sub)) continue;
-                        var isDir = sub is DirectoryInfo;
-                        if (sub.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                        {
-                            try
-                            {
-                                var target = sub.ResolveLinkTarget(true);
-                                isDir = target != null && (target.Attributes & FileAttributes.Directory) != 0;
-                            }
-                            catch { continue; }
-                        }
-                        subItems.Add(new ObjItem
-                        {
-                            Name = sub.Name,
-                            Size = isDir ? 0 : (sub as FileInfo)?.Length ?? 0,
-                            Modified = sub.LastWriteTimeUtc,
-                            CTime = sub.CreationTimeUtc,
-                            IsFolder = isDir,
-                            Path = item.GetPath() + "/" + sub.Name
-                        });
-                    }
-                }
-                catch (UnauthorizedAccessException) { }
-            }
-            result.AddRange(subItems);
-        }
-
-        return Task.FromResult(result);
+        return result;
     }
 
     public override Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
@@ -179,7 +129,6 @@ public class LocalDriver : RootPathDriver,
 
         var link = new Link { URL = path };
 
-        // Handle thumbnail request
         if (args.Type == "thumb")
         {
             var addition = (LocalAddition)GetAddition();
@@ -200,18 +149,42 @@ public class LocalDriver : RootPathDriver,
         return Task.FromResult<Link?>(link);
     }
 
-    public Task<IObj?> GetAsync(string path, CancellationToken ct = default)
+    public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
         var actualPath = GetActualPath(path);
+        var relativePath = ToRelativePath(path);
+
+        // Try to get blob info from FluentStorage
+        var blob = await _blobStorage.GetBlobAsync(relativePath, ct);
+        if (blob != null)
+        {
+            var size = blob.Size ?? 0;
+            if (blob.IsFolder && addition.DirectorySize)
+            {
+                try { size = GetDirectorySize(actualPath); } catch { }
+            }
+
+            return new ObjItem
+            {
+                Name = blob.Name,
+                Size = size,
+                Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+                CTime = GetCreationTime(actualPath),
+                IsFolder = blob.IsFolder,
+                Path = path
+            };
+        }
+
+        // Fallback to direct file system check (for root path etc.)
         if (File.Exists(actualPath))
         {
             var fi = new FileInfo(actualPath);
-            return Task.FromResult<IObj?>(new ObjItem
+            return new ObjItem
             {
                 Name = fi.Name, Size = fi.Length, Modified = fi.LastWriteTimeUtc,
                 CTime = fi.CreationTimeUtc, IsFolder = false, Path = path
-            });
+            };
         }
         if (Directory.Exists(actualPath))
         {
@@ -221,23 +194,26 @@ public class LocalDriver : RootPathDriver,
             {
                 try { size = GetDirectorySize(di.FullName); } catch { }
             }
-            return Task.FromResult<IObj?>(new ObjItem
+            return new ObjItem
             {
                 Name = di.Name, Size = size, Modified = di.LastWriteTimeUtc,
                 CTime = di.CreationTimeUtc, IsFolder = true, Path = path
-            });
+            };
         }
-        return Task.FromResult<IObj?>(null);
+
+        return null;
     }
 
     public Task<IObj> MakeDirAsync(IObj parentDir, string dirName, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
         var path = Path.Join(GetActualPath(parentDir.GetPath()), dirName);
-        var perm = addition.MkdirPerm;
+
+        // Parse octal permission
+        var perm = ParseOctalPermission(addition.MkdirPerm);
+        Directory.CreateDirectory(path);
         if (perm > 0)
         {
-            Directory.CreateDirectory(path);
             try
             {
                 var dirInfo = new DirectoryInfo(path);
@@ -245,10 +221,7 @@ public class LocalDriver : RootPathDriver,
             }
             catch { }
         }
-        else
-        {
-            Directory.CreateDirectory(path);
-        }
+
         var di = new DirectoryInfo(path);
         return Task.FromResult<IObj>(new ObjItem
         {
@@ -262,7 +235,6 @@ public class LocalDriver : RootPathDriver,
         var srcPath = GetActualPath(srcObj.GetPath());
         var dstPath = Path.Join(GetActualPath(dstDir.GetPath()), srcObj.GetName());
 
-        // Prevent moving to subfolder of itself
         if (dstPath.StartsWith(srcPath + Path.DirectorySeparatorChar))
             throw new InvalidOperationException("The destination folder is a subfolder of the source folder");
 
@@ -273,7 +245,6 @@ public class LocalDriver : RootPathDriver,
         }
         catch (IOException ex) when (IsCrossDeviceError(ex))
         {
-            // Cross-device move: throw to indicate task-based move needed
             throw new NotImplementedException("Cross-device move requires task-based processing");
         }
         return Task.CompletedTask;
@@ -294,7 +265,6 @@ public class LocalDriver : RootPathDriver,
         var srcPath = GetActualPath(srcObj.GetPath());
         var dstPath = Path.Join(GetActualPath(dstDir.GetPath()), srcObj.GetName());
 
-        // Prevent copying to subfolder of itself
         if (dstPath.StartsWith(srcPath + Path.DirectorySeparatorChar))
             throw new InvalidOperationException("The destination folder is a subfolder of the source folder");
 
@@ -308,7 +278,7 @@ public class LocalDriver : RootPathDriver,
         var addition = (LocalAddition)GetAddition();
         var path = GetActualPath(obj.GetPath());
 
-        // Recycle bin support
+        // Recycle bin support (Go: checks for empty or "delete permanently")
         if (!string.IsNullOrEmpty(addition.RecycleBinPath) &&
             addition.RecycleBinPath != "delete permanently")
         {
@@ -344,11 +314,14 @@ public class LocalDriver : RootPathDriver,
         var dirPath = GetActualPath(dstDir.GetPath());
         var filePath = Path.Join(dirPath, file.Obj.GetName());
         Directory.CreateDirectory(dirPath);
-        using var fs = new FileStream(filePath, FileMode.Create);
+
+        // Use FluentStorage to write
+        var relativePath = ToRelativePath(dstDir.GetPath() + "/" + file.Obj.GetName());
         if (file.Stream != null)
         {
-            await file.Stream.CopyToAsync(fs, 81920, ct);
+            await _blobStorage.WriteAsync(relativePath, file.Stream, append: false, cancellationToken: ct);
         }
+
         var fi = new FileInfo(filePath);
         return new ObjItem
         {
@@ -384,18 +357,22 @@ public class LocalDriver : RootPathDriver,
         return string.IsNullOrEmpty(relative) ? root : Path.Join(root, relative);
     }
 
-    private static bool IsHidden(FileSystemInfo fsi)
+    /// <summary>Convert virtual path to relative path for FluentStorage</summary>
+    private string ToRelativePath(string virtualPath)
     {
-        if (fsi.Attributes.HasFlag(FileAttributes.Hidden)) return true;
-        // Unix-style hidden files (start with .)
-        return fsi.Name.StartsWith('.') && fsi.Name != "." && fsi.Name != "..";
+        var relative = virtualPath.TrimStart('/');
+        return string.IsNullOrEmpty(relative) ? "/" : relative;
+    }
+
+    private static bool IsHiddenName(string name)
+    {
+        return name.StartsWith('.') && name != "." && name != "..";
     }
 
     private static bool IsCrossDeviceError(IOException ex)
     {
-        // Cross-device link error on Unix (errno 18) or Windows ERROR_NOT_SAME_DEVICE
-        return ex.HResult == 17 || // EXDEV on Linux
-               ex.HResult == -2147024890 || // ERROR_NOT_SAME_DEVICE on Windows
+        return ex.HResult == 17 ||
+               ex.HResult == -2147024890 ||
                ex.Message.Contains("different") ||
                ex.Message.Contains("cross-device");
     }
@@ -412,6 +389,30 @@ public class LocalDriver : RootPathDriver,
         }
         catch { }
         return size;
+    }
+
+    private static DateTime GetCreationTime(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) return File.GetCreationTimeUtc(path);
+            if (Directory.Exists(path)) return Directory.GetCreationTimeUtc(path);
+        }
+        catch { }
+        return DateTime.MinValue;
+    }
+
+    private static int ParseOctalPermission(string? perm)
+    {
+        if (string.IsNullOrEmpty(perm)) return 0;
+        try
+        {
+            return Convert.ToInt32(perm, 8);
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private string? GetThumbnailPath(IObj file, LocalAddition addition)
@@ -440,12 +441,11 @@ public class LocalAddition
 {
     public string RootFolderPath { get; set; } = "/";
     public bool ShowHidden { get; set; } = true;
-    public bool Recursion { get; set; }
     public bool DirectorySize { get; set; }
     public bool Thumbnail { get; set; }
     public string? ThumbCacheFolder { get; set; }
-    public string? ThumbConcurrency { get; set; }
-    public string? VideoThumbPos { get; set; }
-    public int MkdirPerm { get; set; }
-    public string? RecycleBinPath { get; set; }
+    public string? ThumbConcurrency { get; set; } = "16";
+    public string? VideoThumbPos { get; set; } = "20%";
+    public string? MkdirPerm { get; set; } = "777";
+    public string? RecycleBinPath { get; set; } = "delete permanently";
 }
