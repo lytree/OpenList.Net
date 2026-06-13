@@ -4,11 +4,11 @@
 
 **All APIs are Minimal APIs** (no controllers). The `Controllers/` directory exists but is empty — all endpoints live in `src/OpenList.Server/Endpoints/` as static extension methods (`MapAuthApi`, `MapFsApi`, etc.) called from `Program.cs`.
 
-JSON uses **PascalCase** (`PropertyNamingPolicy = null`) — non-standard for ASP.NET Core. New endpoints must also use PascalCase.
+JSON uses **camelCase** (`PropertyNamingPolicy = JsonNamingPolicy.CamelCase`) — standard ASP.NET Core default. New endpoints must also use camelCase.
 
 All responses are wrapped in `Resp<T>` (see `src/OpenList.Server/Models/Resp.cs:3`):
 ```
-{ "Code": 200, "Message": "success", "Data": ... }
+{ "code": 200, "message": "success", "data": ... }
 ```
 
 ## Reference Implementation

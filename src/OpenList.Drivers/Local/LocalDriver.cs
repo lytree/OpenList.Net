@@ -17,8 +17,7 @@ public class LocalDriver : RootPathDriver,
         OnlyProxy = true,
         NoCache = true,
         DefaultRoot = "/",
-        NoLinkURL = true,
-        CheckStatus = true
+        NoLinkURL = true
     };
 
     public override object GetAddition() => JsonSerializer.Deserialize<LocalAddition>(_storage.Addition) ?? new LocalAddition();
@@ -414,18 +413,18 @@ public class LocalDriver : RootPathDriver,
 public class LocalAddition
 {
     public string RootFolderPath { get; set; } = "/";
-    [System.ComponentModel.Description("show hidden directories and files")]
-    public bool ShowHidden { get; set; } = true;
     [System.ComponentModel.Description("This might impact host performance")]
     public bool DirectorySize { get; set; }
+    [System.ComponentModel.DataAnnotations.Required]
     [System.ComponentModel.Description("enable thumbnail")]
     public bool Thumbnail { get; set; }
-    [System.ComponentModel.Description("Thumbnail cache folder")]
     public string? ThumbCacheFolder { get; set; }
-    [System.ComponentModel.Description("Number of concurrent thumbnail generation goroutines")]
+    [System.ComponentModel.Description("Number of concurrent thumbnail generation goroutines. This controls how many thumbnails can be generated in parallel.")]
     public string? ThumbConcurrency { get; set; } = "16";
-    [System.ComponentModel.Description("The position of the video thumbnail. If the value is a number, it represents seconds. If it ends with '%', it represents the percentage of the video duration.")]
+    [System.ComponentModel.Description("The position of the video thumbnail. If the value is a number (integer or floating point), it represents the time in seconds. If the value ends with '%', it represents the percentage of the video duration.")]
     public string? VideoThumbPos { get; set; } = "20%";
+    [System.ComponentModel.Description("show hidden directories and files")]
+    public bool ShowHidden { get; set; } = true;
     [System.ComponentModel.Description("Mkdir permission (octal)")]
     public string? MkdirPerm { get; set; } = "777";
     [System.ComponentModel.Description("path to recycle bin, delete permanently if empty or keep 'delete permanently'")]

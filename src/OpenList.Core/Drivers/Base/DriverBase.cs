@@ -67,17 +67,9 @@ public abstract class DriverBase : IDriver
             commonItems.Add(new DriverItem { Name = "custom_cache_policies", Type = "text", Help = "The cache expiration rules for this storage" });
         }
 
-        // Root folder path/id (from driver Addition)
-        if (this is RootPathDriver)
-        {
-            commonItems.Add(new DriverItem { Name = "root_folder_path", Type = "string", Default = cfg.DefaultRoot, Required = true });
-            excludeNames.Add("root_folder_path");
-        }
-        if (this is RootIdDriver)
-        {
-            commonItems.Add(new DriverItem { Name = "root_folder_id", Type = "string", Default = cfg.DefaultRoot, Required = true });
-            excludeNames.Add("root_folder_id");
-        }
+        // Root folder path/id is handled in Additional items from Addition properties
+        // (Go: RootPath/RootID is an embedded struct in Addition, reflected into Additional items)
+        // No need to add to Common or excludeNames — BuildItemsFromObject handles it
 
         // Proxy settings (from model.Storage.Proxy)
         if (cfg.MustProxy())
@@ -117,6 +109,18 @@ public abstract class DriverBase : IDriver
 
         var additionalItems = BuildItemsFromObject(addition, excludeNames);
 
+        // Go: if root_folder_path/root_folder_id default is empty, set to config.DefaultRoot
+        // Required depends on whether Default is non-empty
+        foreach (var item in additionalItems)
+        {
+            if (item.Name == "root_folder_path" || item.Name == "root_folder_id")
+            {
+                if (string.IsNullOrEmpty(item.Default))
+                    item.Default = cfg.DefaultRoot;
+                item.Required = !string.IsNullOrEmpty(item.Default);
+            }
+        }
+
         return new DriverInfo
         {
             Common = commonItems,
@@ -131,6 +135,28 @@ public abstract class DriverBase : IDriver
     /// Override only if GetAddition() uses complex logic.
     /// </summary>
     protected virtual Type? GetAdditionType() => null;
+
+    private static string? FormatDefaultValue(object? value)
+    {
+        if (value == null) return null;
+        if (value is bool b) return b ? "true" : "false";
+        return value.ToString();
+    }
+
+    private static string MapPropertyType(Type type)
+    {
+        // Handle Nullable<T> — unwrap to underlying type
+        var underlying = Nullable.GetUnderlyingType(type);
+        if (underlying != null) type = underlying;
+
+        // Map C# types to Go frontend-expected type names
+        if (type == typeof(bool)) return "bool";
+        if (type == typeof(int) || type == typeof(long) || type == typeof(float) || type == typeof(double))
+            return "number";
+        if (type == typeof(string)) return "string";
+        // Fallback
+        return type.Name.ToLowerInvariant();
+    }
 
     private static List<DriverItem> BuildItemsFromObject(object obj, HashSet<string>? excludeNames = null)
     {
@@ -151,8 +177,8 @@ public abstract class DriverBase : IDriver
             var item = new DriverItem
             {
                 Name = jsonName,
-                Type = typeAttr?.Type ?? prop.PropertyType.Name.ToLowerInvariant(),
-                Default = prop.GetValue(obj)?.ToString(),
+                Type = typeAttr?.Type ?? MapPropertyType(prop.PropertyType),
+                Default = FormatDefaultValue(prop.GetValue(obj)),
                 Options = optionsAttr?.Options,
                 Required = prop.GetCustomAttributes<System.ComponentModel.DataAnnotations.RequiredAttribute>().Any(),
                 Help = descAttr?.Description
