@@ -30,6 +30,7 @@ public class StorageService : IStorageService
     public async Task<uint> CreateStorageAsync(Storage storage, CancellationToken ct = default)
     {
         storage.Modified = DateTime.UtcNow;
+        storage.MountPath = FixAndCleanPath(storage.MountPath);
         _db.Storages.Add(storage);
         await _db.SaveChangesAsync(ct);
         return storage.Id;
@@ -38,6 +39,7 @@ public class StorageService : IStorageService
     public async Task UpdateStorageAsync(Storage storage, CancellationToken ct = default)
     {
         storage.Modified = DateTime.UtcNow;
+        storage.MountPath = FixAndCleanPath(storage.MountPath);
         _db.Storages.Update(storage);
         await _db.SaveChangesAsync(ct);
     }
@@ -88,4 +90,25 @@ public class StorageService : IStorageService
     public List<DriverInfo> ListDriverInfos() => _driverFactory.ListDriverInfos();
 
     public List<string> ListDriverNames() => _driverFactory.ListDriverNames();
+
+    /// <summary>
+    /// Normalize mount path: replace backslashes, ensure leading /, clean path.
+    /// Mirrors Go's utils.FixAndCleanPath.
+    /// </summary>
+    private static string FixAndCleanPath(string path)
+    {
+        path = path.Replace('\\', '/');
+        if (!path.StartsWith('/')) path = "/" + path;
+        // Clean: remove double slashes, trailing slash (except root), resolve . and ..
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var stack = new Stack<string>();
+        foreach (var seg in segments)
+        {
+            if (seg == ".") continue;
+            if (seg == ".." && stack.Count > 0) stack.Pop();
+            else if (seg != "..") stack.Push(seg);
+        }
+        var result = "/" + string.Join("/", stack.Reverse());
+        return result;
+    }
 }

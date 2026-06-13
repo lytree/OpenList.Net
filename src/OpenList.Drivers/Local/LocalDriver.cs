@@ -1,6 +1,4 @@
 using System.Text.Json;
-using FluentStorage;
-using FluentStorage.Blobs;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
@@ -12,8 +10,6 @@ public class LocalDriver : RootPathDriver,
     IDriverGetter, IDriverMkdirResult, IDriverMove, IDriverRename,
     IDriverCopy, IDriverRemove, IDriverPutResult, IDriverWithDetails
 {
-    private IBlobStorage _blobStorage = null!;
-
     public override DriverConfig Config() => new()
     {
         Name = "Local",
@@ -39,9 +35,6 @@ public class LocalDriver : RootPathDriver,
         if (!Path.IsPathRooted(RootFolderPath))
             RootFolderPath = Path.GetFullPath(RootFolderPath);
 
-        // Initialize FluentStorage local disk provider
-        _blobStorage = StorageFactory.Blobs.DirectoryFiles(RootFolderPath);
-
         if (!string.IsNullOrEmpty(addition.ThumbCacheFolder) && !Directory.Exists(addition.ThumbCacheFolder))
             Directory.CreateDirectory(addition.ThumbCacheFolder);
 
@@ -50,65 +43,122 @@ public class LocalDriver : RootPathDriver,
 
     public override Task DropAsync(CancellationToken ct = default) => Task.CompletedTask;
 
-    public override async Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
+    /// <summary>
+    /// List directory contents. Mirrors Go: dir.GetPath() returns actual filesystem path.
+    /// Go: fullPath := dir.GetPath() → readDir(fullPath)
+    /// </summary>
+    public override Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
-        var virtualPath = dir.GetPath();
-        var relativePath = ToRelativePath(virtualPath);
+        // Go: fullPath := dir.GetPath() — this is the actual filesystem path
+        var fullPath = dir.GetPath();
 
         var result = new List<IObj>();
 
-        // Use FluentStorage to list blobs
-        var blobs = await _blobStorage.ListAsync(new ListOptions { FolderPath = relativePath, BrowseFilter = null }, ct);
+        // Read directory entries directly (Go: readDir)
+        var dirInfo = new DirectoryInfo(fullPath);
+        if (!dirInfo.Exists)
+            return Task.FromResult(result);
 
-        foreach (var blob in blobs)
+        foreach (var entry in dirInfo.EnumerateFileSystemInfos())
         {
-            if (blob.IsFolder)
-            {
-                // Skip hidden if configured
-                if (!addition.ShowHidden && IsHiddenName(blob.Name)) continue;
+            // Skip hidden if configured
+            if (!addition.ShowHidden && IsHiddenName(entry.Name)) continue;
 
-                var size = 0L;
+            var isFolder = entry is DirectoryInfo;
+            // Go: isSymlinkDir check — check if symlink points to a directory
+            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) && entry is FileInfo)
+            {
+                try
+                {
+                    isFolder = File.GetAttributes(entry.FullName).HasFlag(FileAttributes.Directory);
+                }
+                catch { }
+            }
+
+            var size = 0L;
+            if (isFolder)
+            {
                 if (addition.DirectorySize)
                 {
-                    try { size = GetDirectorySize(GetActualPath(virtualPath + "/" + blob.Name)); } catch { }
+                    try { size = GetDirectorySize(Path.Join(fullPath, entry.Name)); } catch { }
                 }
-
-                result.Add(new ObjItem
-                {
-                    Name = blob.Name,
-                    Size = blob.Size ?? 0,
-                    Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-                    CTime = GetCreationTime(GetActualPath(virtualPath + "/" + blob.Name)),
-                    IsFolder = true,
-                    Path = virtualPath + "/" + blob.Name
-                });
             }
             else
             {
-                if (!addition.ShowHidden && IsHiddenName(blob.Name)) continue;
-
-                result.Add(new ObjItem
-                {
-                    Name = blob.Name,
-                    Size = blob.Size ?? 0,
-                    Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-                    CTime = GetCreationTime(GetActualPath(virtualPath + "/" + blob.Name)),
-                    IsFolder = false,
-                    Path = virtualPath + "/" + blob.Name
-                });
+                try { size = ((FileInfo)entry).Length; } catch { }
             }
+
+            var ctime = DateTime.MinValue;
+            try { ctime = entry.CreationTimeUtc; } catch { }
+
+            // Go: Path = filepath.Join(fullPath, f.Name()) — actual filesystem path
+            result.Add(new ObjItem
+            {
+                Name = entry.Name,
+                Size = size,
+                Modified = entry.LastWriteTimeUtc,
+                CTime = ctime,
+                IsFolder = isFolder,
+                Path = Path.Join(fullPath, entry.Name)
+            });
         }
 
-        return result;
+        return Task.FromResult(result);
+    }
+
+    /// <summary>
+    /// Get a single object by path. Mirrors Go: path = filepath.Join(d.GetRootPath(), path)
+    /// </summary>
+    public Task<IObj?> GetAsync(string path, CancellationToken ct = default)
+    {
+        var addition = (LocalAddition)GetAddition();
+        // Go: path = filepath.Join(d.GetRootPath(), path)
+        var actualPath = Path.Join(RootFolderPath, path.TrimStart('/'));
+
+        if (File.Exists(actualPath))
+        {
+            var fi = new FileInfo(actualPath);
+            return Task.FromResult<IObj?>(new ObjItem
+            {
+                Name = fi.Name,
+                Size = fi.Length,
+                Modified = fi.LastWriteTimeUtc,
+                CTime = fi.CreationTimeUtc,
+                IsFolder = false,
+                Path = actualPath
+            });
+        }
+
+        if (Directory.Exists(actualPath))
+        {
+            var di = new DirectoryInfo(actualPath);
+            var size = 0L;
+            if (addition.DirectorySize)
+            {
+                try { size = GetDirectorySize(di.FullName); } catch { }
+            }
+            return Task.FromResult<IObj?>(new ObjItem
+            {
+                Name = di.Name,
+                Size = size,
+                Modified = di.LastWriteTimeUtc,
+                CTime = di.CreationTimeUtc,
+                IsFolder = true,
+                Path = actualPath
+            });
+        }
+
+        return Task.FromResult<IObj?>(null);
     }
 
     public override Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
     {
-        var path = GetActualPath(file.GetPath());
-        if (!File.Exists(path)) return Task.FromResult<Link?>(null);
+        // Go: fullPath := file.GetPath() — Path is actual filesystem path
+        var fullPath = file.GetPath();
+        if (!File.Exists(fullPath)) return Task.FromResult<Link?>(null);
 
-        var link = new Link { URL = path };
+        var link = new Link { URL = fullPath };
 
         if (args.Type == "thumb")
         {
@@ -130,91 +180,45 @@ public class LocalDriver : RootPathDriver,
         return Task.FromResult<Link?>(link);
     }
 
-    public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
-    {
-        var addition = (LocalAddition)GetAddition();
-        var actualPath = GetActualPath(path);
-        var relativePath = ToRelativePath(path);
-
-        // Try to get blob info from FluentStorage
-        var blob = await _blobStorage.GetBlobAsync(relativePath, ct);
-        if (blob != null)
-        {
-            var size = blob.Size ?? 0;
-            if (blob.IsFolder && addition.DirectorySize)
-            {
-                try { size = GetDirectorySize(actualPath); } catch { }
-            }
-
-            return new ObjItem
-            {
-                Name = blob.Name,
-                Size = size,
-                Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-                CTime = GetCreationTime(actualPath),
-                IsFolder = blob.IsFolder,
-                Path = path
-            };
-        }
-
-        // Fallback to direct file system check (for root path etc.)
-        if (File.Exists(actualPath))
-        {
-            var fi = new FileInfo(actualPath);
-            return new ObjItem
-            {
-                Name = fi.Name, Size = fi.Length, Modified = fi.LastWriteTimeUtc,
-                CTime = fi.CreationTimeUtc, IsFolder = false, Path = path
-            };
-        }
-        if (Directory.Exists(actualPath))
-        {
-            var di = new DirectoryInfo(actualPath);
-            var size = 0L;
-            if (addition.DirectorySize)
-            {
-                try { size = GetDirectorySize(di.FullName); } catch { }
-            }
-            return new ObjItem
-            {
-                Name = di.Name, Size = size, Modified = di.LastWriteTimeUtc,
-                CTime = di.CreationTimeUtc, IsFolder = true, Path = path
-            };
-        }
-
-        return null;
-    }
-
+    /// <summary>
+    /// Make directory. Go: fullPath := filepath.Join(parentDir.GetPath(), dirName)
+    /// </summary>
     public Task<IObj> MakeDirAsync(IObj parentDir, string dirName, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
-        var path = Path.Join(GetActualPath(parentDir.GetPath()), dirName);
+        // Go: fullPath := filepath.Join(parentDir.GetPath(), dirName)
+        var fullPath = Path.Join(parentDir.GetPath(), dirName);
 
-        // Parse octal permission
         var perm = ParseOctalPermission(addition.MkdirPerm);
-        Directory.CreateDirectory(path);
+        Directory.CreateDirectory(fullPath);
         if (perm > 0)
         {
             try
             {
-                var dirInfo = new DirectoryInfo(path);
+                var dirInfo = new DirectoryInfo(fullPath);
                 dirInfo.Attributes = (FileAttributes)perm;
             }
             catch { }
         }
 
-        var di = new DirectoryInfo(path);
+        var di = new DirectoryInfo(fullPath);
         return Task.FromResult<IObj>(new ObjItem
         {
-            Name = di.Name, IsFolder = true, Modified = di.LastWriteTimeUtc,
-            CTime = di.CreationTimeUtc, Path = parentDir.GetPath() + "/" + dirName
+            Name = di.Name,
+            IsFolder = true,
+            Modified = di.LastWriteTimeUtc,
+            CTime = di.CreationTimeUtc,
+            Path = fullPath
         });
     }
 
+    /// <summary>
+    /// Move. Go: srcPath := srcObj.GetPath(); dstPath := filepath.Join(dstDir.GetPath(), srcObj.GetName())
+    /// </summary>
     public Task MoveAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
     {
-        var srcPath = GetActualPath(srcObj.GetPath());
-        var dstPath = Path.Join(GetActualPath(dstDir.GetPath()), srcObj.GetName());
+        var srcPath = srcObj.GetPath();
+        var dstPath = Path.Join(dstDir.GetPath(), srcObj.GetName());
 
         if (dstPath.StartsWith(srcPath + Path.DirectorySeparatorChar))
             throw new InvalidOperationException("The destination folder is a subfolder of the source folder");
@@ -231,9 +235,12 @@ public class LocalDriver : RootPathDriver,
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Rename. Go: srcPath := srcObj.GetPath(); dstPath := filepath.Join(filepath.Dir(srcPath), newName)
+    /// </summary>
     public Task RenameAsync(IObj srcObj, string newName, CancellationToken ct = default)
     {
-        var srcPath = GetActualPath(srcObj.GetPath());
+        var srcPath = srcObj.GetPath();
         var dir = Path.GetDirectoryName(srcPath)!;
         var dstPath = Path.Join(dir, newName);
         if (srcObj.IsDir()) Directory.Move(srcPath, dstPath);
@@ -241,10 +248,13 @@ public class LocalDriver : RootPathDriver,
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Copy. Go: srcPath := srcObj.GetPath(); dstPath := filepath.Join(dstDir.GetPath(), srcObj.GetName())
+    /// </summary>
     public Task CopyAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
     {
-        var srcPath = GetActualPath(srcObj.GetPath());
-        var dstPath = Path.Join(GetActualPath(dstDir.GetPath()), srcObj.GetName());
+        var srcPath = srcObj.GetPath();
+        var dstPath = Path.Join(dstDir.GetPath(), srcObj.GetName());
 
         if (dstPath.StartsWith(srcPath + Path.DirectorySeparatorChar))
             throw new InvalidOperationException("The destination folder is a subfolder of the source folder");
@@ -254,10 +264,13 @@ public class LocalDriver : RootPathDriver,
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Remove. Go: obj.GetPath() is actual filesystem path
+    /// </summary>
     public Task RemoveAsync(IObj obj, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
-        var path = GetActualPath(obj.GetPath());
+        var path = obj.GetPath();
 
         // Recycle bin support (Go: checks for empty or "delete permanently")
         if (!string.IsNullOrEmpty(addition.RecycleBinPath) &&
@@ -290,24 +303,30 @@ public class LocalDriver : RootPathDriver,
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Put (upload). Go: fullPath := filepath.Join(dstDir.GetPath(), stream.GetName())
+    /// </summary>
     public async Task<IObj> PutAsync(IObj dstDir, FileStreamer file, Action<double> updateProgress, CancellationToken ct = default)
     {
-        var dirPath = GetActualPath(dstDir.GetPath());
-        var filePath = Path.Join(dirPath, file.Obj.GetName());
-        Directory.CreateDirectory(dirPath);
+        // Go: fullPath := filepath.Join(dstDir.GetPath(), stream.GetName())
+        var fullPath = Path.Join(dstDir.GetPath(), file.Obj.GetName());
+        Directory.CreateDirectory(dstDir.GetPath());
 
-        // Use FluentStorage to write
-        var relativePath = ToRelativePath(dstDir.GetPath() + "/" + file.Obj.GetName());
         if (file.Stream != null)
         {
-            await _blobStorage.WriteAsync(relativePath, file.Stream, append: false, cancellationToken: ct);
+            using var fs = new FileStream(fullPath, FileMode.Create, FileAccess.Write);
+            await file.Stream.CopyToAsync(fs, ct);
         }
 
-        var fi = new FileInfo(filePath);
+        var fi = new FileInfo(fullPath);
         return new ObjItem
         {
-            Name = fi.Name, Size = fi.Length, Modified = fi.LastWriteTimeUtc,
-            CTime = fi.CreationTimeUtc, IsFolder = false, Path = dstDir.GetPath() + "/" + file.Obj.GetName()
+            Name = fi.Name,
+            Size = fi.Length,
+            Modified = fi.LastWriteTimeUtc,
+            CTime = fi.CreationTimeUtc,
+            IsFolder = false,
+            Path = fullPath
         };
     }
 
@@ -328,21 +347,6 @@ public class LocalDriver : RootPathDriver,
         {
             return Task.FromResult<StorageDetails?>(null);
         }
-    }
-
-    private string GetActualPath(string virtualPath)
-    {
-        var root = RootFolderPath;
-        if (string.IsNullOrEmpty(root)) root = "/";
-        var relative = virtualPath.TrimStart('/');
-        return string.IsNullOrEmpty(relative) ? root : Path.Join(root, relative);
-    }
-
-    /// <summary>Convert virtual path to relative path for FluentStorage</summary>
-    private string ToRelativePath(string virtualPath)
-    {
-        var relative = virtualPath.TrimStart('/');
-        return string.IsNullOrEmpty(relative) ? "/" : relative;
     }
 
     private static bool IsHiddenName(string name)
@@ -370,17 +374,6 @@ public class LocalDriver : RootPathDriver,
         }
         catch { }
         return size;
-    }
-
-    private static DateTime GetCreationTime(string path)
-    {
-        try
-        {
-            if (File.Exists(path)) return File.GetCreationTimeUtc(path);
-            if (Directory.Exists(path)) return Directory.GetCreationTimeUtc(path);
-        }
-        catch { }
-        return DateTime.MinValue;
     }
 
     private static int ParseOctalPermission(string? perm)

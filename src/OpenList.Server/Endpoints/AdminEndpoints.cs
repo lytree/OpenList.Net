@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Linq;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -19,7 +18,23 @@ public static class AdminEndpoints
     {
         var group = endpoints.MapGroup("/api/admin").RequireAuthorization(policy => policy.RequireRole("2"));
 
-        // === User management ===
+        MapUserAdmin(group);
+        MapStorageAdmin(group);
+        MapMetaAdmin(group);
+        MapSettingAdmin(group);
+        MapShareAdmin(group);
+        MapDriverAdmin(group);
+        MapIndexAdmin(group);
+        MapMessageAdmin(group);
+        MapScanAdmin(group);
+        MapTaskAdmin(group);
+        MapArchiveAdmin(group);
+
+        return endpoints;
+    }
+
+    private static void MapUserAdmin(RouteGroupBuilder group)
+    {
         group.MapGet("user/list", async (IUserService users, int page = 1, int perPage = 100) =>
         {
             var (userList, total) = await users.ListUsersAsync(page, perPage);
@@ -51,11 +66,9 @@ public static class AdminEndpoints
 
         group.MapPost("user/create", async (IUserService users, [FromBody] CreateUserReq req) =>
         {
-            // Go: admin or guest user can not be created
             if (req.Role == 1 || req.Role == 2)
                 return Results.Json(Resp<object>.Error(400, "admin or guest user can not be created"));
             var user = new User { Username = req.Username, BasePath = req.BasePath ?? "/", Role = (UserRole)req.Role, Permission = req.Permission, Disabled = req.Disabled, AllowLdap = req.AllowLdap, Authn = "[]" };
-            // Go: always call SetPassword (even for empty password)
             await users.SetPasswordAsync(user, req.Password ?? "");
             await users.CreateUserAsync(user);
             return Results.Json(new Resp<object>(null));
@@ -65,10 +78,8 @@ public static class AdminEndpoints
         {
             var user = await users.GetUserByIdAsync(req.Id);
             if (user == null) return Results.Json(Resp<object>.Error(404, "user not found"));
-            // Go: role can not be changed
             if (req.Role != null && req.Role != (int)user.Role)
                 return Results.Json(Resp<object>.Error(400, "role can not be changed"));
-            // Go: admin user can not be disabled
             if (req.Disabled == true && user.Role == UserRole.Admin)
                 return Results.Json(Resp<object>.Error(400, "admin user can not be disabled"));
             if (req.Username != null) user.Username = req.Username;
@@ -76,7 +87,6 @@ public static class AdminEndpoints
             if (req.Permission != null) user.Permission = req.Permission.Value;
             if (req.Disabled != null) user.Disabled = req.Disabled.Value;
             if (req.AllowLdap != null) user.AllowLdap = req.AllowLdap.Value;
-            // Go: if password is empty, keep old password hash
             if (!string.IsNullOrEmpty(req.Password))
             {
                 await users.SetPasswordAsync(user, req.Password);
@@ -85,7 +95,6 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        // Go: uses query param "id"
         group.MapPost("user/delete", async (IUserService users, uint id) =>
         {
             await users.DeleteUserAsync(id);
@@ -98,14 +107,12 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        // Go: uses query param "username"
         group.MapPost("user/del_cache", async (IUserService users, string username) =>
         {
             await users.DeleteUserCacheByUsernameAsync(username);
             return Results.Json(new Resp<object>(null));
         });
 
-        // Admin SSH key management (Go: uid is required query param, supports pagination)
         group.MapGet("user/sshkey/list", async (IUserService users, uint uid, int page = 1, int perPage = 100) =>
         {
             var (keys, total) = await users.ListSshKeysPagedAsync(uid, page, perPage);
@@ -117,12 +124,13 @@ public static class AdminEndpoints
             await users.DeleteSshKeyByIdAsync(id);
             return Results.Json(new Resp<object>(null));
         });
+    }
 
-        // === Storage management ===
+    private static void MapStorageAdmin(RouteGroupBuilder group)
+    {
         group.MapGet("storage/list", async (IStorageService storages, IDriverFactory driverFactory, ISettingService settings, int page = 1, int perPage = 100) =>
         {
             var (storageList, total) = await storages.ListStoragesAsync(page, perPage);
-            // Fill MountDetails for each storage (Go: makeStorageResp)
             var hideDetails = settings.GetBool("hide_storage_details_in_manage_page");
             if (!hideDetails)
             {
@@ -143,7 +151,6 @@ public static class AdminEndpoints
         {
             var storage = await storages.GetStorageByIdAsync(id);
             if (storage == null) return Results.Json(Resp<Storage>.Error(404, "storage not found"));
-            // Fill MountDetails (Go: makeStorageResp)
             var driver = driverFactory.GetDriver(storage.MountPath);
             if (driver is IDriverWithDetails withDetails)
             {
@@ -188,8 +195,10 @@ public static class AdminEndpoints
             await storages.LoadAllStoragesAsync();
             return Results.Json(new Resp<object>(null));
         });
+    }
 
-        // === Meta management ===
+    private static void MapMetaAdmin(RouteGroupBuilder group)
+    {
         group.MapGet("meta/list", async (IMetaService metas, int page = 1, int perPage = 100) =>
         {
             var (metaList, total) = await metas.ListMetasAsync(page, perPage);
@@ -205,7 +214,6 @@ public static class AdminEndpoints
 
         group.MapPost("meta/create", async (IMetaService metas, Meta req) =>
         {
-            // Go: validHide - validate each line of Hide as regex
             var hideError = ValidateHide(req.Hide);
             if (hideError != null) return Results.Json(Resp<object>.Error(400, $"{hideError} is illegal"));
             await metas.CreateMetaAsync(req);
@@ -214,7 +222,6 @@ public static class AdminEndpoints
 
         group.MapPost("meta/update", async (IMetaService metas, Meta req) =>
         {
-            // Go: validHide - validate each line of Hide as regex
             var hideError = ValidateHide(req.Hide);
             if (hideError != null) return Results.Json(Resp<object>.Error(400, $"{hideError} is illegal"));
             await metas.UpdateMetaAsync(req);
@@ -226,9 +233,10 @@ public static class AdminEndpoints
             await metas.DeleteMetaByIdAsync(id);
             return Results.Json(new Resp<object>(null));
         });
+    }
 
-        // === Settings management ===
-        // Go: group/groups are int query params
+    private static void MapSettingAdmin(RouteGroupBuilder group)
+    {
         group.MapGet("setting/list", async (ISettingService settings, int? group = null, string? groups = null) =>
         {
             if (!string.IsNullOrEmpty(groups) || group.HasValue)
@@ -241,7 +249,6 @@ public static class AdminEndpoints
             return Results.Json(new Resp<List<SettingItem>>(await settings.ListSettingsAsync()));
         });
 
-        // Go: supports key (single) and keys (comma-separated) query params
         group.MapGet("setting/get", async (ISettingService settings, string? key = null, string? keys = null) =>
         {
             if (!string.IsNullOrEmpty(key))
@@ -265,14 +272,12 @@ public static class AdminEndpoints
             return Results.Json(new Resp<object>(null));
         });
 
-        // Go: uses query param "key"
         group.MapPost("setting/delete", async (ISettingService settings, string key) =>
         {
             await settings.DeleteSettingAsync(key);
             return Results.Json(new Resp<object>(null));
         });
 
-        // Go: group/groups are int query params
         group.MapPost("setting/default", async (ISettingService settings, int? group = null, string? groups = null) =>
         {
             if (!string.IsNullOrEmpty(groups) || group.HasValue)
@@ -291,7 +296,6 @@ public static class AdminEndpoints
             return Results.Json(new Resp<string>(token));
         });
 
-        // Offline download tool settings
         group.MapPost("setting/set_aria2", async (OfflineDownloadService downloadService, ISettingService settings, SetToolSettingReq req, CancellationToken ct) =>
         {
             if (req.Data is Dictionary<string, object> dict)
@@ -342,11 +346,12 @@ public static class AdminEndpoints
 
         group.MapPost("setting/set_thunder_browser", ([FromBody] SetToolSettingReq req) =>
             Results.Json(Resp<object>.Error(501, "not implemented")));
+    }
 
-        // === Sharing management (admin view) ===
+    private static void MapShareAdmin(RouteGroupBuilder group)
+    {
         group.MapGet("share/list", async (ISharingService sharings, int page = 1, int perPage = 100) =>
         {
-            // Admin sees all sharings
             var (sharingList, total) = await sharings.ListSharingsAsync(0, page, perPage);
             foreach (var s in sharingList)
             {
@@ -376,8 +381,10 @@ public static class AdminEndpoints
             await sharings.DeleteSharingAsync(id);
             return Results.Json(new Resp<object>(null));
         });
+    }
 
-        // === Driver info ===
+    private static void MapDriverAdmin(RouteGroupBuilder group)
+    {
         group.MapGet("driver/list", (IStorageService storages) =>
         {
             var infos = storages.ListDriverInfos();
@@ -401,8 +408,10 @@ public static class AdminEndpoints
                 Name = info.Config.Name, Common = info.Common, Additional = info.Additional, Config = info.Config
             }));
         });
+    }
 
-        // === Search index management ===
+    private static void MapIndexAdmin(RouteGroupBuilder group)
+    {
         group.MapPost("index/build", (ISearchService search, IConfiguration config) =>
         {
             var searchIndex = config["SearchIndex"] ?? "none";
@@ -447,8 +456,10 @@ public static class AdminEndpoints
                 return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
             return Results.Json(new Resp<IndexProgress>(await search.GetProgressAsync()));
         });
+    }
 
-        // === Message management ===
+    private static void MapMessageAdmin(RouteGroupBuilder group)
+    {
         group.MapPost("message/get", async (IMessageService messages, ClaimsPrincipal user) =>
         {
             var userId = GetUserId(user);
@@ -461,8 +472,10 @@ public static class AdminEndpoints
             await messages.SendMessageAsync(req.UserId, req.Title, req.Content);
             return Results.Json(new Resp<object>(null));
         });
+    }
 
-        // === Scan management ===
+    private static void MapScanAdmin(RouteGroupBuilder group)
+    {
         group.MapPost("scan/start", async (IScanService scan, ScanReq req, CancellationToken ct) =>
         {
             try
@@ -489,8 +502,10 @@ public static class AdminEndpoints
         });
         group.MapGet("scan/progress", (IScanService scan) =>
             Results.Json(new Resp<object>(new { obj_count = scan.ScannedCount, is_done = !scan.IsRunning })));
+    }
 
-        // === Admin task routes (legacy compatibility) ===
+    private static void MapTaskAdmin(RouteGroupBuilder group)
+    {
         group.MapGet("task/list", async (ITaskService tasks, string? type = null) =>
             Results.Json(new Resp<List<TaskInfo>>(await tasks.ListTasksAsync(type))));
 
@@ -518,15 +533,17 @@ public static class AdminEndpoints
             await tasks.DeleteTaskAsync(req.Id);
             return Results.Json(new Resp<object>(null));
         });
+    }
 
-        // === Archive management (Go: admin/archive) ===
+    private static void MapArchiveAdmin(RouteGroupBuilder group)
+    {
         group.MapMethods("archive/meta", ["GET", "POST"], async (IFileSystemService fs, [FromBody] ArchiveMetaReq req) =>
         {
             var obj = await fs.GetAsync(req.Path);
             if (obj == null) return Results.Json(Resp<object>.Error(404, "file not found"));
             if (obj.IsDir()) return Results.Json(Resp<object>.Error(400, "path is a directory"));
 
-            var archiveEntries = await FsEndpoints.ReadArchiveEntriesAsync(fs, req.Path, req.Password);
+            var archiveEntries = await FsHelpers.ReadArchiveEntriesAsync(fs, req.Path, req.Password);
             if (archiveEntries == null)
                 return Results.Json(Resp<object>.Error(500, "failed to read archive"));
 
@@ -550,7 +567,7 @@ public static class AdminEndpoints
             if (obj == null) return Results.Json(Resp<object>.Error(404, "file not found"));
             if (obj.IsDir()) return Results.Json(Resp<object>.Error(400, "path is a directory"));
 
-            var archiveEntries = await FsEndpoints.ReadArchiveEntriesAsync(fs, req.Path, req.Password);
+            var archiveEntries = await FsHelpers.ReadArchiveEntriesAsync(fs, req.Path, req.Password);
             if (archiveEntries == null)
                 return Results.Json(Resp<object>.Error(500, "failed to read archive"));
 
@@ -599,8 +616,6 @@ public static class AdminEndpoints
                 Total = total
             }));
         });
-
-        return endpoints;
     }
 
     private static uint? GetUserId(ClaimsPrincipal user)
@@ -609,7 +624,6 @@ public static class AdminEndpoints
         return claim != null && uint.TryParse(claim.Value, out var id) ? id : null;
     }
 
-    /// <summary>Go: validHide - validate each line of Hide as regex</summary>
     private static string? ValidateHide(string? hide)
     {
         if (string.IsNullOrEmpty(hide)) return null;
@@ -620,9 +634,4 @@ public static class AdminEndpoints
         }
         return null;
     }
-
-    private static string SnakeCase(string name) =>
-        string.Concat(name.Select((c, i) =>
-            i > 0 && (char.IsUpper(c) || char.IsDigit(c)) ? "_" + char.ToLower(c) : char.ToLower(c).ToString()))
-            .Replace("__", "_");
 }

@@ -27,7 +27,7 @@ public static class FsEndpoints
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
             {
                 var sharingPath = req.Path[3..]; // strip /@s
-                var (sid, subPath) = SplitSharingPath(sharingPath);
+                var (sid, subPath) = FsHelpers.SplitSharingPath(sharingPath);
                 if (string.IsNullOrEmpty(sid))
                     return Results.Json(Resp<ListResp>.Error(400, "invalid share id"));
 
@@ -40,7 +40,7 @@ public static class FsEndpoints
                 var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "";
                 await sharings.IncrementAccessAsync(sid, ip);
 
-                var sAllItems = sharingObjs.Select(MapObj).ToList();
+                var sAllItems = sharingObjs.Select(FsHelpers.MapObj).ToList();
                 var sTotal = sAllItems.Count;
                 if (req.Page < 1) req.Page = 1;
                 if (req.PerPage < 1) req.PerPage = int.MaxValue;
@@ -59,21 +59,21 @@ public static class FsEndpoints
             }
 
             // Go: Auth(true) - resolve user (allow anonymous/Guest)
-            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: true);
+            var (u, userId, resolveError) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: true);
             if (resolveError != null) return resolveError;
 
             // Go: user.IsGuest() && user.Disabled → already handled in ResolveUserAsync with allowDisabledGuest=true
 
-            var reqPath = JoinPath(u, req.Path);
+            var reqPath = FsHelpers.JoinPath(u, req.Path);
 
             // Go: common.CanAccess - checks Hide, CanRead, and password
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanAccess(u, meta, reqPath, req.Password, ctx))
+            if (!FsHelpers.CanAccess(u, meta, reqPath, req.Password, ctx))
                 return Results.Json(Resp<ListResp>.Error(403, "password is incorrect or you have no permission"));
             // isEncrypt: IsStorageSignEnabled || (meta has password and covers path)
             var listStorage = await fs.GetStorageAsync(reqPath);
             var listEncrypt = (listStorage?.EnableSign == true) ||
-                (meta != null && !string.IsNullOrEmpty(meta.Password) && MetaCoversPath(meta.Path, reqPath, meta.PSub));
+                (meta != null && !string.IsNullOrEmpty(meta.Password) && FsHelpers.MetaCoversPath(meta.Path, reqPath, meta.PSub));
             // Validate pagination (Go: PageReq.Validate)
             if (req.Page < 1) req.Page = 1;
             if (req.PerPage < 1) req.PerPage = int.MaxValue;
@@ -83,9 +83,9 @@ public static class FsEndpoints
             var writeContentBypass = false;
             if (meta != null)
             {
-                if (userId.HasValue && meta.WriteUsers.Count > 0 && !meta.WriteUsers.Contains(userId.Value) && MetaCoversPath(meta.Path, reqPath, meta.WriteUsersSub))
+                if (userId.HasValue && meta.WriteUsers.Count > 0 && !meta.WriteUsers.Contains(userId.Value) && FsHelpers.MetaCoversPath(meta.Path, reqPath, meta.WriteUsersSub))
                     canWrite = false;
-                writeContentBypass = meta.Write && MetaCoversPath(meta.Path, reqPath, meta.WSub);
+                writeContentBypass = meta.Write && FsHelpers.MetaCoversPath(meta.Path, reqPath, meta.WSub);
             }
             var canWriteContentAtPath = canWrite && (u == null || u.HasPermission(UserPermission.CanWriteContent) || writeContentBypass);
             if (req.Refresh && !canWriteContentAtPath)
@@ -113,7 +113,7 @@ public static class FsEndpoints
             }
 
             var signAll = settings.GetBool("sign_all");
-            var allItems = objs.Select(o => MapObjWithSign(o, reqPath, listEncrypt, signAll, signSvc, mountDetails)).ToList();
+            var allItems = objs.Select(o => FsHelpers.MapObjWithSign(o, reqPath, listEncrypt, signAll, signSvc, mountDetails)).ToList();
             var total = allItems.Count;
 
             // Apply pagination (Go: pagination function)
@@ -147,7 +147,7 @@ public static class FsEndpoints
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
             {
                 var sharingPath = req.Path[3..]; // strip /@s
-                var (sid, subPath) = SplitSharingPath(sharingPath);
+                var (sid, subPath) = FsHelpers.SplitSharingPath(sharingPath);
                 if (string.IsNullOrEmpty(sid))
                     return Results.Json(Resp<GetResp>.Error(400, "invalid share id"));
 
@@ -161,12 +161,12 @@ public static class FsEndpoints
                 var sIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "";
                 await sharings.IncrementAccessAsync(sid, sIp);
 
-                var sResp = MapGetResp(sObj);
+                var sResp = FsHelpers.MapGetResp(sObj);
                 if (!sObj.IsDir())
                 {
                     var fakePath = $"/{sid}/{subPath}".TrimEnd('/');
                     var apiUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
-                    sResp.RawURL = $"{apiUrl}/sd{EncodePath(fakePath)}";
+                    sResp.RawURL = $"{apiUrl}/sd{FsHelpers.EncodePath(fakePath)}";
                     if (!string.IsNullOrEmpty(sharing.Pwd)) sResp.RawURL += $"?pwd={sharing.Pwd}";
                 }
                 sResp.Readme = sharing.Readme;
@@ -176,19 +176,19 @@ public static class FsEndpoints
             }
 
             // Go: Auth(true) - resolve user (allow anonymous/Guest)
-            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: true);
+            var (u, userId, resolveError) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: true);
             if (resolveError != null) return resolveError;
 
-            var reqPath = JoinPath(u, req.Path);
+            var reqPath = FsHelpers.JoinPath(u, req.Path);
 
             // Go: common.CanAccess - checks Hide, CanRead, and password
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanAccess(u, meta, reqPath, req.Password, ctx))
+            if (!FsHelpers.CanAccess(u, meta, reqPath, req.Password, ctx))
                 return Results.Json(Resp<GetResp>.Error(403, "password is incorrect or you have no permission"));
 
             var obj = await fs.GetAsync(reqPath);
             if (obj == null) return Results.Json(Resp<GetResp>.Error(404, "object not found"));
-            var resp = MapGetResp(obj);
+            var resp = FsHelpers.MapGetResp(obj);
 
             // Get storage info for sign/proxy logic
             var storageForProxy = await fs.GetStorageAsync(reqPath);
@@ -196,7 +196,7 @@ public static class FsEndpoints
             // Add sign (Go: common.Sign(obj, parentPath, isEncrypt(meta, reqPath)))
             // isEncrypt: IsStorageSignEnabled || (meta has password and covers path)
             var storageSignEnabled = storageForProxy?.EnableSign == true;
-            var metaEncrypt = meta != null && !string.IsNullOrEmpty(meta.Password) && MetaCoversPath(meta.Path, reqPath, meta.PSub);
+            var metaEncrypt = meta != null && !string.IsNullOrEmpty(meta.Password) && FsHelpers.MetaCoversPath(meta.Path, reqPath, meta.PSub);
             var encrypt = storageSignEnabled || metaEncrypt;
             var signAll = settings.GetBool("sign_all");
             if (!obj.IsDir() && (encrypt || signAll))
@@ -216,13 +216,13 @@ public static class FsEndpoints
                 if (mustProxy || webProxy)
                 {
                     // Go: GenerateDownProxyURL - use storage.DownProxyURL if available
-                    var rawURL = GenerateDownProxyURL(storageForProxy, reqPath, sign);
+                    var rawURL = FsHelpers.GenerateDownProxyURL(storageForProxy, reqPath, sign);
                     if (string.IsNullOrEmpty(rawURL))
                     {
                         var query = "";
                         if (encrypt || settings.GetBool("sign_all"))
                             query = "?sign=" + sign.Sign(reqPath);
-                        rawURL = $"{ctx.Request.Scheme}://{ctx.Request.Host}/p{EncodePath(reqPath)}{query}";
+                        rawURL = $"{ctx.Request.Scheme}://{ctx.Request.Host}/p{FsHelpers.EncodePath(reqPath)}{query}";
                     }
                     resp.RawURL = rawURL;
                 }
@@ -262,10 +262,10 @@ public static class FsEndpoints
                     // Go: isEncrypt(parentMeta, parentPath) for Related sign
                     var parentMeta = await metaSvc.GetNearestMetaAsync(parentPath);
                     var relatedEncrypt = (storage?.EnableSign == true) ||
-                        (parentMeta != null && !string.IsNullOrEmpty(parentMeta.Password) && MetaCoversPath(parentMeta.Path, parentPath, parentMeta.PSub));
+                        (parentMeta != null && !string.IsNullOrEmpty(parentMeta.Password) && FsHelpers.MetaCoversPath(parentMeta.Path, parentPath, parentMeta.PSub));
                     resp.Related = siblingObjs
                         .Where(o => o.GetName() != obj.GetName() && o.GetName().StartsWith(nameWithoutExt))
-                        .Select(o => MapObjWithSign(o, parentPath, relatedEncrypt, signAll, sign, null)).ToList();
+                        .Select(o => FsHelpers.MapObjWithSign(o, parentPath, relatedEncrypt, signAll, sign, null)).ToList();
                 }
             }
 
@@ -276,23 +276,23 @@ public static class FsEndpoints
         // Write operations (requires auth, not guest)
         group.MapPost("mkdir", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] MkdirReq req) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
 
             // Go: user.JoinPath
-            var reqPath = JoinPath(u, req.Path);
+            var reqPath = FsHelpers.JoinPath(u, req.Path);
 
             // Go: CanWriteContent check on parent path (CanWriteContent || CanWriteContentBypassUserPerms)
             var parentPath = reqPath.LastIndexOf('/') > 0 ? reqPath[..reqPath.LastIndexOf('/')] : "/";
             var parentMeta = await metaSvc.GetNearestMetaAsync(parentPath);
-            var parentWriteBypass = parentMeta?.Write == true && MetaCoversPath(parentMeta.Path, parentPath, parentMeta.WSub);
+            var parentWriteBypass = parentMeta?.Write == true && FsHelpers.MetaCoversPath(parentMeta.Path, parentPath, parentMeta.WSub);
             if (!u.HasPermission(UserPermission.CanWriteContent) && !parentWriteBypass)
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: CanWrite check on parent path
-            if (!CanWrite(u, parentMeta, parentPath))
+            if (!FsHelpers.CanWrite(u, parentMeta, parentPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             await fs.MakeDirAsync(reqPath);
@@ -301,7 +301,7 @@ public static class FsEndpoints
 
         group.MapPost("rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RenameReq req) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -310,7 +310,7 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: user.JoinPath
-            var reqPath = JoinPath(u, req.Path);
+            var reqPath = FsHelpers.JoinPath(u, req.Path);
 
             // Go: checkRelativePath - name cannot contain / or \, cannot be empty, "." or ".."
             if (string.IsNullOrEmpty(req.Name) || req.Name == "." || req.Name == ".." ||
@@ -320,7 +320,7 @@ public static class FsEndpoints
             // Go: CanWrite check on parent path
             var parentPath = reqPath.LastIndexOf('/') > 0 ? reqPath[..reqPath.LastIndexOf('/')] : "/";
             var parentMeta = await metaSvc.GetNearestMetaAsync(parentPath);
-            if (!CanWrite(u, parentMeta, parentPath))
+            if (!FsHelpers.CanWrite(u, parentMeta, parentPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: if !req.Overwrite, check if destination exists
@@ -341,7 +341,7 @@ public static class FsEndpoints
 
         group.MapPost("batch_rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] BatchRenameReq req) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -350,11 +350,11 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: user.JoinPath
-            var reqPath = JoinPath(u, req.SrcDir);
+            var reqPath = FsHelpers.JoinPath(u, req.SrcDir);
 
             // Go: CanWrite check
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanWrite(u, meta, reqPath))
+            if (!FsHelpers.CanWrite(u, meta, reqPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             foreach (var item in req.RenameObjects ?? [])
@@ -373,7 +373,7 @@ public static class FsEndpoints
 
         group.MapPost("regex_rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RegexRenameReq req) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -382,11 +382,11 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: user.JoinPath
-            var reqPath = JoinPath(u, req.SrcDir);
+            var reqPath = FsHelpers.JoinPath(u, req.SrcDir);
 
             // Go: CanWrite check
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanWrite(u, meta, reqPath))
+            if (!FsHelpers.CanWrite(u, meta, reqPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             System.Text.RegularExpressions.Regex? srcRegexp;
@@ -412,7 +412,7 @@ public static class FsEndpoints
 
         group.MapPost("move", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] MoveReq req) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -421,17 +421,17 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: user.JoinPath for srcDir and dstDir
-            var srcDir = JoinPath(u, req.SrcDir);
-            var dstDir = JoinPath(u, req.DstDir);
+            var srcDir = FsHelpers.JoinPath(u, req.SrcDir);
+            var dstDir = FsHelpers.JoinPath(u, req.DstDir);
 
             // Go: CanWrite check on srcDir
             var srcMeta = await metaSvc.GetNearestMetaAsync(srcDir);
-            if (!CanWrite(u, srcMeta, srcDir))
+            if (!FsHelpers.CanWrite(u, srcMeta, srcDir))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: CanWrite check on dstDir
             var dstMeta = await metaSvc.GetNearestMetaAsync(dstDir);
-            if (!CanWrite(u, dstMeta, dstDir))
+            if (!FsHelpers.CanWrite(u, dstMeta, dstDir))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             if (req.Names == null || req.Names.Count == 0)
@@ -467,7 +467,7 @@ public static class FsEndpoints
 
         group.MapPost("recursive_move", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RecursiveMoveReq req) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -476,15 +476,15 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: user.JoinPath
-            var srcDir = JoinPath(u, req.SrcDir);
-            var dstDir = JoinPath(u, req.DstDir);
+            var srcDir = FsHelpers.JoinPath(u, req.SrcDir);
+            var dstDir = FsHelpers.JoinPath(u, req.DstDir);
 
             // Go: CanWrite check on srcDir and dstDir
             var srcMeta = await metaSvc.GetNearestMetaAsync(srcDir);
-            if (!CanWrite(u, srcMeta, srcDir))
+            if (!FsHelpers.CanWrite(u, srcMeta, srcDir))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
             var dstMeta = await metaSvc.GetNearestMetaAsync(dstDir);
-            if (!CanWrite(u, dstMeta, dstDir))
+            if (!FsHelpers.CanWrite(u, dstMeta, dstDir))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: recursive move with conflict policy
@@ -550,7 +550,7 @@ public static class FsEndpoints
 
         group.MapPost("copy", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] CopyReq req) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -559,17 +559,17 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: user.JoinPath for srcDir and dstDir
-            var srcDir = JoinPath(u, req.SrcDir);
-            var dstDir = JoinPath(u, req.DstDir);
+            var srcDir = FsHelpers.JoinPath(u, req.SrcDir);
+            var dstDir = FsHelpers.JoinPath(u, req.DstDir);
 
             // Go: CanRead check on srcDir (copy only needs read access to source)
             var srcMeta = await metaSvc.GetNearestMetaAsync(srcDir);
-            if (!CanRead(u, srcMeta, srcDir))
+            if (!FsHelpers.CanRead(u, srcMeta, srcDir))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: CanWrite check on dstDir
             var dstMeta = await metaSvc.GetNearestMetaAsync(dstDir);
-            if (!CanWrite(u, dstMeta, dstDir))
+            if (!FsHelpers.CanWrite(u, dstMeta, dstDir))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             if (req.Names == null || req.Names.Count == 0)
@@ -612,7 +612,7 @@ public static class FsEndpoints
 
         group.MapPost("remove", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RemoveReq req) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -621,11 +621,11 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: user.JoinPath
-            var reqPath = JoinPath(u, req.Dir);
+            var reqPath = FsHelpers.JoinPath(u, req.Dir);
 
             // Go: CanWrite check
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanWrite(u, meta, reqPath))
+            if (!FsHelpers.CanWrite(u, meta, reqPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             if (req.Names == null || req.Names.Count == 0)
@@ -645,7 +645,7 @@ public static class FsEndpoints
 
         group.MapPost("remove_empty_directory", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RemoveEmptyDirReq req) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -654,11 +654,11 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: user.JoinPath
-            var reqPath = JoinPath(u, req.SrcDir);
+            var reqPath = FsHelpers.JoinPath(u, req.SrcDir);
 
             // Go: CanWrite check
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanWrite(u, meta, reqPath))
+            if (!FsHelpers.CanWrite(u, meta, reqPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: recursive empty directory removal with parent recheck
@@ -719,23 +719,23 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(400, "File-Path header is required"));
 
             // Go: user.JoinPath
-            var userId = GetUserId(ctx.User);
+            var userId = FsHelpers.GetUserId(ctx.User);
             var u = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
-            filePath = JoinPath(u, filePath);
+            filePath = FsHelpers.JoinPath(u, filePath);
 
             // Go: FsUp middleware - CanWriteContent || CanWriteContentBypassUserPerms
             var parentPath = filePath.LastIndexOf('/') > 0 ? filePath[..filePath.LastIndexOf('/')] : "/";
             var parentMeta = await metaSvc.GetNearestMetaAsync(parentPath);
-            var parentWriteBypass = parentMeta?.Write == true && MetaCoversPath(parentMeta.Path, parentPath, parentMeta.WSub);
+            var parentWriteBypass = parentMeta?.Write == true && FsHelpers.MetaCoversPath(parentMeta.Path, parentPath, parentMeta.WSub);
             if ((u == null || !u.HasPermission(UserPermission.CanWriteContent)) && !parentWriteBypass)
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
             // Go: FsUp middleware - CanWrite check on parent
-            if (!CanWrite(u, parentMeta, parentPath))
+            if (!FsHelpers.CanWrite(u, parentMeta, parentPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: shouldIgnoreSystemFile
             var putFileName = System.IO.Path.GetFileName(filePath);
-            if (IsSystemFile(putFileName))
+            if (FsHelpers.IsSystemFile(putFileName))
                 return Results.Json(Resp<object>.Error(403, "system file ignored"));
 
             // Go: overwrite check (default true)
@@ -810,23 +810,23 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(400, "File-Path header is required"));
 
             // Go: user.JoinPath
-            var userId = GetUserId(ctx.User);
+            var userId = FsHelpers.GetUserId(ctx.User);
             var u = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
-            filePath = JoinPath(u, filePath);
+            filePath = FsHelpers.JoinPath(u, filePath);
 
             // Go: FsUp middleware - CanWriteContent || CanWriteContentBypassUserPerms
             var parentPath = filePath.LastIndexOf('/') > 0 ? filePath[..filePath.LastIndexOf('/')] : "/";
             var parentMeta = await metaSvc.GetNearestMetaAsync(parentPath);
-            var parentWriteBypass = parentMeta?.Write == true && MetaCoversPath(parentMeta.Path, parentPath, parentMeta.WSub);
+            var parentWriteBypass = parentMeta?.Write == true && FsHelpers.MetaCoversPath(parentMeta.Path, parentPath, parentMeta.WSub);
             if ((u == null || !u.HasPermission(UserPermission.CanWriteContent)) && !parentWriteBypass)
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
             // Go: FsUp middleware - CanWrite check on parent
-            if (!CanWrite(u, parentMeta, parentPath))
+            if (!FsHelpers.CanWrite(u, parentMeta, parentPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: shouldIgnoreSystemFile
             var formFileName = System.IO.Path.GetFileName(filePath);
-            if (IsSystemFile(formFileName))
+            if (FsHelpers.IsSystemFile(formFileName))
                 return Results.Json(Resp<object>.Error(403, "system file ignored"));
 
             var overwrite = ctx.Request.Headers["Overwrite"].FirstOrDefault() != "false";
@@ -893,7 +893,7 @@ public static class FsEndpoints
                 {
                     var signStr = sign.Sign(rawPath);
                     var apiUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
-                    var proxyUrl = $"{apiUrl}/p{EncodePath(rawPath)}?d&sign={signStr}";
+                    var proxyUrl = $"{apiUrl}/p{FsHelpers.EncodePath(rawPath)}?d&sign={signStr}";
                     return Results.Json(new Resp<LinkResp>(new LinkResp { URL = proxyUrl }));
                 }
             }
@@ -910,10 +910,10 @@ public static class FsEndpoints
                 return Results.Json(new Resp<object?>(null) { Code = 404, Message = "search not available" });
 
             // Go: Auth(false) - resolve user (allow anonymous/Guest, but not disabled guest)
-            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: false);
+            var (u, userId, resolveError) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: false);
             if (resolveError != null) return resolveError;
 
-            req.Parent = JoinPath(u, req.Parent);
+            req.Parent = FsHelpers.JoinPath(u, req.Parent);
 
             var results = await search.SearchAsync(req.Parent, req.Keywords, req.Page, req.PerPage);
             // Go: Total is the count before filtering
@@ -930,9 +930,9 @@ public static class FsEndpoints
                     !r.Parent.StartsWith(u.BasePath, StringComparison.Ordinal))
                     continue;
                 var rMeta = await metaSvc.GetNearestMetaAsync(r.Parent);
-                // Go: CanAccess(user, meta, path.Join(node.Parent, node.Name), req.Password)
+                // Go: FsHelpers.CanAccess(user, meta, path.Join(node.Parent, node.Name), req.Password)
                 var fullPath = r.Parent.TrimEnd('/') + "/" + r.Name;
-                if (!CanAccess(u, rMeta, fullPath, null, ctx))
+                if (!FsHelpers.CanAccess(u, rMeta, fullPath, null, ctx))
                     continue;
                 filtered.Add(r);
             }
@@ -944,7 +944,7 @@ public static class FsEndpoints
         group.MapMethods("dirs", ["GET", "POST"], async (IFileSystemService fs, IMetaService metaSvc, IUserService users, HttpContext ctx, [FromBody] DirsReq req) =>
         {
             // Go: Auth(false) - resolve user (allow anonymous/Guest, but not disabled guest)
-            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: false);
+            var (u, userId, resolveError) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: false);
             if (resolveError != null) return resolveError;
 
             // Go: ForceRoot check - admin only
@@ -954,11 +954,11 @@ public static class FsEndpoints
 
             var reqPath = req.Path;
             if (!req.ForceRoot)
-                reqPath = JoinPath(u, req.Path);
+                reqPath = FsHelpers.JoinPath(u, req.Path);
 
             // Go: CanAccess - checks Hide, CanRead, and password
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanAccess(u, meta, reqPath, req.Password, ctx))
+            if (!FsHelpers.CanAccess(u, meta, reqPath, req.Password, ctx))
                 return Results.Json(Resp<object>.Error(403, "password is incorrect or you have no permission"));
 
             var objs = await fs.ListAsync(reqPath);
@@ -970,14 +970,14 @@ public static class FsEndpoints
         group.MapMethods("other", ["GET", "POST"], async (IFileSystemService fs, IUserService users, IMetaService metaSvc, HttpContext ctx, [FromBody] OtherReq req) =>
         {
             // Go: Auth(false) - resolve user (allow anonymous/Guest, but not disabled guest)
-            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: false);
+            var (u, userId, resolveError) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: false);
             if (resolveError != null) return resolveError;
 
-            var reqPath = JoinPath(u, req.Path);
+            var reqPath = FsHelpers.JoinPath(u, req.Path);
 
             // Go: common.CanAccess - checks Hide, CanRead, and password
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanAccess(u, meta, reqPath, req.Password, ctx))
+            if (!FsHelpers.CanAccess(u, meta, reqPath, req.Password, ctx))
                 return Results.Json(Resp<object>.Error(403, "password is incorrect or you have no permission"));
 
             var obj = await fs.GetAsync(reqPath);
@@ -988,7 +988,7 @@ public static class FsEndpoints
 
         group.MapPost("add_offline_download", async (OfflineDownloadService downloadService, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, AddOfflineDownloadReq req, CancellationToken ct) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -996,12 +996,12 @@ public static class FsEndpoints
             if (!u.HasPermission(UserPermission.CanAddOfflineDownloadTasks))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
-            // Go: user.JoinPath(req.Path)
-            var reqPath = JoinPath(u, req.Path);
+            // Go: user.FsHelpers.JoinPath(req.Path)
+            var reqPath = FsHelpers.JoinPath(u, req.Path);
 
             // Go: CanWrite check
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanWrite(u, meta, reqPath))
+            if (!FsHelpers.CanWrite(u, meta, reqPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             try
@@ -1022,7 +1022,7 @@ public static class FsEndpoints
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
             {
                 var sharingPath = req.Path[3..];
-                var (sid, subPath) = SplitSharingPath(sharingPath);
+                var (sid, subPath) = FsHelpers.SplitSharingPath(sharingPath);
                 if (string.IsNullOrEmpty(sid))
                     return Results.Json(Resp<object>.Error(400, "invalid share id"));
 
@@ -1052,10 +1052,10 @@ public static class FsEndpoints
             }
 
             // Go: Auth(true) - resolve user (allow anonymous/Guest)
-            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: true);
+            var (u, userId, resolveError) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: true);
             if (resolveError != null) return resolveError;
 
-            var reqPath = JoinPath(u, req.Path);
+            var reqPath = FsHelpers.JoinPath(u, req.Path);
 
             // Go: CanReadArchives permission check
             if (u != null && !u.HasPermission(UserPermission.CanReadArchives))
@@ -1063,7 +1063,7 @@ public static class FsEndpoints
 
             // Go: CanAccess - checks Hide, CanRead, and password
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanAccess(u, meta, reqPath, req.Password, ctx))
+            if (!FsHelpers.CanAccess(u, meta, reqPath, req.Password, ctx))
                 return Results.Json(Resp<object>.Error(403, "password is incorrect or you have no permission"));
 
             var obj = await fs.GetAsync(reqPath);
@@ -1087,7 +1087,7 @@ public static class FsEndpoints
             if (req.Path.StartsWith("/@s", StringComparison.Ordinal))
             {
                 var sharingPath = req.Path[3..];
-                var (sid, subPath) = SplitSharingPath(sharingPath);
+                var (sid, subPath) = FsHelpers.SplitSharingPath(sharingPath);
                 if (string.IsNullOrEmpty(sid))
                     return Results.Json(Resp<object>.Error(400, "invalid share id"));
 
@@ -1121,17 +1121,17 @@ public static class FsEndpoints
             }
 
             // Go: Auth(true) - resolve user (allow anonymous/Guest)
-            var (u, userId, resolveError) = await ResolveUserAsync(ctx, users, allowDisabledGuest: true);
+            var (u, userId, resolveError) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: true);
             if (resolveError != null) return resolveError;
 
-            var reqPath = JoinPath(u, req.Path);
+            var reqPath = FsHelpers.JoinPath(u, req.Path);
 
             if (u != null && !u.HasPermission(UserPermission.CanReadArchives))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: CanAccess - checks Hide, CanRead, and password
             var meta = await metaSvc.GetNearestMetaAsync(reqPath);
-            if (!CanAccess(u, meta, reqPath, req.Password, ctx))
+            if (!FsHelpers.CanAccess(u, meta, reqPath, req.Password, ctx))
                 return Results.Json(Resp<object>.Error(403, "password is incorrect or you have no permission"));
 
             var obj = await fs.GetAsync(reqPath);
@@ -1159,7 +1159,7 @@ public static class FsEndpoints
         group.MapPost("archive/decompress", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ITaskService taskService, ClaimsPrincipal userPrincipal, [FromBody] ArchiveDecompressReq req) =>
         {
             // Go: user.CanDecompress() permission check
-            var userId = GetUserId(userPrincipal);
+            var userId = FsHelpers.GetUserId(userPrincipal);
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<object>.Error(401, "user not found"));
@@ -1167,12 +1167,12 @@ public static class FsEndpoints
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             // Go: user.JoinPath for srcDir and dstDir
-            var srcDir = JoinPath(u, req.SrcDir);
-            var dstDir = JoinPath(u, req.DstDir);
+            var srcDir = FsHelpers.JoinPath(u, req.SrcDir);
+            var dstDir = FsHelpers.JoinPath(u, req.DstDir);
 
             // Go: CanWrite check on dstDir
             var dstMeta = await metaSvc.GetNearestMetaAsync(dstDir);
-            if (!CanWrite(u, dstMeta, dstDir))
+            if (!FsHelpers.CanWrite(u, dstMeta, dstDir))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
             var names = req.Names ?? [];
@@ -1251,11 +1251,11 @@ public static class FsEndpoints
         {
             // Go: url.PathUnescape + user.JoinPath
             var dirPath = Uri.UnescapeDataString(req.Path ?? "/");
-            var userId = GetUserId(ctx.User);
+            var userId = FsHelpers.GetUserId(ctx.User);
             if (userId.HasValue)
             {
                 var u = await users.GetUserByIdAsync(userId.Value);
-                dirPath = JoinPath(u, dirPath);
+                dirPath = FsHelpers.JoinPath(u, dirPath);
             }
 
             // Go: overwrite check - check if file already exists
@@ -1290,282 +1290,4 @@ public static class FsEndpoints
         return endpoints;
     }
 
-    private static Dictionary<string, string>? ParseHashInfo(string? hashStr)
-    {
-        if (string.IsNullOrEmpty(hashStr) || hashStr == "{}") return null;
-        try { return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(hashStr); }
-        catch { return null; }
-    }
-
-    private static ObjResp MapObj(IObj obj) => new()
-    {
-        Name = obj.GetName(),
-        Size = obj.GetSize(),
-        IsDir = obj.IsDir(),
-        Modified = obj.GetModTime(),
-        Created = obj.GetCreateTime(),
-        HashInfoStr = obj.GetHash(),
-        HashInfo = ParseHashInfo(obj.GetHash()),
-        Type = ObjTypeHelper.GetObjType(obj.GetName(), obj.IsDir()),
-        Thumb = ObjTypeHelper.GetThumb(obj),
-    };
-
-    private static ObjResp MapObjWithSign(IObj obj, string parent, bool encrypt, bool signAll, ISignService signSvc, StorageDetails? mountDetails) => new()
-    {
-        Name = obj.GetName(),
-        Size = obj.GetSize(),
-        IsDir = obj.IsDir(),
-        Modified = obj.GetModTime(),
-        Created = obj.GetCreateTime(),
-        HashInfoStr = obj.GetHash(),
-        HashInfo = ParseHashInfo(obj.GetHash()),
-        Type = ObjTypeHelper.GetObjType(obj.GetName(), obj.IsDir()),
-        Thumb = ObjTypeHelper.GetThumb(obj),
-        // Go: Sign = obj.IsDir() ? "" : (!encrypt && !signAll) ? "" : sign(path)
-        Sign = obj.IsDir() ? null : (encrypt || signAll ? signSvc.Sign(string.Join("/", parent.TrimEnd('/'), obj.GetName())) : null),
-        MountDetails = obj.IsDir() ? mountDetails : null,
-    };
-
-    private static GetResp MapGetResp(IObj obj) => new()
-    {
-        Name = obj.GetName(),
-        Size = obj.GetSize(),
-        IsDir = obj.IsDir(),
-        Modified = obj.GetModTime(),
-        Created = obj.GetCreateTime(),
-        HashInfoStr = obj.GetHash(),
-        HashInfo = ParseHashInfo(obj.GetHash()),
-        Type = ObjTypeHelper.GetObjType(obj.GetName(), obj.IsDir()),
-        Thumb = ObjTypeHelper.GetThumb(obj),
-    };
-
-    // Go: EncodePath(path, true) = PathEscape each segment, then join with /
-    private static string EncodePath(string path) =>
-        string.Join("/", path.Split('/').Select(Uri.EscapeDataString));
-
-    private static string? GenerateDownProxyURL(Storage? storage, string reqPath, ISignService sign)
-    {
-        if (storage == null || string.IsNullOrEmpty(storage.DownProxyURL))
-            return null;
-        var baseURL = storage.DownProxyURL.Split('\n')[0];
-        var query = "";
-        if (!storage.DisableProxySign)
-            query = "?sign=" + sign.Sign(reqPath);
-        // Go: EncodePath(reqPath, true) = PathEscape each segment, then join with /
-        var encodedPath = EncodePath(reqPath);
-        return $"{baseURL}{encodedPath}{query}";
-    }
-
-    private static uint? GetUserId(ClaimsPrincipal user)
-    {
-        var claim = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
-        return claim != null && uint.TryParse(claim.Value, out var id) ? id : null;
-    }
-
-    /// <summary>
-    /// Go: Auth(true) equivalent - resolves user from JWT if present, otherwise returns Guest user.
-    /// allowDisabledGuest: when false, disabled guest users get 401 (Go: Auth(false)).
-    /// </summary>
-    private static async Task<(User? User, uint? UserId, IResult? Error)> ResolveUserAsync(
-        HttpContext ctx, IUserService users, bool allowDisabledGuest = true)
-    {
-        // Try to get user from authenticated claims
-        var userId = GetUserId(ctx.User);
-        if (userId.HasValue)
-        {
-            var u = await users.GetUserByIdAsync(userId.Value);
-            if (u == null) return (null, null, Results.Json(Resp<object>.Error(401, "user not found")));
-            if (u.Disabled)
-                return (null, null, Results.Json(Resp<object>.Error(401, "Current user is disabled, replace please")));
-            return (u, userId, null);
-        }
-
-        // No token → treat as Guest user (Go: Auth gets guest when token is empty)
-        var guest = await users.GetGuestUserAsync();
-        if (guest == null)
-            return (null, null, Results.Json(Resp<object>.Error(500, "guest user not found")));
-        if (!allowDisabledGuest && guest.Disabled)
-            return (null, null, Results.Json(Resp<object>.Error(401, "Guest user is disabled, login please")));
-        return (guest, guest.Id, null);
-    }
-
-    /// <summary>
-    /// Go: user.JoinPath - prepends user.BasePath if set and not "/"
-    /// </summary>
-    private static string JoinPath(User? user, string path)
-    {
-        if (user != null && !string.IsNullOrEmpty(user.BasePath) && user.BasePath != "/")
-            return user.BasePath.TrimEnd('/') + "/" + path.TrimStart('/');
-        return path;
-    }
-
-    private static bool UserCanAccessWithoutPassword(HttpContext ctx)
-    {
-        var user = ctx.Items["User"] as User;
-        if (user != null) return user.HasPermission(UserPermission.CanAccessWithoutPassword);
-        // Check from claims for authenticated users
-        var permStr = ctx.User.FindFirst("Permission")?.Value;
-        if (int.TryParse(permStr, out var perm))
-            return (perm & (int)UserPermission.CanAccessWithoutPassword) != 0;
-        return false;
-    }
-
-    private static bool MetaCoversPath(string metaPath, string targetPath, bool sub)
-    {
-        if (metaPath == targetPath) return true;
-        if (!sub) return false;
-        return targetPath.StartsWith(metaPath + "/", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool CanRead(User? user, Meta? meta, string path)
-    {
-        if (user == null) return true;
-        if (meta != null && meta.ReadUsers.Count > 0 && !meta.ReadUsers.Contains(user.Id) && MetaCoversPath(meta.Path, path, meta.ReadUsersSub))
-            return false;
-        return true;
-    }
-
-    // Go: common.CanAccess - checks Hide, CanRead, and password
-    private static bool CanAccess(User? user, Meta? meta, string reqPath, string? password, HttpContext ctx)
-    {
-        // Hide check: if user can't see hides and path matches meta.Hide regex
-        if (meta != null && (user == null || !user.HasPermission(UserPermission.CanSeeHides)) && !string.IsNullOrEmpty(meta.Hide) &&
-            MetaCoversPath(meta.Path, GetParentPath(reqPath), meta.HSub))
-        {
-            var fileName = System.IO.Path.GetFileName(reqPath);
-            foreach (var hidePattern in meta.Hide.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-            {
-                try
-                {
-                    if (Regex.IsMatch(fileName, hidePattern))
-                        return false;
-                }
-                catch { /* invalid regex, skip */ }
-            }
-        }
-        // CanRead check
-        if (!CanRead(user, meta, reqPath))
-            return false;
-        // Password check
-        if (user != null && user.HasPermission(UserPermission.CanAccessWithoutPassword))
-            return true;
-        if (meta == null || string.IsNullOrEmpty(meta.Password))
-            return true;
-        if (!MetaCoversPath(meta.Path, reqPath, meta.PSub))
-            return true;
-        return meta.Password == password;
-    }
-
-    private static string GetParentPath(string path)
-    {
-        var idx = path.TrimEnd('/').LastIndexOf('/');
-        return idx <= 0 ? "/" : path[..idx];
-    }
-
-    // Go: utils.IsSystemFile - checks for common system files
-    private static readonly HashSet<string> SystemFiles = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".DS_Store", "desktop.ini", "Thumbs.db", "@eaDir"
-    };
-    private static bool IsSystemFile(string filename)
-    {
-        if (string.IsNullOrEmpty(filename)) return false;
-        if (SystemFiles.Contains(filename)) return true;
-        if (filename.StartsWith("._")) return true;
-        return false;
-    }
-
-    private static bool CanWrite(User? user, Meta? meta, string path)
-    {
-        if (user == null) return true;
-        if (meta != null && meta.WriteUsers.Count > 0 && !meta.WriteUsers.Contains(user.Id) && MetaCoversPath(meta.Path, path, meta.WriteUsersSub))
-            return false;
-        return true;
-    }
-
-    private static (string sid, string path) SplitSharingPath(string sharingPath)
-    {
-        var trimmed = sharingPath.TrimStart('/');
-        var slashIdx = trimmed.IndexOf('/');
-        return slashIdx < 0
-            ? (trimmed, "")
-            : (trimmed[..slashIdx], trimmed[(slashIdx + 1)..]);
-    }
-
-    internal static async Task<List<ArchiveEntryInfo>?> ReadArchiveEntriesAsync(IFileSystemService fs, string path, string? password)
-    {
-        var link = await fs.LinkAsync(path, new LinkArgs());
-        if (link == null) return null;
-
-        Stream? archiveStream = null;
-        string? tempFile = null;
-
-        try
-        {
-            // Try to open as local file first
-            if (!string.IsNullOrEmpty(link.URL) && File.Exists(link.URL))
-            {
-                archiveStream = new FileStream(link.URL, FileMode.Open, FileAccess.Read);
-            }
-            else if (!string.IsNullOrEmpty(link.URL) && link.URL.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-            {
-                // Download to temp file
-                using var http = new HttpClient();
-                var response = await http.GetAsync(link.URL, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-                tempFile = Path.Combine(Path.GetTempPath(), $"openlist-archive-{Guid.NewGuid():N}");
-                using (var fs2 = File.Create(tempFile))
-                    await response.Content.CopyToAsync(fs2);
-                archiveStream = new FileStream(tempFile, FileMode.Open, FileAccess.Read);
-            }
-            else
-            {
-                return null;
-            }
-
-            var ext = Path.GetExtension(path).ToLowerInvariant();
-            return ext switch
-            {
-                ".zip" => ReadZipEntries(archiveStream),
-                _ => null // Unsupported archive format
-            };
-        }
-        catch
-        {
-            return null;
-        }
-        finally
-        {
-            archiveStream?.Dispose();
-            if (tempFile != null && File.Exists(tempFile))
-            {
-                try { File.Delete(tempFile); } catch { }
-            }
-        }
-    }
-
-    private static List<ArchiveEntryInfo> ReadZipEntries(Stream stream)
-    {
-        var entries = new List<ArchiveEntryInfo>();
-        using var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Read);
-        foreach (var entry in archive.Entries)
-        {
-            entries.Add(new ArchiveEntryInfo
-            {
-                Name = entry.FullName,
-                Size = entry.Length,
-                IsDir = entry.FullName.EndsWith('/'),
-                IsEncrypted = entry.CompressedLength == 0 && entry.Length > 0 // heuristic for encrypted entries
-            });
-        }
-        return entries;
-    }
-}
-
-public class ArchiveEntryInfo
-{
-    public string Name { get; set; } = "";
-    public long Size { get; set; }
-    public bool IsDir { get; set; }
-    public bool IsEncrypted { get; set; }
 }
