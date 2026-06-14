@@ -278,6 +278,13 @@ internal static partial class FsHelpers
         return true;
     }
 
+    // Go: common.CanWriteContentBypassUserPerms(meta, path)
+    internal static bool CanWriteContentBypassUserPerms(Meta? meta, string path)
+    {
+        if (meta == null || !meta.Write) return false;
+        return MetaCoversPath(meta.Path, path, meta.WSub);
+    }
+
     internal static (string sid, string path) SplitSharingPath(string sharingPath)
     {
         var trimmed = sharingPath.TrimStart('/');

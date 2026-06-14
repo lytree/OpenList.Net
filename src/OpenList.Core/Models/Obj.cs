@@ -85,6 +85,8 @@ public class ObjItem : IObj
     public ObjMask Mask { get; set; }
     /// <summary>Per-object storage details (Go: ObjStorageDetails wrapper).</summary>
     public StorageDetails? MountDetails { get; set; }
+    /// <summary>Per-object provider name (Go: ObjWithProvider interface).</summary>
+    public string? Provider { get; set; }
 
     public virtual long GetSize() => Size;
     public virtual string GetName() => Name;

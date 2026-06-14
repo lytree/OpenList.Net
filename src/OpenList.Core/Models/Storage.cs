@@ -54,7 +54,10 @@ public class Storage
 
 public class StorageDetails
 {
-    [JsonPropertyName("total_space")] public long TotalSpace { get; set; }
-    [JsonPropertyName("used_space")] public long UsedSpace { get; set; }
-    [JsonPropertyName("free_space")] public long FreeSpace => TotalSpace - UsedSpace;
+    [JsonPropertyName("total_space")]
+    public long TotalSpace { get; set; }
+    [JsonPropertyName("used_space")]
+    public long UsedSpace { get; set; }
+    [JsonPropertyName("free_space")]
+    public long FreeSpace => TotalSpace - UsedSpace;
 }
