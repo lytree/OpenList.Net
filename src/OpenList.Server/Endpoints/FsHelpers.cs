@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
@@ -14,7 +13,7 @@ namespace OpenList.Server.Endpoints;
 /// <summary>
 /// Shared helper methods for FS endpoints.
 /// </summary>
-internal static class FsHelpers
+internal static partial class FsHelpers
 {
     internal static Dictionary<string, string>? ParseHashInfo(string? hashStr)
     {
@@ -49,7 +48,8 @@ internal static class FsHelpers
         Thumb = ObjTypeHelper.GetThumb(obj),
         // Go: Sign = obj.IsDir() ? "" : (!encrypt && !signAll) ? "" : sign(path)
         Sign = obj.IsDir() ? null : (encrypt || signAll ? signSvc.Sign(string.Join("/", parent.TrimEnd('/'), obj.GetName())) : null),
-        MountDetails = obj.IsDir() ? mountDetails : null,
+        // Go: per-object mount details (from ObjStorageDetails wrapper), fallback to parent-level
+        MountDetails = obj.IsDir() ? ((obj as ObjItem)?.MountDetails ?? mountDetails) : null,
     };
 
     internal static GetResp MapGetResp(IObj obj) => new()
@@ -151,6 +151,75 @@ internal static class FsHelpers
         return true;
     }
 
+    /// <summary>
+    /// Go: whetherHide - checks if hide patterns should be applied for this user/path.
+    /// Admin users (CanSeeHides) bypass hide filtering.
+    /// </summary>
+    internal static bool WhetherHide(User? user, Meta? meta, string path)
+    {
+        if (user == null || user.HasPermission(UserPermission.CanSeeHides)) return false;
+        if (meta == null) return false;
+        if (string.IsNullOrEmpty(meta.Hide)) return false;
+        if (!MetaCoversPath(meta.Path, path, meta.HSub)) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Go: filterReadableObjs - filters objects based on hide patterns and per-object read permissions.
+    /// For directories, fetches the nearest meta for each dir path; for files, uses the parent meta.
+    /// </summary>
+    internal static async Task<List<IObj>> FilterReadableObjsAsync(
+        List<IObj> objs, User? user, string reqPath, Meta? parentMeta,
+        bool applyHide, IMetaService metaSvc)
+    {
+        // Compile hide patterns if applicable
+        List<Regex>? hidePatterns = null;
+        if (applyHide && parentMeta != null && !string.IsNullOrEmpty(parentMeta.Hide))
+        {
+            hidePatterns = [];
+            foreach (var pattern in parentMeta.Hide.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                try { hidePatterns.Add(new Regex(pattern)); }
+                catch { /* invalid regex, skip */ }
+            }
+        }
+
+        var result = new List<IObj>(objs.Count);
+        foreach (var obj in objs)
+        {
+            var objName = obj.GetName();
+
+            // Hide check: match filename against hide patterns
+            if (hidePatterns != null)
+            {
+                var hidden = false;
+                foreach (var regex in hidePatterns)
+                {
+                    if (regex.IsMatch(objName)) { hidden = true; break; }
+                }
+                if (hidden) continue;
+            }
+
+            // Per-object read check (Go: filterReadableObjs)
+            var objPath = reqPath.TrimEnd('/') + "/" + objName;
+            Meta? objMeta;
+            if (obj.IsDir())
+            {
+                // For directories, get nearest meta for the directory path itself
+                objMeta = await metaSvc.GetNearestMetaAsync(objPath);
+            }
+            else
+            {
+                objMeta = parentMeta;
+            }
+
+            if (!CanRead(user, objMeta, objPath)) continue;
+
+            result.Add(obj);
+        }
+        return result;
+    }
+
     // Go: common.CanAccess - checks Hide, CanRead, and password
     internal static bool CanAccess(User? user, Meta? meta, string reqPath, string? password, HttpContext ctx)
     {
@@ -218,80 +287,27 @@ internal static class FsHelpers
             : (trimmed[..slashIdx], trimmed[(slashIdx + 1)..]);
     }
 
-    internal static async Task<List<ArchiveEntryInfo>?> ReadArchiveEntriesAsync(IFileSystemService fs, string path, string? password)
+    /// <summary>
+    /// Unified MIME type lookup used by all endpoint files.
+    /// </summary>
+    internal static string GetContentType(string path)
     {
-        var link = await fs.LinkAsync(path, new LinkArgs());
-        if (link == null) return null;
-
-        Stream? archiveStream = null;
-        string? tempFile = null;
-
-        try
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        return ext switch
         {
-            // Try to open as local file first
-            if (!string.IsNullOrEmpty(link.URL) && File.Exists(link.URL))
-            {
-                archiveStream = new FileStream(link.URL, FileMode.Open, FileAccess.Read);
-            }
-            else if (!string.IsNullOrEmpty(link.URL) && link.URL.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-            {
-                // Download to temp file
-                using var http = new HttpClient();
-                var response = await http.GetAsync(link.URL, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-                tempFile = Path.Combine(Path.GetTempPath(), $"openlist-archive-{Guid.NewGuid():N}");
-                using (var fs2 = File.Create(tempFile))
-                    await response.Content.CopyToAsync(fs2);
-                archiveStream = new FileStream(tempFile, FileMode.Open, FileAccess.Read);
-            }
-            else
-            {
-                return null;
-            }
-
-            var ext = Path.GetExtension(path).ToLowerInvariant();
-            return ext switch
-            {
-                ".zip" => ReadZipEntries(archiveStream),
-                _ => null // Unsupported archive format
-            };
-        }
-        catch
-        {
-            return null;
-        }
-        finally
-        {
-            archiveStream?.Dispose();
-            if (tempFile != null && File.Exists(tempFile))
-            {
-                try { File.Delete(tempFile); } catch { }
-            }
-        }
-    }
-
-    internal static List<ArchiveEntryInfo> ReadZipEntries(Stream stream)
-    {
-        var entries = new List<ArchiveEntryInfo>();
-        using var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Read);
-        foreach (var entry in archive.Entries)
-        {
-            entries.Add(new ArchiveEntryInfo
-            {
-                Name = entry.FullName,
-                Size = entry.Length,
-                IsDir = entry.FullName.EndsWith('/'),
-                IsEncrypted = entry.CompressedLength == 0 && entry.Length > 0 // heuristic for encrypted entries
-            });
-        }
-        return entries;
+            ".mp4" => "video/mp4", ".mkv" => "video/x-matroska", ".avi" => "video/x-msvideo",
+            ".mp3" => "audio/mpeg", ".flac" => "audio/flac", ".wav" => "audio/wav",
+            ".pdf" => "application/pdf",
+            ".zip" => "application/zip", ".tar" => "application/x-tar",
+            ".gz" or ".tgz" => "application/gzip", ".rar" => "application/vnd.rar",
+            ".7z" => "application/x-7z-compressed",
+            ".jpg" or ".jpeg" => "image/jpeg", ".png" => "image/png",
+            ".gif" => "image/gif", ".webp" => "image/webp", ".svg" => "image/svg+xml",
+            ".txt" => "text/plain", ".html" => "text/html", ".css" => "text/css",
+            ".json" => "application/json", ".xml" => "application/xml",
+            ".js" => "application/javascript", ".wasm" => "application/wasm",
+            _ => "application/octet-stream"
+        };
     }
 }
 
-public class ArchiveEntryInfo
-{
-    public string Name { get; set; } = "";
-    public long Size { get; set; }
-    public bool IsDir { get; set; }
-    public bool IsEncrypted { get; set; }
-}

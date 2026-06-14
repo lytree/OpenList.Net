@@ -177,7 +177,7 @@ public static class WebDavEndpoints
 
         // Local file path — serve directly with Range support
         if (System.IO.File.Exists(nativeLink.URL))
-            return Results.File(nativeLink.URL, GetContentType(path), obj.GetName(), enableRangeProcessing: true);
+            return Results.File(nativeLink.URL, FsHelpers.GetContentType(path), obj.GetName(), enableRangeProcessing: true);
 
         // HTTP URL — proxy through server if ProxyRange is enabled, otherwise redirect
         if (nativeLink.URL.StartsWith("http"))
@@ -327,14 +327,4 @@ public static class WebDavEndpoints
 
     private static string NormalizePath(string? path) => string.IsNullOrEmpty(path) ? "/" : $"/{path.Trim('/')}".Replace("//", "/");
 
-    private static string GetContentType(string path)
-    {
-        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
-        return ext switch
-        {
-            ".mp4" => "video/mp4", ".mp3" => "audio/mpeg", ".pdf" => "application/pdf",
-            ".txt" => "text/plain", ".html" => "text/html", ".json" => "application/json",
-            _ => "application/octet-stream"
-        };
-    }
 }

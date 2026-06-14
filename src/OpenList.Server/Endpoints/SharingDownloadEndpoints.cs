@@ -83,7 +83,7 @@ public static class SharingDownloadEndpoints
             return Results.Redirect(link.URL);
 
         if (System.IO.File.Exists(link.URL))
-            return Results.File(link.URL, GetContentType(fullPath), enableRangeProcessing: true);
+            return Results.File(link.URL, FsHelpers.GetContentType(fullPath), enableRangeProcessing: true);
 
         return Results.NotFound();
     }
@@ -139,57 +139,16 @@ public static class SharingDownloadEndpoints
         {
             if (link.URL.StartsWith("http")) return Results.Redirect(link.URL);
             if (System.IO.File.Exists(link.URL))
-                return Results.File(link.URL, GetContentType(fullPath), System.IO.Path.GetFileName(fullPath));
+                return Results.File(link.URL, FsHelpers.GetContentType(fullPath), System.IO.Path.GetFileName(fullPath));
             return Results.NotFound();
         }
 
         // Extract inner file from archive
-        var extractedStream = await ExtractArchiveFile(link.URL, innerPath, password);
+        var extractedStream = await FsHelpers.ExtractArchiveFileAsync(link.URL, innerPath, password);
         if (extractedStream == null) return Results.NotFound();
 
         var fileName = System.IO.Path.GetFileName(innerPath);
-        return Results.Stream(extractedStream, GetContentType(innerPath), fileName);
+        return Results.Stream(extractedStream, FsHelpers.GetContentType(innerPath), fileName);
     }
 
-    private static async Task<Stream?> ExtractArchiveFile(string? archivePath, string innerPath, string? password)
-    {
-        if (string.IsNullOrEmpty(archivePath) || !System.IO.File.Exists(archivePath)) return null;
-
-        try
-        {
-            // Use SharpCompress to support multiple archive formats (zip, tar.gz, rar, 7z, etc.)
-            await using var fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
-            using var reader = SharpCompress.Readers.ReaderFactory.Open(fileStream);
-            var normalizedName = innerPath.TrimStart('/');
-
-            while (reader.MoveToNextEntry())
-            {
-                if (reader.Entry.IsDirectory) continue;
-                var entryKey = reader.Entry.Key ?? "";
-                if (entryKey == normalizedName ||
-                    entryKey.EndsWith("/" + normalizedName, StringComparison.Ordinal) ||
-                    System.IO.Path.GetFileName(entryKey) == System.IO.Path.GetFileName(normalizedName))
-                {
-                    var ms = new MemoryStream();
-                    using var entryStream = reader.OpenEntryStream();
-                    await entryStream.CopyToAsync(ms);
-                    ms.Position = 0;
-                    return ms;
-                }
-            }
-
-            return null;
-        }
-        catch { return null; }
-    }
-
-    private static string GetContentType(string path)
-    {
-        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
-        return ext switch
-        {
-            ".mp4" => "video/mp4", ".mp3" => "audio/mpeg", ".pdf" => "application/pdf",
-            _ => "application/octet-stream"
-        };
-    }
 }

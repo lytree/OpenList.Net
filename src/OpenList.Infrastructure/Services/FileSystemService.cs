@@ -28,7 +28,8 @@ public class FileSystemService : IFileSystemService
         args ??= new ListArgs();
 
         // Go: virtualFiles are always computed for any path, then merged with actual driver results
-        var virtualFiles = _driverFactory.GetVirtualFilesByPath(path);
+        // Go: GetStorageVirtualFilesWithDetailsByPath passes WithStorageDetails through
+        var virtualFiles = _driverFactory.GetVirtualFilesByPath(path, args.WithStorageDetails, ct);
 
         var (driver, actualPath) = ResolveDriver(path);
         List<IObj> driverObjs = [];

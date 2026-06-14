@@ -79,7 +79,7 @@ public static class S3Endpoints
             if (link == null) return Results.NotFound();
             if (link.URL.StartsWith("http")) return Results.Redirect(link.URL);
             if (System.IO.File.Exists(link.URL))
-                return Results.File(link.URL, GetContentType(key), enableRangeProcessing: true);
+                return Results.File(link.URL, FsHelpers.GetContentType(key), enableRangeProcessing: true);
             return Results.NotFound();
         });
 
@@ -92,7 +92,7 @@ public static class S3Endpoints
             if (obj == null) return Results.NotFound();
 
             ctx.Response.Headers.ContentLength = obj.GetSize();
-            ctx.Response.Headers.ContentType = GetContentType(key);
+            ctx.Response.Headers.ContentType = FsHelpers.GetContentType(key);
             ctx.Response.Headers.LastModified = obj.GetModTime().ToString("R");
             ctx.Response.Headers.ETag = $"\"{obj.GetHash()}\"";
             return Results.Ok();
@@ -503,29 +503,5 @@ public static class S3Endpoints
         return doc.OuterXml;
     }
 
-    private static string GetContentType(string key)
-    {
-        var ext = System.IO.Path.GetExtension(key).ToLowerInvariant();
-        return ext switch
-        {
-            ".mp4" => "video/mp4", ".mp3" => "audio/mpeg", ".pdf" => "application/pdf",
-            ".txt" => "text/plain", ".html" => "text/html", ".json" => "application/json",
-            _ => "application/octet-stream"
-        };
-    }
-}
 
-public class MultipartUploadState
-{
-    public string Bucket { get; set; } = "";
-    public string Key { get; set; } = "";
-    public Dictionary<int, MultipartPartInfo> Parts { get; set; } = [];
-}
-
-public class MultipartPartInfo
-{
-    public int PartNumber { get; set; }
-    public string ETag { get; set; } = "";
-    public long Size { get; set; }
-    public string? TempFile { get; set; }
 }

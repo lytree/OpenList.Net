@@ -23,7 +23,7 @@ public static class TaskEndpoints
 
             subGroup.MapGet("undone", async (ITaskService tasks, ClaimsPrincipal user, CancellationToken ct = default) =>
             {
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 var result = await tasks.ListUndoneTasksAsync(taskType, ct);
                 if (!isAdmin && userId.HasValue)
@@ -33,7 +33,7 @@ public static class TaskEndpoints
 
             subGroup.MapGet("done", async (ITaskService tasks, ClaimsPrincipal user, CancellationToken ct = default) =>
             {
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 var result = await tasks.ListDoneTasksAsync(taskType, ct);
                 if (!isAdmin && userId.HasValue)
@@ -45,7 +45,7 @@ public static class TaskEndpoints
             {
                 var task = await tasks.GetTaskAsync(tid, ct);
                 if (task == null) return Results.Json(Resp<TaskInfo>.Error(404, "task not found"));
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 if (!isAdmin && (!userId.HasValue || task.CreatorId != userId.Value))
                     return Results.Json(Resp<TaskInfo>.Error(404, "task not found"));
@@ -56,7 +56,7 @@ public static class TaskEndpoints
             {
                 var task = await tasks.GetTaskAsync(tid, ct);
                 if (task == null) return Results.Json(Resp<object>.Error(404, "task not found"));
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 if (!isAdmin && (!userId.HasValue || task.CreatorId != userId.Value))
                     return Results.Json(Resp<object>.Error(404, "task not found"));
@@ -68,7 +68,7 @@ public static class TaskEndpoints
             {
                 var task = await tasks.GetTaskAsync(tid, ct);
                 if (task == null) return Results.Json(Resp<object>.Error(404, "task not found"));
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 if (!isAdmin && (!userId.HasValue || task.CreatorId != userId.Value))
                     return Results.Json(Resp<object>.Error(404, "task not found"));
@@ -80,7 +80,7 @@ public static class TaskEndpoints
             {
                 var task = await tasks.GetTaskAsync(tid, ct);
                 if (task == null) return Results.Json(Resp<object>.Error(404, "task not found"));
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 if (!isAdmin && (!userId.HasValue || task.CreatorId != userId.Value))
                     return Results.Json(Resp<object>.Error(404, "task not found"));
@@ -90,7 +90,7 @@ public static class TaskEndpoints
 
             subGroup.MapPost("cancel_some", async (ITaskService tasks, ClaimsPrincipal user, List<string> tids, CancellationToken ct = default) =>
             {
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 var errors = new Dictionary<string, string>();
                 foreach (var tid in tids)
@@ -108,7 +108,7 @@ public static class TaskEndpoints
 
             subGroup.MapPost("delete_some", async (ITaskService tasks, ClaimsPrincipal user, List<string> tids, CancellationToken ct = default) =>
             {
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 var errors = new Dictionary<string, string>();
                 foreach (var tid in tids)
@@ -126,7 +126,7 @@ public static class TaskEndpoints
 
             subGroup.MapPost("retry_some", async (ITaskService tasks, ClaimsPrincipal user, List<string> tids, CancellationToken ct = default) =>
             {
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 var errors = new Dictionary<string, string>();
                 foreach (var tid in tids)
@@ -144,7 +144,7 @@ public static class TaskEndpoints
 
             subGroup.MapPost("clear_done", async (ITaskService tasks, IUserService users, ClaimsPrincipal user, CancellationToken ct = default) =>
             {
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 await tasks.ClearDoneAsync(isAdmin ? null : userId, taskType, ct);
                 return Results.Json(new Resp<object>(null));
@@ -152,7 +152,7 @@ public static class TaskEndpoints
 
             subGroup.MapPost("clear_succeeded", async (ITaskService tasks, IUserService users, ClaimsPrincipal user, CancellationToken ct = default) =>
             {
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 await tasks.ClearSucceededAsync(isAdmin ? null : userId, taskType, ct);
                 return Results.Json(new Resp<object>(null));
@@ -160,7 +160,7 @@ public static class TaskEndpoints
 
             subGroup.MapPost("retry_failed", async (ITaskService tasks, IUserService users, ClaimsPrincipal user, CancellationToken ct = default) =>
             {
-                var userId = GetUserId(user);
+                var userId = FsHelpers.GetUserId(user);
                 var isAdmin = user.IsInRole("2");
                 await tasks.RetryFailedAsync(isAdmin ? null : userId, taskType, ct);
                 return Results.Json(new Resp<object>(null));
@@ -170,9 +170,4 @@ public static class TaskEndpoints
         return endpoints;
     }
 
-    private static uint? GetUserId(ClaimsPrincipal user)
-    {
-        var claim = user.FindFirst(ClaimTypes.NameIdentifier);
-        return claim != null && uint.TryParse(claim.Value, out var id) ? id : null;
-    }
 }

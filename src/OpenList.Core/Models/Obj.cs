@@ -83,6 +83,8 @@ public class ObjItem : IObj
     public bool IsFolder { get; set; }
     public string HashInfo { get; set; } = string.Empty;
     public ObjMask Mask { get; set; }
+    /// <summary>Per-object storage details (Go: ObjStorageDetails wrapper).</summary>
+    public StorageDetails? MountDetails { get; set; }
 
     public virtual long GetSize() => Size;
     public virtual string GetName() => Name;

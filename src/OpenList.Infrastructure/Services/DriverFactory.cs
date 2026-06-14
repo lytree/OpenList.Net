@@ -21,6 +21,10 @@ public interface IDriverFactory
     /// Returns mount points that are direct children of the given prefix path.
     /// </summary>
     List<ObjItem> GetVirtualFilesByPath(string prefix);
+    /// <summary>
+    /// Get virtual directory entries with optional storage details (Go: GetStorageVirtualFilesWithDetailsByPath).
+    /// </summary>
+    List<ObjItem> GetVirtualFilesByPath(string prefix, bool withStorageDetails, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -150,6 +154,15 @@ public class DriverFactory : IDriverFactory
     /// starts with prefix+"/", extract the next path segment as a virtual directory name.
     /// </summary>
     public List<ObjItem> GetVirtualFilesByPath(string prefix)
+        => GetVirtualFilesByPath(prefix, false);
+
+    /// <summary>
+    /// Get virtual directory entries with optional storage details.
+    /// Mirrors Go's GetStorageVirtualFilesWithDetailsByPath: for each storage whose mount path
+    /// starts with prefix+"/", extract the next path segment as a virtual directory name.
+    /// When withStorageDetails is true, populates MountDetails from IDriverWithDetails.
+    /// </summary>
+    public List<ObjItem> GetVirtualFilesByPath(string prefix, bool withStorageDetails, CancellationToken ct = default)
     {
         var files = new List<ObjItem>();
         var seen = new Dictionary<string, int>();
@@ -158,14 +171,15 @@ public class DriverFactory : IDriverFactory
         if (!prefix.EndsWith('/')) prefix += "/";
 
         var storages = _drivers.Values
-            .Select(d => d.GetStorage())
-            .Where(s => s != null && !s.Disabled)
-            .OrderBy(s => s.Order)
-            .ThenBy(s => s.MountPath)
+            .Select(d => d)
+            .Where(d => d.GetStorage() != null && !d.GetStorage().Disabled)
+            .OrderBy(d => d.GetStorage().Order)
+            .ThenBy(d => d.GetStorage().MountPath)
             .ToList();
 
-        foreach (var storage in storages)
+        foreach (var driverEntry in storages)
         {
+            var storage = driverEntry.GetStorage();
             var mountPath = storage.MountPath;
             // Normalize mount path
             if (!mountPath.StartsWith('/')) mountPath = "/" + mountPath;
@@ -186,6 +200,9 @@ public class DriverFactory : IDriverFactory
                 if (!hasMore)
                 {
                     files[idx].Mask = ObjMask.Locked | ObjMask.Virtual;
+                    // Go: also update storage details for direct mount overriding intermediate
+                    if (withStorageDetails)
+                        files[idx].MountDetails = GetDetailsForDriver(driverEntry);
                 }
                 continue;
             }
@@ -196,11 +213,28 @@ public class DriverFactory : IDriverFactory
                 Name = name,
                 IsFolder = true,
                 Modified = storage.Modified,
-                Mask = hasMore ? (ObjMask.ReadOnly | ObjMask.Virtual) : (ObjMask.Locked | ObjMask.Virtual)
+                Mask = hasMore ? (ObjMask.ReadOnly | ObjMask.Virtual) : (ObjMask.Locked | ObjMask.Virtual),
+                MountDetails = withStorageDetails ? GetDetailsForDriver(driverEntry) : null
             };
             files.Add(obj);
         }
 
         return files;
+    }
+
+    /// <summary>
+    /// Get storage details for a driver (Go: GetStorageDetails with 1s timeout).
+    /// </summary>
+    private StorageDetails? GetDetailsForDriver(IDriver driver)
+    {
+        if (driver is not IDriverWithDetails withDetails) return null;
+        try
+        {
+            var task = withDetails.GetDetailsAsync();
+            if (task.Wait(TimeSpan.FromSeconds(1)))
+                return task.Result;
+        }
+        catch { /* ignore errors for storage details */ }
+        return null;
     }
 }

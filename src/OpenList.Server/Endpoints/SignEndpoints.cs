@@ -144,7 +144,7 @@ public static class SignEndpoints
             return Results.Redirect(link.URL);
 
         if (System.IO.File.Exists(link.URL))
-            return Results.File(link.URL, GetContentType(path), enableRangeProcessing: true);
+            return Results.File(link.URL, FsHelpers.GetContentType(path), enableRangeProcessing: true);
 
         return Results.NotFound();
     }
@@ -174,7 +174,7 @@ public static class SignEndpoints
             return Results.Redirect(link.URL);
 
         if (System.IO.File.Exists(link.URL))
-            return Results.File(link.URL, GetContentType(path), enableRangeProcessing: true);
+            return Results.File(link.URL, FsHelpers.GetContentType(path), enableRangeProcessing: true);
 
         return Results.NotFound();
     }
@@ -195,12 +195,12 @@ public static class SignEndpoints
 
             var response = await httpClient.GetAsync(link.URL, HttpCompletionOption.ResponseHeadersRead);
             var stream = await response.Content.ReadAsStreamAsync();
-            var contentType = response.Content.Headers.ContentType?.MediaType ?? GetContentType(path);
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? FsHelpers.GetContentType(path);
             return Results.Stream(stream, contentType);
         }
 
         if (System.IO.File.Exists(link.URL))
-            return Results.File(link.URL, GetContentType(path), enableRangeProcessing: true);
+            return Results.File(link.URL, FsHelpers.GetContentType(path), enableRangeProcessing: true);
 
         return Results.NotFound();
     }
@@ -223,15 +223,15 @@ public static class SignEndpoints
         {
             if (link.URL.StartsWith("http")) return Results.Redirect(link.URL);
             if (System.IO.File.Exists(link.URL))
-                return Results.File(link.URL, GetContentType(path), System.IO.Path.GetFileName(path));
+                return Results.File(link.URL, FsHelpers.GetContentType(path), System.IO.Path.GetFileName(path));
             return Results.NotFound();
         }
 
         // Extract inner file from archive
-        var extractedStream = await ExtractArchiveFile(link.URL, innerPath, password);
+        var extractedStream = await FsHelpers.ExtractArchiveFileAsync(link.URL, innerPath, password);
         if (extractedStream == null) return Results.NotFound();
 
-        return Results.Stream(extractedStream, GetContentType(innerPath), fileName);
+        return Results.Stream(extractedStream, FsHelpers.GetContentType(innerPath), fileName);
     }
 
     private static async Task<IResult> HandleArchiveProxy(IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? signValue)
@@ -255,19 +255,19 @@ public static class SignEndpoints
                     httpClient.DefaultRequestHeaders.TryAddWithoutValidation(header.Key, header.Value);
                 var response = await httpClient.GetAsync(link.URL, HttpCompletionOption.ResponseHeadersRead);
                 var stream = await response.Content.ReadAsStreamAsync();
-                var contentType = response.Content.Headers.ContentType?.MediaType ?? GetContentType(path);
+                var contentType = response.Content.Headers.ContentType?.MediaType ?? FsHelpers.GetContentType(path);
                 return Results.Stream(stream, contentType);
             }
             if (System.IO.File.Exists(link.URL))
-                return Results.File(link.URL, GetContentType(path), enableRangeProcessing: true);
+                return Results.File(link.URL, FsHelpers.GetContentType(path), enableRangeProcessing: true);
             return Results.NotFound();
         }
 
         // Extract and proxy inner file
-        var extractedStream = await ExtractArchiveFile(link.URL, innerPath, password);
+        var extractedStream = await FsHelpers.ExtractArchiveFileAsync(link.URL, innerPath, password);
         if (extractedStream == null) return Results.NotFound();
 
-        return Results.Stream(extractedStream, GetContentType(innerPath), enableRangeProcessing: true);
+        return Results.Stream(extractedStream, FsHelpers.GetContentType(innerPath), enableRangeProcessing: true);
     }
 
     private static async Task<IResult> HandleArchiveExtract(IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? signValue)
@@ -281,61 +281,10 @@ public static class SignEndpoints
         var link = await fs.LinkAsync(path, new LinkArgs { IP = ctx.Connection.RemoteIpAddress?.ToString() ?? "" });
         if (link == null) return Results.NotFound();
 
-        var extractedStream = await ExtractArchiveFile(link.URL, innerPath, password);
+        var extractedStream = await FsHelpers.ExtractArchiveFileAsync(link.URL, innerPath, password);
         if (extractedStream == null) return Results.NotFound();
 
         var fileName = string.IsNullOrEmpty(innerPath) ? System.IO.Path.GetFileName(path) : System.IO.Path.GetFileName(innerPath);
-        return Results.Stream(extractedStream, GetContentType(innerPath), fileName);
-    }
-
-    private static async Task<Stream?> ExtractArchiveFile(string archivePath, string innerPath, string? password)
-    {
-        if (!System.IO.File.Exists(archivePath)) return null;
-
-        try
-        {
-            // Use SharpCompress to support multiple archive formats (zip, tar.gz, rar, 7z, etc.)
-            await using var fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read);
-            using var reader = SharpCompress.Readers.ReaderFactory.Open(fileStream);
-            var normalizedName = innerPath.TrimStart('/');
-
-            while (reader.MoveToNextEntry())
-            {
-                if (reader.Entry.IsDirectory) continue;
-                var entryKey = reader.Entry.Key ?? "";
-                // Match by full path or just filename
-                if (entryKey == normalizedName ||
-                    entryKey.EndsWith("/" + normalizedName, StringComparison.Ordinal) ||
-                    System.IO.Path.GetFileName(entryKey) == System.IO.Path.GetFileName(normalizedName))
-                {
-                    var ms = new MemoryStream();
-                    using var entryStream = reader.OpenEntryStream();
-                    await entryStream.CopyToAsync(ms);
-                    ms.Position = 0;
-                    return ms;
-                }
-            }
-
-            return null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string GetContentType(string path)
-    {
-        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
-        return ext switch
-        {
-            ".mp4" => "video/mp4", ".mp3" => "audio/mpeg", ".pdf" => "application/pdf",
-            ".zip" => "application/zip", ".tar" => "application/x-tar",
-            ".gz" or ".tgz" => "application/gzip", ".rar" => "application/vnd.rar",
-            ".7z" => "application/x-7z-compressed", ".jpg" or ".jpeg" => "image/jpeg",
-            ".png" => "image/png", ".gif" => "image/gif", ".webp" => "image/webp",
-            ".txt" => "text/plain", ".html" => "text/html", ".json" => "application/json",
-            ".xml" => "application/xml", _ => "application/octet-stream"
-        };
+        return Results.Stream(extractedStream, FsHelpers.GetContentType(innerPath), fileName);
     }
 }

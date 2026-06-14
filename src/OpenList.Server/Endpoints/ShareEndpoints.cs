@@ -17,7 +17,7 @@ public static class ShareEndpoints
 
         group.MapMethods("list", ["GET", "POST"], async (ISharingService sharings, IUserService users, ClaimsPrincipal user, int page = 1, int perPage = 100) =>
         {
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             // Go: AuthNotGuest - guest users cannot access share endpoints
             var u = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
             if (u != null && u.IsGuest) return Results.Json(Resp<object>.Error(403, "You are a guest"));
@@ -41,7 +41,7 @@ public static class ShareEndpoints
         {
             var sharing = await sharings.GetSharingAsync(id);
             if (sharing == null) return Results.Json(Resp<Sharing>.Error(404, "sharing not found"));
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             var isAdmin = user.IsInRole("2");
             if (!isAdmin && sharing.CreatorId != userId)
                 return Results.Json(Resp<Sharing>.Error(404, "sharing not found"));
@@ -57,7 +57,7 @@ public static class ShareEndpoints
         group.MapPost("create", async (ISharingService sharings, IUserService users, ClaimsPrincipal user, [FromBody] CreateShareReq req) =>
         {
             // Go: AuthNotGuest
-            var createUserId = GetUserId(user);
+            var createUserId = FsHelpers.GetUserId(user);
             var createU = createUserId.HasValue ? await users.GetUserByIdAsync(createUserId.Value) : null;
             if (createU != null && createU.IsGuest) return Results.Json(Resp<object>.Error(403, "You are a guest"));
 
@@ -82,7 +82,7 @@ public static class ShareEndpoints
             }
             else
             {
-                creatorId = GetUserId(reqUser) ?? 0;
+                creatorId = FsHelpers.GetUserId(reqUser) ?? 0;
                 creatorUser = await users.GetUserByIdAsync(creatorId);
                 // Go: non-admin needs CanShare permission, CanCustomizeShareID for custom ID
                 if (creatorUser != null)
@@ -135,7 +135,7 @@ public static class ShareEndpoints
 
             var reqUser = user;
             var isAdmin = reqUser.IsInRole("2");
-            var userId = GetUserId(reqUser);
+            var userId = FsHelpers.GetUserId(reqUser);
 
             // Go: check CanShare for non-admin
             var reqUserModel = userId.HasValue ? await users.GetUserByIdAsync(userId.Value) : null;
@@ -212,7 +212,7 @@ public static class ShareEndpoints
             // Go: only admin or creator can delete
             var existing = await sharings.GetSharingAsync(id);
             if (existing == null) return Results.Json(Resp<object>.Error(404, "sharing not found"));
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             var isAdmin = user.IsInRole("2");
             if (!isAdmin && existing.CreatorId != userId)
                 return Results.Json(Resp<object>.Error(404, "sharing not found"));
@@ -225,7 +225,7 @@ public static class ShareEndpoints
             // Go: only admin or creator can enable
             var existing = await sharings.GetSharingAsync(id);
             if (existing == null) return Results.Json(Resp<object>.Error(404, "sharing not found"));
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             var isAdmin = user.IsInRole("2");
             if (!isAdmin && existing.CreatorId != userId)
                 return Results.Json(Resp<object>.Error(404, "sharing not found"));
@@ -238,7 +238,7 @@ public static class ShareEndpoints
             // Go: only admin or creator can disable
             var existing = await sharings.GetSharingAsync(id);
             if (existing == null) return Results.Json(Resp<object>.Error(404, "sharing not found"));
-            var userId = GetUserId(user);
+            var userId = FsHelpers.GetUserId(user);
             var isAdmin = user.IsInRole("2");
             if (!isAdmin && existing.CreatorId != userId)
                 return Results.Json(Resp<object>.Error(404, "sharing not found"));
@@ -249,11 +249,6 @@ public static class ShareEndpoints
         return endpoints;
     }
 
-    private static uint? GetUserId(ClaimsPrincipal user)
-    {
-        var claim = user.FindFirst(ClaimTypes.NameIdentifier);
-        return claim != null && uint.TryParse(claim.Value, out var id) ? id : null;
-    }
 
     // Go: validateSharingID - max 64 chars, only letters, numbers, underscores, hyphens, and CJK
     private static readonly System.Text.RegularExpressions.Regex ValidSharingIDRegex = new(@"^[\w\p{IsCJKUnifiedIdeographs}\-]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
