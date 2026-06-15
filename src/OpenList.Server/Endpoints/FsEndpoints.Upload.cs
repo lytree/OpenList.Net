@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Mapster;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -16,7 +17,8 @@ public static partial class FsEndpoints
     internal static void MapFsUploadApi(RouteGroupBuilder group)
     {
         // PUT /fs/put - stream upload (Go: FsStream, uses File-Path header)
-        group.MapPut("put", async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, HttpContext ctx) =>
+        // Note: Go's FsStream does NOT check NoUpload (only FsForm does)
+        group.MapPut("put", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ISettingService settings, HttpContext ctx) =>
         {
             // Go: path from File-Path header, URL-decoded
             var filePath = ctx.Request.Headers["File-Path"].FirstOrDefault() ?? "";
@@ -39,9 +41,9 @@ public static partial class FsEndpoints
             if (!FsHelpers.CanWrite(u, parentMeta, parentPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
-            // Go: shouldIgnoreSystemFile
+            // Go: shouldIgnoreSystemFile - only when ignore_system_files setting is enabled
             var putFileName = System.IO.Path.GetFileName(filePath);
-            if (FsHelpers.IsSystemFile(putFileName))
+            if (settings.GetBool("ignore_system_files") && FsHelpers.IsSystemFile(putFileName))
                 return Results.Json(Resp<object>.Error(403, "system file ignored"));
 
             // Go: overwrite check (default true)
@@ -51,15 +53,6 @@ public static partial class FsEndpoints
                 var existing = await fs.GetAsync(filePath);
                 if (existing != null)
                     return Results.Json(Resp<object>.Error(403, "file exists"));
-            }
-
-            // Go: check NoUpload
-            var putStorage = await fs.GetStorageAsync(filePath);
-            if (putStorage != null)
-            {
-                var putDriver = storageService.GetDriverByMountPath(putStorage.MountPath);
-                if (putDriver != null && putDriver.Config().NoUpload)
-                    return Results.Json(Resp<object>.Error(405, "current storage doesn't support upload"));
             }
 
             // Go: size from Content-Length or X-File-Size header
@@ -106,8 +99,8 @@ public static partial class FsEndpoints
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
 
-        // PUT /fs/form - form upload (Go: FsForm, uses File-Path header)
-        group.MapPut("form", async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, HttpContext ctx) =>
+        // PUT /fs/form - form upload (Go: FsForm, uses File-Path header, single 'file' field)
+        group.MapPut("form", async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, ISettingService settings, HttpContext ctx) =>
         {
             // Go: path from File-Path header
             var filePath = ctx.Request.Headers["File-Path"].FirstOrDefault() ?? "";
@@ -130,11 +123,7 @@ public static partial class FsEndpoints
             if (!FsHelpers.CanWrite(u, parentMeta, parentPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
-            // Go: shouldIgnoreSystemFile
-            var formFileName = System.IO.Path.GetFileName(filePath);
-            if (FsHelpers.IsSystemFile(formFileName))
-                return Results.Json(Resp<object>.Error(403, "system file ignored"));
-
+            // Go: overwrite check (default true)
             var overwrite = ctx.Request.Headers["Overwrite"].FirstOrDefault() != "false";
             if (!overwrite)
             {
@@ -143,7 +132,7 @@ public static partial class FsEndpoints
                     return Results.Json(Resp<object>.Error(403, "file exists"));
             }
 
-            // Go: check NoUpload
+            // Go: check NoUpload (FsForm checks this, FsStream does not)
             var formStorage = await fs.GetStorageAsync(filePath);
             if (formStorage != null)
             {
@@ -157,27 +146,40 @@ public static partial class FsEndpoints
 
             // Go: As-Task header (default false)
             var asTask = ctx.Request.Headers["As-Task"].FirstOrDefault() == "true";
-            TaskInfo? createdTask = null;
 
             var dir = Path.GetDirectoryName(filePath)?.Replace('\\', '/') ?? "/";
             var form = await ctx.Request.ReadFormAsync();
-            foreach (var file in form.Files)
+
+            // Go: c.FormFile("file") - single file field named "file"
+            var file = form.Files.GetFile("file");
+            if (file == null)
+                return Results.Json(Resp<object>.Error(400, "file not found in form"));
+
+            // Go: shouldIgnoreSystemFile - only when ignore_system_files setting is enabled
+            if (settings.GetBool("ignore_system_files") && FsHelpers.IsSystemFile(file.FileName))
+                return Results.Json(Resp<object>.Error(403, "system file ignored"));
+
+            // Go: last-modified from header (millisecond timestamp)
+            var lastModified = DateTime.UtcNow;
+            var lmStr = ctx.Request.Headers["Last-Modified"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(lmStr) && long.TryParse(lmStr, out var lmMs))
+                lastModified = DateTime.UnixEpoch.AddMilliseconds(lmMs);
+
+            var obj = new ObjItem { Name = file.FileName, Size = file.Length, Modified = lastModified };
+            var fileStream = new FileStreamer
             {
-                var obj = new ObjItem { Name = file.FileName, Size = file.Length };
-                var fileStream = new FileStreamer
-                {
-                    Stream = file.OpenReadStream(),
-                    Obj = obj,
-                    Size = file.Length
-                };
-                if (asTask)
-                {
-                    createdTask = await fs.PutAsTaskAsync(dir, fileStream);
-                }
-                else
-                {
-                    await fs.PutAsync(dir, fileStream, _ => { });
-                }
+                Stream = file.OpenReadStream(),
+                Obj = obj,
+                Size = file.Length
+            };
+            TaskInfo? createdTask = null;
+            if (asTask)
+            {
+                createdTask = await fs.PutAsTaskAsync(dir, fileStream);
+            }
+            else
+            {
+                await fs.PutAsync(dir, fileStream, _ => { });
             }
             if (asTask && createdTask != null)
                 return Results.Json(new Resp<object>(new { task = createdTask }));
@@ -205,7 +207,7 @@ public static partial class FsEndpoints
             }
             var link = await fs.LinkAsync(rawPath, new LinkArgs { IP = ctx.Connection.RemoteIpAddress?.ToString() ?? "", Header = ctx.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString()), Redirect = true });
             if (link == null) return Results.Json(Resp<LinkResp>.Error(500, "failed to get link"));
-            return Results.Json(new Resp<LinkResp>(new LinkResp { URL = link.URL, Header = link.Header, Concurrency = link.Concurrency, PartSize = link.PartSize, ContentLength = link.ContentLength }));
+            return Results.Json(new Resp<LinkResp>(link.Adapt<LinkResp>()));
         }).RequireAuthorization(policy => policy.RequireRole("2"));
 
         // Direct upload info

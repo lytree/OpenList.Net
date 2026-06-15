@@ -9,10 +9,14 @@ using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
 using OpenList.Infrastructure.Auth;
 using OpenList.Infrastructure.Services;
+using OpenList.Server;
 using OpenList.Server.Endpoints;
 using OpenList.Server.Middleware;
 using Serilog;
 using System.Text;
+
+// Configure Mapster type adapter mappings
+MappingConfig.Configure();
 
 // Configure Serilog before building the host
 Log.Logger = new LoggerConfiguration()

@@ -19,4 +19,9 @@ public interface IFileSystemService
     Task<object?> OtherAsync(OtherArgs args, CancellationToken ct = default);
     Task<Storage?> GetStorageAsync(string path, CancellationToken ct = default);
     Task<StorageDetails?> GetStorageDetailsAsync(string path, CancellationToken ct = default);
+
+    // Archive operations (Go: fs.ArchiveMeta, fs.ArchiveList, fs.ArchiveDecompress)
+    Task<ArchiveMetaResult?> GetArchiveMetaAsync(string path, ArchiveArgs args, CancellationToken ct = default);
+    Task<(List<IObj> Items, int Total)> ListArchiveAsync(string path, ArchiveListArgs args, CancellationToken ct = default);
+    Task<TaskInfo?> ArchiveDecompressAsync(string srcPath, string dstDir, ArchiveDecompressArgs args, CancellationToken ct = default);
 }

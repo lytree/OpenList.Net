@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Mapster;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -27,7 +28,6 @@ public static partial class AdminEndpoints
         MapMessageAdmin(group);
         MapScanAdmin(group);
         MapTaskAdmin(group);
-        MapArchiveAdmin(group);
 
         return endpoints;
     }
@@ -49,15 +49,7 @@ public static partial class AdminEndpoints
 
         group.MapPost("user/create", async (IUserService users, [FromBody] CreateUserReq req) =>
         {
-            var user = new User
-            {
-                Username = req.Username,
-                PwdHash = UserService.StaticHash(req.Password),
-                Permission = req.Permission,
-                BasePath = req.BasePath ?? "/",
-                Role = (UserRole)req.Role,
-                Disabled = req.Disabled,
-            };
+            var user = req.Adapt<User>();
             var created = await users.CreateUserAsync(user);
             return Results.Json(new Resp<IdResp>(new IdResp { Id = created.Id }));
         });

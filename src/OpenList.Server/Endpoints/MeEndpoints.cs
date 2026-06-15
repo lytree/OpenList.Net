@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Mapster;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -21,13 +22,7 @@ public static class MeEndpoints
             if (userId == null) return Results.Json(Resp<UserResp>.Error(401, "unauthorized"));
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<UserResp>.Error(404, "user not found"));
-            return Results.Json(new Resp<UserResp>(new UserResp
-            {
-                Id = u.Id, Username = u.Username, Role = (int)u.Role,
-                BasePath = u.BasePath, Permission = u.Permission,
-                Disabled = u.Disabled, Otp = !string.IsNullOrEmpty(u.OtpSecret),
-                SsoID = u.SsoID, AllowLdap = u.AllowLdap, Password = ""
-            }));
+            return Results.Json(new Resp<UserResp>(u.Adapt<UserResp>()));
         });
 
         group.MapPost("update", async (IUserService users, IAuthService auth, ClaimsPrincipal user, [FromBody] UpdateMeReq req) =>

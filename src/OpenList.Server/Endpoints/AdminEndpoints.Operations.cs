@@ -222,115 +222,110 @@ public static partial class AdminEndpoints
 
     private static void MapTaskAdmin(RouteGroupBuilder group)
     {
-        group.MapGet("task/list", async (ITaskService tasks, string? type = null) =>
-            Results.Json(new Resp<List<TaskInfo>>(await tasks.ListTasksAsync(type))));
-
-        group.MapGet("task/info", async (ITaskService tasks, string id) =>
+        // Go: _task(g.Group("/task")) → SetupTaskRoute
+        // Same per-type structure as user task routes, but admin can see all tasks (no per-user filtering)
+        var taskGroup = group.MapGroup("task");
+        var taskTypes = new[] { "upload", "copy", "move", "offline_download", "offline_download_transfer", "decompress", "decompress_upload" };
+        foreach (var taskType in taskTypes)
         {
-            var task = await tasks.GetTaskAsync(id);
-            if (task == null) return Results.Json(Resp<TaskInfo>.Error(404, "task not found"));
-            return Results.Json(new Resp<TaskInfo>(task));
-        });
+            var subGroup = taskGroup.MapGroup(taskType);
 
-        group.MapPost("task/cancel", async (ITaskService tasks, [FromBody] TaskIdReq req) =>
-        {
-            await tasks.CancelTaskAsync(req.Id);
-            return Results.Json(new Resp<object>(null));
-        });
-
-        group.MapPost("task/retry", async (ITaskService tasks, [FromBody] TaskIdReq req) =>
-        {
-            await tasks.RetryTaskAsync(req.Id);
-            return Results.Json(new Resp<object>(null));
-        });
-
-        group.MapPost("task/delete", async (ITaskService tasks, [FromBody] TaskIdReq req) =>
-        {
-            await tasks.DeleteTaskAsync(req.Id);
-            return Results.Json(new Resp<object>(null));
-        });
-    }
-
-    private static void MapArchiveAdmin(RouteGroupBuilder group)
-    {
-        group.MapMethods("archive/meta", ["GET", "POST"], async (IFileSystemService fs, [FromBody] ArchiveMetaReq req) =>
-        {
-            var obj = await fs.GetAsync(req.Path);
-            if (obj == null) return Results.Json(Resp<object>.Error(404, "file not found"));
-            if (obj.IsDir()) return Results.Json(Resp<object>.Error(400, "path is a directory"));
-
-            var archiveEntries = await FsHelpers.ReadArchiveEntriesAsync(fs, req.Path, req.Password);
-            if (archiveEntries == null)
-                return Results.Json(Resp<object>.Error(500, "failed to read archive"));
-
-            var isEncrypted = archiveEntries.Any(e => e.IsEncrypted);
-            return Results.Json(new Resp<ArchiveMetaResp>(new ArchiveMetaResp
+            subGroup.MapGet("undone", async (ITaskService tasks, CancellationToken ct = default) =>
             {
-                Comment = "",
-                IsEncrypted = isEncrypted,
-                Content = archiveEntries.Select(e => new ArchiveContentResp
+                var result = await tasks.ListUndoneTasksAsync(taskType, ct);
+                return Results.Json(new Resp<List<TaskInfo>>(result));
+            });
+
+            subGroup.MapGet("done", async (ITaskService tasks, CancellationToken ct = default) =>
+            {
+                var result = await tasks.ListDoneTasksAsync(taskType, ct);
+                return Results.Json(new Resp<List<TaskInfo>>(result));
+            });
+
+            subGroup.MapPost("info", async (ITaskService tasks, string tid, CancellationToken ct = default) =>
+            {
+                var task = await tasks.GetTaskAsync(tid, ct);
+                if (task == null) return Results.Json(Resp<TaskInfo>.Error(404, "task not found"));
+                return Results.Json(new Resp<TaskInfo>(task));
+            });
+
+            subGroup.MapPost("cancel", async (ITaskService tasks, string tid, CancellationToken ct = default) =>
+            {
+                var task = await tasks.GetTaskAsync(tid, ct);
+                if (task == null) return Results.Json(Resp<object>.Error(404, "task not found"));
+                await tasks.CancelTaskAsync(tid, ct);
+                return Results.Json(new Resp<object>(null));
+            });
+
+            subGroup.MapPost("delete", async (ITaskService tasks, string tid, CancellationToken ct = default) =>
+            {
+                var task = await tasks.GetTaskAsync(tid, ct);
+                if (task == null) return Results.Json(Resp<object>.Error(404, "task not found"));
+                await tasks.DeleteTaskAsync(tid, ct);
+                return Results.Json(new Resp<object>(null));
+            });
+
+            subGroup.MapPost("retry", async (ITaskService tasks, string tid, CancellationToken ct = default) =>
+            {
+                var task = await tasks.GetTaskAsync(tid, ct);
+                if (task == null) return Results.Json(Resp<object>.Error(404, "task not found"));
+                await tasks.RetryTaskAsync(tid, ct);
+                return Results.Json(new Resp<object>(null));
+            });
+
+            subGroup.MapPost("cancel_some", async (ITaskService tasks, [FromBody] List<string> tids, CancellationToken ct = default) =>
+            {
+                var errors = new Dictionary<string, string>();
+                foreach (var tid in tids)
                 {
-                    Name = e.Name,
-                    Size = e.Size,
-                    IsDir = e.IsDir
-                }).ToList()
-            }));
-        });
-
-        group.MapMethods("archive/list", ["GET", "POST"], async (IFileSystemService fs, [FromBody] ArchiveListReq req) =>
-        {
-            var obj = await fs.GetAsync(req.Path);
-            if (obj == null) return Results.Json(Resp<object>.Error(404, "file not found"));
-            if (obj.IsDir()) return Results.Json(Resp<object>.Error(400, "path is a directory"));
-
-            var archiveEntries = await FsHelpers.ReadArchiveEntriesAsync(fs, req.Path, req.Password);
-            if (archiveEntries == null)
-                return Results.Json(Resp<object>.Error(500, "failed to read archive"));
-
-            IEnumerable<ArchiveEntryInfo> filtered = archiveEntries;
-            if (!string.IsNullOrEmpty(req.InnerPath))
-            {
-                var prefix = req.InnerPath.TrimStart('/');
-                filtered = filtered.Where(e => e.Name.StartsWith(prefix) && e.Name != prefix);
-            }
-
-            var entries = filtered.ToList();
-            var result = new List<ObjResp>();
-            foreach (var entry in entries)
-            {
-                var relativePath = entry.Name;
-                if (!string.IsNullOrEmpty(req.InnerPath))
-                {
-                    var prefix = req.InnerPath.TrimStart('/');
-                    if (relativePath.StartsWith(prefix))
-                        relativePath = relativePath[prefix.Length..].TrimStart('/');
+                    var task = await tasks.GetTaskAsync(tid, ct);
+                    if (task == null) { errors[tid] = "task not found"; continue; }
+                    await tasks.CancelTaskAsync(tid, ct);
                 }
+                return Results.Json(new Resp<Dictionary<string, string>>(errors));
+            });
 
-                var parts = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length == 0) continue;
-
-                if (parts.Length == 1 || (parts.Length > 1 && !result.Any(r => r.Name == parts[0])))
-                {
-                    result.Add(new ObjResp
-                    {
-                        Name = parts[0],
-                        Size = parts.Length == 1 ? entry.Size : 0,
-                        IsDir = parts.Length > 1,
-                        Modified = DateTime.MinValue,
-                        Type = parts.Length > 1 ? 1 : 0
-                    });
-                }
-            }
-
-            var total = result.Count;
-            if (req.PerPage > 0)
-                result = result.Skip((req.Page - 1) * req.PerPage).Take(req.PerPage).ToList();
-
-            return Results.Json(new Resp<ArchiveListResp>(new ArchiveListResp
+            subGroup.MapPost("delete_some", async (ITaskService tasks, [FromBody] List<string> tids, CancellationToken ct = default) =>
             {
-                Content = result,
-                Total = total
-            }));
-        });
+                var errors = new Dictionary<string, string>();
+                foreach (var tid in tids)
+                {
+                    var task = await tasks.GetTaskAsync(tid, ct);
+                    if (task == null) { errors[tid] = "task not found"; continue; }
+                    await tasks.DeleteTaskAsync(tid, ct);
+                }
+                return Results.Json(new Resp<Dictionary<string, string>>(errors));
+            });
+
+            subGroup.MapPost("retry_some", async (ITaskService tasks, [FromBody] List<string> tids, CancellationToken ct = default) =>
+            {
+                var errors = new Dictionary<string, string>();
+                foreach (var tid in tids)
+                {
+                    var task = await tasks.GetTaskAsync(tid, ct);
+                    if (task == null) { errors[tid] = "task not found"; continue; }
+                    await tasks.RetryTaskAsync(tid, ct);
+                }
+                return Results.Json(new Resp<Dictionary<string, string>>(errors));
+            });
+
+            subGroup.MapPost("clear_done", async (ITaskService tasks, CancellationToken ct = default) =>
+            {
+                await tasks.ClearDoneAsync(null, taskType, ct);
+                return Results.Json(new Resp<object>(null));
+            });
+
+            subGroup.MapPost("clear_succeeded", async (ITaskService tasks, CancellationToken ct = default) =>
+            {
+                await tasks.ClearSucceededAsync(null, taskType, ct);
+                return Results.Json(new Resp<object>(null));
+            });
+
+            subGroup.MapPost("retry_failed", async (ITaskService tasks, CancellationToken ct = default) =>
+            {
+                await tasks.RetryFailedAsync(null, taskType, ct);
+                return Results.Json(new Resp<object>(null));
+            });
+        }
     }
 }

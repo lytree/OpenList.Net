@@ -161,29 +161,52 @@ public static partial class FsEndpoints
                 return Results.Json(Resp<object>.Error(400, "empty file names"));
 
             if (!srcDir.EndsWith('/')) srcDir += '/';
-            foreach (var name in req.Names)
+            var resolvedNames = new List<string>();
+            for (var i = 0; i < req.Names.Count; i++)
             {
-                var srcPath = srcDir.TrimEnd('/') + "/" + name;
-                if (!srcPath.StartsWith(srcDir))
+                var name = req.Names[i];
+                // Go: stdpath.Join(srcDir, name) - normalizes path, prevents traversal
+                var srcPath = FsHelpers.PathJoin(srcDir, name);
+                // Go: !strings.HasPrefix(srcPath+"/", srcDir)
+                if (!(srcPath + "/").StartsWith(srcDir))
+                {
+                    resolvedNames.Add("");
                     continue;
-
-                var baseName = srcPath[(srcPath.LastIndexOf('/') + 1)..];
-                if (baseName == "." || baseName == "/")
-                    return Results.Json(Resp<object>.Error(400, $"invalid file name [{name}]"));
+                }
+                resolvedNames.Add(srcPath);
 
                 if (!req.Overwrite)
                 {
-                    var dstPath = dstDir.TrimEnd('/') + "/" + name;
+                    // Go: stdpath.Base(srcPath)
+                    var baseName = FsHelpers.PathBase(srcPath);
+                    if (baseName == "." || baseName == "/")
+                        return Results.Json(Resp<object>.Error(400, $"invalid file name [{name}]"));
+                    // Go: fs.Get with NoLog: true
+                    var dstPath = FsHelpers.PathJoin(dstDir, baseName);
                     var dstObj = await fs.GetAsync(dstPath);
                     if (dstObj != null)
                     {
-                        if (req.SkipExisting) continue;
-                        return Results.Json(Resp<object>.Error(403, $"file [{name}] exists"));
+                        if (!req.SkipExisting)
+                            return Results.Json(Resp<object>.Error(403, $"file [{name}] exists"));
+                        resolvedNames[i] = "";
+                        continue;
                     }
                 }
-                await fs.MoveAsync(srcPath, dstDir);
             }
-            return Results.Json(new Resp<object>(null));
+
+            // Go: Create all tasks immediately without synchronous validation
+            var taskCount = 0;
+            foreach (var srcPath in resolvedNames)
+            {
+                if (string.IsNullOrEmpty(srcPath)) continue;
+                await fs.MoveAsync(srcPath, dstDir);
+                taskCount++;
+            }
+
+            // Go: Return task info
+            if (taskCount > 0)
+                return Results.Json(new Resp<object>(new { message = $"Successfully created {taskCount} move task(s)" }));
+            return Results.Json(new Resp<object>(new { message = "Move operations completed immediately" }));
         }).RequireAuthorization();
 
         group.MapPost("recursive_move", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RecursiveMoveReq req) =>
@@ -288,34 +311,58 @@ public static partial class FsEndpoints
                 return Results.Json(Resp<object>.Error(400, "empty file names"));
 
             if (!srcDir.EndsWith('/')) srcDir += '/';
-            foreach (var name in req.Names)
+            var resolvedNames = new List<string>();
+            for (var i = 0; i < req.Names.Count; i++)
             {
-                var srcPath = srcDir.TrimEnd('/') + "/" + name;
-                if (!srcPath.StartsWith(srcDir))
+                var name = req.Names[i];
+                // Go: stdpath.Join(srcDir, name) - normalizes path, prevents traversal
+                var srcPath = FsHelpers.PathJoin(srcDir, name);
+                // Go: !strings.HasPrefix(srcPath+"/", srcDir)
+                if (!(srcPath + "/").StartsWith(srcDir))
+                {
+                    resolvedNames.Add("");
                     continue;
-
-                var baseName = srcPath[(srcPath.LastIndexOf('/') + 1)..];
-                if (baseName == "." || baseName == "/")
-                    return Results.Json(Resp<object>.Error(400, $"invalid file name [{name}]"));
+                }
+                resolvedNames.Add(srcPath);
 
                 if (!req.Overwrite)
                 {
-                    var dstPath = dstDir.TrimEnd('/') + "/" + name;
+                    // Go: stdpath.Base(srcPath)
+                    var baseName = FsHelpers.PathBase(srcPath);
+                    if (baseName == "." || baseName == "/")
+                        return Results.Json(Resp<object>.Error(400, $"invalid file name [{name}]"));
+                    // Go: fs.Get with NoLog: true
+                    var dstPath = FsHelpers.PathJoin(dstDir, baseName);
                     var dstObj = await fs.GetAsync(dstPath);
                     if (dstObj != null)
                     {
                         if (!req.SkipExisting && !req.Merge)
                             return Results.Json(Resp<object>.Error(403, $"file [{name}] exists"));
                         if (!req.Merge || !dstObj.IsDir())
+                        {
+                            resolvedNames[i] = "";
                             continue;
+                        }
                     }
                 }
+            }
+
+            // Go: Create all tasks immediately without synchronous validation
+            var taskCount = 0;
+            foreach (var srcPath in resolvedNames)
+            {
+                if (string.IsNullOrEmpty(srcPath)) continue;
                 if (req.Merge)
                     await fs.MergeAsync(srcPath, dstDir);
                 else
                     await fs.CopyAsync(srcPath, dstDir);
+                taskCount++;
             }
-            return Results.Json(new Resp<object>(null));
+
+            // Go: Return task info
+            if (taskCount > 0)
+                return Results.Json(new Resp<object>(new { message = $"Successfully created {taskCount} copy task(s)" }));
+            return Results.Json(new Resp<object>(new { message = "Copy operations completed immediately" }));
         }).RequireAuthorization();
 
         group.MapPost("remove", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RemoveReq req) =>
@@ -338,12 +385,23 @@ public static partial class FsEndpoints
                 return Results.Json(Resp<object>.Error(400, "empty file names"));
 
             if (!reqPath.EndsWith('/')) reqPath += '/';
+            var resolvedPaths = new List<string>();
             foreach (var name in req.Names)
             {
-                var fullPath = reqPath.TrimEnd('/') + "/" + name;
-                if (!fullPath.StartsWith(reqPath))
+                // Go: stdpath.Join(reqPath, name) - normalizes path
+                var fullPath = FsHelpers.PathJoin(reqPath, name);
+                // Go: !strings.HasPrefix(fullPath+"/", reqPath)
+                if (!(fullPath + "/").StartsWith(reqPath))
+                {
+                    resolvedPaths.Add("");
                     continue;
-                await fs.RemoveAsync(fullPath);
+                }
+                resolvedPaths.Add(fullPath);
+            }
+            foreach (var path in resolvedPaths)
+            {
+                if (string.IsNullOrEmpty(path)) continue;
+                await fs.RemoveAsync(path);
             }
             return Results.Json(new Resp<object>(null));
         }).RequireAuthorization();
@@ -385,7 +443,7 @@ public static partial class FsEndpoints
                 if (removedFiles.Contains(removingFilePath))
                     continue;
 
-                var subFiles = await fs.ListAsync(removingFilePath);
+                var subFiles = await fs.ListAsync(removingFilePath, new ListArgs { ReqPath = removingFilePath, Refresh = true });
                 if (subFiles.Count == 0)
                 {
                     await fs.RemoveAsync(removingFilePath);

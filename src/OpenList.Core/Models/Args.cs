@@ -52,6 +52,40 @@ public class ArchiveDecompressArgs : ArchiveInnerArgs
     public bool Overwrite { get; set; }
 }
 
+public class WrongArchivePasswordException : Exception
+{
+    public WrongArchivePasswordException() : base("wrong archive password") { }
+    public WrongArchivePasswordException(string message) : base(message) { }
+}
+
+public class ArchiveListArgs
+{
+    public ArchiveInnerArgs ArchiveInnerArgs { get; set; } = new();
+    public bool Refresh { get; set; }
+    public int Page { get; set; } = 1;
+    public int PerPage { get; set; } = int.MaxValue;
+}
+
+public class ArchiveMetaResult
+{
+    public string Comment { get; set; } = "";
+    public bool IsEncrypted { get; set; }
+    public List<ArchiveContentEntry> Content { get; set; } = [];
+    /// <summary>Go: ret.DriverProviding → determines /ad vs /ae for RawURL</summary>
+    public bool DriverProviding { get; set; }
+}
+
+public class ArchiveContentEntry
+{
+    public string Name { get; set; } = "";
+    public long Size { get; set; }
+    public bool IsDir { get; set; }
+    public DateTime Modified { get; set; }
+    public DateTime Created { get; set; }
+    public int Type { get; set; }
+    public List<ArchiveContentEntry> Children { get; set; } = [];
+}
+
 public class PageReq
 {
     public int Page { get; set; } = 1;

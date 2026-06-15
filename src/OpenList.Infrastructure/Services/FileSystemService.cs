@@ -299,6 +299,167 @@ public class FileSystemService : IFileSystemService
         return details;
     }
 
+    // ── Archive operations (Go: fs.ArchiveMeta, fs.ArchiveList, fs.ArchiveDecompress) ──
+
+    public async Task<ArchiveMetaResult?> GetArchiveMetaAsync(string path, ArchiveArgs args, CancellationToken ct = default)
+    {
+        var (driver, actualPath) = ResolveDriver(path);
+        if (driver is not IDriverArchiveReader reader) return null;
+
+        var obj = await GetObjAsync(driver, actualPath, ct);
+        if (obj == null || obj.IsDir()) return null;
+
+        var meta = await reader.GetArchiveMetaAsync(obj, args, ct);
+
+        // Build tree from flat entries (Go: archive.BuildTree)
+        var tree = BuildArchiveTree(meta.Entries);
+
+        return new ArchiveMetaResult
+        {
+            Comment = "",
+            IsEncrypted = meta.IsEncrypted,
+            Content = tree,
+            // Go: DriverProviding = true when driver implements ArchiveReader
+            DriverProviding = driver is IDriverArchiveDecompress
+        };
+    }
+
+    public async Task<(List<IObj> Items, int Total)> ListArchiveAsync(string path, ArchiveListArgs args, CancellationToken ct = default)
+    {
+        var (driver, actualPath) = ResolveDriver(path);
+        if (driver is not IDriverArchiveReader reader) return ([], 0);
+
+        var obj = await GetObjAsync(driver, actualPath, ct);
+        if (obj == null || obj.IsDir()) return ([], 0);
+
+        var items = await reader.ListArchiveAsync(obj, args.ArchiveInnerArgs, ct);
+        var total = items.Count;
+
+        // Pagination (Go: pagination helper)
+        if (args.PerPage > 0 && args.PerPage < int.MaxValue)
+        {
+            var skip = (args.Page - 1) * args.PerPage;
+            items = items.Skip(skip).Take(args.PerPage).ToList();
+        }
+
+        return (items, total);
+    }
+
+    public async Task<TaskInfo?> ArchiveDecompressAsync(string srcPath, string dstDir, ArchiveDecompressArgs args, CancellationToken ct = default)
+    {
+        var (srcDriver, srcActual) = ResolveDriver(srcPath);
+        var (dstDriver, dstActual) = ResolveDriver(dstDir);
+        if (srcDriver is not IDriverArchiveDecompress decompressor) return null;
+
+        var srcObj = await GetObjAsync(srcDriver, srcActual, ct);
+        if (srcObj == null || srcObj.IsDir()) return null;
+
+        var dstObj = await GetObjAsync(dstDriver, dstActual, ct);
+        if (dstObj == null || !dstObj.IsDir()) return null;
+
+        // Create task wrapping decompressor.ArchiveDecompressAsync (Go: fs.ArchiveDecompress creates task)
+        var taskService = _serviceProvider.GetService<ITaskService>();
+        if (taskService == null) return null;
+
+        var fileName = srcActual.Split('/').Last();
+        var task = await taskService.CreateTaskAsync("decompress", $"Decompress {fileName}", async (taskId, innerCt) =>
+        {
+            await decompressor.ArchiveDecompressAsync(srcObj, dstObj, args, innerCt);
+        }, ct);
+
+        return task;
+    }
+
+    /// <summary>
+    /// Build tree from flat archive entries (Go: archive.BuildTree).
+    /// Entries with InnerPath like "dir/subdir/file.txt" are organized into a tree.
+    /// </summary>
+    private static List<ArchiveContentEntry> BuildArchiveTree(List<ArchiveEntry> entries)
+    {
+        if (entries.Count == 0) return [];
+
+        // Check if entries already have InnerPath (path-based flat list)
+        var hasPaths = entries.Any(e => !string.IsNullOrEmpty(e.InnerPath));
+        if (!hasPaths)
+        {
+            // Simple flat list without paths → return as-is
+            return entries.Select(e => new ArchiveContentEntry
+            {
+                Name = e.Name,
+                Size = e.Size,
+                IsDir = e.IsDir,
+                Modified = e.Modified,
+                Type = ObjTypeHelper.GetObjType(e.Name, e.IsDir)
+            }).ToList();
+        }
+
+        // Build tree from path-based entries
+        var root = new List<ArchiveContentEntry>();
+        var dirMap = new Dictionary<string, ArchiveContentEntry>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in entries.OrderBy(e => e.InnerPath ?? e.Name))
+        {
+            var path = (entry.InnerPath ?? entry.Name).TrimStart('/');
+            var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) continue;
+
+            var node = new ArchiveContentEntry
+            {
+                Name = parts[^1],
+                Size = entry.Size,
+                IsDir = entry.IsDir,
+                Modified = entry.Modified,
+                Type = ObjTypeHelper.GetObjType(parts[^1], entry.IsDir)
+            };
+
+            if (parts.Length == 1)
+            {
+                root.Add(node);
+                if (entry.IsDir)
+                    dirMap[path.TrimEnd('/')] = node;
+            }
+            else
+            {
+                var parentPath = string.Join('/', parts[..^1]);
+                if (dirMap.TryGetValue(parentPath, out var parent))
+                {
+                    parent.Children.Add(node);
+                }
+                else
+                {
+                    // Create intermediate directories
+                    ArchiveContentEntry? lastParent = null;
+                    var buildPath = "";
+                    for (int i = 0; i < parts.Length - 1; i++)
+                    {
+                        buildPath = i == 0 ? parts[0] : buildPath + "/" + parts[i];
+                        if (!dirMap.TryGetValue(buildPath, out var intermediate))
+                        {
+                            intermediate = new ArchiveContentEntry
+                            {
+                                Name = parts[i],
+                                IsDir = true,
+                                Type = (int)ObjType.Folder
+                            };
+                            if (lastParent != null)
+                                lastParent.Children.Add(intermediate);
+                            else
+                                root.Add(intermediate);
+                            dirMap[buildPath] = intermediate;
+                        }
+                        lastParent = intermediate;
+                    }
+                    lastParent?.Children.Add(node);
+                }
+
+                if (entry.IsDir)
+                    dirMap[path.TrimEnd('/')] = node;
+            }
+        }
+
+        return root;
+    }
+
     private void InvalidateDirectoryCache(IDriver driver, string dirPath)
     {
         var cacheKey = $"dir:{driver.GetStorage().MountPath}:{dirPath}";
@@ -313,10 +474,18 @@ public class FileSystemService : IFileSystemService
 
     private (IDriver? driver, string actualPath) ResolveDriver(string path)
     {
-        var storage = _driverFactory.FindStorageByPath(path);
-        if (storage == null) return (null, path);
-        var driver = _driverFactory.GetDriver(storage.MountPath);
-        var actualPath = path[storage.MountPath.TrimEnd('/').Length..].TrimStart('/');
+        // Go: GetStorageAndActualPath — uses GetBalancedStorage for load balancing, GetActualMountPath for balance suffix
+        var driver = _driverFactory.GetBalancedStorage(path);
+        if (driver == null) return (null, path);
+
+        var mountPath = IDriverFactory.GetActualMountPath(driver.GetStorage().MountPath);
+        // Go: actualPath = utils.FixAndCleanPath(strings.TrimPrefix(rawPath, mountPath))
+        var actualPath = path;
+        if (actualPath.StartsWith(mountPath, StringComparison.OrdinalIgnoreCase))
+        {
+            actualPath = actualPath[mountPath.Length..];
+        }
+        actualPath = actualPath.TrimStart('/');
         if (string.IsNullOrEmpty(actualPath)) actualPath = "/";
         return (driver, actualPath);
     }

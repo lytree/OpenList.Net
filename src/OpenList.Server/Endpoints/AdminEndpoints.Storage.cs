@@ -15,35 +15,35 @@ public static partial class AdminEndpoints
 {
     private static void MapStorageAdmin(RouteGroupBuilder group)
     {
+        // Go: ListStorages — fetches mount details concurrently with 3s timeout
         group.MapGet("storage/list", async (IStorageService storages, IDriverFactory driverFactory, ISettingService settings, int page = 1, int perPage = 100) =>
         {
             var (storageList, total) = await storages.ListStoragesAsync(page, perPage);
             var hideDetails = settings.GetBool("hide_storage_details_in_manage_page");
             if (!hideDetails)
             {
-                foreach (var s in storageList)
+                // Go: makeStorageResp — fetch details concurrently with 3s timeout
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var tasks = storageList.Select(async s =>
                 {
                     var driver = driverFactory.GetDriver(s.MountPath);
                     if (driver is IDriverWithDetails withDetails)
                     {
-                        try { s.MountDetails = await withDetails.GetDetailsAsync(); }
+                        try { s.MountDetails = await withDetails.GetDetailsAsync(cts.Token); }
                         catch { /* ignore errors for storage details */ }
                     }
-                }
+                }).ToArray();
+                try { await Task.WhenAll(tasks); }
+                catch (OperationCanceledException) { /* timeout is OK */ }
             }
             return Results.Json(new Resp<PagedListResp<Storage>>(new PagedListResp<Storage> { Content = storageList, Total = total }));
         });
 
-        group.MapGet("storage/get", async (IStorageService storages, IDriverFactory driverFactory, uint id) =>
+        // Go: GetStorage — returns raw storage without mount details
+        group.MapGet("storage/get", async (IStorageService storages, uint id) =>
         {
             var storage = await storages.GetStorageByIdAsync(id);
             if (storage == null) return Results.Json(Resp<Storage>.Error(404, "storage not found"));
-            var driver = driverFactory.GetDriver(storage.MountPath);
-            if (driver is IDriverWithDetails withDetails)
-            {
-                try { storage.MountDetails = await withDetails.GetDetailsAsync(); }
-                catch { /* ignore */ }
-            }
             return Results.Json(new Resp<Storage>(storage));
         });
 
@@ -79,7 +79,12 @@ public static partial class AdminEndpoints
 
         group.MapPost("storage/load_all", async (IStorageService storages) =>
         {
-            await storages.LoadAllStoragesAsync();
+            // Go: LoadAllStorages — async reload in background, return immediately
+            _ = Task.Run(async () =>
+            {
+                try { await storages.LoadAllStoragesAsync(); }
+                catch { /* logged internally */ }
+            });
             return Results.Json(new Resp<object>(null));
         });
     }

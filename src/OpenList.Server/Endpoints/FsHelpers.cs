@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
+using Mapster;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using OpenList.Core.Drivers;
@@ -22,48 +23,19 @@ internal static partial class FsHelpers
         catch { return null; }
     }
 
-    internal static ObjResp MapObj(IObj obj) => new()
-    {
-        Name = obj.GetName(),
-        Size = obj.GetSize(),
-        IsDir = obj.IsDir(),
-        Modified = obj.GetModTime(),
-        Created = obj.GetCreateTime(),
-        HashInfoStr = obj.GetHash(),
-        HashInfo = ParseHashInfo(obj.GetHash()),
-        Type = ObjTypeHelper.GetObjType(obj.GetName(), obj.IsDir()),
-        Thumb = ObjTypeHelper.GetThumb(obj),
-    };
+    internal static ObjResp MapObj(IObj obj) => obj.Adapt<ObjResp>();
 
-    internal static ObjResp MapObjWithSign(IObj obj, string parent, bool encrypt, bool signAll, ISignService signSvc, StorageDetails? mountDetails) => new()
+    internal static ObjResp MapObjWithSign(IObj obj, string parent, bool encrypt, bool signAll, ISignService signSvc, StorageDetails? mountDetails)
     {
-        Name = obj.GetName(),
-        Size = obj.GetSize(),
-        IsDir = obj.IsDir(),
-        Modified = obj.GetModTime(),
-        Created = obj.GetCreateTime(),
-        HashInfoStr = obj.GetHash(),
-        HashInfo = ParseHashInfo(obj.GetHash()),
-        Type = ObjTypeHelper.GetObjType(obj.GetName(), obj.IsDir()),
-        Thumb = ObjTypeHelper.GetThumb(obj),
+        var resp = obj.Adapt<ObjResp>();
         // Go: Sign = obj.IsDir() ? "" : (!encrypt && !signAll) ? "" : sign(path)
-        Sign = obj.IsDir() ? null : (encrypt || signAll ? signSvc.Sign(string.Join("/", parent.TrimEnd('/'), obj.GetName())) : null),
+        resp.Sign = obj.IsDir() ? null : (encrypt || signAll ? signSvc.Sign(string.Join("/", parent.TrimEnd('/'), obj.GetName())) : null);
         // Go: per-object mount details (from ObjStorageDetails wrapper), fallback to parent-level
-        MountDetails = obj.IsDir() ? ((obj as ObjItem)?.MountDetails ?? mountDetails) : null,
-    };
+        resp.MountDetails = obj.IsDir() ? ((obj as ObjItem)?.MountDetails ?? mountDetails) : null;
+        return resp;
+    }
 
-    internal static GetResp MapGetResp(IObj obj) => new()
-    {
-        Name = obj.GetName(),
-        Size = obj.GetSize(),
-        IsDir = obj.IsDir(),
-        Modified = obj.GetModTime(),
-        Created = obj.GetCreateTime(),
-        HashInfoStr = obj.GetHash(),
-        HashInfo = ParseHashInfo(obj.GetHash()),
-        Type = ObjTypeHelper.GetObjType(obj.GetName(), obj.IsDir()),
-        Thumb = ObjTypeHelper.GetThumb(obj),
-    };
+    internal static GetResp MapGetResp(IObj obj) => obj.Adapt<GetResp>();
 
     // Go: EncodePath(path, true) = PathEscape each segment, then join with /
     internal static string EncodePath(string path) =>
@@ -123,6 +95,45 @@ internal static partial class FsHelpers
         if (user != null && !string.IsNullOrEmpty(user.BasePath) && user.BasePath != "/")
             return user.BasePath.TrimEnd('/') + "/" + path.TrimStart('/');
         return path;
+    }
+
+    /// <summary>
+    /// Go: stdpath.Join - joins path elements and normalizes (removes .., ., double slashes).
+    /// This is critical for security: prevents path traversal via names like "../secret".
+    /// </summary>
+    internal static string PathJoin(string basePath, string name)
+    {
+        // Go equivalent: stdpath.Join(basePath, name)
+        var combined = basePath.TrimEnd('/') + "/" + name.TrimStart('/');
+        // Use Path.GetFullPath for normalization, then convert back to forward slashes
+        try
+        {
+            // Normalize by splitting and resolving . and ..
+            var parts = combined.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var resolved = new List<string>();
+            foreach (var part in parts)
+            {
+                if (part == ".") continue;
+                if (part == ".." && resolved.Count > 0) { resolved.RemoveAt(resolved.Count - 1); continue; }
+                if (part == "..") continue; // skip .. at root
+                resolved.Add(part);
+            }
+            return "/" + string.Join("/", resolved);
+        }
+        catch
+        {
+            return combined;
+        }
+    }
+
+    /// <summary>
+    /// Go: stdpath.Base - returns the last element of the path.
+    /// </summary>
+    internal static string PathBase(string path)
+    {
+        var trimmed = path.TrimEnd('/');
+        var idx = trimmed.LastIndexOf('/');
+        return idx < 0 ? trimmed : trimmed[(idx + 1)..];
     }
 
     internal static bool UserCanAccessWithoutPassword(HttpContext ctx)

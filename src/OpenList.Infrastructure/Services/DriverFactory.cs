@@ -2,29 +2,70 @@ using OpenList.Core.Drivers;
 using OpenList.Core.Models;
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 namespace OpenList.Infrastructure.Services;
 
 public interface IDriverFactory
 {
+    /// <summary>
+    /// Initialize and load a driver for the given storage.
+    /// Go: initStorage + storagesMap.Store. Stores driver even on init failure (with error status).
+    /// </summary>
     void LoadDriver(Storage storage);
+    /// <summary>
+    /// Drop and remove the driver at the given mount path.
+    /// Go: storageDriver.Drop + storagesMap.Delete
+    /// </summary>
     void UnloadDriver(string mountPath);
     IDriver? GetDriver(string mountPath);
     DriverInfo GetDriverInfo(string driverName);
     List<DriverInfo> ListDriverInfos();
     List<string> ListDriverNames();
+    /// <summary>
+    /// Check if a storage is loaded at the given mount path.
+    /// Go: HasStorage
+    /// </summary>
+    bool HasStorage(string mountPath);
+    /// <summary>
+    /// Find the storage whose actual mount path (stripped of .balance suffix) is the longest prefix match for the given path.
+    /// Go: getStoragesByPath → longest match
+    /// </summary>
     Storage? FindStorageByPath(string path);
+    /// <summary>
+    /// Get balanced storage for a path (supports .balance suffix for load balancing).
+    /// Go: GetBalancedStorage
+    /// </summary>
+    IDriver? GetBalancedStorage(string path);
     List<Storage> GetAllStorages();
     /// <summary>
     /// Get virtual directory entries under the given path (Go: getStorageVirtualFilesByPath).
-    /// Returns mount points that are direct children of the given prefix path.
     /// </summary>
     List<ObjItem> GetVirtualFilesByPath(string prefix);
     /// <summary>
     /// Get virtual directory entries with optional storage details (Go: GetStorageVirtualFilesWithDetailsByPath).
     /// </summary>
     List<ObjItem> GetVirtualFilesByPath(string prefix, bool withStorageDetails, CancellationToken ct = default);
+    /// <summary>
+    /// Reload a storage driver: drop existing, re-init with new storage config.
+    /// Go: Drop + initStorage (in UpdateStorage)
+    /// </summary>
+    void ReloadDriver(Storage oldStorage, Storage newStorage);
+    /// <summary>
+    /// Strip .balance suffix from mount path.
+    /// Go: utils.GetActualMountPath
+    /// </summary>
+    static string GetActualMountPath(string mountPath)
+    {
+        var idx = mountPath.LastIndexOf(".balance", StringComparison.Ordinal);
+        return idx >= 0 ? mountPath[..idx] : mountPath;
+    }
+    /// <summary>
+    /// Save the driver's addition config back to storage (Go: MustSaveDriverStorage).
+    /// Returns the serialized addition JSON.
+    /// </summary>
+    string? SerializeAddition(IDriver driver);
 }
 
 /// <summary>
@@ -37,12 +78,40 @@ public class DriverFactory : IDriverFactory
     private readonly ConcurrentDictionary<string, IDriver> _drivers = new();
     private readonly ConcurrentDictionary<string, Func<IDriver>> _driverFactories = new();
     private readonly ConcurrentDictionary<string, DriverInfo> _driverInfoMap = new();
+    private readonly ConcurrentDictionary<string, int> _balanceMap = new();
     private readonly ILogger<DriverFactory>? _logger;
+
+    // Go: storageHooks
+    private readonly List<Action<string, IDriver>> _storageHooks = [];
+
+    public const string StatusWork = "work";
+    public const string StatusDisabled = "disabled";
+
+    /// <summary>
+    /// Strip .balance suffix from mount path.
+    /// Go: utils.GetActualMountPath
+    /// </summary>
+    public static string GetActualMountPath(string mountPath)
+    {
+        var idx = mountPath.LastIndexOf(".balance", StringComparison.Ordinal);
+        return idx >= 0 ? mountPath[..idx] : mountPath;
+    }
 
     public DriverFactory(ILogger<DriverFactory>? logger = null)
     {
         _logger = logger;
         RegisterDrivers();
+    }
+
+    /// <summary>Go: RegisterStorageHook</summary>
+    public void RegisterStorageHook(Action<string, IDriver> hook) => _storageHooks.Add(hook);
+
+    private void CallStorageHooks(string type, IDriver driver)
+    {
+        foreach (var hook in _storageHooks)
+        {
+            try { hook(type, driver); } catch { }
+        }
     }
 
     private void RegisterDrivers()
@@ -84,6 +153,9 @@ public class DriverFactory : IDriverFactory
         }
     }
 
+    /// <summary>
+    /// Go: initStorage — unmarshal addition, init, store in map (even on failure), set status, save addition back.
+    /// </summary>
     public void LoadDriver(Storage storage)
     {
         if (!_driverFactories.TryGetValue(storage.Driver, out var factory))
@@ -92,16 +164,116 @@ public class DriverFactory : IDriverFactory
             return;
         }
         var driver = factory();
+        InitAndStoreDriver(storage, driver);
+        Task.Run(() => CallStorageHooks("add", driver));
+    }
+
+    /// <summary>
+    /// Go: UpdateStorage → Drop + initStorage. Handles mount path rename.
+    /// </summary>
+    public void ReloadDriver(Storage oldStorage, Storage newStorage)
+    {
+        // If mount path changed, remove old entry
+        if (oldStorage.MountPath != newStorage.MountPath)
+        {
+            UnloadDriver(oldStorage.MountPath);
+        }
+
+        // Get existing driver or create new one
+        IDriver? driver = null;
+        if (oldStorage.MountPath == newStorage.MountPath)
+            driver = GetDriver(oldStorage.MountPath);
+
+        if (driver == null)
+        {
+            if (!_driverFactories.TryGetValue(newStorage.Driver, out var factory))
+            {
+                _logger?.LogWarning("Driver '{Driver}' not found for storage '{MountPath}'", newStorage.Driver, newStorage.MountPath);
+                return;
+            }
+            driver = factory();
+        }
+        else
+        {
+            // Drop existing driver before re-init (Go: storageDriver.Drop)
+            try { driver.DropAsync().GetAwaiter().GetResult(); } catch { }
+        }
+
+        InitAndStoreDriver(newStorage, driver);
+        Task.Run(() => CallStorageHooks("update", driver));
+    }
+
+    /// <summary>
+    /// Go: initStorage core — SetStorage, unmarshal addition, init, store, set status, save.
+    /// </summary>
+    private void InitAndStoreDriver(Storage storage, IDriver driver)
+    {
         driver.SetStorage(storage);
+        var driverStorage = driver.GetStorage();
+
         try
         {
+            // Unmarshal addition JSON into driver's addition object (Go: utils.Json.UnmarshalFromString)
+            var addition = driver.GetAddition();
+            if (addition != null && !string.IsNullOrEmpty(driverStorage.Addition) && driverStorage.Addition != "{}")
+            {
+                try
+                {
+                    var additionType = addition.GetType();
+                    var deserialized = JsonSerializer.Deserialize(driverStorage.Addition, additionType,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (deserialized != null)
+                    {
+                        // Copy properties from deserialized object to the driver's addition instance
+                        foreach (var prop in additionType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                        {
+                            if (prop.CanRead && prop.CanWrite)
+                            {
+                                var val = prop.GetValue(deserialized);
+                                if (val != null) prop.SetValue(addition, val);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to unmarshal addition for '{MountPath}'", driverStorage.MountPath);
+                }
+            }
+
+            // Init driver (Go: storageDriver.Init)
             driver.InitAsync().GetAwaiter().GetResult();
-            _drivers[storage.MountPath] = driver;
-            _logger?.LogInformation("Loaded driver '{Driver}' at mount path '{MountPath}'", storage.Driver, storage.MountPath);
+            driverStorage.Status = StatusWork;
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to initialize driver '{Driver}' for storage '{MountPath}'", storage.Driver, storage.MountPath);
+            driverStorage.Status = ex.Message;
+        }
+
+        // Go: storagesMap.Store — ALWAYS store, even on init failure
+        _drivers[driverStorage.MountPath] = driver;
+
+        // Go: MustSaveDriverStorage — save addition back to DB after init
+        var additionJson = SerializeAddition(driver);
+        if (additionJson != null)
+        {
+            driverStorage.Addition = additionJson;
+        }
+    }
+
+    public string? SerializeAddition(IDriver driver)
+    {
+        try
+        {
+            var addition = driver.GetAddition();
+            if (addition == null) return null;
+            return JsonSerializer.Serialize(addition);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to serialize addition for driver");
+            return null;
         }
     }
 
@@ -110,10 +282,13 @@ public class DriverFactory : IDriverFactory
         if (_drivers.TryRemove(mountPath, out var driver))
         {
             try { driver.DropAsync().GetAwaiter().GetResult(); } catch { }
+            Task.Run(() => CallStorageHooks("del", driver));
         }
     }
 
-    public IDriver? GetDriver(string mountPath) => _drivers.GetValueOrDefault(mountPath);
+    public IDriver? GetDriver(string mountPath) => _drivers.GetValueOrDefault(FixAndCleanPath(mountPath));
+
+    public bool HasStorage(string mountPath) => _drivers.ContainsKey(FixAndCleanPath(mountPath));
 
     /// <summary>Returns cached DriverInfo — mirrors Go's GetDriverInfoMap</summary>
     public DriverInfo GetDriverInfo(string driverName)
@@ -124,29 +299,100 @@ public class DriverFactory : IDriverFactory
 
     public List<string> ListDriverNames() => [.. _driverInfoMap.Keys.OrderBy(k => k)];
 
+    /// <summary>
+    /// Go: getStoragesByPath — longest match with balance support.
+    /// </summary>
     public Storage? FindStorageByPath(string path)
     {
-        // Match like Go's IsSubPath: path == mountPath || path starts with mountPath + "/"
-        var match = _drivers
-            .Where(kvp => IsSubPath(kvp.Key, path))
-            .OrderByDescending(kvp => kvp.Key.Length)
-            .FirstOrDefault();
-        return match.Value?.GetStorage();
+        var storages = GetStoragesByPath(path);
+        return storages.FirstOrDefault()?.GetStorage();
     }
 
     /// <summary>
-    /// Checks if path equals mountPath or is a sub-path of mountPath.
-    /// Mirrors Go's utils.IsSubPath: path == subPath || HasPrefix(subPath, path+"/")
+    /// Go: GetBalancedStorage — round-robin across storages with same actual mount path.
+    /// </summary>
+    public IDriver? GetBalancedStorage(string path)
+    {
+        path = FixAndCleanPath(path);
+        var storages = GetStoragesByPath(path);
+        return storages.Count switch
+        {
+            0 => null,
+            1 => storages[0],
+            _ => RoundRobinBalance(storages)
+        };
+    }
+
+    /// <summary>
+    /// Go: getStoragesByPath — find all storages matching the path (longest prefix match), supports .balance suffix.
+    /// </summary>
+    private List<IDriver> GetStoragesByPath(string path)
+    {
+        var result = new List<IDriver>();
+        var curSlashCount = 0;
+
+        foreach (var kvp in _drivers)
+        {
+            var mountPath = GetActualMountPath(kvp.Key);
+            if (!IsSubPath(mountPath, path)) continue;
+
+            var slashCount = mountPath.TrimEnd('/').Split('/').Length;
+            if (slashCount > curSlashCount)
+            {
+                result.Clear();
+                curSlashCount = slashCount;
+            }
+            if (slashCount == curSlashCount)
+            {
+                result.Add(kvp.Value);
+            }
+        }
+
+        // Go: sort by MountPath for deterministic order
+        result.Sort((a, b) => string.Compare(a.GetStorage().MountPath, b.GetStorage().MountPath, StringComparison.Ordinal));
+        return result;
+    }
+
+    private IDriver RoundRobinBalance(List<IDriver> storages)
+    {
+        var virtualPath = GetActualMountPath(storages[0].GetStorage().MountPath);
+        var i = _balanceMap.GetOrAdd(virtualPath, 0);
+        i = (i + 1) % storages.Count;
+        _balanceMap[virtualPath] = i;
+        return storages[i];
+    }
+
+    /// <summary>
+    /// Go: utils.IsSubPath — path == subPath || subPath starts with path + "/"
     /// </summary>
     private static bool IsSubPath(string mountPath, string path)
     {
+        mountPath = FixAndCleanPath(mountPath);
+        path = FixAndCleanPath(path);
         if (string.Equals(mountPath, path, StringComparison.OrdinalIgnoreCase)) return true;
         var prefix = mountPath.EndsWith('/') ? mountPath : mountPath + "/";
         return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string FixAndCleanPath(string path)
+    {
+        path = path.Replace('\\', '/');
+        if (!path.StartsWith('/')) path = "/" + path;
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var stack = new Stack<string>();
+        foreach (var seg in segments)
+        {
+            if (seg == ".") continue;
+            if (seg == ".." && stack.Count > 0) stack.Pop();
+            else if (seg != "..") stack.Push(seg);
+        }
+        return "/" + string.Join("/", stack.Reverse());
+    }
+
     public List<Storage> GetAllStorages()
         => _drivers.Values.Select(d => d.GetStorage()).Where(s => s != null).ToList()!;
+
+    /// <summary>Go: getStorageVirtualFilesByPath — uses GetActualMountPath for balance support</summary>
 
     /// <summary>
     /// Get virtual directory entries under the given prefix path.
@@ -180,9 +426,7 @@ public class DriverFactory : IDriverFactory
         foreach (var driverEntry in storages)
         {
             var storage = driverEntry.GetStorage();
-            var mountPath = storage.MountPath;
-            // Normalize mount path
-            if (!mountPath.StartsWith('/')) mountPath = "/" + mountPath;
+            var mountPath = GetActualMountPath(storage.MountPath);
 
             // Check if mountPath starts with prefix
             if (!mountPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
