@@ -87,7 +87,7 @@ public static partial class FsEndpoints
                 RawURL = rawUrl,
                 Sign = sign
             }));
-        });
+        }).WithSummary("获取压缩包元数据");
 
         // archive/list - archive content listing (Go: FsArchiveListSplit in fsAndShare with Auth(true))
         archiveGroup.MapMethods("list", ["GET", "POST"], async (
@@ -150,7 +150,7 @@ public static partial class FsEndpoints
                 Content = content,
                 Total = total
             }));
-        });
+        }).WithSummary("列出压缩包内容");
 
         // archive/decompress - decompress archive to target directory (Go: FsArchiveDecompress in _fs)
         archiveGroup.MapPost("decompress", async (
@@ -209,7 +209,7 @@ public static partial class FsEndpoints
             }
 
             return Results.Json(new Resp<object>(new { task = createdTasks }));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("解压压缩包到目标目录");
     }
 
     // MapContentTree is now handled by Mapster configuration in MappingConfig.cs

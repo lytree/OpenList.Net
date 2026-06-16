@@ -38,21 +38,21 @@ public static partial class AdminEndpoints
         {
             var (userList, total) = await users.ListUsersAsync(page, perPage);
             return Results.Json(new Resp<PagedListResp<User>>(new PagedListResp<User> { Content = userList, Total = total }));
-        });
+        }).WithSummary("获取用户列表");
 
         group.MapGet("user/get", async (IUserService users, uint id) =>
         {
             var user = await users.GetUserByIdAsync(id);
             if (user == null) return Results.Json(Resp<User>.Error(404, "user not found"));
             return Results.Json(new Resp<User>(user));
-        });
+        }).WithSummary("获取用户详情");
 
         group.MapPost("user/create", async (IUserService users, [FromBody] CreateUserReq req) =>
         {
             var user = req.Adapt<User>();
             var created = await users.CreateUserAsync(user);
             return Results.Json(new Resp<IdResp>(new IdResp { Id = created.Id }));
-        });
+        }).WithSummary("创建用户");
 
         group.MapPost("user/update", async (IUserService users, [FromBody] UpdateUserReq req) =>
         {
@@ -68,37 +68,37 @@ public static partial class AdminEndpoints
 
             await users.UpdateUserAsync(user);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("更新用户");
 
         group.MapPost("user/delete", async (IUserService users, uint id) =>
         {
             await users.DeleteUserAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("删除用户");
 
         group.MapPost("user/cancel_2fa", async (IUserService users, uint id) =>
         {
             await users.Cancel2FAAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("取消用户 2FA");
 
         group.MapPost("user/del_cache", async (IUserService users, string username) =>
         {
             await users.DeleteUserCacheByUsernameAsync(username);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("清除用户缓存");
 
         group.MapGet("user/sshkey/list", async (IUserService users, uint uid, int page = 1, int perPage = 100) =>
         {
             var (keys, total) = await users.ListSshKeysPagedAsync(uid, page, perPage);
             return Results.Json(new Resp<PagedListResp<SshKey>>(new PagedListResp<SshKey> { Content = keys, Total = total }));
-        });
+        }).WithSummary("获取用户 SSH 密钥列表");
 
         group.MapPost("user/sshkey/delete", async (IUserService users, uint id) =>
         {
             await users.DeleteSshKeyByIdAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("删除用户 SSH 密钥");
     }
 
     private static void MapShareAdmin(RouteGroupBuilder group)
@@ -115,25 +115,25 @@ public static partial class AdminEndpoints
                 }
             }
             return Results.Json(new Resp<PagedListResp<Sharing>>(new PagedListResp<Sharing> { Content = sharingList, Total = total }));
-        });
+        }).WithSummary("获取分享列表");
 
         group.MapPost("share/create", async (ISharingService sharings, Sharing req) =>
         {
             var sharing = await sharings.CreateSharingAsync(req);
             return Results.Json(new Resp<Sharing>(sharing));
-        });
+        }).WithSummary("创建分享 (管理员)");
 
         group.MapPost("share/update", async (ISharingService sharings, Sharing req) =>
         {
             await sharings.UpdateSharingAsync(req);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("更新分享");
 
         group.MapPost("share/delete", async (ISharingService sharings, string id) =>
         {
             await sharings.DeleteSharingAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("删除分享");
     }
 
     private static void MapDriverAdmin(RouteGroupBuilder group)
@@ -148,10 +148,10 @@ public static partial class AdminEndpoints
                     Common = i.Common, Additional = i.Additional, Config = i.Config
                 });
             return Results.Json(new Resp<Dictionary<string, DriverInfoResp>>(map));
-        });
+        }).WithSummary("获取所有驱动信息");
 
         group.MapGet("driver/names", (IStorageService storages) =>
-            Results.Json(new Resp<List<string>>(storages.ListDriverNames())));
+            Results.Json(new Resp<List<string>>(storages.ListDriverNames()))).WithSummary("获取驱动名称列表");
 
         group.MapGet("driver/info", (IStorageService storages, string driver) =>
         {
@@ -160,6 +160,6 @@ public static partial class AdminEndpoints
             {
                 Name = info.Config.Name, Common = info.Common, Additional = info.Additional, Config = info.Config
             }));
-        });
+        }).WithSummary("获取指定驱动信息");
     }
 }

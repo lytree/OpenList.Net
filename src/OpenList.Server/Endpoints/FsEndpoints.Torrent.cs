@@ -42,7 +42,7 @@ public static partial class FsEndpoints
             // TODO: Implement torrent Bencode parsing in C#
             // Go: torrent.Decode(torrentData) → extracts name, files, pieces, info_hash, CAS
             return Results.Json(Resp<object>.Error(501, "torrent parsing not yet implemented in C#"));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("解析 Torrent 文件 (Base64)");
 
         // POST torrent/upload_parse - upload and parse torrent file (Go: UploadTorrentAndParse)
         torrentGroup.MapPost("upload_parse", async (HttpContext ctx) =>
@@ -68,7 +68,7 @@ public static partial class FsEndpoints
             // TODO: Implement torrent Bencode parsing in C#
             // Go: torrent.Decode(torrentData) → returns ParseTorrentResp + Base64 torrent_data
             return Results.Json(Resp<object>.Error(501, "torrent parsing not yet implemented in C#"));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("上传并解析 Torrent 文件");
 
         // POST torrent/rapid_upload - CAS rapid upload from torrent (Go: TorrentRapidUpload, 189PC only)
         torrentGroup.MapPost("rapid_upload", async (
@@ -103,7 +103,7 @@ public static partial class FsEndpoints
             // TODO: Implement torrent CAS rapid upload (189PC driver specific)
             // Go: checks HasCASInfo → gets storage → verifies Cloud189PC → RapidUploadFromTorrent
             return Results.Json(Resp<object>.Error(501, "torrent rapid upload not yet implemented in C#"));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("Torrent 快速上传 (CAS)");
 
         // POST torrent/generate - generate torrent for a file path (Go: GenerateTorrentForPath)
         torrentGroup.MapPost("generate", async (
@@ -135,7 +135,7 @@ public static partial class FsEndpoints
             // TODO: Implement torrent generation in C#
             // Go: gets link → RangeRead entire file → torrent.GenerateFromReader/WithCAS → Base64 encode
             return Results.Json(Resp<object>.Error(501, "torrent generation not yet implemented in C#"));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("生成 Torrent 文件");
     }
 }
 

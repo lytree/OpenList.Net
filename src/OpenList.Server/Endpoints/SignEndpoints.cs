@@ -16,33 +16,33 @@ public static class SignEndpoints
     {
         // /d/*path - signed download (Go: checks ShouldProxy first)
         endpoints.MapGet("/d/{*path}", async (IFileSystemService fs, ISignService sign, IDriverFactory driverFactory, ISettingService settings, HttpContext ctx, string path, string? sign_query) =>
-            await HandleSignedDownload(fs, sign, driverFactory, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous();
+            await HandleSignedDownload(fs, sign, driverFactory, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous().WithSummary("签名下载 (重定向/代理)");
         endpoints.MapMethods("/d/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, IDriverFactory driverFactory, ISettingService settings, HttpContext ctx, string path, string? sign_query) =>
-            await HandleSignedDownload(fs, sign, driverFactory, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous();
+            await HandleSignedDownload(fs, sign, driverFactory, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous().WithSummary("签名下载 HEAD");
 
         // /p/*path - signed proxy
         endpoints.MapGet("/p/{*path}", async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleSignedProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+            await HandleSignedProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous().WithSummary("签名代理");
         endpoints.MapMethods("/p/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleSignedProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+            await HandleSignedProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous().WithSummary("签名代理 HEAD");
 
-        // /ad/*path - signed archive download (extract inner file from archive)
+        // /ad/*path - signed archive download
         endpoints.MapGet("/ad/{*path}", async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleArchiveDownload(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+            await HandleArchiveDownload(fs, sign, ctx, path, sign_query)).AllowAnonymous().WithSummary("签名压缩包内文件下载");
         endpoints.MapMethods("/ad/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleArchiveDownload(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+            await HandleArchiveDownload(fs, sign, ctx, path, sign_query)).AllowAnonymous().WithSummary("签名压缩包内文件 HEAD");
 
-        // /ap/*path - signed archive proxy (proxy inner file from archive)
+        // /ap/*path - signed archive proxy
         endpoints.MapGet("/ap/{*path}", async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleArchiveProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+            await HandleArchiveProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous().WithSummary("签名压缩包内文件代理");
         endpoints.MapMethods("/ap/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleArchiveProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+            await HandleArchiveProxy(fs, sign, ctx, path, sign_query)).AllowAnonymous().WithSummary("签名压缩包内文件代理 HEAD");
 
-        // /ae/*path - signed archive extract (download extracted file)
+        // /ae/*path - signed archive extract
         endpoints.MapGet("/ae/{*path}", async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleArchiveExtract(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+            await HandleArchiveExtract(fs, sign, ctx, path, sign_query)).AllowAnonymous().WithSummary("签名压缩包提取下载");
         endpoints.MapMethods("/ae/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
-            await HandleArchiveExtract(fs, sign, ctx, path, sign_query)).AllowAnonymous();
+            await HandleArchiveExtract(fs, sign, ctx, path, sign_query)).AllowAnonymous().WithSummary("签名压缩包提取 HEAD");
 
         // /i/:link_name - iOS Plist for streaming IPA
         endpoints.MapGet("/i/{linkName}", (string linkName) =>
@@ -117,7 +117,7 @@ public static class SignEndpoints
             plist.AppendLine("</plist>");
 
             return Results.Text(plist.ToString(), "application/xml", Encoding.UTF8);
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithSummary("iOS Plist 流媒体安装");
 
         return endpoints;
     }

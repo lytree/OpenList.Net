@@ -14,23 +14,23 @@ public static class SharingDownloadEndpoints
     {
         // /sd/:sid - sharing download
         endpoints.MapGet("/sd/{sid}", async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid) =>
-            await HandleSharingDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous();
+            await HandleSharingDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous().WithSummary("分享文件下载");
         endpoints.MapGet("/sd/{sid}/{*path}", async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string path) =>
-            await HandleSharingDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous();
+            await HandleSharingDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous().WithSummary("分享子路径下载");
         endpoints.MapMethods("/sd/{sid}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid) =>
-            await HandleSharingDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous();
+            await HandleSharingDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous().WithSummary("分享文件 HEAD");
         endpoints.MapMethods("/sd/{sid}/{*path}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string path) =>
-            await HandleSharingDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous();
+            await HandleSharingDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous().WithSummary("分享子路径 HEAD");
 
         // /sad/:sid - sharing archive download
         endpoints.MapGet("/sad/{sid}", async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid) =>
-            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous();
+            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous().WithSummary("分享压缩包下载");
         endpoints.MapGet("/sad/{sid}/{*path}", async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string path) =>
-            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous();
+            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous().WithSummary("分享压缩包子路径下载");
         endpoints.MapMethods("/sad/{sid}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid) =>
-            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous();
+            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, null)).AllowAnonymous().WithSummary("分享压缩包 HEAD");
         endpoints.MapMethods("/sad/{sid}/{*path}", ["HEAD"], async (ISharingService sharing, IFileSystemService fs, IConfiguration config, HttpContext ctx, string sid, string path) =>
-            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous();
+            await HandleSharingArchiveDownload(sharing, fs, config, ctx, sid, path)).AllowAnonymous().WithSummary("分享压缩包子路径 HEAD");
 
         return endpoints;
     }

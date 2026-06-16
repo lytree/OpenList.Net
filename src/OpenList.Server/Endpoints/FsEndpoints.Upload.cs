@@ -97,7 +97,7 @@ public static partial class FsEndpoints
                 }
             }
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("流式上传文件 (PUT)");
 
         // PUT /fs/form - form upload (Go: FsForm, uses File-Path header, single 'file' field)
         group.MapPut("form", async (IFileSystemService fs, IStorageService storageService, IUserService users, IMetaService metaSvc, ISettingService settings, HttpContext ctx) =>
@@ -184,7 +184,7 @@ public static partial class FsEndpoints
             if (asTask && createdTask != null)
                 return Results.Json(new Resp<object>(new { task = createdTask }));
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("表单上传文件 (multipart)");
 
         // fs/link - admin only (Go: middlewares.AuthAdmin)
         group.MapPost("link", async (IFileSystemService fs, IStorageService storageService, ISignService sign, HttpContext ctx, [FromBody] LinkReq req) =>
@@ -208,7 +208,7 @@ public static partial class FsEndpoints
             var link = await fs.LinkAsync(rawPath, new LinkArgs { IP = ctx.Connection.RemoteIpAddress?.ToString() ?? "", Header = ctx.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString()), Redirect = true });
             if (link == null) return Results.Json(Resp<LinkResp>.Error(500, "failed to get link"));
             return Results.Json(new Resp<LinkResp>(link.Adapt<LinkResp>()));
-        }).RequireAuthorization(policy => policy.RequireRole("2"));
+        }).RequireAuthorization(policy => policy.RequireRole("2")).WithSummary("获取文件直链 (管理员)");
 
         // Direct upload info
         group.MapPost("get_direct_upload_info", async (IFileSystemService fs, IStorageService storageService, IUserService users, HttpContext ctx, [FromBody] DirectUploadReq req) =>
@@ -249,6 +249,6 @@ public static partial class FsEndpoints
             }
 
             return Results.Json(Resp<object>.Error(500, "driver does not support direct upload"));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("获取直传信息");
     }
 }

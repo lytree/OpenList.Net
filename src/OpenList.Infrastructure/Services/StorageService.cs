@@ -64,9 +64,9 @@ public class StorageService : IStorageService
         if (oldStorage.Driver != storage.Driver)
             throw new InvalidOperationException("driver cannot be changed");
 
-        storage.Modified = DateTime.UtcNow;
-        storage.MountPath = FixAndCleanPath(storage.MountPath);
-        _db.Storages.Update(storage);
+        oldStorage.Modified = DateTime.UtcNow;
+        oldStorage.MountPath = FixAndCleanPath(storage.MountPath);
+        _db.Storages.Update(oldStorage);
         await _db.SaveChangesAsync(ct);
 
         // Go: if disabled, skip driver reload

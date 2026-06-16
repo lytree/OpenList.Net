@@ -1,10 +1,12 @@
 namespace OpenList.Core.Models;
 
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
 
 public class Storage
 {
+    [Key]
     public uint Id { get; set; }
     [JsonPropertyName("mount_path")]
     public string MountPath { get; set; } = string.Empty;

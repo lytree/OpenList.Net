@@ -160,7 +160,7 @@ public static partial class FsEndpoints
                 resp.Header = meta.Header;
 
             return Results.Json(new Resp<ListResp>(resp));
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithSummary("文件列表");
 
         // fs/get - supports both GET and POST, allows guest (Go: fsAndShare with Auth(true))
         // Go: FsGetSplit → SharingGet if /@s prefix, else check guest disabled then FsGet
@@ -342,6 +342,6 @@ public static partial class FsEndpoints
             }
 
             return Results.Json(new Resp<GetResp>(resp));
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithSummary("获取文件详情");
     }
 }

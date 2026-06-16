@@ -37,7 +37,7 @@ public static partial class AdminEndpoints
                 catch (OperationCanceledException) { /* timeout is OK */ }
             }
             return Results.Json(new Resp<PagedListResp<Storage>>(new PagedListResp<Storage> { Content = storageList, Total = total }));
-        });
+        }).WithSummary("获取存储列表");
 
         // Go: GetStorage — returns raw storage without mount details
         group.MapGet("storage/get", async (IStorageService storages, uint id) =>
@@ -45,37 +45,37 @@ public static partial class AdminEndpoints
             var storage = await storages.GetStorageByIdAsync(id);
             if (storage == null) return Results.Json(Resp<Storage>.Error(404, "storage not found"));
             return Results.Json(new Resp<Storage>(storage));
-        });
+        }).WithSummary("获取存储详情");
 
         group.MapPost("storage/create", async (IStorageService storages, Storage req) =>
         {
             var id = await storages.CreateStorageAsync(req);
             return Results.Json(new Resp<IdResp>(new IdResp { Id = id }));
-        });
+        }).WithSummary("创建存储");
 
         group.MapPost("storage/update", async (IStorageService storages, Storage req) =>
         {
             await storages.UpdateStorageAsync(req);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("更新存储");
 
         group.MapPost("storage/delete", async (IStorageService storages, uint id) =>
         {
             await storages.DeleteStorageAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("删除存储");
 
         group.MapPost("storage/enable", async (IStorageService storages, uint id) =>
         {
             await storages.EnableStorageAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("启用存储");
 
         group.MapPost("storage/disable", async (IStorageService storages, uint id) =>
         {
             await storages.DisableStorageAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("禁用存储");
 
         group.MapPost("storage/load_all", async (IStorageService storages) =>
         {
@@ -86,7 +86,7 @@ public static partial class AdminEndpoints
                 catch { /* logged internally */ }
             });
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("重新加载所有存储");
     }
 
     private static void MapMetaAdmin(RouteGroupBuilder group)
@@ -95,14 +95,14 @@ public static partial class AdminEndpoints
         {
             var (metaList, total) = await metas.ListMetasAsync(page, perPage);
             return Results.Json(new Resp<PagedListResp<Meta>>(new PagedListResp<Meta> { Content = metaList, Total = total }));
-        });
+        }).WithSummary("获取 Meta 列表");
 
         group.MapGet("meta/get", async (IMetaService metas, uint id) =>
         {
             var meta = await metas.GetMetaByIdAsync(id);
             if (meta == null) return Results.Json(Resp<Meta>.Error(404, "meta not found"));
             return Results.Json(new Resp<Meta>(meta));
-        });
+        }).WithSummary("获取 Meta 详情");
 
         group.MapPost("meta/create", async (IMetaService metas, Meta req) =>
         {
@@ -110,7 +110,7 @@ public static partial class AdminEndpoints
             if (hideError != null) return Results.Json(Resp<object>.Error(400, $"{hideError} is illegal"));
             await metas.CreateMetaAsync(req);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("创建 Meta");
 
         group.MapPost("meta/update", async (IMetaService metas, Meta req) =>
         {
@@ -118,13 +118,13 @@ public static partial class AdminEndpoints
             if (hideError != null) return Results.Json(Resp<object>.Error(400, $"{hideError} is illegal"));
             await metas.UpdateMetaAsync(req);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("更新 Meta");
 
         group.MapPost("meta/delete", async (IMetaService metas, uint id) =>
         {
             await metas.DeleteMetaByIdAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("删除 Meta");
     }
 
     private static string? ValidateHide(string? hide)

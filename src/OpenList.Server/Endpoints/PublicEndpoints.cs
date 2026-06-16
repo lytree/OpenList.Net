@@ -13,19 +13,19 @@ public static class PublicEndpoints
         var group = endpoints.MapGroup("/api/public");
 
         group.MapGet("settings", async (ISettingService settings) =>
-            BuildSettingsResp(settings));
+            BuildSettingsResp(settings)).WithSummary("获取公共设置 (GET)");
         group.MapPost("settings", async (ISettingService settings) =>
-            BuildSettingsResp(settings));
+            BuildSettingsResp(settings)).WithSummary("获取公共设置 (POST)");
 
         group.MapGet("offline_download_tools", () =>
-            Results.Json(new Resp<List<string>>(["aria2", "qBittorrent"])));
+            Results.Json(new Resp<List<string>>(["aria2", "qBittorrent"]))).WithSummary("获取离线下载工具列表");
         group.MapPost("offline_download_tools", () =>
-            Results.Json(new Resp<List<string>>(["aria2", "qBittorrent"])));
+            Results.Json(new Resp<List<string>>(["aria2", "qBittorrent"]))).WithSummary("获取离线下载工具列表");
 
         group.MapGet("archive_extensions", () =>
-            Results.Json(new Resp<List<string>>([".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".rar", ".7z"])));
+            Results.Json(new Resp<List<string>>([".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".rar", ".7z"]))).WithSummary("获取支持的压缩格式列表");
         group.MapPost("archive_extensions", () =>
-            Results.Json(new Resp<List<string>>([".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".rar", ".7z"])));
+            Results.Json(new Resp<List<string>>([".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".rar", ".7z"]))).WithSummary("获取支持的压缩格式列表");
 
         return endpoints;
     }

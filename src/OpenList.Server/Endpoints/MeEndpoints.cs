@@ -23,7 +23,7 @@ public static class MeEndpoints
             var u = await users.GetUserByIdAsync(userId.Value);
             if (u == null) return Results.Json(Resp<UserResp>.Error(404, "user not found"));
             return Results.Json(new Resp<UserResp>(u.Adapt<UserResp>()));
-        });
+        }).WithSummary("获取当前用户信息");
 
         group.MapPost("update", async (IUserService users, IAuthService auth, ClaimsPrincipal user, [FromBody] UpdateMeReq req) =>
         {
@@ -40,7 +40,7 @@ public static class MeEndpoints
 
             await users.UpdateUserAsync(u);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("更新个人资料");
 
         group.MapGet("sshkey/list", async (IUserService users, ClaimsPrincipal user, int page = 1, int perPage = 100) =>
         {
@@ -48,7 +48,7 @@ public static class MeEndpoints
             if (userId == null) return Results.Json(Resp<PagedListResp<SshKey>>.Error(401, "unauthorized"));
             var (keys, total) = await users.ListSshKeysPagedAsync(userId.Value, page, perPage);
             return Results.Json(new Resp<PagedListResp<SshKey>>(new PagedListResp<SshKey> { Content = keys, Total = total }));
-        });
+        }).WithSummary("获取 SSH 密钥列表");
 
         group.MapPost("sshkey/add", async (IUserService users, ClaimsPrincipal user, [FromBody] AddSshKeyReq req) =>
         {
@@ -56,7 +56,7 @@ public static class MeEndpoints
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             await users.AddSshKeyAsync(userId.Value, req.Name, req.Key);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("添加 SSH 密钥");
 
         group.MapPost("sshkey/delete", async (IUserService users, ClaimsPrincipal user, uint id) =>
         {
@@ -64,7 +64,7 @@ public static class MeEndpoints
             if (userId == null) return Results.Json(Resp<object>.Error(401, "unauthorized"));
             await users.DeleteSshKeyByIdAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("删除 SSH 密钥");
 
         return endpoints;
     }

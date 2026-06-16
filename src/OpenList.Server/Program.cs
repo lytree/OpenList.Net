@@ -12,6 +12,7 @@ using OpenList.Infrastructure.Services;
 using OpenList.Server;
 using OpenList.Server.Endpoints;
 using OpenList.Server.Middleware;
+using Scalar.AspNetCore;
 using Serilog;
 using System.Text;
 
@@ -147,9 +148,62 @@ builder.Services.Configure<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServe
     }
 });
 
-// Swagger
+// OpenAPI + Scalar
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo
+    {
+        Title = "OpenList.Net API",
+        Version = "v1",
+        Description = "OpenList.Net — 多存储驱动文件管理 API"
+    });
+    // Group endpoints by tag
+    c.TagActionsBy(api =>
+    {
+        if (api.GroupName != null) return [api.GroupName];
+        if (api.ActionDescriptor.RouteValues.TryGetValue("controller", out var ctrl)) return [ctrl];
+        // Infer tag from route
+        var route = api.RelativePath ?? "";
+        if (route.StartsWith("api/auth")) return ["Auth"];
+        if (route.StartsWith("api/fs/archive")) return ["Fs.Archive"];
+        if (route.StartsWith("api/fs/torrent")) return ["Fs.Torrent"];
+        if (route.StartsWith("api/fs")) return ["Fs"];
+        if (route.StartsWith("api/admin/user")) return ["Admin.User"];
+        if (route.StartsWith("api/admin/storage")) return ["Admin.Storage"];
+        if (route.StartsWith("api/admin/meta")) return ["Admin.Meta"];
+        if (route.StartsWith("api/admin/setting")) return ["Admin.Setting"];
+        if (route.StartsWith("api/admin/share")) return ["Admin.Share"];
+        if (route.StartsWith("api/admin/driver")) return ["Admin.Driver"];
+        if (route.StartsWith("api/admin/index")) return ["Admin.Index"];
+        if (route.StartsWith("api/admin/message")) return ["Admin.Message"];
+        if (route.StartsWith("api/admin/scan")) return ["Admin.Scan"];
+        if (route.StartsWith("api/admin/task")) return ["Admin.Task"];
+        if (route.StartsWith("api/admin")) return ["Admin"];
+        if (route.StartsWith("api/share")) return ["Share"];
+        if (route.StartsWith("api/task")) return ["Task"];
+        if (route.StartsWith("api/me")) return ["Me"];
+        if (route.StartsWith("api/public")) return ["Public"];
+        if (route.StartsWith("s3")) return ["S3"];
+        if (route.StartsWith("dav")) return ["WebDAV"];
+        if (route.StartsWith("d/") || route.StartsWith("p/") || route.StartsWith("ad/") || route.StartsWith("ap/") || route.StartsWith("ae/")) return ["Sign"];
+        if (route.StartsWith("sd/") || route.StartsWith("sad/")) return ["SharingDownload"];
+        return ["Other"];
+    });
+    c.DocInclusionPredicate((_, _) => true);
+    // JWT Bearer auth scheme
+    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.OpenApiSecurityScheme
+    {
+        Type = Microsoft.OpenApi.SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        Description = "输入 JWT Token"
+    });
+    c.AddSecurityRequirement(_ => new Microsoft.OpenApi.OpenApiSecurityRequirement
+    {
+        [new Microsoft.OpenApi.OpenApiSecuritySchemeReference("Bearer")] = []
+    });
+});
 
 // CORS
 builder.Services.AddCors(options =>
@@ -218,11 +272,18 @@ app.UseAuthorization();
 app.UseWhen(ctx => ctx.Request.Path.StartsWithSegments("/dav"), builder =>
     builder.UseMiddleware<WebDavAuthMiddleware>());
 
-// Swagger
+// OpenAPI + Scalar
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.MapScalarApiReference(options =>
+    {
+        options
+            .WithTitle("OpenList.Net API")
+            .WithTheme(ScalarTheme.DeepSpace)
+            .WithDefaultHttpClient(ScalarTarget.Shell, ScalarClient.Curl)
+            .AddPreferredSecuritySchemes("Bearer");
+    });
 }
 
 // Static files for frontend

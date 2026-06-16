@@ -3,6 +3,7 @@ using OpenList.Core.Models;
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 
 namespace OpenList.Infrastructure.Services;
@@ -204,8 +205,16 @@ public class DriverFactory : IDriverFactory
     }
 
     /// <summary>
-    /// Go: initStorage core — SetStorage, unmarshal addition, init, store, set status, save.
+    /// JSON options for addition deserialization — handles Go's flexible JSON encoding
+    /// where booleans may be stored as strings ("true"/"false") and numbers as strings.
     /// </summary>
+    private static readonly JsonSerializerOptions AdditionJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        Converters = { new FlexibleBoolConverter() }
+    };
+
     private void InitAndStoreDriver(Storage storage, IDriver driver)
     {
         driver.SetStorage(storage);
@@ -220,8 +229,7 @@ public class DriverFactory : IDriverFactory
                 try
                 {
                     var additionType = addition.GetType();
-                    var deserialized = JsonSerializer.Deserialize(driverStorage.Addition, additionType,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    var deserialized = JsonSerializer.Deserialize(driverStorage.Addition, additionType, AdditionJsonOptions);
                     if (deserialized != null)
                     {
                         // Copy properties from deserialized object to the driver's addition instance
@@ -259,6 +267,30 @@ public class DriverFactory : IDriverFactory
         if (additionJson != null)
         {
             driverStorage.Addition = additionJson;
+        }
+    }
+
+    /// <summary>
+    /// Handles Go's JSON encoding where bool fields may be stored as strings
+    /// (e.g., "true", "false", "1", "0") or numbers (1, 0).
+    /// </summary>
+    private sealed class FlexibleBoolConverter : JsonConverter<bool>
+    {
+        public override bool Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return reader.TokenType switch
+            {
+                JsonTokenType.True => true,
+                JsonTokenType.False => false,
+                JsonTokenType.String => reader.GetString() is "true" or "1" or "yes",
+                JsonTokenType.Number => reader.TryGetInt32(out var n) && n != 0,
+                _ => throw new JsonException($"Cannot convert {reader.TokenType} to Boolean")
+            };
+        }
+
+        public override void Write(Utf8JsonWriter writer, bool value, JsonSerializerOptions options)
+        {
+            writer.WriteBooleanValue(value);
         }
     }
 

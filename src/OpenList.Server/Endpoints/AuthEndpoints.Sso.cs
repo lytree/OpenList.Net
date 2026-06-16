@@ -49,25 +49,25 @@ public static partial class AuthEndpoints
 
             if (authUrl == null) return Results.Json(Resp<object>.Error(400, $"invalid platform: {platform}"));
             return Results.Redirect(authUrl);
-        });
+        }).WithSummary("SSO 登录重定向");
 
         group.MapGet("sso_callback", async (IAuthService auth, IUserService userService, IConfiguration config, HttpContext ctx) =>
         {
             var result = await HandleSsoCallback(auth, userService, config, ctx);
             return result;
-        });
+        }).WithSummary("SSO 回调处理");
 
         group.MapGet("get_sso_id", async (IAuthService auth, IUserService userService, IConfiguration config, HttpContext ctx) =>
         {
             var result = await HandleSsoCallback(auth, userService, config, ctx);
             return result;
-        });
+        }).WithSummary("获取 SSO 用户 ID");
 
         group.MapGet("sso_get_token", async (IAuthService auth, IUserService userService, IConfiguration config, HttpContext ctx) =>
         {
             var result = await HandleSsoCallback(auth, userService, config, ctx);
             return result;
-        });
+        }).WithSummary("SSO 获取 Token");
     }
 
     private static string GetApiUrl(HttpContext ctx)

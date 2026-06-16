@@ -34,7 +34,7 @@ public static class ShareEndpoints
                 }
             }
             return Results.Json(new Resp<PagedListResp<Sharing>>(new PagedListResp<Sharing> { Content = sharingList, Total = total }));
-        });
+        }).WithSummary("获取我的分享列表");
 
         // Go: requires auth, only admin or creator can access; returns full SharingResp
         group.MapGet("get", async (ISharingService sharings, ClaimsPrincipal user, string id) =>
@@ -52,7 +52,7 @@ public static class ShareEndpoints
                 sharing.CreatorRole = (int)sharing.Creator.Role;
             }
             return Results.Json(new Resp<Sharing>(sharing));
-        });
+        }).WithSummary("获取分享详情");
 
         group.MapPost("create", async (ISharingService sharings, IUserService users, ClaimsPrincipal user, [FromBody] CreateShareReq req) =>
         {
@@ -125,7 +125,7 @@ public static class ShareEndpoints
                 created.CreatorRole = (int)creatorUser.Role;
             }
             return Results.Json(new Resp<Sharing>(created));
-        });
+        }).WithSummary("创建分享");
 
         group.MapPost("update", async (ISharingService sharings, IUserService users, ClaimsPrincipal user, [FromBody] UpdateShareReq req) =>
         {
@@ -205,7 +205,7 @@ public static class ShareEndpoints
 
             await sharings.UpdateSharingAsync(existing);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("更新分享");
 
         group.MapPost("delete", async (ISharingService sharings, ClaimsPrincipal user, string id) =>
         {
@@ -218,7 +218,7 @@ public static class ShareEndpoints
                 return Results.Json(Resp<object>.Error(404, "sharing not found"));
             await sharings.DeleteSharingAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("删除分享");
 
         group.MapPost("enable", async (ISharingService sharings, ClaimsPrincipal user, string id) =>
         {
@@ -231,7 +231,7 @@ public static class ShareEndpoints
                 return Results.Json(Resp<object>.Error(404, "sharing not found"));
             await sharings.EnableSharingAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("启用分享");
 
         group.MapPost("disable", async (ISharingService sharings, ClaimsPrincipal user, string id) =>
         {
@@ -244,7 +244,7 @@ public static class ShareEndpoints
                 return Results.Json(Resp<object>.Error(404, "sharing not found"));
             await sharings.DisableSharingAsync(id);
             return Results.Json(new Resp<object>(null));
-        });
+        }).WithSummary("禁用分享");
 
         return endpoints;
     }

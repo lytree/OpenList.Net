@@ -52,7 +52,7 @@ public static partial class FsEndpoints
             }
 
             return Results.Json(new Resp<SearchResp>(new SearchResp { Content = filtered, Total = total }));
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithSummary("搜索文件");
 
         // fs/dirs - Auth(false): allows guest but not disabled guest
         group.MapMethods("dirs", ["GET", "POST"], async (IFileSystemService fs, IMetaService metaSvc, IUserService users, HttpContext ctx, [FromBody] DirsReq req) =>
@@ -78,7 +78,7 @@ public static partial class FsEndpoints
             var objs = await fs.ListAsync(reqPath);
             var dirs = objs.Where(o => o.IsDir()).Select(o => new DirResp { Name = o.GetName(), Modified = o.GetModTime() }).ToList();
             return Results.Json(new Resp<List<DirResp>>(dirs));
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithSummary("获取子目录列表");
 
         // fs/other - Auth(false): allows guest but not disabled guest
         group.MapMethods("other", ["GET", "POST"], async (IFileSystemService fs, IUserService users, IMetaService metaSvc, HttpContext ctx, [FromBody] OtherReq req) =>
@@ -98,7 +98,7 @@ public static partial class FsEndpoints
             if (obj == null) return Results.Json(Resp<object>.Error(404, "object not found"));
             var result = await fs.OtherAsync(new OtherArgs { Obj = obj, Method = req.Method, Data = req.Data });
             return Results.Json(new Resp<object>(result));
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithSummary("执行驱动自定义操作");
 
         group.MapPost("add_offline_download", async (OfflineDownloadService downloadService, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, AddOfflineDownloadReq req, CancellationToken ct) =>
         {
@@ -127,6 +127,6 @@ public static partial class FsEndpoints
             {
                 return Results.Json(Resp<object>.Error(400, ex.Message));
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("添加离线下载任务");
     }
 }

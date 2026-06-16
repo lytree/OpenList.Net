@@ -33,7 +33,7 @@ public static partial class FsEndpoints
 
             await fs.MakeDirAsync(reqPath);
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("创建目录");
 
         group.MapPost("rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RenameReq req) =>
         {
@@ -69,7 +69,7 @@ public static partial class FsEndpoints
 
             await fs.RenameAsync(reqPath, req.Name);
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("重命名文件/目录");
 
         group.MapPost("batch_rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] BatchRenameReq req) =>
         {
@@ -98,7 +98,7 @@ public static partial class FsEndpoints
                 await fs.RenameAsync(filePath, item.NewName);
             }
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("批量重命名");
 
         group.MapPost("regex_rename", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RegexRenameReq req) =>
         {
@@ -134,7 +134,7 @@ public static partial class FsEndpoints
                 }
             }
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("正则重命名");
 
         group.MapPost("move", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] MoveReq req) =>
         {
@@ -207,7 +207,7 @@ public static partial class FsEndpoints
             if (taskCount > 0)
                 return Results.Json(new Resp<object>(new { message = $"Successfully created {taskCount} move task(s)" }));
             return Results.Json(new Resp<object>(new { message = "Move operations completed immediately" }));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("移动文件/目录");
 
         group.MapPost("recursive_move", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RecursiveMoveReq req) =>
         {
@@ -284,7 +284,7 @@ public static partial class FsEndpoints
             }
 
             return Results.Json(new Resp<string>($"Successfully moved {count} {(count == 1 ? "file" : "files")}"));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("递归移动文件");
 
         group.MapPost("copy", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] CopyReq req) =>
         {
@@ -363,7 +363,7 @@ public static partial class FsEndpoints
             if (taskCount > 0)
                 return Results.Json(new Resp<object>(new { message = $"Successfully created {taskCount} copy task(s)" }));
             return Results.Json(new Resp<object>(new { message = "Copy operations completed immediately" }));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("复制文件/目录");
 
         group.MapPost("remove", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RemoveReq req) =>
         {
@@ -404,7 +404,7 @@ public static partial class FsEndpoints
                 await fs.RemoveAsync(path);
             }
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("删除文件/目录");
 
         group.MapPost("remove_empty_directory", async (IFileSystemService fs, IUserService users, IMetaService metaSvc, ClaimsPrincipal user, [FromBody] RemoveEmptyDirReq req) =>
         {
@@ -464,6 +464,6 @@ public static partial class FsEndpoints
             }
 
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("删除空目录");
     }
 }

@@ -29,7 +29,7 @@ public static class TaskEndpoints
                 if (!isAdmin && userId.HasValue)
                     result = result.Where(t => t.CreatorId == userId.Value).ToList();
                 return Results.Json(new Resp<List<TaskInfo>>(result));
-            });
+            }).WithSummary("获取未完成的任务");
 
             subGroup.MapGet("done", async (ITaskService tasks, ClaimsPrincipal user, CancellationToken ct = default) =>
             {
@@ -39,7 +39,7 @@ public static class TaskEndpoints
                 if (!isAdmin && userId.HasValue)
                     result = result.Where(t => t.CreatorId == userId.Value).ToList();
                 return Results.Json(new Resp<List<TaskInfo>>(result));
-            });
+            }).WithSummary("获取已完成的任务");
 
             subGroup.MapPost("info", async (ITaskService tasks, ClaimsPrincipal user, string tid, CancellationToken ct = default) =>
             {
@@ -50,7 +50,7 @@ public static class TaskEndpoints
                 if (!isAdmin && (!userId.HasValue || task.CreatorId != userId.Value))
                     return Results.Json(Resp<TaskInfo>.Error(404, "task not found"));
                 return Results.Json(new Resp<TaskInfo>(task));
-            });
+            }).WithSummary("获取任务详情");
 
             subGroup.MapPost("cancel", async (ITaskService tasks, ClaimsPrincipal user, string tid, CancellationToken ct = default) =>
             {
@@ -62,7 +62,7 @@ public static class TaskEndpoints
                     return Results.Json(Resp<object>.Error(404, "task not found"));
                 await tasks.CancelTaskAsync(tid, ct);
                 return Results.Json(new Resp<object>(null));
-            });
+            }).WithSummary("取消任务");
 
             subGroup.MapPost("delete", async (ITaskService tasks, ClaimsPrincipal user, string tid, CancellationToken ct = default) =>
             {
@@ -74,7 +74,7 @@ public static class TaskEndpoints
                     return Results.Json(Resp<object>.Error(404, "task not found"));
                 await tasks.DeleteTaskAsync(tid, ct);
                 return Results.Json(new Resp<object>(null));
-            });
+            }).WithSummary("删除任务");
 
             subGroup.MapPost("retry", async (ITaskService tasks, ClaimsPrincipal user, string tid, CancellationToken ct = default) =>
             {
@@ -86,7 +86,7 @@ public static class TaskEndpoints
                     return Results.Json(Resp<object>.Error(404, "task not found"));
                 await tasks.RetryTaskAsync(tid, ct);
                 return Results.Json(new Resp<object>(null));
-            });
+            }).WithSummary("重试任务");
 
             subGroup.MapPost("cancel_some", async (ITaskService tasks, ClaimsPrincipal user, List<string> tids, CancellationToken ct = default) =>
             {
@@ -104,7 +104,7 @@ public static class TaskEndpoints
                     await tasks.CancelTaskAsync(tid, ct);
                 }
                 return Results.Json(new Resp<Dictionary<string, string>>(errors));
-            });
+            }).WithSummary("批量取消任务");
 
             subGroup.MapPost("delete_some", async (ITaskService tasks, ClaimsPrincipal user, List<string> tids, CancellationToken ct = default) =>
             {
@@ -122,7 +122,7 @@ public static class TaskEndpoints
                     await tasks.DeleteTaskAsync(tid, ct);
                 }
                 return Results.Json(new Resp<Dictionary<string, string>>(errors));
-            });
+            }).WithSummary("批量删除任务");
 
             subGroup.MapPost("retry_some", async (ITaskService tasks, ClaimsPrincipal user, List<string> tids, CancellationToken ct = default) =>
             {
@@ -140,7 +140,7 @@ public static class TaskEndpoints
                     await tasks.RetryTaskAsync(tid, ct);
                 }
                 return Results.Json(new Resp<Dictionary<string, string>>(errors));
-            });
+            }).WithSummary("批量重试任务");
 
             subGroup.MapPost("clear_done", async (ITaskService tasks, IUserService users, ClaimsPrincipal user, CancellationToken ct = default) =>
             {
@@ -148,7 +148,7 @@ public static class TaskEndpoints
                 var isAdmin = user.IsInRole("2");
                 await tasks.ClearDoneAsync(isAdmin ? null : userId, taskType, ct);
                 return Results.Json(new Resp<object>(null));
-            });
+            }).WithSummary("清除已完成任务");
 
             subGroup.MapPost("clear_succeeded", async (ITaskService tasks, IUserService users, ClaimsPrincipal user, CancellationToken ct = default) =>
             {
@@ -156,7 +156,7 @@ public static class TaskEndpoints
                 var isAdmin = user.IsInRole("2");
                 await tasks.ClearSucceededAsync(isAdmin ? null : userId, taskType, ct);
                 return Results.Json(new Resp<object>(null));
-            });
+            }).WithSummary("清除成功任务");
 
             subGroup.MapPost("retry_failed", async (ITaskService tasks, IUserService users, ClaimsPrincipal user, CancellationToken ct = default) =>
             {
@@ -164,7 +164,7 @@ public static class TaskEndpoints
                 var isAdmin = user.IsInRole("2");
                 await tasks.RetryFailedAsync(isAdmin ? null : userId, taskType, ct);
                 return Results.Json(new Resp<object>(null));
-            });
+            }).WithSummary("重试失败任务");
         }
 
         return endpoints;

@@ -44,7 +44,7 @@ public static partial class AuthEndpoints
             }
             _loginCache.TryRemove(ip, out var _);
             return Results.Json(new Resp<LoginResp>(new LoginResp { Token = token }));
-        });
+        }).WithSummary("用户登录（明文密码 + OTP）");
 
         group.MapPost("login/hash", async (IAuthService auth, HttpContext ctx, [FromBody] LoginHashReq req) =>
         {
@@ -67,7 +67,7 @@ public static partial class AuthEndpoints
             }
             _loginCache.TryRemove(ip, out var _);
             return Results.Json(new Resp<LoginResp>(new LoginResp { Token = token }));
-        });
+        }).WithSummary("用户登录（哈希密码 + OTP）");
 
         group.MapPost("login/ldap", async (IAuthService auth, HttpContext ctx, [FromBody] LoginReq req) =>
         {
@@ -84,7 +84,7 @@ public static partial class AuthEndpoints
             }
             _loginCache.TryRemove(ip, out var _);
             return Results.Json(new Resp<LoginResp>(new LoginResp { Token = token }));
-        });
+        }).WithSummary("LDAP 用户登录");
 
         // SSO endpoints (delegated to partial class)
         MapSsoApi(group);
@@ -99,7 +99,7 @@ public static partial class AuthEndpoints
             if (!string.IsNullOrEmpty(token))
                 await auth.InvalidateTokenAsync(token);
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("用户登出");
 
         group.MapPost("2fa/generate", async (IAuthService auth, IUserService users, ClaimsPrincipal user) =>
         {
@@ -110,7 +110,7 @@ public static partial class AuthEndpoints
             if (u != null && u.IsGuest) return Results.Json(Resp<TwoFAResp>.Error(403, "guest cannot generate 2FA"));
             var (qr, secret) = await auth.Generate2FAAsync(userId.Value);
             return Results.Json(new Resp<TwoFAResp>(new TwoFAResp { QR = qr, Secret = secret }));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("生成 2FA 二维码和密钥");
 
         group.MapPost("2fa/verify", async (IAuthService auth, IUserService users, Verify2FAReq req, ClaimsPrincipal user) =>
         {
@@ -123,7 +123,7 @@ public static partial class AuthEndpoints
             return ok
                 ? Results.Json(new Resp<object>(null))
                 : Results.Json(Resp<object>.Error(400, "verification failed"));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("验证 2FA 代码");
 
         return endpoints;
     }

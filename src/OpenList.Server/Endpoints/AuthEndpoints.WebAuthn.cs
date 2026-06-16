@@ -24,7 +24,7 @@ public static partial class AuthEndpoints
             if (!string.IsNullOrEmpty(username))
                 webAuthnService.CacheAssertionOptions(username, options);
             return Results.Json(new Resp<object>(options));
-        });
+        }).WithSummary("WebAuthn 登录开始");
 
         authn.MapPost("webauthn_finish_login", async (WebAuthnService webAuthnService, HttpContext ctx, IUserService userService, IAuthService authService, string? username, CancellationToken ct) =>
         {
@@ -40,7 +40,7 @@ public static partial class AuthEndpoints
 
             var token = authService.GenerateToken(user);
             return Results.Json(new Resp<object>(new { Token = token }));
-        });
+        }).WithSummary("WebAuthn 登录完成");
 
         // Authenticated: registration/management
         authn.MapGet("webauthn_begin_registration", async (WebAuthnService webAuthnService, ClaimsPrincipal user, string? credentialName, CancellationToken ct) =>
@@ -52,7 +52,7 @@ public static partial class AuthEndpoints
             var options = await webAuthnService.BeginRegistrationAsync(userId.Value, username, credentialName, ct);
             webAuthnService.CacheRegistrationOptions(userId.Value, options);
             return Results.Json(new Resp<object>(options));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("WebAuthn 注册开始");
 
         authn.MapPost("webauthn_finish_registration", async (WebAuthnService webAuthnService, HttpContext ctx, ClaimsPrincipal user, CancellationToken ct) =>
         {
@@ -65,7 +65,7 @@ public static partial class AuthEndpoints
             var credentialName = ctx.Request.Query["name"].ToString();
             var credential = await webAuthnService.FinishRegistrationAsync(userId.Value, credentialName, body, ct);
             return Results.Json(new Resp<object>(credential));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("WebAuthn 注册完成");
 
         authn.MapPost("delete_authn", async (WebAuthnService webAuthnService, ClaimsPrincipal user, int credentialId, CancellationToken ct) =>
         {
@@ -74,7 +74,7 @@ public static partial class AuthEndpoints
 
             await webAuthnService.DeleteCredentialAsync(credentialId, userId.Value, ct);
             return Results.Json(new Resp<object>(null));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("删除 WebAuthn 凭据");
 
         authn.MapGet("getcredentials", async (WebAuthnService webAuthnService, ClaimsPrincipal user, CancellationToken ct) =>
         {
@@ -83,6 +83,6 @@ public static partial class AuthEndpoints
 
             var credentials = await webAuthnService.GetCredentialsAsync(userId.Value, ct);
             return Results.Json(new Resp<object>(credentials));
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithSummary("获取 WebAuthn 凭据列表");
     }
 }
