@@ -13,6 +13,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\OpenList.Core\OpenList.Core.csproj" />
+    <ProjectReference Include="..\..\src\OpenList.Drivers\OpenList.Drivers.csproj" />
     <ProjectReference Include="..\..\src\OpenList.Infrastructure\OpenList.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\OpenList.Server\OpenList.Server.csproj" />
   </ItemGroup>

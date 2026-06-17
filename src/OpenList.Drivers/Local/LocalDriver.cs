@@ -1,4 +1,7 @@
+using System.Globalization;
 using System.Text.Json;
+using FluentStorage;
+using FluentStorage.Blobs;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
@@ -10,6 +13,12 @@ public class LocalDriver : RootPathDriver,
     IDriverGetter, IDriverMkdirResult, IDriverMove, IDriverRename,
     IDriverCopy, IDriverRemove, IDriverPutResult, IDriverWithDetails
 {
+    private IBlobStorage _blobStorage = null!;
+    private DirectoryMap _directoryMap = new();
+    private ITokenBucket _thumbTokenBucket = new NopTokenBucket();
+    private double _videoThumbPos;
+    private bool _videoThumbPosIsPercentage;
+
     public override DriverConfig Config() => new()
     {
         Name = "Local",
@@ -20,7 +29,9 @@ public class LocalDriver : RootPathDriver,
         NoLinkURL = true
     };
 
-    public override object GetAddition() => JsonSerializer.Deserialize<LocalAddition>(_storage.Addition) ?? new LocalAddition();
+    public override object GetAddition() =>
+        JsonSerializer.Deserialize<LocalAddition>(_storage.Addition) ?? new LocalAddition();
+
     protected override Type? GetAdditionType() => typeof(LocalAddition);
 
     public override Task InitAsync(CancellationToken ct = default)
@@ -34,126 +45,189 @@ public class LocalDriver : RootPathDriver,
         if (!Path.IsPathRooted(RootFolderPath))
             RootFolderPath = Path.GetFullPath(RootFolderPath);
 
+        // Create FluentStorage blob storage backed by local directory
+        _blobStorage = StorageFactory.Blobs.DirectoryFiles(RootFolderPath);
+
+        // Thumb cache folder
         if (!string.IsNullOrEmpty(addition.ThumbCacheFolder) && !Directory.Exists(addition.ThumbCacheFolder))
             Directory.CreateDirectory(addition.ThumbCacheFolder);
+
+        // Directory size calculation (Go: directoryMap)
+        if (addition.DirectorySize)
+        {
+            _directoryMap.Root = RootFolderPath;
+            _directoryMap.CalculateDirSize(RootFolderPath);
+        }
+        else
+        {
+            _directoryMap.Clear();
+        }
+
+        // Token bucket for thumbnail concurrency (Go: thumbConcurrency)
+        var concurrency = 16;
+        if (!string.IsNullOrEmpty(addition.ThumbConcurrency) &&
+            int.TryParse(addition.ThumbConcurrency, out var c))
+        {
+            concurrency = c;
+        }
+        _thumbTokenBucket = concurrency > 0
+            ? new StaticTokenBucket(concurrency)
+            : new NopTokenBucket();
+
+        // VideoThumbPos parsing (Go: VideoThumbPos)
+        var videoThumbPos = addition.VideoThumbPos ?? "20%";
+        if (videoThumbPos.EndsWith('%'))
+        {
+            var percentage = videoThumbPos.TrimEnd('%');
+            if (!double.TryParse(percentage, NumberStyles.Float, CultureInfo.InvariantCulture, out var val))
+                throw new ArgumentException($"Invalid video_thumb_pos value: {videoThumbPos}");
+            if (val < 0 || val > 100)
+                throw new ArgumentException($"Invalid video_thumb_pos value: {videoThumbPos}, the percentage must be between 0 and 100");
+            _videoThumbPosIsPercentage = true;
+            _videoThumbPos = val / 100.0;
+        }
+        else
+        {
+            if (!double.TryParse(videoThumbPos, NumberStyles.Float, CultureInfo.InvariantCulture, out var val))
+                throw new ArgumentException($"Invalid video_thumb_pos value: {videoThumbPos}");
+            if (val < 0)
+                throw new ArgumentException($"Invalid video_thumb_pos value: {videoThumbPos}, the time must be a positive number");
+            _videoThumbPosIsPercentage = false;
+            _videoThumbPos = val;
+        }
 
         return Task.CompletedTask;
     }
 
-    public override Task DropAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public override Task DropAsync(CancellationToken ct = default)
+    {
+        _blobStorage?.Dispose();
+        return Task.CompletedTask;
+    }
 
     /// <summary>
-    /// List directory contents. Mirrors Go: dir.GetPath() returns actual filesystem path.
-    /// Go: fullPath := dir.GetPath() → readDir(fullPath)
+    /// List directory contents using FluentStorage's ListAsync.
+    /// Falls back to System.IO for hidden file filtering and directory size.
     /// </summary>
-    public override Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
+    public override async Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
-        // Go: fullPath := dir.GetPath() — this is the actual filesystem path
         var fullPath = dir.GetPath();
 
+        // Refresh directory sizes if requested
+        if (addition.DirectorySize && args.Refresh)
+            _directoryMap.RecalculateDirSize();
+
+        // Use FluentStorage to list entries
+        var relativePath = GetRelativePath(fullPath);
+        var blobs = await _blobStorage.ListAsync(new ListOptions { FolderPath = relativePath }, ct);
+
         var result = new List<IObj>();
-
-        // Read directory entries directly (Go: readDir)
-        var dirInfo = new DirectoryInfo(fullPath);
-        if (!dirInfo.Exists)
-            return Task.FromResult(result);
-
-        foreach (var entry in dirInfo.EnumerateFileSystemInfos())
+        foreach (var blob in blobs)
         {
-            // Skip hidden if configured
-            if (!addition.ShowHidden && IsHiddenName(entry.Name)) continue;
+            if (blob.Name == "." || blob.Name == "..") continue;
 
-            var isFolder = entry is DirectoryInfo;
-            // Go: isSymlinkDir check — check if symlink points to a directory
-            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) && entry is FileInfo)
-            {
-                try
-                {
-                    isFolder = File.GetAttributes(entry.FullName).HasFlag(FileAttributes.Directory);
-                }
-                catch { }
-            }
+            // Hidden file filter (requires System.IO check on Windows)
+            if (!addition.ShowHidden && IsHiddenName(blob.Name)) continue;
 
-            var size = 0L;
+            var entryPath = Path.Join(fullPath, blob.Name);
+            var isFolder = blob.IsFolder;
+
+            // Determine size
+            long size = 0;
             if (isFolder)
             {
                 if (addition.DirectorySize)
                 {
-                    try { size = GetDirectorySize(Path.Join(fullPath, entry.Name)); } catch { }
+                    var node = _directoryMap.Get(entryPath);
+                    if (node != null)
+                        size = node.FileSum + node.DirectorySum;
                 }
             }
             else
             {
-                try { size = ((FileInfo)entry).Length; } catch { }
+                size = blob.Size ?? 0;
             }
 
+            // Get creation time from System.IO (FluentStorage doesn't expose ctime)
             var ctime = DateTime.MinValue;
-            try { ctime = entry.CreationTimeUtc; } catch { }
+            try { ctime = new FileInfo(entryPath).CreationTimeUtc; } catch { }
 
-            // Go: Path = filepath.Join(fullPath, f.Name()) — actual filesystem path
             result.Add(new ObjItem
             {
-                Name = entry.Name,
+                Name = blob.Name,
                 Size = size,
-                Modified = entry.LastWriteTimeUtc,
+                Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
                 CTime = ctime,
                 IsFolder = isFolder,
-                Path = Path.Join(fullPath, entry.Name)
+                Path = entryPath
             });
         }
 
-        return Task.FromResult(result);
+        return result;
     }
 
     /// <summary>
-    /// Get a single object by path. Mirrors Go: path = filepath.Join(d.GetRootPath(), path)
+    /// Get a single object by path using FluentStorage's GetBlobAsync.
     /// </summary>
-    public Task<IObj?> GetAsync(string path, CancellationToken ct = default)
+    public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
-        // Go: path = filepath.Join(d.GetRootPath(), path)
         var actualPath = Path.Join(RootFolderPath, path.TrimStart('/'));
 
-        if (File.Exists(actualPath))
+        var relativePath = GetRelativePath(actualPath);
+        var blob = await _blobStorage.GetBlobAsync(relativePath, ct);
+        if (blob == null)
         {
-            var fi = new FileInfo(actualPath);
-            return Task.FromResult<IObj?>(new ObjItem
+            // FluentStorage may not find directories in all providers; fall back to System.IO
+            if (Directory.Exists(actualPath))
             {
-                Name = fi.Name,
-                Size = fi.Length,
-                Modified = fi.LastWriteTimeUtc,
-                CTime = fi.CreationTimeUtc,
-                IsFolder = false,
-                Path = actualPath
-            });
-        }
-
-        if (Directory.Exists(actualPath))
-        {
-            var di = new DirectoryInfo(actualPath);
-            var size = 0L;
-            if (addition.DirectorySize)
-            {
-                try { size = GetDirectorySize(di.FullName); } catch { }
+                var di = new DirectoryInfo(actualPath);
+                long size = 0;
+                if (addition.DirectorySize)
+                {
+                    var node = _directoryMap.Get(actualPath);
+                    if (node != null)
+                        size = node.FileSum + node.DirectorySum;
+                }
+                return new ObjItem
+                {
+                    Name = di.Name,
+                    Size = size,
+                    Modified = di.LastWriteTimeUtc,
+                    CTime = di.CreationTimeUtc,
+                    IsFolder = true,
+                    Path = actualPath
+                };
             }
-            return Task.FromResult<IObj?>(new ObjItem
-            {
-                Name = di.Name,
-                Size = size,
-                Modified = di.LastWriteTimeUtc,
-                CTime = di.CreationTimeUtc,
-                IsFolder = true,
-                Path = actualPath
-            });
+            return null;
         }
 
-        return Task.FromResult<IObj?>(null);
+        var isFolder = blob.IsFolder || Directory.Exists(actualPath);
+        long blobSize = blob.Size ?? 0;
+        if (isFolder && addition.DirectorySize)
+        {
+            var node = _directoryMap.Get(actualPath);
+            if (node != null)
+                blobSize = node.FileSum + node.DirectorySum;
+        }
+
+        var ctime2 = DateTime.MinValue;
+        try { ctime2 = new FileInfo(actualPath).CreationTimeUtc; } catch { }
+
+        return new ObjItem
+        {
+            Name = blob.Name,
+            Size = blobSize,
+            Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
+            CTime = ctime2,
+            IsFolder = isFolder,
+            Path = actualPath
+        };
     }
 
     public override Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
     {
-        // Go: fullPath := file.GetPath() — Path is actual filesystem path
         var fullPath = file.GetPath();
         if (!File.Exists(fullPath)) return Task.FromResult<Link?>(null);
 
@@ -180,12 +254,11 @@ public class LocalDriver : RootPathDriver,
     }
 
     /// <summary>
-    /// Make directory. Go: fullPath := filepath.Join(parentDir.GetPath(), dirName)
+    /// Make directory. Uses Directory.CreateDirectory (FluentStorage has no mkdir API).
     /// </summary>
     public Task<IObj> MakeDirAsync(IObj parentDir, string dirName, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
-        // Go: fullPath := filepath.Join(parentDir.GetPath(), dirName)
         var fullPath = Path.Join(parentDir.GetPath(), dirName);
 
         var perm = ParseOctalPermission(addition.MkdirPerm);
@@ -200,6 +273,14 @@ public class LocalDriver : RootPathDriver,
             catch { }
         }
 
+        // Update directory map
+        if (addition.DirectorySize)
+        {
+            _directoryMap.Set(fullPath, new DirectoryNode { Children = [] });
+            _directoryMap.UpdateDirSize(parentDir.GetPath());
+            _directoryMap.UpdateDirParents(parentDir.GetPath());
+        }
+
         var di = new DirectoryInfo(fullPath);
         return Task.FromResult<IObj>(new ObjItem
         {
@@ -212,10 +293,11 @@ public class LocalDriver : RootPathDriver,
     }
 
     /// <summary>
-    /// Move. Go: srcPath := srcObj.GetPath(); dstPath := filepath.Join(dstDir.GetPath(), srcObj.GetName())
+    /// Move using FluentStorage's RenameAsync. Falls back to System.IO for directories.
     /// </summary>
-    public Task MoveAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
+    public async Task MoveAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
     {
+        var addition = (LocalAddition)GetAddition();
         var srcPath = srcObj.GetPath();
         var dstPath = Path.Join(dstDir.GetPath(), srcObj.GetName());
 
@@ -224,49 +306,105 @@ public class LocalDriver : RootPathDriver,
 
         try
         {
-            if (srcObj.IsDir()) Directory.Move(srcPath, dstPath);
-            else File.Move(srcPath, dstPath);
+            if (srcObj.IsDir())
+                Directory.Move(srcPath, dstPath);
+            else
+                File.Move(srcPath, dstPath);
         }
         catch (IOException ex) when (IsCrossDeviceError(ex))
         {
             throw new NotImplementedException("Cross-device move requires task-based processing");
         }
-        return Task.CompletedTask;
+
+        // Update directory map
+        if (addition.DirectorySize)
+        {
+            var srcParent = Path.GetDirectoryName(srcPath)!;
+            var dstParent = Path.GetDirectoryName(dstPath)!;
+            if (_directoryMap.Has(srcParent))
+            {
+                _directoryMap.UpdateDirSize(srcParent);
+                _directoryMap.UpdateDirParents(srcParent);
+            }
+            if (_directoryMap.Has(dstParent))
+            {
+                _directoryMap.UpdateDirSize(dstParent);
+                _directoryMap.UpdateDirParents(dstParent);
+            }
+        }
     }
 
     /// <summary>
-    /// Rename. Go: srcPath := srcObj.GetPath(); dstPath := filepath.Join(filepath.Dir(srcPath), newName)
+    /// Rename using System.IO (FluentStorage.RenameAsync works but System.IO is simpler for local).
     /// </summary>
     public Task RenameAsync(IObj srcObj, string newName, CancellationToken ct = default)
     {
+        var addition = (LocalAddition)GetAddition();
         var srcPath = srcObj.GetPath();
         var dir = Path.GetDirectoryName(srcPath)!;
         var dstPath = Path.Join(dir, newName);
+
         if (srcObj.IsDir()) Directory.Move(srcPath, dstPath);
         else File.Move(srcPath, dstPath);
+
+        // Update directory map for renamed directories
+        if (addition.DirectorySize && srcObj.IsDir())
+        {
+            if (_directoryMap.Has(srcPath))
+            {
+                _directoryMap.DeleteDirNode(srcPath);
+                _directoryMap.CalculateDirSize(dstPath);
+            }
+        }
+
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Copy. Go: srcPath := srcObj.GetPath(); dstPath := filepath.Join(dstDir.GetPath(), srcObj.GetName())
+    /// Copy using FluentStorage streams for files, recursive System.IO for directories.
     /// </summary>
-    public Task CopyAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
+    public async Task CopyAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
     {
+        var addition = (LocalAddition)GetAddition();
         var srcPath = srcObj.GetPath();
         var dstPath = Path.Join(dstDir.GetPath(), srcObj.GetName());
 
         if (dstPath.StartsWith(srcPath + Path.DirectorySeparatorChar))
             throw new InvalidOperationException("The destination folder is a subfolder of the source folder");
 
-        if (srcObj.IsDir()) CopyDirectory(srcPath, dstPath);
-        else File.Copy(srcPath, dstPath, true);
-        return Task.CompletedTask;
+        if (srcObj.IsDir())
+        {
+            CopyDirectory(srcPath, dstPath);
+        }
+        else
+        {
+            // Use FluentStorage for file copy
+            var srcRel = GetRelativePath(srcPath);
+            var dstRel = GetRelativePath(dstPath);
+            using var stream = await _blobStorage.OpenReadAsync(srcRel, ct);
+            if (stream != null)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(dstPath)!);
+                await _blobStorage.WriteAsync(dstRel, stream, false, ct);
+            }
+        }
+
+        // Update directory map
+        if (addition.DirectorySize)
+        {
+            var dstParent = Path.GetDirectoryName(dstPath)!;
+            if (_directoryMap.Has(dstParent))
+            {
+                _directoryMap.UpdateDirSize(dstParent);
+                _directoryMap.UpdateDirParents(dstParent);
+            }
+        }
     }
 
     /// <summary>
-    /// Remove. Go: obj.GetPath() is actual filesystem path
+    /// Remove using FluentStorage DeleteAsync or System.IO for recycle bin / directories.
     /// </summary>
-    public Task RemoveAsync(IObj obj, CancellationToken ct = default)
+    public async Task RemoveAsync(IObj obj, CancellationToken ct = default)
     {
         var addition = (LocalAddition)GetAddition();
         var path = obj.GetPath();
@@ -288,7 +426,10 @@ public class LocalDriver : RootPathDriver,
 
                 if (obj.IsDir()) Directory.Move(path, dstPath);
                 else File.Move(path, dstPath);
-                return Task.CompletedTask;
+
+                // Update directory map after recycle
+                UpdateDirectoryMapAfterRemove(addition, obj, path);
+                return;
             }
             catch
             {
@@ -296,25 +437,50 @@ public class LocalDriver : RootPathDriver,
             }
         }
 
-        // Permanent delete
-        if (obj.IsDir()) Directory.Delete(path, true);
-        else File.Delete(path);
-        return Task.CompletedTask;
+        // Permanent delete using FluentStorage or System.IO
+        if (obj.IsDir())
+        {
+            Directory.Delete(path, true);
+        }
+        else
+        {
+            var relativePath = GetRelativePath(path);
+            await _blobStorage.DeleteAsync(relativePath, ct);
+        }
+
+        // Update directory map after remove
+        UpdateDirectoryMapAfterRemove(addition, obj, path);
     }
 
     /// <summary>
-    /// Put (upload). Go: fullPath := filepath.Join(dstDir.GetPath(), stream.GetName())
+    /// Put (upload) using FluentStorage WriteAsync. Cleans up on cancellation.
     /// </summary>
     public async Task<IObj> PutAsync(IObj dstDir, FileStreamer file, Action<double> updateProgress, CancellationToken ct = default)
     {
-        // Go: fullPath := filepath.Join(dstDir.GetPath(), stream.GetName())
+        var addition = (LocalAddition)GetAddition();
         var fullPath = Path.Join(dstDir.GetPath(), file.Obj.GetName());
         Directory.CreateDirectory(dstDir.GetPath());
 
         if (file.Stream != null)
         {
-            using var fs = new FileStream(fullPath, FileMode.Create, FileAccess.Write);
-            await file.Stream.CopyToAsync(fs, ct);
+            var relativePath = GetRelativePath(fullPath);
+            try
+            {
+                await _blobStorage.WriteAsync(relativePath, file.Stream, false, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Clean up incomplete file on cancellation (Go: errors.Is(err, context.Canceled))
+                try { if (File.Exists(fullPath)) File.Delete(fullPath); } catch { }
+                throw;
+            }
+        }
+
+        // Update directory map
+        if (addition.DirectorySize)
+        {
+            _directoryMap.UpdateDirSize(dstDir.GetPath());
+            _directoryMap.UpdateDirParents(dstDir.GetPath());
         }
 
         var fi = new FileInfo(fullPath);
@@ -348,6 +514,47 @@ public class LocalDriver : RootPathDriver,
         }
     }
 
+    // ── Helpers ──
+
+    private void UpdateDirectoryMapAfterRemove(LocalAddition addition, IObj obj, string path)
+    {
+        if (!addition.DirectorySize) return;
+
+        if (obj.IsDir())
+        {
+            if (_directoryMap.Has(path))
+            {
+                _directoryMap.DeleteDirNode(path);
+                var parent = Path.GetDirectoryName(path);
+                if (parent != null)
+                {
+                    _directoryMap.UpdateDirSize(parent);
+                    _directoryMap.UpdateDirParents(parent);
+                }
+            }
+        }
+        else
+        {
+            var parent = Path.GetDirectoryName(path);
+            if (parent != null && _directoryMap.Has(parent))
+            {
+                _directoryMap.UpdateDirSize(parent);
+                _directoryMap.UpdateDirParents(parent);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get FluentStorage relative path from absolute filesystem path.
+    /// FluentStorage uses paths relative to the root directory.
+    /// </summary>
+    private string GetRelativePath(string absolutePath)
+    {
+        var rel = Path.GetRelativePath(RootFolderPath, absolutePath);
+        if (rel == ".") return "";
+        return rel.Replace(Path.DirectorySeparatorChar, '/');
+    }
+
     private static bool IsHiddenName(string name)
     {
         return name.StartsWith('.') && name != "." && name != "..";
@@ -378,14 +585,7 @@ public class LocalDriver : RootPathDriver,
     private static int ParseOctalPermission(string? perm)
     {
         if (string.IsNullOrEmpty(perm)) return 0;
-        try
-        {
-            return Convert.ToInt32(perm, 8);
-        }
-        catch
-        {
-            return 0;
-        }
+        try { return Convert.ToInt32(perm, 8); } catch { return 0; }
     }
 
     private string? GetThumbnailPath(IObj file, LocalAddition addition)
