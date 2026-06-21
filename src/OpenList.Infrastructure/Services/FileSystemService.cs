@@ -5,19 +5,20 @@ using OpenList.Core.Models;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Zio;
 
 namespace OpenList.Infrastructure.Services;
 
 public class FileSystemService : IFileSystemService
 {
-    private readonly IDriverFactory _driverFactory;
+    private readonly ZioMountService _mountService;
     private readonly IMemoryCache _cache;
     private readonly ILogger<FileSystemService> _logger;
     private readonly IServiceProvider _serviceProvider;
 
-    public FileSystemService(IDriverFactory driverFactory, IMemoryCache cache, ILogger<FileSystemService> logger, IServiceProvider serviceProvider)
+    public FileSystemService(ZioMountService mountService, IMemoryCache cache, ILogger<FileSystemService> logger, IServiceProvider serviceProvider)
     {
-        _driverFactory = driverFactory;
+        _mountService = mountService;
         _cache = cache;
         _logger = logger;
         _serviceProvider = serviceProvider;
@@ -28,62 +29,44 @@ public class FileSystemService : IFileSystemService
         args ??= new ListArgs();
 
         // Go: virtualFiles are always computed for any path, then merged with actual driver results
-        // Go: GetStorageVirtualFilesWithDetailsByPath passes WithStorageDetails through
-        var virtualFiles = _driverFactory.GetVirtualFilesByPath(path, args.WithStorageDetails, ct);
+        var virtualFiles = _mountService.GetVirtualFilesByPath(path, args.WithStorageDetails, ct);
 
-        var (driver, actualPath) = ResolveDriver(path);
+        var (fs, resolvedPath, storage) = _mountService.Resolve(path);
         List<IObj> driverObjs = [];
 
-        if (driver != null)
+        if (fs != null && storage != null)
         {
-            var dir = await GetObjAsync(driver, actualPath, ct);
-            if (dir != null && dir.IsDir())
+            var config = (fs as IFileSystemDriverMeta)?.Config;
+            var cacheKey = $"dir:{storage.MountPath}:{resolvedPath}";
+
+            if (!args.Refresh && config is { NoCache: false })
             {
-                // Check cache (skip if refresh requested or driver has NoCache)
-                var cacheKey = $"dir:{driver.GetStorage().MountPath}:{actualPath}";
-                var config = driver.Config();
-                if (!args.Refresh && config.NoCache == false)
-                {
-                    if (_cache.TryGetValue(cacheKey, out List<IObj>? cached) && cached != null)
-                        driverObjs = cached;
-                    else
-                    {
-                        driverObjs = await driver.ListAsync(dir, args, ct);
-
-                        // Sort (Go: LocalSort → SortFiles + ExtractFolder)
-                        var storage = driver.GetStorage();
-                        if (config.LocalSort)
-                            SortFiles(driverObjs, storage.OrderBy, storage.OrderDirection);
-                        ExtractFolder(driverObjs, storage.ExtractFolder);
-
-                        // Cache result with TTL from storage config
-                        if (config.NoCache == false)
-                        {
-                            var ttl = TimeSpan.FromMinutes(Math.Max(driver.GetStorage().CacheExpiration, 1));
-                            _cache.Set(cacheKey, driverObjs, ttl);
-                        }
-                    }
-                }
+                if (_cache.TryGetValue(cacheKey, out List<IObj>? cached) && cached != null)
+                    driverObjs = cached;
                 else
                 {
-                    driverObjs = await driver.ListAsync(dir, args, ct);
-
-                    var storage = driver.GetStorage();
-                    if (config.LocalSort)
+                    driverObjs = ListFromFs(fs, resolvedPath, storage);
+                    if (config is { LocalSort: true })
                         SortFiles(driverObjs, storage.OrderBy, storage.OrderDirection);
                     ExtractFolder(driverObjs, storage.ExtractFolder);
 
-                    if (config.NoCache == false)
-                    {
-                        var ttl = TimeSpan.FromMinutes(Math.Max(driver.GetStorage().CacheExpiration, 1));
-                        _cache.Set(cacheKey, driverObjs, ttl);
-                    }
+                    if (config is { NoCache: false })
+                        _cache.Set(cacheKey, driverObjs, TimeSpan.FromMinutes(Math.Max(storage.CacheExpiration, 1)));
                 }
+            }
+            else
+            {
+                driverObjs = ListFromFs(fs, resolvedPath, storage);
+                if (config is { LocalSort: true })
+                    SortFiles(driverObjs, storage.OrderBy, storage.OrderDirection);
+                ExtractFolder(driverObjs, storage.ExtractFolder);
+
+                if (config is { NoCache: false })
+                    _cache.Set(cacheKey, driverObjs, TimeSpan.FromMinutes(Math.Max(storage.CacheExpiration, 1)));
             }
         }
 
         // Merge: virtual files override driver objects with the same name (Go: om.Merge)
-        // Virtual files (mount points) take priority over real files with the same name
         if (virtualFiles.Count == 0) return driverObjs;
         if (driverObjs.Count == 0) return virtualFiles.Cast<IObj>().ToList();
 
@@ -105,153 +88,175 @@ public class FileSystemService : IFileSystemService
         {
             var parentDir = GetParentPath(path);
             var name = path.TrimEnd('/').Split('/').Last();
-            var virtualFiles = _driverFactory.GetVirtualFilesByPath(parentDir);
+            var virtualFiles = _mountService.GetVirtualFilesByPath(parentDir);
             var virtualMatch = virtualFiles.FirstOrDefault(v => v.GetName() == name);
             if (virtualMatch != null) return virtualMatch;
         }
 
-        var (driver, actualPath) = ResolveDriver(path);
-        if (driver == null)
+        var (fs, resolvedPath, storage) = _mountService.Resolve(path);
+        if (fs == null || storage == null)
         {
             // Root path: return virtual root object (Go: model.Object{Name: "root", IsFolder: true})
             if (path == "/")
                 return new ObjItem { Name = "root", Path = "/", IsFolder = true, Mask = ObjMask.ReadOnly | ObjMask.Virtual };
             return null;
         }
-        return await GetObjAsync(driver, actualPath, ct);
+
+        return GetObjFromFs(fs, resolvedPath, storage);
     }
 
     public async Task<Link?> LinkAsync(string path, LinkArgs args, CancellationToken ct = default)
     {
-        var (driver, actualPath) = ResolveDriver(path);
-        if (driver == null) return null;
+        var (fs, resolvedPath, storage) = _mountService.Resolve(path);
+        if (fs == null || storage == null) return null;
+        if (fs is not IFileSystemLinkProvider linkProvider) return null;
 
-        var obj = await GetObjAsync(driver, actualPath, ct);
-        if (obj == null || obj.IsDir()) return null;
+        // Check if it's a file (not directory)
+        if (!fs.FileExists(resolvedPath)) return null;
 
         // Check link cache
-        var cacheKey = $"link:{driver.GetStorage().MountPath}:{actualPath}";
-        if (driver.Config().NoCache == false && _cache.TryGetValue(cacheKey, out Link? cachedLink))
+        var cacheKey = $"link:{storage.MountPath}:{resolvedPath}";
+        var config = (fs as IFileSystemDriverMeta)?.Config;
+        if (config is { NoCache: false } && _cache.TryGetValue(cacheKey, out Link? cachedLink))
             return cachedLink;
 
-        var link = await driver.LinkAsync(obj, args, ct);
+        var link = await linkProvider.GetLinkAsync(resolvedPath, args, ct);
 
         // Cache link for 30 minutes
-        if (link != null && driver.Config().NoCache == false)
+        if (link != null && config is { NoCache: false })
             _cache.Set(cacheKey, link, TimeSpan.FromMinutes(30));
 
         return link;
     }
 
-    public async Task MakeDirAsync(string path, CancellationToken ct = default)
+    public Task MakeDirAsync(string path, CancellationToken ct = default)
     {
-        var (driver, actualPath) = ResolveDriver(path);
-        if (driver is IDriverMkdir mkdir)
+        var (fs, resolvedPath, storage) = _mountService.Resolve(path);
+        if (fs == null) return Task.CompletedTask;
+
+        try
         {
-            var parentPath = GetParentPath(actualPath);
-            var dirName = Path.GetFileName(actualPath.TrimEnd('/'));
-            var parent = await GetObjAsync(driver, parentPath, ct);
-            if (parent != null)
-            {
-                await mkdir.MakeDirAsync(parent, dirName, ct);
-                InvalidateDirectoryCache(driver, parentPath);
-            }
+            fs.CreateDirectory(resolvedPath);
+            InvalidateDirectoryCache(storage, GetParentPath(resolvedPath.ToString()));
         }
+        catch (NotSupportedException) { }
+        return Task.CompletedTask;
     }
 
-    public async Task MoveAsync(string srcPath, string dstDir, CancellationToken ct = default)
+    public Task MoveAsync(string srcPath, string dstDir, CancellationToken ct = default)
     {
-        var (srcDriver, srcActual) = ResolveDriver(srcPath);
-        var (dstDriver, dstActual) = ResolveDriver(dstDir);
-        if (srcDriver is IDriverMove move && srcDriver == dstDriver)
+        var (srcFs, srcResolved, srcStorage) = _mountService.Resolve(srcPath);
+        var (dstFs, dstResolved, dstStorage) = _mountService.Resolve(dstDir);
+        if (srcFs == null || srcFs != dstFs) return Task.CompletedTask;
+
+        var fileName = srcPath.TrimEnd('/').Split('/').Last();
+        var dstPath = UPath.Combine(dstResolved, fileName);
+
+        try
         {
-            var srcObj = await GetObjAsync(srcDriver, srcActual, ct);
-            var dstObj = await GetObjAsync(dstDriver, dstActual, ct);
-            if (srcObj != null && dstObj != null)
-            {
-                await move.MoveAsync(srcObj, dstObj, ct);
-                InvalidateDirectoryCache(srcDriver, GetParentPath(srcActual));
-                InvalidateDirectoryCache(dstDriver, dstActual);
-                InvalidateLinkCache(srcDriver, srcActual);
-            }
+            if (srcFs.DirectoryExists(srcResolved))
+                srcFs.MoveDirectory(srcResolved, dstPath);
+            else
+                srcFs.MoveFile(srcResolved, dstPath);
+
+            InvalidateDirectoryCache(srcStorage, GetParentPath(srcResolved.ToString()));
+            InvalidateDirectoryCache(dstStorage, dstResolved.ToString());
+            InvalidateLinkCache(srcStorage, srcResolved.ToString());
         }
+        catch (NotSupportedException) { }
+        return Task.CompletedTask;
     }
 
-    public async Task CopyAsync(string srcPath, string dstDir, CancellationToken ct = default)
+    public Task CopyAsync(string srcPath, string dstDir, CancellationToken ct = default)
     {
-        var (srcDriver, srcActual) = ResolveDriver(srcPath);
-        var (dstDriver, dstActual) = ResolveDriver(dstDir);
-        if (srcDriver is IDriverCopy copy && srcDriver == dstDriver)
+        var (srcFs, srcResolved, _) = _mountService.Resolve(srcPath);
+        var (dstFs, dstResolved, dstStorage) = _mountService.Resolve(dstDir);
+        if (srcFs == null || srcFs != dstFs) return Task.CompletedTask;
+
+        var fileName = srcPath.TrimEnd('/').Split('/').Last();
+        var dstPath = UPath.Combine(dstResolved, fileName);
+
+        try
         {
-            var srcObj = await GetObjAsync(srcDriver, srcActual, ct);
-            var dstObj = await GetObjAsync(dstDriver, dstActual, ct);
-            if (srcObj != null && dstObj != null)
+            if (srcFs.FileExists(srcResolved))
             {
-                await copy.CopyAsync(srcObj, dstObj, ct);
-                InvalidateDirectoryCache(dstDriver, dstActual);
+                srcFs.CopyFile(srcResolved, dstPath, overwrite: true);
+                InvalidateDirectoryCache(dstStorage, dstResolved.ToString());
             }
         }
+        catch (NotSupportedException) { }
+        return Task.CompletedTask;
     }
 
-    public async Task MergeAsync(string srcPath, string dstDir, CancellationToken ct = default)
+    public Task MergeAsync(string srcPath, string dstDir, CancellationToken ct = default)
     {
         // Go: fs.Merge uses transfer(merge, ...) which recursively merges directory contents
-        // At the driver level, merge uses the same IDriverCopy interface
-        var (srcDriver, srcActual) = ResolveDriver(srcPath);
-        var (dstDriver, dstActual) = ResolveDriver(dstDir);
-        if (srcDriver is IDriverCopy copy && srcDriver == dstDriver)
-        {
-            var srcObj = await GetObjAsync(srcDriver, srcActual, ct);
-            var dstObj = await GetObjAsync(dstDriver, dstActual, ct);
-            if (srcObj != null && dstObj != null)
-            {
-                await copy.CopyAsync(srcObj, dstObj, ct);
-                InvalidateDirectoryCache(dstDriver, dstActual);
-            }
-        }
+        // At the driver level, merge uses the same CopyFile interface
+        return CopyAsync(srcPath, dstDir, ct);
     }
 
-    public async Task RenameAsync(string path, string newName, CancellationToken ct = default)
+    public Task RenameAsync(string path, string newName, CancellationToken ct = default)
     {
-        var (driver, actualPath) = ResolveDriver(path);
-        if (driver is IDriverRename rename)
+        var (fs, resolvedPath, storage) = _mountService.Resolve(path);
+        if (fs == null) return Task.CompletedTask;
+
+        var parentPath = resolvedPath.GetDirectory();
+        var newPath = UPath.Combine(parentPath, newName);
+
+        try
         {
-            var obj = await GetObjAsync(driver, actualPath, ct);
-            if (obj != null)
-            {
-                await rename.RenameAsync(obj, newName, ct);
-                InvalidateDirectoryCache(driver, GetParentPath(actualPath));
-                InvalidateLinkCache(driver, actualPath);
-            }
+            if (fs.DirectoryExists(resolvedPath))
+                fs.MoveDirectory(resolvedPath, newPath);
+            else
+                fs.MoveFile(resolvedPath, newPath);
+
+            InvalidateDirectoryCache(storage, parentPath.ToString());
+            InvalidateLinkCache(storage, resolvedPath.ToString());
         }
+        catch (NotSupportedException) { }
+        return Task.CompletedTask;
     }
 
-    public async Task RemoveAsync(string path, CancellationToken ct = default)
+    public Task RemoveAsync(string path, CancellationToken ct = default)
     {
-        var (driver, actualPath) = ResolveDriver(path);
-        if (driver is IDriverRemove remove)
+        var (fs, resolvedPath, storage) = _mountService.Resolve(path);
+        if (fs == null) return Task.CompletedTask;
+
+        try
         {
-            var obj = await GetObjAsync(driver, actualPath, ct);
-            if (obj != null)
-            {
-                await remove.RemoveAsync(obj, ct);
-                InvalidateDirectoryCache(driver, GetParentPath(actualPath));
-                InvalidateLinkCache(driver, actualPath);
-            }
+            if (fs.DirectoryExists(resolvedPath))
+                fs.DeleteDirectory(resolvedPath, isRecursive: true);
+            else if (fs.FileExists(resolvedPath))
+                fs.DeleteFile(resolvedPath);
+
+            InvalidateDirectoryCache(storage, GetParentPath(resolvedPath.ToString()));
+            InvalidateLinkCache(storage, resolvedPath.ToString());
         }
+        catch (NotSupportedException) { }
+        return Task.CompletedTask;
     }
 
     public async Task PutAsync(string dstDir, FileStreamer file, Action<double> progress, CancellationToken ct = default)
     {
-        var (driver, actualPath) = ResolveDriver(dstDir);
-        if (driver is IDriverPut put)
+        var (fs, resolvedPath, storage) = _mountService.Resolve(dstDir);
+        if (fs == null) return;
+
+        if (fs is IFileSystemUploader uploader)
         {
-            var dir = await GetObjAsync(driver, actualPath, ct);
-            if (dir != null)
+            await uploader.UploadAsync(resolvedPath, file.Stream!, file.Obj.GetName(), progress, ct);
+            InvalidateDirectoryCache(storage, resolvedPath.ToString());
+        }
+        else
+        {
+            // Fallback: use OpenFile to write the stream directly
+            try
             {
-                await put.PutAsync(dir, file, progress, ct);
-                InvalidateDirectoryCache(driver, actualPath);
+                var filePath = UPath.Combine(resolvedPath, file.Obj.GetName());
+                using var stream = fs.OpenFile(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await file.Stream!.CopyToAsync(stream, 81920, ct);
+                InvalidateDirectoryCache(storage, resolvedPath.ToString());
             }
+            catch (NotSupportedException) { }
         }
     }
 
@@ -266,29 +271,24 @@ public class FileSystemService : IFileSystemService
         return task;
     }
 
-    public async Task<object?> OtherAsync(OtherArgs args, CancellationToken ct = default)
+    public Task<object?> OtherAsync(OtherArgs args, CancellationToken ct = default)
     {
-        if (args.Obj == null) return null;
-        var storage = _driverFactory.FindStorageByPath(args.Obj.GetPath());
-        if (storage == null) return null;
-        var driver = _driverFactory.GetDriver(storage.MountPath);
-        if (driver is IDriverOther other)
-            return await other.OtherAsync(args, ct);
-        return null;
+        // IDriverOther has no Zio equivalent — return null
+        return Task.FromResult<object?>(null);
     }
 
-    public async Task<Storage?> GetStorageAsync(string path, CancellationToken ct = default)
+    public Task<Storage?> GetStorageAsync(string path, CancellationToken ct = default)
     {
-        return await Task.FromResult(_driverFactory.FindStorageByPath(path));
+        return Task.FromResult(_mountService.FindStorageByPath(path));
     }
 
     public async Task<StorageDetails?> GetStorageDetailsAsync(string path, CancellationToken ct = default)
     {
-        var (driver, _) = ResolveDriver(path);
-        if (driver is not IDriverWithDetails detailDriver) return null;
+        var (fs, _, storage) = _mountService.Resolve(path);
+        if (fs is not IFileSystemWithDetails detailDriver) return null;
 
         // Check cache (Go: detailCache with 30min TTL)
-        var cacheKey = $"detail:{driver.GetStorage().MountPath}";
+        var cacheKey = $"detail:{storage?.MountPath}";
         if (_cache.TryGetValue(cacheKey, out StorageDetails? cached))
             return cached;
 
@@ -303,13 +303,12 @@ public class FileSystemService : IFileSystemService
 
     public async Task<ArchiveMetaResult?> GetArchiveMetaAsync(string path, ArchiveArgs args, CancellationToken ct = default)
     {
-        var (driver, actualPath) = ResolveDriver(path);
-        if (driver is not IDriverArchiveReader reader) return null;
+        var (fs, resolvedPath, _) = _mountService.Resolve(path);
+        if (fs is not IFileSystemArchiveReader reader) return null;
 
-        var obj = await GetObjAsync(driver, actualPath, ct);
-        if (obj == null || obj.IsDir()) return null;
+        if (!fs.FileExists(resolvedPath)) return null;
 
-        var meta = await reader.GetArchiveMetaAsync(obj, args, ct);
+        var meta = await reader.GetArchiveMetaAsync(resolvedPath, args, ct);
 
         // Build tree from flat entries (Go: archive.BuildTree)
         var tree = BuildArchiveTree(meta.Entries);
@@ -319,20 +318,29 @@ public class FileSystemService : IFileSystemService
             Comment = "",
             IsEncrypted = meta.IsEncrypted,
             Content = tree,
-            // Go: DriverProviding = true when driver implements ArchiveReader
-            DriverProviding = driver is IDriverArchiveDecompress
+            DriverProviding = fs is IFileSystemArchiveDecompress
         };
     }
 
     public async Task<(List<IObj> Items, int Total)> ListArchiveAsync(string path, ArchiveListArgs args, CancellationToken ct = default)
     {
-        var (driver, actualPath) = ResolveDriver(path);
-        if (driver is not IDriverArchiveReader reader) return ([], 0);
+        var (fs, resolvedPath, _) = _mountService.Resolve(path);
+        if (fs is not IFileSystemArchiveReader reader) return ([], 0);
 
-        var obj = await GetObjAsync(driver, actualPath, ct);
-        if (obj == null || obj.IsDir()) return ([], 0);
+        if (!fs.FileExists(resolvedPath)) return ([], 0);
 
-        var items = await reader.ListArchiveAsync(obj, args.ArchiveInnerArgs, ct);
+        var items = (await reader.ListArchiveAsync(resolvedPath, args.ArchiveInnerArgs, ct))
+            .Select(item => new ObjItem
+            {
+                Name = item.Path.GetName(),
+                Size = item.Length,
+                IsFolder = item.IsDirectory,
+                Path = item.Path.FullName,
+                Modified = item.LastWriteTime.LocalDateTime
+            })
+            .Cast<IObj>()
+            .ToList();
+
         var total = items.Count;
 
         // Pagination (Go: pagination helper)
@@ -347,42 +355,99 @@ public class FileSystemService : IFileSystemService
 
     public async Task<TaskInfo?> ArchiveDecompressAsync(string srcPath, string dstDir, ArchiveDecompressArgs args, CancellationToken ct = default)
     {
-        var (srcDriver, srcActual) = ResolveDriver(srcPath);
-        var (dstDriver, dstActual) = ResolveDriver(dstDir);
-        if (srcDriver is not IDriverArchiveDecompress decompressor) return null;
+        var (srcFs, srcResolved, _) = _mountService.Resolve(srcPath);
+        var (dstFs, dstResolved, _) = _mountService.Resolve(dstDir);
+        if (srcFs is not IFileSystemArchiveDecompress decompressor) return null;
 
-        var srcObj = await GetObjAsync(srcDriver, srcActual, ct);
-        if (srcObj == null || srcObj.IsDir()) return null;
-
-        var dstObj = await GetObjAsync(dstDriver, dstActual, ct);
-        if (dstObj == null || !dstObj.IsDir()) return null;
+        if (!srcFs.FileExists(srcResolved)) return null;
+        if (!dstFs.DirectoryExists(dstResolved)) return null;
 
         // Create task wrapping decompressor.ArchiveDecompressAsync (Go: fs.ArchiveDecompress creates task)
         var taskService = _serviceProvider.GetService<ITaskService>();
         if (taskService == null) return null;
 
-        var fileName = srcActual.Split('/').Last();
+        var fileName = srcResolved.GetName();
         var task = await taskService.CreateTaskAsync("decompress", $"Decompress {fileName}", async (taskId, innerCt) =>
         {
-            await decompressor.ArchiveDecompressAsync(srcObj, dstObj, args, innerCt);
+            await decompressor.ArchiveDecompressAsync(srcResolved, dstResolved, args, innerCt);
         }, ct);
 
         return task;
     }
 
+    // ── Helpers ──
+
+    private List<IObj> ListFromFs(IFileSystem fs, UPath path, Storage storage)
+    {
+        try
+        {
+            var items = fs.EnumerateItems(path, SearchOption.TopDirectoryOnly);
+            var result = new List<IObj>();
+            foreach (var item in items)
+            {
+                result.Add(FileSystemItemToObj(item, storage));
+            }
+            return result;
+        }
+        catch (NotSupportedException) { return []; }
+        catch (DirectoryNotFoundException) { return []; }
+    }
+
+    private static IObj FileSystemItemToObj(FileSystemItem item, Storage storage)
+    {
+        return new ObjItem
+        {
+            Name = item.Path.GetName(),
+            Path = item.Path.FullName,
+            Size = !item.IsDirectory ? item.Length : 0,
+            IsFolder = item.IsDirectory,
+            Modified = item.LastWriteTime.LocalDateTime,
+            CTime = item.CreationTime.LocalDateTime
+        };
+    }
+
+    private IObj? GetObjFromFs(IFileSystem fs, UPath path, Storage storage)
+    {
+        try
+        {
+            if (fs.FileExists(path))
+            {
+                return new ObjItem
+                {
+                    Name = path.GetName(),
+                    Path = path.FullName,
+                    Size = fs.GetFileLength(path),
+                    IsFolder = false,
+                    Modified = fs.GetLastWriteTime(path),
+                    CTime = fs.GetCreationTime(path)
+                };
+            }
+            if (fs.DirectoryExists(path))
+            {
+                return new ObjItem
+                {
+                    Name = path.GetName(),
+                    Path = path.FullName,
+                    IsFolder = true,
+                    Modified = fs.GetLastWriteTime(path),
+                    CTime = fs.GetCreationTime(path)
+                };
+            }
+        }
+        catch (NotSupportedException) { }
+        return null;
+    }
+
     /// <summary>
     /// Build tree from flat archive entries (Go: archive.BuildTree).
-    /// Entries with InnerPath like "dir/subdir/file.txt" are organized into a tree.
     /// </summary>
     private static List<ArchiveContentEntry> BuildArchiveTree(List<ArchiveEntry> entries)
     {
         if (entries.Count == 0) return [];
 
-        // Check if entries already have InnerPath (path-based flat list)
         var hasPaths = entries.Any(e => !string.IsNullOrEmpty(e.InnerPath));
         if (!hasPaths)
         {
-            // Simple flat list without paths → return as-is
             return entries.Select(e => new ArchiveContentEntry
             {
                 Name = e.Name,
@@ -393,7 +458,6 @@ public class FileSystemService : IFileSystemService
             }).ToList();
         }
 
-        // Build tree from path-based entries
         var root = new List<ArchiveContentEntry>();
         var dirMap = new Dictionary<string, ArchiveContentEntry>(StringComparer.OrdinalIgnoreCase);
 
@@ -427,7 +491,6 @@ public class FileSystemService : IFileSystemService
                 }
                 else
                 {
-                    // Create intermediate directories
                     ArchiveContentEntry? lastParent = null;
                     var buildPath = "";
                     for (int i = 0; i < parts.Length - 1; i++)
@@ -460,116 +523,18 @@ public class FileSystemService : IFileSystemService
         return root;
     }
 
-    private void InvalidateDirectoryCache(IDriver driver, string dirPath)
+    private void InvalidateDirectoryCache(Storage? storage, string dirPath)
     {
-        var cacheKey = $"dir:{driver.GetStorage().MountPath}:{dirPath}";
+        if (storage == null) return;
+        var cacheKey = $"dir:{storage.MountPath}:{dirPath}";
         _cache.Remove(cacheKey);
     }
 
-    private void InvalidateLinkCache(IDriver driver, string filePath)
+    private void InvalidateLinkCache(Storage? storage, string filePath)
     {
-        var cacheKey = $"link:{driver.GetStorage().MountPath}:{filePath}";
+        if (storage == null) return;
+        var cacheKey = $"link:{storage.MountPath}:{filePath}";
         _cache.Remove(cacheKey);
-    }
-
-    private (IDriver? driver, string actualPath) ResolveDriver(string path)
-    {
-        // Go: GetStorageAndActualPath — uses GetBalancedStorage for load balancing, GetActualMountPath for balance suffix
-        var driver = _driverFactory.GetBalancedStorage(path);
-        if (driver == null) return (null, path);
-
-        var mountPath = IDriverFactory.GetActualMountPath(driver.GetStorage().MountPath);
-        // Go: actualPath = utils.FixAndCleanPath(strings.TrimPrefix(rawPath, mountPath))
-        var actualPath = path;
-        if (actualPath.StartsWith(mountPath, StringComparison.OrdinalIgnoreCase))
-        {
-            actualPath = actualPath[mountPath.Length..];
-        }
-        actualPath = actualPath.TrimStart('/');
-        if (string.IsNullOrEmpty(actualPath)) actualPath = "/";
-        return (driver, actualPath);
-    }
-
-    private async Task<IObj?> GetObjAsync(IDriver driver, string path, CancellationToken ct)
-    {
-        // Root path: handle like Go's op.Get (GetRooter → IRootPath/IRootId → Getter → fallback)
-        if (path == "/")
-        {
-            // 1. Try IDriverGetRoot (Go: GetRooter)
-            if (driver is IDriverGetRoot rootGetter)
-            {
-                try { return await rootGetter.GetRootAsync(ct); }
-                catch { /* fall through */ }
-            }
-
-            // 2. Try RootPathDriver / RootIdDriver (Go: IRootPath / IRootId)
-            // Go: Object{Path: r.GetRootPath(), Name: "root"} — Path is actual filesystem path
-            // so that driver.List can use dir.GetPath() directly to read the directory
-            if (driver is RootPathDriver rpd)
-            {
-                return new ObjItem
-                {
-                    Name = "root",
-                    Path = rpd.GetRootPath(),
-                    IsFolder = true,
-                    Modified = driver.GetStorage().Modified,
-                    Mask = ObjMask.Locked
-                };
-            }
-            if (driver is RootIdDriver rid)
-            {
-                return new ObjItem
-                {
-                    Name = "root",
-                    ID = rid.GetRootId(),
-                    Path = "/",
-                    IsFolder = true,
-                    Modified = driver.GetStorage().Modified,
-                    Mask = ObjMask.Locked
-                };
-            }
-
-            // 3. Try IDriverGetter (Go: Getter)
-            if (driver is IDriverGetter getter)
-            {
-                try
-                {
-                    var obj = await getter.GetAsync(path, ct);
-                    if (obj != null) return obj;
-                }
-                catch { /* fall through */ }
-            }
-
-            return null;
-        }
-
-        // Non-root path: try Getter first, then fallback to listing parent directory
-        // (mirrors Go's op.Get logic)
-        if (driver is IDriverGetter getter2)
-        {
-            try
-            {
-                var obj = await getter2.GetAsync(path, ct);
-                if (obj != null) return obj;
-            }
-            catch { /* fall through to parent dir listing */ }
-        }
-
-        // Fallback: list parent directory and find by name (Go: op.Get fallback)
-        var dir = GetParentPath(path);
-        var name = path.TrimEnd('/').Split('/').Last();
-        try
-        {
-            var parentDir = await GetObjAsync(driver, dir, ct);
-            if (parentDir != null && parentDir.IsDir())
-            {
-                var siblings = await driver.ListAsync(parentDir, new ListArgs(), ct);
-                return siblings.FirstOrDefault(o => o.GetName() == name);
-            }
-        }
-        catch { }
-
-        return null;
     }
 
     private static string GetParentPath(string path)

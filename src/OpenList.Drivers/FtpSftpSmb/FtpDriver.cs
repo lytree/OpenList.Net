@@ -1,22 +1,18 @@
-using System.Net;
 using System.Text.Json;
 using FluentFTP;
-using FluentStorage;
-using FluentStorage.Blobs;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
+using Zio;
+using Zio.FileSystems;
 
 namespace OpenList.Drivers.Ftp;
 
-public class FtpDriver : RootPathDriver,
-    IDriverGetter, IDriverMkdirResult, IDriverMove, IDriverRename,
-    IDriverRemove, IDriverPutResult
+public class FtpDriver : ZioDriverBase, IFileSystemLinkProvider, IFileSystemUploader
 {
     private AsyncFtpClient? _client;
-    private IBlobStorage _blobStorage = null!;
 
-    public override DriverConfig Config() => new()
+    public override DriverConfig Config { get; } = new()
     {
         Name = "FTP",
         LocalSort = true,
@@ -25,13 +21,32 @@ public class FtpDriver : RootPathDriver,
         CheckStatus = true
     };
 
-    public override object GetAddition() => JsonSerializer.Deserialize<FtpAddition>(_storage.Addition) ?? new FtpAddition();
-    protected override Type? GetAdditionType() => typeof(FtpAddition);
+    private FtpAddition? _addition;
+    public override object Addition => _addition ??= JsonSerializer.Deserialize<FtpAddition>(_storage?.Addition ?? "{}") ?? new FtpAddition();
+
+    public override DriverInfo GetDriverInfo()
+    {
+        var additionalItems = BuildItemsFromObject(new FtpAddition());
+        var commonItems = new List<DriverItem>
+        {
+            new() { Name = "mount_path", Type = "string", Required = true, Help = "The path you want to mount to, it is unique and cannot be repeated" },
+            new() { Name = "order", Type = "number", Help = "use to sort" },
+            new() { Name = "remark", Type = "text" },
+            new() { Name = "webdav_policy", Type = "select", Options = "use_proxy_url,native_proxy", Default = "native_proxy", Required = true },
+            new() { Name = "down_proxy_url", Type = "text" },
+            new() { Name = "disable_proxy_sign", Type = "bool", Default = "false" },
+            new() { Name = "order_by", Type = "select", Options = "name,size,modified" },
+            new() { Name = "order_direction", Type = "select", Options = "asc,desc" },
+            new() { Name = "extract_folder", Type = "select", Options = "front,back" },
+            new() { Name = "disable_index", Type = "bool", Default = "false", Required = true },
+            new() { Name = "enable_sign", Type = "bool", Default = "false", Required = true },
+        };
+        return new DriverInfo { Common = commonItems, Additional = additionalItems, Config = Config };
+    }
 
     public override async Task InitAsync(CancellationToken ct = default)
     {
-        var addition = (FtpAddition)GetAddition();
-        RootFolderPath = addition.RootFolderPath;
+        var addition = (FtpAddition)Addition;
         await EnsureConnectedAsync(ct);
     }
 
@@ -45,40 +60,125 @@ public class FtpDriver : RootPathDriver,
         }
     }
 
-    public override async Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
+    #region IFileSystem Impl
+
+    protected override void CreateDirectoryImpl(UPath path)
     {
-        await EnsureConnectedAsync(ct);
-        var virtualPath = dir.GetPath();
-        var relativePath = virtualPath.TrimStart('/');
-
-        var result = new List<IObj>();
-        var blobs = await _blobStorage.ListAsync(new ListOptions { FolderPath = relativePath }, ct);
-
-        foreach (var blob in blobs)
-        {
-            if (blob.Name == "." || blob.Name == "..") continue;
-            result.Add(new ObjItem
-            {
-                Name = blob.Name,
-                Size = blob.Size ?? 0,
-                Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-                CTime = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-                IsFolder = blob.IsFolder,
-                Path = string.Concat(virtualPath.TrimEnd('/'), "/", blob.Name)
-            });
-        }
-        return result;
+        EnsureConnected();
+        _client!.CreateDirectory(path.FullName).GetAwaiter().GetResult();
     }
 
-    public override async Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
+    protected override bool DirectoryExistsImpl(UPath path)
+    {
+        EnsureConnected();
+        return _client!.DirectoryExists(path.FullName).GetAwaiter().GetResult();
+    }
+
+    protected override void MoveDirectoryImpl(UPath srcPath, UPath destPath)
+    {
+        EnsureConnected();
+        _client!.MoveDirectory(srcPath.FullName, destPath.FullName).GetAwaiter().GetResult();
+    }
+
+    protected override void DeleteDirectoryImpl(UPath path, bool isRecursive)
+    {
+        EnsureConnected();
+        _client!.DeleteDirectory(path.FullName, FtpListOption.Recursive).GetAwaiter().GetResult();
+    }
+
+    protected override void CopyFileImpl(UPath srcPath, UPath destPath, bool overwrite)
+    {
+        EnsureConnected();
+        // FTP doesn't have a native copy - download then upload
+        using var stream = _client!.OpenRead(srcPath.FullName).Result;
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        ms.Position = 0;
+        _client.UploadStream(ms, destPath.FullName, overwrite ? FtpRemoteExists.Overwrite : FtpRemoteExists.Skip).GetAwaiter().GetResult();
+    }
+
+    protected override long GetFileLengthImpl(UPath path)
+    {
+        EnsureConnected();
+        return _client!.GetFileSize(path.FullName).GetAwaiter().GetResult();
+    }
+
+    protected override bool FileExistsImpl(UPath path)
+    {
+        EnsureConnected();
+        return _client!.FileExists(path.FullName).GetAwaiter().GetResult();
+    }
+
+    protected override void MoveFileImpl(UPath srcPath, UPath destPath)
+    {
+        EnsureConnected();
+        _client!.MoveFile(srcPath.FullName, destPath.FullName, FtpRemoteExists.Overwrite).GetAwaiter().GetResult();
+    }
+
+    protected override void DeleteFileImpl(UPath path)
+    {
+        EnsureConnected();
+        _client!.DeleteFile(path.FullName).GetAwaiter().GetResult();
+    }
+
+    protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
+    {
+        EnsureConnected();
+        if (access.HasFlag(FileAccess.Read))
+            return _client!.OpenRead(path.FullName).GetAwaiter().GetResult();
+        return _client!.OpenWrite(path.FullName).GetAwaiter().GetResult();
+    }
+
+    protected override DateTime GetLastWriteTimeImpl(UPath path)
+    {
+        EnsureConnected();
+        return _client!.GetModifiedTime(path.FullName).GetAwaiter().GetResult().ToUniversalTime();
+    }
+
+    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
+    {
+        EnsureConnected();
+        var items = _client!.GetListing(path.FullName, FtpListOption.Auto).GetAwaiter().GetResult();
+        foreach (var item in items)
+        {
+            if (item.Name == "." || item.Name == "..") continue;
+            var itemPath = path / item.Name;
+            var isDir = item.Type == FtpObjectType.Directory;
+
+            if (searchTarget == SearchTarget.File && isDir) continue;
+            if (searchTarget == SearchTarget.Directory && !isDir) continue;
+
+            if (searchPattern == "*" || MatchesPattern(item.Name, searchPattern))
+                yield return itemPath;
+        }
+    }
+
+    protected override IEnumerable<FileSystemItem> EnumerateItemsImpl(UPath path, SearchOption searchOption, SearchPredicate? searchPredicate)
+    {
+        EnsureConnected();
+        var items = _client!.GetListing(path.FullName, FtpListOption.Auto).GetAwaiter().GetResult();
+        foreach (var item in items)
+        {
+            if (item.Name == "." || item.Name == "..") continue;
+            var isDir = item.Type == FtpObjectType.Directory;
+            var fsItem = new FileSystemItem(this, path / item.Name, isDir);
+            if (searchPredicate == null || searchPredicate(ref fsItem))
+                yield return fsItem;
+        }
+    }
+
+    #endregion
+
+    #region IFileSystemLinkProvider
+
+    public async Task<Link?> GetLinkAsync(UPath path, LinkArgs args, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct);
-        var relativePath = file.GetPath().TrimStart('/');
-
-        var tempFile = Path.Combine(Path.GetTempPath(), $"ftp_{Guid.NewGuid():N}_{file.GetName()}");
+        // FTP doesn't support direct URLs - proxy through temp file
+        var tempFile = Path.Combine(Path.GetTempPath(), $"ftp_{Guid.NewGuid():N}_{path.GetName()}");
         try
         {
-            using var remoteStream = await _blobStorage.OpenReadAsync(relativePath, ct);
+            using var remoteStream = await _client!.OpenRead(path.FullName, token: ct);
             using var localStream = new FileStream(tempFile, FileMode.Create, FileAccess.Write);
             await remoteStream.CopyToAsync(localStream, 81920, ct);
             return new Link
@@ -94,102 +194,54 @@ public class FtpDriver : RootPathDriver,
         }
     }
 
-    public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
+    #endregion
+
+    #region IFileSystemUploader
+
+    public async Task<UPath> UploadAsync(UPath dstDir, Stream stream, string fileName, Action<double> progress, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct);
-        var relativePath = path.TrimStart('/');
+        var remotePath = (dstDir / fileName).FullName;
 
-        var blob = await _blobStorage.GetBlobAsync(relativePath, ct);
-        if (blob == null) return null;
+        await _client!.UploadStream(stream, remotePath, FtpRemoteExists.Overwrite,
+            false, new Progress<FtpProgress>(p =>
+            {
+                progress((double)p.Progress / 100.0);
+            }), ct);
 
-        return new ObjItem
-        {
-            Name = blob.Name,
-            Size = blob.Size ?? 0,
-            Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-            CTime = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-            IsFolder = blob.IsFolder,
-            Path = path
-        };
+        progress(1.0);
+        return new UPath(remotePath);
     }
 
-    public async Task<IObj> MakeDirAsync(IObj parentDir, string dirName, CancellationToken ct = default)
-    {
-        await EnsureConnectedAsync(ct);
-        var path = string.Concat(parentDir.GetPath().TrimEnd('/'), "/", dirName);
-        await _client!.CreateDirectory(path, ct);
-        return new ObjItem
-        {
-            Name = dirName,
-            IsFolder = true,
-            Path = path,
-            Modified = DateTime.UtcNow,
-            CTime = DateTime.UtcNow
-        };
-    }
+    #endregion
 
-    public async Task MoveAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
-    {
-        await EnsureConnectedAsync(ct);
-        var dstPath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", srcObj.GetName());
-        await _client!.MoveFile(srcObj.GetPath(), dstPath, FtpRemoteExists.Overwrite, ct);
-    }
-
-    public async Task RenameAsync(IObj srcObj, string newName, CancellationToken ct = default)
-    {
-        await EnsureConnectedAsync(ct);
-        var parentPath = Path.GetDirectoryName(srcObj.GetPath())?.Replace('\\', '/') ?? "/";
-        var dstPath = string.Concat(parentPath.TrimEnd('/'), "/", newName);
-        await _client!.Rename(srcObj.GetPath(), dstPath, ct);
-    }
-
-    public async Task RemoveAsync(IObj obj, CancellationToken ct = default)
-    {
-        await EnsureConnectedAsync(ct);
-        if (obj.IsDir())
-            await _client!.DeleteDirectory(obj.GetPath(), FtpListOption.Recursive, ct);
-        else
-            await _client!.DeleteFile(obj.GetPath(), ct);
-    }
-
-    public async Task<IObj> PutAsync(IObj dstDir, FileStreamer file, Action<double> updateProgress, CancellationToken ct = default)
-    {
-        await EnsureConnectedAsync(ct);
-        var remotePath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", file.Obj.GetName());
-
-        if (file.Stream != null)
-        {
-            await _client!.UploadStream(file.Stream, remotePath, FtpRemoteExists.Overwrite,
-                false, new Progress<FtpProgress>(p =>
-                {
-                    if (file.Size > 0)
-                        updateProgress((double)p.Progress / 100.0);
-                }), ct);
-        }
-
-        return new ObjItem
-        {
-            Name = file.Obj.GetName(),
-            IsFolder = false,
-            Path = remotePath,
-            Size = file.Size,
-            Modified = DateTime.UtcNow,
-            CTime = DateTime.UtcNow
-        };
-    }
+    #region Helpers
 
     private async Task EnsureConnectedAsync(CancellationToken ct = default)
     {
         if (_client != null && _client.IsConnected) return;
 
-        var addition = (FtpAddition)GetAddition();
+        var addition = (FtpAddition)Addition;
         _client = new AsyncFtpClient(addition.Address, addition.Username, addition.Password);
         _client.Config.DataConnectionConnectTimeout = 10000;
         _client.Config.ReadTimeout = 10000;
         await _client.Connect(ct);
-
-        _blobStorage = StorageFactory.Blobs.FtpFromFluentFtpClient(_client);
     }
+
+    private void EnsureConnected()
+    {
+        EnsureConnectedAsync().GetAwaiter().GetResult();
+    }
+
+    private static bool MatchesPattern(string name, string pattern)
+    {
+        if (pattern == "*") return true;
+        if (pattern.StartsWith('*')) return name.EndsWith(pattern[1..], StringComparison.OrdinalIgnoreCase);
+        if (pattern.EndsWith('*')) return name.StartsWith(pattern[..^1], StringComparison.OrdinalIgnoreCase);
+        return string.Equals(name, pattern, StringComparison.OrdinalIgnoreCase);
+    }
+
+    #endregion
 }
 
 public class FtpAddition

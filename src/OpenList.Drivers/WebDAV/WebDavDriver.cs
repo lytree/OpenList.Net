@@ -3,29 +3,47 @@ using WebDav;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
+using Zio;
 
 namespace OpenList.Drivers.WebDAV;
 
-public class WebDavDriver : RootPathDriver,
-    IDriverGetter, IDriverMkdirResult, IDriverMove, IDriverRename,
-    IDriverCopy, IDriverRemove, IDriverPutResult
+public class WebDavDriver : ZioDriverBase, IFileSystemLinkProvider, IFileSystemUploader
 {
     private WebDavClient? _client;
 
-    public override DriverConfig Config() => new()
+    public override DriverConfig Config { get; } = new()
     {
         Name = "WebDAV",
         DefaultRoot = "/",
         CheckStatus = true
     };
 
-    public override object GetAddition() => JsonSerializer.Deserialize<WebDavAddition>(_storage.Addition) ?? new WebDavAddition();
-    protected override Type? GetAdditionType() => typeof(WebDavAddition);
+    private WebDavAddition? _addition;
+    public override object Addition => _addition ??= JsonSerializer.Deserialize<WebDavAddition>(_storage?.Addition ?? "{}") ?? new WebDavAddition();
+
+    public override DriverInfo GetDriverInfo()
+    {
+        var additionalItems = BuildItemsFromObject(new WebDavAddition());
+        var commonItems = new List<DriverItem>
+        {
+            new() { Name = "mount_path", Type = "string", Required = true, Help = "The path you want to mount to, it is unique and cannot be repeated" },
+            new() { Name = "order", Type = "number", Help = "use to sort" },
+            new() { Name = "remark", Type = "text" },
+            new() { Name = "webdav_policy", Type = "select", Options = "use_proxy_url,native_proxy", Default = "native_proxy", Required = true },
+            new() { Name = "down_proxy_url", Type = "text" },
+            new() { Name = "disable_proxy_sign", Type = "bool", Default = "false" },
+            new() { Name = "order_by", Type = "select", Options = "name,size,modified" },
+            new() { Name = "order_direction", Type = "select", Options = "asc,desc" },
+            new() { Name = "extract_folder", Type = "select", Options = "front,back" },
+            new() { Name = "disable_index", Type = "bool", Default = "false", Required = true },
+            new() { Name = "enable_sign", Type = "bool", Default = "false", Required = true },
+        };
+        return new DriverInfo { Common = commonItems, Additional = additionalItems, Config = Config };
+    }
 
     public override Task InitAsync(CancellationToken ct = default)
     {
-        var addition = (WebDavAddition)GetAddition();
-        RootFolderPath = addition.RootFolderPath;
+        var addition = (WebDavAddition)Addition;
 
         var clientParams = new WebDavClientParams
         {
@@ -40,131 +58,204 @@ public class WebDavDriver : RootPathDriver,
 
     public override Task DropAsync(CancellationToken ct = default)
     {
+        _client?.Dispose();
         _client = null;
         return Task.CompletedTask;
     }
 
-    public override async Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
+    private void EnsureConnected()
     {
-        var result = new List<IObj>();
-        var response = await _client!.Propfind(dir.GetPath());
+        if (_client == null)
+        {
+            InitAsync().GetAwaiter().GetResult();
+        }
+    }
 
-        if (!response.IsSuccessful) return result;
+    #region IFileSystem Impl
+
+    protected override void CreateDirectoryImpl(UPath path)
+    {
+        EnsureConnected();
+        _client!.Mkcol(path.FullName + "/").GetAwaiter().GetResult();
+    }
+
+    protected override bool DirectoryExistsImpl(UPath path)
+    {
+        EnsureConnected();
+        var response = _client!.Propfind(path.FullName).GetAwaiter().GetResult();
+        if (!response.IsSuccessful) return false;
+        return response.Resources.Any(r => r.IsCollection && r.Uri.TrimEnd('/') == path.FullName.TrimEnd('/'));
+    }
+
+    protected override void MoveDirectoryImpl(UPath srcPath, UPath destPath)
+    {
+        EnsureConnected();
+        _client!.Move(srcPath.FullName, destPath.FullName + "/", new MoveParameters { Overwrite = true }).GetAwaiter().GetResult();
+    }
+
+    protected override void DeleteDirectoryImpl(UPath path, bool isRecursive)
+    {
+        EnsureConnected();
+        _client!.Delete(path.FullName).GetAwaiter().GetResult();
+    }
+
+    protected override void CopyFileImpl(UPath srcPath, UPath destPath, bool overwrite)
+    {
+        EnsureConnected();
+        _client!.Copy(srcPath.FullName, destPath.FullName, new CopyParameters { Overwrite = overwrite }).GetAwaiter().GetResult();
+    }
+
+    protected override long GetFileLengthImpl(UPath path)
+    {
+        EnsureConnected();
+        var response = _client!.Propfind(path.FullName).GetAwaiter().GetResult();
+        if (!response.IsSuccessful) return 0;
+        var resource = response.Resources.FirstOrDefault(r => !r.IsCollection);
+        return resource?.ContentLength ?? 0;
+    }
+
+    protected override bool FileExistsImpl(UPath path)
+    {
+        EnsureConnected();
+        var response = _client!.Propfind(path.FullName).GetAwaiter().GetResult();
+        if (!response.IsSuccessful) return false;
+        return response.Resources.Any(r => !r.IsCollection && r.Uri.TrimEnd('/') == path.FullName.TrimEnd('/'));
+    }
+
+    protected override void MoveFileImpl(UPath srcPath, UPath destPath)
+    {
+        EnsureConnected();
+        _client!.Move(srcPath.FullName, destPath.FullName, new MoveParameters { Overwrite = true }).GetAwaiter().GetResult();
+    }
+
+    protected override void DeleteFileImpl(UPath path)
+    {
+        EnsureConnected();
+        _client!.Delete(path.FullName).GetAwaiter().GetResult();
+    }
+
+    protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
+    {
+        EnsureConnected();
+        if (access.HasFlag(FileAccess.Read))
+        {
+            var response = _client!.GetRawFile(path.FullName).GetAwaiter().GetResult();
+            return response.Stream;
+        }
+        // For write: return a stream that uploads on dispose
+        return new WebDavWriteStream(_client!, path.FullName);
+    }
+
+    protected override DateTime GetLastWriteTimeImpl(UPath path)
+    {
+        EnsureConnected();
+        var response = _client!.Propfind(path.FullName).GetAwaiter().GetResult();
+        if (!response.IsSuccessful) return DateTime.MinValue;
+        var resource = response.Resources.FirstOrDefault();
+        return resource?.LastModifiedDate?.ToUniversalTime() ?? DateTime.MinValue;
+    }
+
+    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
+    {
+        EnsureConnected();
+        var response = _client!.Propfind(path.FullName, new PropfindParameters { ApplyTo = ApplyTo.Propfind.ResourceAndChildren }).GetAwaiter().GetResult();
+        if (!response.IsSuccessful) yield break;
 
         foreach (var resource in response.Resources)
         {
             var name = Uri.UnescapeDataString(resource.Uri.TrimEnd('/').Split('/').Last());
-            if (string.IsNullOrEmpty(name) || name == dir.GetPath().TrimEnd('/').Split('/').Last()) continue;
+            if (string.IsNullOrEmpty(name) || name == path.GetName()) continue;
 
-            result.Add(new ObjItem
-            {
-                Name = name,
-                Size = resource.ContentLength ?? 0,
-                Modified = resource.LastModifiedDate ?? DateTime.MinValue,
-                CTime = resource.CreationDate ?? resource.LastModifiedDate ?? DateTime.MinValue,
-                IsFolder = resource.IsCollection,
-                Path = resource.Uri.TrimEnd('/')
-            });
+            var itemPath = path / name;
+            var isDir = resource.IsCollection;
+
+            if (searchTarget == SearchTarget.File && isDir) continue;
+            if (searchTarget == SearchTarget.Directory && !isDir) continue;
+
+            yield return itemPath;
         }
-
-        return result;
     }
 
-    public override async Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
+    protected override IEnumerable<FileSystemItem> EnumerateItemsImpl(UPath path, SearchOption searchOption, SearchPredicate? searchPredicate)
     {
-        var addition = (WebDavAddition)GetAddition();
-        var url = addition.WebdavURL.TrimEnd('/') + file.GetPath();
-        return new Link
+        EnsureConnected();
+        var response = _client!.Propfind(path.FullName, new PropfindParameters { ApplyTo = ApplyTo.Propfind.ResourceAndChildren }).GetAwaiter().GetResult();
+        if (!response.IsSuccessful) yield break;
+
+        foreach (var resource in response.Resources)
+        {
+            var name = Uri.UnescapeDataString(resource.Uri.TrimEnd('/').Split('/').Last());
+            if (string.IsNullOrEmpty(name) || name == path.GetName()) continue;
+
+            var itemPath = path / name;
+            var item = new FileSystemItem(this, itemPath, resource.IsCollection)
+            {
+                Length = resource.ContentLength ?? 0,
+                LastWriteTime = resource.LastModifiedDate?.ToUniversalTime() ?? DateTime.MinValue
+            };
+
+            if (searchPredicate == null || searchPredicate(ref item))
+                yield return item;
+        }
+    }
+
+    #endregion
+
+    #region IFileSystemLinkProvider
+
+    public Task<Link?> GetLinkAsync(UPath path, LinkArgs args, CancellationToken ct = default)
+    {
+        var addition = (WebDavAddition)Addition;
+        var url = addition.WebdavURL.TrimEnd('/') + path.FullName;
+        return Task.FromResult<Link?>(new Link
         {
             URL = url,
             Header = string.IsNullOrEmpty(addition.Authorization) ? null
                 : new Dictionary<string, string> { { "Authorization", addition.Authorization } }
-        };
+        });
     }
 
-    public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
+    #endregion
+
+    #region IFileSystemUploader
+
+    public async Task<UPath> UploadAsync(UPath dstDir, Stream stream, string fileName, Action<double> progress, CancellationToken ct = default)
     {
-        var fullPath = string.Concat(RootFolderPath.TrimEnd('/'), "/", path.TrimStart('/'));
-        var response = await _client!.Propfind(fullPath);
+        EnsureConnected();
+        var remotePath = (dstDir / fileName).FullName;
 
-        if (!response.IsSuccessful) return null;
+        await _client!.PutFile(remotePath, stream);
+        progress(1.0);
+        return dstDir / fileName;
+    }
 
-        var resource = response.Resources.FirstOrDefault(r =>
-            r.Uri.TrimEnd('/') == fullPath.TrimEnd('/'));
+    #endregion
+}
 
-        if (resource == null) return null;
+/// <summary>
+/// A stream that uploads to WebDAV on dispose.
+/// </summary>
+internal class WebDavWriteStream : MemoryStream
+{
+    private readonly WebDavClient _client;
+    private readonly string _path;
+    private bool _uploaded;
 
-        var name = Uri.UnescapeDataString(resource.Uri.TrimEnd('/').Split('/').Last());
-        return new ObjItem
+    public WebDavWriteStream(WebDavClient client, string path)
+    {
+        _client = client;
+        _path = path;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !_uploaded)
         {
-            Name = name,
-            Size = resource.ContentLength ?? 0,
-            Modified = resource.LastModifiedDate ?? DateTime.MinValue,
-            CTime = resource.CreationDate ?? resource.LastModifiedDate ?? DateTime.MinValue,
-            IsFolder = resource.IsCollection,
-            Path = fullPath
-        };
-    }
-
-    public async Task<IObj> MakeDirAsync(IObj parentDir, string dirName, CancellationToken ct = default)
-    {
-        var path = string.Concat(parentDir.GetPath().TrimEnd('/'), "/", dirName, "/");
-        await _client!.Mkcol(path);
-        return new ObjItem
-        {
-            Name = dirName,
-            IsFolder = true,
-            Path = path.TrimEnd('/'),
-            Modified = DateTime.UtcNow,
-            CTime = DateTime.UtcNow
-        };
-    }
-
-    public async Task MoveAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
-    {
-        var dstPath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", srcObj.GetName());
-        if (srcObj.IsDir()) dstPath += "/";
-        await _client!.Move(srcObj.GetPath(), dstPath, new MoveParameters { Overwrite = true });
-    }
-
-    public async Task RenameAsync(IObj srcObj, string newName, CancellationToken ct = default)
-    {
-        var parentPath = srcObj.GetPath().TrimEnd('/')[..srcObj.GetPath().TrimEnd('/').LastIndexOf('/')];
-        var dstPath = string.Concat(parentPath, "/", newName);
-        if (srcObj.IsDir()) dstPath += "/";
-        await _client!.Move(srcObj.GetPath(), dstPath, new MoveParameters { Overwrite = true });
-    }
-
-    public async Task CopyAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
-    {
-        var dstPath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", srcObj.GetName());
-        if (srcObj.IsDir()) dstPath += "/";
-        await _client!.Copy(srcObj.GetPath(), dstPath, new CopyParameters { Overwrite = true });
-    }
-
-    public async Task RemoveAsync(IObj obj, CancellationToken ct = default)
-    {
-        await _client!.Delete(obj.GetPath());
-    }
-
-    public async Task<IObj> PutAsync(IObj dstDir, FileStreamer file, Action<double> updateProgress, CancellationToken ct = default)
-    {
-        var remotePath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", file.Obj.GetName());
-
-        if (file.Stream != null)
-        {
-            await _client!.PutFile(remotePath, file.Stream);
+            _uploaded = true;
+            Position = 0;
+            _client.PutFile(_path, this).GetAwaiter().GetResult();
         }
-
-        return new ObjItem
-        {
-            Name = file.Obj.GetName(),
-            IsFolder = false,
-            Path = remotePath,
-            Size = file.Size,
-            Modified = DateTime.UtcNow,
-            CTime = DateTime.UtcNow
-        };
+        base.Dispose(disposing);
     }
 }
 

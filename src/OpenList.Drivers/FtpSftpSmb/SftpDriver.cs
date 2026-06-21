@@ -1,24 +1,20 @@
 using System.Text.Json;
 using Renci.SshNet;
 using Renci.SshNet.Sftp;
-using FluentStorage;
-using FluentStorage.Blobs;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
-using OpenList.Core.Interfaces;
+using Zio;
+using Zio.FileSystems;
 
 namespace OpenList.Drivers.Sftp;
 
-public class SftpDriver : RootPathDriver,
-    IDriverGetter, IDriverMkdirResult, IDriverMove, IDriverRename,
-    IDriverRemove, IDriverPutResult, IDriverWithDetails
+public class SftpDriver : ZioDriverBase, IFileSystemLinkProvider, IFileSystemUploader
 {
     private SftpClient? _client;
-    private IBlobStorage _blobStorage = null!;
     private Exception? _connectionError;
 
-    public override DriverConfig Config() => new()
+    public override DriverConfig Config { get; } = new()
     {
         Name = "SFTP",
         LocalSort = true,
@@ -27,13 +23,31 @@ public class SftpDriver : RootPathDriver,
         CheckStatus = true
     };
 
-    public override object GetAddition() => JsonSerializer.Deserialize<SftpAddition>(_storage.Addition) ?? new SftpAddition();
-    protected override Type? GetAdditionType() => typeof(SftpAddition);
+    private SftpAddition? _addition;
+    public override object Addition => _addition ??= JsonSerializer.Deserialize<SftpAddition>(_storage?.Addition ?? "{}") ?? new SftpAddition();
+
+    public override DriverInfo GetDriverInfo()
+    {
+        var additionalItems = BuildItemsFromObject(new SftpAddition());
+        var commonItems = new List<DriverItem>
+        {
+            new() { Name = "mount_path", Type = "string", Required = true, Help = "The path you want to mount to, it is unique and cannot be repeated" },
+            new() { Name = "order", Type = "number", Help = "use to sort" },
+            new() { Name = "remark", Type = "text" },
+            new() { Name = "webdav_policy", Type = "select", Options = "use_proxy_url,native_proxy", Default = "native_proxy", Required = true },
+            new() { Name = "down_proxy_url", Type = "text" },
+            new() { Name = "disable_proxy_sign", Type = "bool", Default = "false" },
+            new() { Name = "order_by", Type = "select", Options = "name,size,modified" },
+            new() { Name = "order_direction", Type = "select", Options = "asc,desc" },
+            new() { Name = "extract_folder", Type = "select", Options = "front,back" },
+            new() { Name = "disable_index", Type = "bool", Default = "false", Required = true },
+            new() { Name = "enable_sign", Type = "bool", Default = "false", Required = true },
+        };
+        return new DriverInfo { Common = commonItems, Additional = additionalItems, Config = Config };
+    }
 
     public override Task InitAsync(CancellationToken ct = default)
     {
-        var addition = (SftpAddition)GetAddition();
-        RootFolderPath = addition.RootFolderPath;
         InitClient();
         return Task.CompletedTask;
     }
@@ -46,40 +60,119 @@ public class SftpDriver : RootPathDriver,
         return Task.CompletedTask;
     }
 
-    public override async Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default)
+    #region IFileSystem Impl
+
+    protected override void CreateDirectoryImpl(UPath path) => _client!.CreateDirectory(path.FullName);
+
+    protected override bool DirectoryExistsImpl(UPath path)
     {
-        await ReconnectIfNeededAsync();
-        var virtualPath = dir.GetPath();
-        var relativePath = virtualPath.TrimStart('/');
+        try { return _client!.GetAttributes(path.FullName).IsDirectory; }
+        catch { return false; }
+    }
 
-        var result = new List<IObj>();
-        var blobs = await _blobStorage.ListAsync(new ListOptions { FolderPath = relativePath }, ct);
+    protected override void MoveDirectoryImpl(UPath srcPath, UPath destPath) =>
+        _client!.RenameFile(srcPath.FullName, destPath.FullName);
 
-        foreach (var blob in blobs)
+    protected override void DeleteDirectoryImpl(UPath path, bool isRecursive)
+    {
+        if (isRecursive)
+            RemoveDirectoryRecursive(path.FullName);
+        else
+            _client!.DeleteDirectory(path.FullName);
+    }
+
+    protected override void CopyFileImpl(UPath srcPath, UPath destPath, bool overwrite)
+    {
+        using var stream = _client!.OpenRead(srcPath.FullName);
+        using var dest = _client.OpenWrite(destPath.FullName);
+        stream.CopyTo(dest);
+    }
+
+    protected override long GetFileLengthImpl(UPath path) =>
+        _client!.GetAttributes(path.FullName).Size;
+
+    protected override bool FileExistsImpl(UPath path)
+    {
+        try
         {
-            if (blob.Name == "." || blob.Name == "..") continue;
-            result.Add(new ObjItem
-            {
-                Name = blob.Name,
-                Size = blob.Size ?? 0,
-                Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-                CTime = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-                IsFolder = blob.IsFolder,
-                Path = string.Concat(virtualPath.TrimEnd('/'), "/", blob.Name)
-            });
+            var attrs = _client!.GetAttributes(path.FullName);
+            return !attrs.IsDirectory;
         }
+        catch { return false; }
+    }
+
+    protected override void MoveFileImpl(UPath srcPath, UPath destPath) =>
+        _client!.RenameFile(srcPath.FullName, destPath.FullName);
+
+    protected override void DeleteFileImpl(UPath path) => _client!.DeleteFile(path.FullName);
+
+    protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
+    {
+        var sftpMode = mode switch
+        {
+            FileMode.Open => System.IO.FileMode.Open,
+            FileMode.Create => System.IO.FileMode.Create,
+            FileMode.CreateNew => System.IO.FileMode.CreateNew,
+            FileMode.Append => System.IO.FileMode.Append,
+            _ => System.IO.FileMode.Open
+        };
+        return _client!.Open(path.FullName, sftpMode);
+    }
+
+    protected override FileAttributes GetAttributesImpl(UPath path)
+    {
+        var attrs = _client!.GetAttributes(path.FullName);
+        var result = FileAttributes.Normal;
+        if (attrs.IsDirectory) result |= FileAttributes.Directory;
         return result;
     }
 
-    public override async Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default)
+    protected override DateTime GetLastWriteTimeImpl(UPath path) =>
+        _client!.GetLastWriteTimeUtc(path.FullName);
+
+    protected override DateTime GetCreationTimeImpl(UPath path) =>
+        _client!.GetLastAccessTimeUtc(path.FullName);
+
+    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
+    {
+        var items = _client!.ListDirectory(path.FullName);
+        foreach (var item in items)
+        {
+            if (item.Name == "." || item.Name == "..") continue;
+            var itemPath = path / item.Name;
+            var isDir = item.IsDirectory;
+
+            if (searchTarget == SearchTarget.File && isDir) continue;
+            if (searchTarget == SearchTarget.Directory && !isDir) continue;
+
+            if (searchPattern == "*" || MatchesPattern(item.Name, searchPattern))
+                yield return itemPath;
+        }
+    }
+
+    protected override IEnumerable<FileSystemItem> EnumerateItemsImpl(UPath path, SearchOption searchOption, SearchPredicate? searchPredicate)
+    {
+        var items = _client!.ListDirectory(path.FullName);
+        foreach (var item in items)
+        {
+            if (item.Name == "." || item.Name == "..") continue;
+            var fsItem = new FileSystemItem(this, path / item.Name, item.IsDirectory);
+            if (searchPredicate == null || searchPredicate(ref fsItem))
+                yield return fsItem;
+        }
+    }
+
+    #endregion
+
+    #region IFileSystemLinkProvider
+
+    public async Task<Link?> GetLinkAsync(UPath path, LinkArgs args, CancellationToken ct = default)
     {
         await ReconnectIfNeededAsync();
-        var relativePath = file.GetPath().TrimStart('/');
-
-        var tempFile = Path.Combine(Path.GetTempPath(), $"sftp_{Guid.NewGuid():N}_{file.GetName()}");
+        var tempFile = Path.Combine(Path.GetTempPath(), $"sftp_{Guid.NewGuid():N}_{path.GetName()}");
         try
         {
-            using var remoteStream = await _blobStorage.OpenReadAsync(relativePath, ct);
+            using var remoteStream = _client!.OpenRead(path.FullName);
             using var localStream = new FileStream(tempFile, FileMode.Create, FileAccess.Write);
             await remoteStream.CopyToAsync(localStream, 81920, ct);
             return new Link
@@ -95,106 +188,39 @@ public class SftpDriver : RootPathDriver,
         }
     }
 
-    public async Task<IObj?> GetAsync(string path, CancellationToken ct = default)
+    #endregion
+
+    #region IFileSystemUploader
+
+    public async Task<UPath> UploadAsync(UPath dstDir, Stream stream, string fileName, Action<double> progress, CancellationToken ct = default)
     {
         await ReconnectIfNeededAsync();
-        var relativePath = path.TrimStart('/');
+        var remotePath = (dstDir / fileName).FullName;
 
-        var blob = await _blobStorage.GetBlobAsync(relativePath, ct);
-        if (blob == null) return null;
-
-        return new ObjItem
+        using var remoteStream = _client!.Create(remotePath);
+        var buffer = new byte[81920];
+        long totalRead = 0;
+        int bytesRead;
+        while ((bytesRead = await stream.ReadAsync(buffer, ct)) > 0)
         {
-            Name = blob.Name,
-            Size = blob.Size ?? 0,
-            Modified = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-            CTime = blob.LastModificationTime?.UtcDateTime ?? DateTime.MinValue,
-            IsFolder = blob.IsFolder,
-            Path = path
-        };
-    }
-
-    public async Task<IObj> MakeDirAsync(IObj parentDir, string dirName, CancellationToken ct = default)
-    {
-        await ReconnectIfNeededAsync();
-        var path = string.Concat(parentDir.GetPath().TrimEnd('/'), "/", dirName);
-        await Task.Run(() => _client!.CreateDirectory(path), ct);
-        return new ObjItem
-        {
-            Name = dirName,
-            IsFolder = true,
-            Path = path,
-            Modified = DateTime.UtcNow,
-            CTime = DateTime.UtcNow
-        };
-    }
-
-    public async Task MoveAsync(IObj srcObj, IObj dstDir, CancellationToken ct = default)
-    {
-        await ReconnectIfNeededAsync();
-        var dstPath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", srcObj.GetName());
-        await Task.Run(() => _client!.RenameFile(srcObj.GetPath(), dstPath), ct);
-    }
-
-    public async Task RenameAsync(IObj srcObj, string newName, CancellationToken ct = default)
-    {
-        await ReconnectIfNeededAsync();
-        var parentPath = Path.GetDirectoryName(srcObj.GetPath())?.Replace('\\', '/') ?? "/";
-        var dstPath = string.Concat(parentPath.TrimEnd('/'), "/", newName);
-        await Task.Run(() => _client!.RenameFile(srcObj.GetPath(), dstPath), ct);
-    }
-
-    public async Task RemoveAsync(IObj obj, CancellationToken ct = default)
-    {
-        await ReconnectIfNeededAsync();
-        if (obj.IsDir())
-            await RemoveDirectoryRecursiveAsync(obj.GetPath(), ct);
-        else
-            await Task.Run(() => _client!.DeleteFile(obj.GetPath()), ct);
-    }
-
-    public async Task<IObj> PutAsync(IObj dstDir, FileStreamer file, Action<double> updateProgress, CancellationToken ct = default)
-    {
-        await ReconnectIfNeededAsync();
-        var remotePath = string.Concat(dstDir.GetPath().TrimEnd('/'), "/", file.Obj.GetName());
-
-        if (file.Stream != null)
-        {
-            using var remoteStream = _client!.Create(remotePath);
-            var buffer = new byte[81920];
-            long totalRead = 0;
-            int bytesRead;
-            while ((bytesRead = await file.Stream.ReadAsync(buffer, ct)) > 0)
-            {
-                await remoteStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
-                totalRead += bytesRead;
-                if (file.Size > 0)
-                    updateProgress((double)totalRead / file.Size);
-            }
+            await remoteStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+            totalRead += bytesRead;
+            if (stream.CanSeek)
+                progress((double)totalRead / stream.Length);
         }
-
-        return new ObjItem
-        {
-            Name = file.Obj.GetName(),
-            IsFolder = false,
-            Path = remotePath,
-            Size = file.Size,
-            Modified = DateTime.UtcNow,
-            CTime = DateTime.UtcNow
-        };
+        progress(1.0);
+        return new UPath(remotePath);
     }
 
-    public Task<StorageDetails?> GetDetailsAsync(CancellationToken ct = default)
-    {
-        return Task.FromResult<StorageDetails?>(null);
-    }
+    #endregion
+
+    #region Helpers
 
     private void InitClient()
     {
-        var addition = (SftpAddition)GetAddition();
+        var addition = (SftpAddition)Addition;
         ConnectionInfo connInfo;
 
-        // Parse host and port from address
         var parts = addition.Address.Split(':');
         var host = parts[0];
         var port = parts.Length > 1 && int.TryParse(parts[1], out var p) ? p : 22;
@@ -218,9 +244,6 @@ public class SftpDriver : RootPathDriver,
         _client = new SftpClient(connInfo);
         _client.Connect();
         _connectionError = null;
-
-        // Create IBlobStorage from the same connection info
-        _blobStorage = StorageFactory.Blobs.Sftp(connInfo);
     }
 
     private async Task ReconnectIfNeededAsync()
@@ -233,20 +256,30 @@ public class SftpDriver : RootPathDriver,
         await Task.CompletedTask;
     }
 
-    private async Task RemoveDirectoryRecursiveAsync(string path, CancellationToken ct)
+    private void RemoveDirectoryRecursive(string path)
     {
-        var items = await Task.Run(() => _client!.ListDirectory(path), ct);
+        var items = _client!.ListDirectory(path);
         foreach (var item in items)
         {
             if (item.Name == "." || item.Name == "..") continue;
-            var itemPath = string.Concat(path.TrimEnd('/'), "/", item.Name);
+            var itemPath = path.TrimEnd('/') + "/" + item.Name;
             if (item.IsDirectory)
-                await RemoveDirectoryRecursiveAsync(itemPath, ct);
+                RemoveDirectoryRecursive(itemPath);
             else
-                await Task.Run(() => _client!.DeleteFile(itemPath), ct);
+                _client.DeleteFile(itemPath);
         }
-        await Task.Run(() => _client!.DeleteDirectory(path), ct);
+        _client.DeleteDirectory(path);
     }
+
+    private static bool MatchesPattern(string name, string pattern)
+    {
+        if (pattern == "*") return true;
+        if (pattern.StartsWith('*')) return name.EndsWith(pattern[1..], StringComparison.OrdinalIgnoreCase);
+        if (pattern.EndsWith('*')) return name.StartsWith(pattern[..^1], StringComparison.OrdinalIgnoreCase);
+        return string.Equals(name, pattern, StringComparison.OrdinalIgnoreCase);
+    }
+
+    #endregion
 }
 
 public class SftpAddition

@@ -1,5 +1,6 @@
 using OpenList.Core.Drivers;
 using OpenList.Core.Models;
+using Zio;
 
 namespace OpenList.Core.Interfaces;
 
@@ -13,7 +14,7 @@ public interface IStorageService
     Task EnableStorageAsync(uint id, CancellationToken ct = default);
     Task DisableStorageAsync(uint id, CancellationToken ct = default);
     Task LoadAllStoragesAsync(CancellationToken ct = default);
-    IDriver? GetDriverByMountPath(string mountPath);
+    IFileSystem? GetDriverByMountPath(string mountPath);
     DriverInfo GetDriverInfo(string driverName);
     List<DriverInfo> ListDriverInfos();
     List<string> ListDriverNames();

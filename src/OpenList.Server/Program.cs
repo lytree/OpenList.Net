@@ -78,7 +78,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<ISignService, SignService>();
 builder.Services.AddScoped<IFileSystemService, FileSystemService>();
-builder.Services.AddSingleton<IDriverFactory, DriverFactory>();
+builder.Services.AddSingleton<ZioMountService>();
 builder.Services.AddSingleton<ISearchService, SearchService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
 builder.Services.AddScoped<IScanService, ScanService>();

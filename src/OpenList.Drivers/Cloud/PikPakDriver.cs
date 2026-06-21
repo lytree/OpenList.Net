@@ -4,24 +4,20 @@ using OpenList.Core.Models;
 
 namespace OpenList.Drivers.PikPak;
 
-public class PikPakDriver : DriverBase, IDriverGetter
+public class PikPakDriver : ZioDriverBase
 {
-    public override DriverConfig Config() => new() { Name = "PikPak" };
-    public override object GetAddition() => new();
+    public override DriverConfig Config { get; } = new() { Name = "PikPak" };
+    public override object Addition => new();
+    public override DriverInfo GetDriverInfo() => new() { Common = [], Additional = [], Config = Config };
     public override Task InitAsync(CancellationToken ct = default) => Task.CompletedTask;
     public override Task DropAsync(CancellationToken ct = default) => Task.CompletedTask;
-    public override Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default) => Task.FromResult(new List<IObj>());
-    public override Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default) => Task.FromResult<Link?>(null);
-    public Task<IObj?> GetAsync(string path, CancellationToken ct = default) => Task.FromResult<IObj?>(null);
 }
 
-public class PikPakShareDriver : DriverBase, IDriverGetter
+public class PikPakShareDriver : ZioDriverBase
 {
-    public override DriverConfig Config() => new() { Name = "PikPakShare" };
-    public override object GetAddition() => new();
+    public override DriverConfig Config { get; } = new() { Name = "PikPakShare" };
+    public override object Addition => new();
+    public override DriverInfo GetDriverInfo() => new() { Common = [], Additional = [], Config = Config };
     public override Task InitAsync(CancellationToken ct = default) => Task.CompletedTask;
     public override Task DropAsync(CancellationToken ct = default) => Task.CompletedTask;
-    public override Task<List<IObj>> ListAsync(IObj dir, ListArgs args, CancellationToken ct = default) => Task.FromResult(new List<IObj>());
-    public override Task<Link?> LinkAsync(IObj file, LinkArgs args, CancellationToken ct = default) => Task.FromResult<Link?>(null);
-    public Task<IObj?> GetAsync(string path, CancellationToken ct = default) => Task.FromResult<IObj?>(null);
 }

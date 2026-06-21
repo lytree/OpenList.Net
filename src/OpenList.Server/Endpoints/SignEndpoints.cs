@@ -7,6 +7,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Core.Drivers;
 using OpenList.Infrastructure.Services;
+using Zio;
 
 namespace OpenList.Server.Endpoints;
 
@@ -15,10 +16,10 @@ public static class SignEndpoints
     public static IEndpointRouteBuilder MapSignRoutes(this IEndpointRouteBuilder endpoints)
     {
         // /d/*path - signed download (Go: checks ShouldProxy first)
-        endpoints.MapGet("/d/{*path}", async (IFileSystemService fs, ISignService sign, IDriverFactory driverFactory, ISettingService settings, HttpContext ctx, string path, string? sign_query) =>
-            await HandleSignedDownload(fs, sign, driverFactory, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous().WithSummary("签名下载 (重定向/代理)");
-        endpoints.MapMethods("/d/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, IDriverFactory driverFactory, ISettingService settings, HttpContext ctx, string path, string? sign_query) =>
-            await HandleSignedDownload(fs, sign, driverFactory, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous().WithSummary("签名下载 HEAD");
+        endpoints.MapGet("/d/{*path}", async (IFileSystemService fs, ISignService sign, ZioMountService mountService, ISettingService settings, HttpContext ctx, string path, string? sign_query) =>
+            await HandleSignedDownload(fs, sign, mountService, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous().WithSummary("签名下载 (重定向/代理)");
+        endpoints.MapMethods("/d/{*path}", ["HEAD"], async (IFileSystemService fs, ISignService sign, ZioMountService mountService, ISettingService settings, HttpContext ctx, string path, string? sign_query) =>
+            await HandleSignedDownload(fs, sign, mountService, settings, ctx, path, sign_query, verifyArchive: false)).AllowAnonymous().WithSummary("签名下载 HEAD");
 
         // /p/*path - signed proxy
         endpoints.MapGet("/p/{*path}", async (IFileSystemService fs, ISignService sign, HttpContext ctx, string path, string? sign_query) =>
@@ -122,7 +123,7 @@ public static class SignEndpoints
         return endpoints;
     }
 
-    private static async Task<IResult> HandleSignedDownload(IFileSystemService fs, ISignService sign, IDriverFactory driverFactory, ISettingService settings, HttpContext ctx, string path, string? signValue, bool verifyArchive)
+    private static async Task<IResult> HandleSignedDownload(IFileSystemService fs, ISignService sign, ZioMountService mountService, ISettingService settings, HttpContext ctx, string path, string? signValue, bool verifyArchive)
     {
         if (string.IsNullOrEmpty(signValue) || !(verifyArchive ? sign.VerifyArchive(signValue, path) : sign.Verify(signValue, path)))
             return Results.StatusCode(403);
@@ -131,7 +132,7 @@ public static class SignEndpoints
         var storage = await fs.GetStorageAsync(path);
         if (storage != null)
         {
-            var driver = driverFactory.GetDriver(storage.MountPath);
+            var driver = mountService.GetFileSystem(storage.MountPath);
             var proxyTypes = await settings.GetSettingAsync("proxy_types");
             if (ShouldProxy(driver, storage, path, proxyTypes))
                 return await HandleSignedProxy(fs, sign, ctx, path, signValue);
@@ -149,9 +150,9 @@ public static class SignEndpoints
         return Results.NotFound();
     }
 
-    private static bool ShouldProxy(IDriver? driver, Storage storage, string path, string? proxyTypes)
+    private static bool ShouldProxy(IFileSystem? driver, Storage storage, string path, string? proxyTypes)
     {
-        if (driver != null && driver.Config().MustProxy()) return true;
+        if (driver is IFileSystemDriverMeta meta && meta.Config.MustProxy()) return true;
         if (storage.WebProxy) return true;
         if (!string.IsNullOrEmpty(proxyTypes))
         {

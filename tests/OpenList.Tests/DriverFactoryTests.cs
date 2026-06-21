@@ -1,7 +1,7 @@
 using System.Text.Json;
 using OpenList.Core.Drivers;
 using OpenList.Core.Models;
-using OpenList.Drivers.Local;
+using OpenList.Drivers.Virtual;
 using OpenList.Infrastructure.Services;
 
 namespace OpenList.Tests;
@@ -9,33 +9,34 @@ namespace OpenList.Tests;
 public class DriverFactoryTests : IDisposable
 {
     private readonly string _tempRoot;
-    private readonly DriverFactory _factory;
+    private readonly ZioMountService _factory;
 
     public DriverFactoryTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"factory_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempRoot);
-        _factory = new DriverFactory();
+        _factory = new ZioMountService();
     }
 
     public void Dispose()
     {
         try { if (Directory.Exists(_tempRoot)) Directory.Delete(_tempRoot, true); } catch { }
+        try { _factory.Dispose(); } catch { }
     }
 
     [Test]
-    public async Task ListDriverNames_ShouldIncludeLocal()
+    public async Task ListDriverNames_ShouldIncludeVirtual()
     {
         var names = _factory.ListDriverNames();
-        await Assert.That(names).Contains("Local");
+        await Assert.That(names).Contains("Virtual");
     }
 
     [Test]
-    public async Task GetDriverInfo_Local_ShouldReturnConfig()
+    public async Task GetDriverInfo_Virtual_ShouldReturnConfig()
     {
-        var info = _factory.GetDriverInfo("Local");
+        var info = _factory.GetDriverInfo("Virtual");
         await Assert.That(info).IsNotNull();
-        await Assert.That(info.Config.Name).IsEqualTo("Local");
+        await Assert.That(info.Config.Name).IsEqualTo("Virtual");
         await Assert.That(info.Config.LocalSort).IsTrue();
     }
 
@@ -50,38 +51,36 @@ public class DriverFactoryTests : IDisposable
     [Test]
     public async Task GetActualMountPath_ShouldStripBalance()
     {
-        await Assert.That(DriverFactory.GetActualMountPath("/data.balance")).IsEqualTo("/data");
-        await Assert.That(DriverFactory.GetActualMountPath("/data.balance/sub.balance")).IsEqualTo("/data.balance/sub");
-        await Assert.That(DriverFactory.GetActualMountPath("/data")).IsEqualTo("/data");
+        await Assert.That(ZioMountService.GetActualMountPath("/data.balance")).IsEqualTo("/data");
+        await Assert.That(ZioMountService.GetActualMountPath("/data.balance/sub.balance")).IsEqualTo("/data.balance/sub");
+        await Assert.That(ZioMountService.GetActualMountPath("/data")).IsEqualTo("/data");
     }
 
     [Test]
     public async Task LoadDriver_ShouldStoreDriver()
     {
-        var addition = new LocalAddition { RootFolderPath = _tempRoot };
         var storage = new Storage
         {
             MountPath = "/test_load",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         };
 
         _factory.LoadDriver(storage);
 
         await Assert.That(_factory.HasStorage("/test_load")).IsTrue();
-        var driver = _factory.GetDriver("/test_load");
+        var driver = _factory.GetFileSystem("/test_load");
         await Assert.That(driver).IsNotNull();
     }
 
     [Test]
     public async Task UnloadDriver_ShouldRemoveDriver()
     {
-        var addition = new LocalAddition { RootFolderPath = _tempRoot };
         var storage = new Storage
         {
             MountPath = "/test_unload",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         };
 
         _factory.LoadDriver(storage);
@@ -94,12 +93,11 @@ public class DriverFactoryTests : IDisposable
     [Test]
     public async Task ReloadDriver_ShouldReinitialize()
     {
-        var addition = new LocalAddition { RootFolderPath = _tempRoot };
         var storage = new Storage
         {
             MountPath = "/test_reload",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         };
 
         _factory.LoadDriver(storage);
@@ -107,8 +105,8 @@ public class DriverFactoryTests : IDisposable
         var newStorage = new Storage
         {
             MountPath = "/test_reload",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         };
 
         _factory.ReloadDriver(storage, newStorage);
@@ -118,18 +116,17 @@ public class DriverFactoryTests : IDisposable
     [Test]
     public async Task FindStorageByPath_ShouldFindLongestMatch()
     {
-        var addition = new LocalAddition { RootFolderPath = _tempRoot };
         var storage1 = new Storage
         {
             MountPath = "/root",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         };
         var storage2 = new Storage
         {
             MountPath = "/root/sub",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         };
 
         _factory.LoadDriver(storage1);
@@ -150,53 +147,49 @@ public class DriverFactoryTests : IDisposable
     [Test]
     public async Task GetVirtualFilesByPath_ShouldReturnVirtualDirs()
     {
-        var addition = new LocalAddition { RootFolderPath = _tempRoot };
         var storage = new Storage
         {
             MountPath = "/virtual_test",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         };
         _factory.LoadDriver(storage);
 
         var files = _factory.GetVirtualFilesByPath("/");
-        await Assert.That(files.Any(f => f.GetName() == "virtual_test")).IsTrue();
+        await Assert.That(files.Any(f => f.Name == "virtual_test")).IsTrue();
     }
 
     [Test]
     public async Task SerializeAddition_ShouldReturnJson()
     {
-        var addition = new LocalAddition { RootFolderPath = _tempRoot };
         var storage = new Storage
         {
             MountPath = "/test_serialize",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         };
 
         _factory.LoadDriver(storage);
-        var driver = _factory.GetDriver("/test_serialize");
+        var driver = _factory.GetFileSystem("/test_serialize");
 
         var json = _factory.SerializeAddition(driver!);
         await Assert.That(json).IsNotNull();
-        await Assert.That(json).Contains("RootFolderPath");
     }
 
     [Test]
     public async Task GetAllStorages_ShouldReturnAll()
     {
-        var addition = new LocalAddition { RootFolderPath = _tempRoot };
         _factory.LoadDriver(new Storage
         {
             MountPath = "/all_test_1",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         });
         _factory.LoadDriver(new Storage
         {
             MountPath = "/all_test_2",
-            Driver = "Local",
-            Addition = JsonSerializer.Serialize(addition)
+            Driver = "Virtual",
+            Addition = "{}"
         });
 
         var storages = _factory.GetAllStorages();

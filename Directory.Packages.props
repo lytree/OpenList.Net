@@ -31,9 +31,7 @@
     <PackageVersion Include="Fido2.AspNet" Version="4.0.0" />
 
     <!-- Drivers -->
-    <PackageVersion Include="FluentStorage" Version="6.0.4" />
-    <PackageVersion Include="FluentStorage.FTP" Version="6.0.0" />
-    <PackageVersion Include="FluentStorage.SFTP" Version="6.0.0" />
+    <PackageVersion Include="Zio" Version="0.23.0" />
     <PackageVersion Include="FluentFTP" Version="53.0.1" />
     <PackageVersion Include="SSH.NET" Version="2025.1.0" />
     <PackageVersion Include="SMBLibrary" Version="1.5.7" />

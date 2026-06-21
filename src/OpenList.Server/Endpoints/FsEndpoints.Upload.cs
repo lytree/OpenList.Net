@@ -137,7 +137,7 @@ public static partial class FsEndpoints
             if (formStorage != null)
             {
                 var formDriver = storageService.GetDriverByMountPath(formStorage.MountPath);
-                if (formDriver != null && formDriver.Config().NoUpload)
+                if (formDriver is IFileSystemDriverMeta formMeta && formMeta.Config.NoUpload)
                     return Results.Json(Resp<object>.Error(405, "current storage doesn't support upload"));
             }
 
@@ -197,7 +197,7 @@ public static partial class FsEndpoints
             if (linkStorage != null)
             {
                 var linkDriver = storageService.GetDriverByMountPath(linkStorage.MountPath);
-                if (linkDriver != null && linkDriver.Config().NoLinkURL)
+                if (linkDriver is IFileSystemDriverMeta linkMeta && linkMeta.Config.NoLinkURL)
                 {
                     var signStr = sign.Sign(rawPath);
                     var apiUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
@@ -241,7 +241,7 @@ public static partial class FsEndpoints
             if (storage != null)
             {
                 var driver = storageService.GetDriverByMountPath(storage.MountPath);
-                if (driver is IDriverDirectUploader directUploader)
+                if (driver is IFileSystemDirectUploader directUploader)
                 {
                     var info = await directUploader.GetDirectUploadInfoAsync(req.Tool ?? "", dirObj, req.FileName ?? "", req.FileSize ?? 0);
                     return Results.Json(new Resp<object?>(info));

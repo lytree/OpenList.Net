@@ -16,7 +16,7 @@ public static partial class AdminEndpoints
     private static void MapStorageAdmin(RouteGroupBuilder group)
     {
         // Go: ListStorages — fetches mount details concurrently with 3s timeout
-        group.MapGet("storage/list", async (IStorageService storages, IDriverFactory driverFactory, ISettingService settings, int page = 1, int perPage = 100) =>
+        group.MapGet("storage/list", async (IStorageService storages, ZioMountService mountService, ISettingService settings, int page = 1, int perPage = 100) =>
         {
             var (storageList, total) = await storages.ListStoragesAsync(page, perPage);
             var hideDetails = settings.GetBool("hide_storage_details_in_manage_page");
@@ -26,8 +26,8 @@ public static partial class AdminEndpoints
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
                 var tasks = storageList.Select(async s =>
                 {
-                    var driver = driverFactory.GetDriver(s.MountPath);
-                    if (driver is IDriverWithDetails withDetails)
+                    var driver = mountService.GetFileSystem(s.MountPath);
+                    if (driver is IFileSystemWithDetails withDetails)
                     {
                         try { s.MountDetails = await withDetails.GetDetailsAsync(cts.Token); }
                         catch { /* ignore errors for storage details */ }

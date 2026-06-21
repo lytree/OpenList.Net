@@ -3,18 +3,19 @@ using OpenList.Core.Drivers;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
+using Zio;
 
 namespace OpenList.Infrastructure.Services;
 
 public class StorageService : IStorageService
 {
     private readonly OpenListDbContext _db;
-    private readonly IDriverFactory _driverFactory;
+    private readonly ZioMountService _mountService;
 
-    public StorageService(OpenListDbContext db, IDriverFactory driverFactory)
+    public StorageService(OpenListDbContext db, ZioMountService mountService)
     {
         _db = db;
-        _driverFactory = driverFactory;
+        _mountService = mountService;
     }
 
     public async Task<(List<Storage> Storages, int Total)> ListStoragesAsync(int page, int perPage, CancellationToken ct = default)
@@ -32,8 +33,7 @@ public class StorageService : IStorageService
     /// </summary>
     public async Task<uint> CreateStorageAsync(Storage storage, CancellationToken ct = default)
     {
-        // Go: check driver first
-        var driverNames = _driverFactory.ListDriverNames();
+        var driverNames = _mountService.ListDriverNames();
         if (!driverNames.Contains(storage.Driver))
             throw new InvalidOperationException($"no driver named: {storage.Driver}");
 
@@ -42,10 +42,7 @@ public class StorageService : IStorageService
         _db.Storages.Add(storage);
         await _db.SaveChangesAsync(ct);
 
-        // Go: initStorage + callStorageHooks("add")
-        _driverFactory.LoadDriver(storage);
-
-        // Go: MustSaveDriverStorage — save addition back after init
+        _mountService.LoadDriver(storage);
         await SaveAdditionBackAsync(storage, ct);
 
         return storage.Id;
@@ -60,7 +57,6 @@ public class StorageService : IStorageService
         if (oldStorage == null)
             throw new InvalidOperationException("storage not found");
 
-        // Go: driver cannot be changed
         if (oldStorage.Driver != storage.Driver)
             throw new InvalidOperationException("driver cannot be changed");
 
@@ -69,13 +65,9 @@ public class StorageService : IStorageService
         _db.Storages.Update(oldStorage);
         await _db.SaveChangesAsync(ct);
 
-        // Go: if disabled, skip driver reload
         if (storage.Disabled) return;
 
-        // Go: Drop + initStorage + callStorageHooks("update")
-        _driverFactory.ReloadDriver(oldStorage, storage);
-
-        // Go: MustSaveDriverStorage — save addition back after init
+        _mountService.ReloadDriver(oldStorage, storage);
         await SaveAdditionBackAsync(storage, ct);
     }
 
@@ -87,10 +79,9 @@ public class StorageService : IStorageService
         var storage = await _db.Storages.FindAsync([id], ct);
         if (storage == null) return;
 
-        // Go: drop driver if not disabled
         if (!storage.Disabled)
         {
-            _driverFactory.UnloadDriver(storage.MountPath);
+            _mountService.UnloadDriver(storage.MountPath);
         }
 
         _db.Storages.Remove(storage);
@@ -105,17 +96,13 @@ public class StorageService : IStorageService
         var storage = await _db.Storages.FindAsync([id], ct);
         if (storage == null) return;
 
-        // Go: check if already enabled
         if (!storage.Disabled)
             throw new InvalidOperationException("this storage have enabled");
 
         storage.Disabled = false;
         await _db.SaveChangesAsync(ct);
 
-        // Go: LoadStorage — init in memory
-        _driverFactory.LoadDriver(storage);
-
-        // Go: MustSaveDriverStorage
+        _mountService.LoadDriver(storage);
         await SaveAdditionBackAsync(storage, ct);
     }
 
@@ -127,15 +114,13 @@ public class StorageService : IStorageService
         var storage = await _db.Storages.FindAsync([id], ct);
         if (storage == null) return;
 
-        // Go: check if already disabled
         if (storage.Disabled)
             throw new InvalidOperationException("this storage have disabled");
 
-        // Go: drop driver + delete from storagesMap
-        _driverFactory.UnloadDriver(storage.MountPath);
+        _mountService.UnloadDriver(storage.MountPath);
 
         storage.Disabled = true;
-        storage.Status = DriverFactory.StatusDisabled;
+        storage.Status = ZioMountService.StatusDisabled;
         await _db.SaveChangesAsync(ct);
     }
 
@@ -144,35 +129,34 @@ public class StorageService : IStorageService
     /// </summary>
     public async Task LoadAllStoragesAsync(CancellationToken ct = default)
     {
-        // Go: drop all existing drivers first
-        foreach (var s in _driverFactory.GetAllStorages())
+        foreach (var s in _mountService.GetAllStorages())
         {
-            _driverFactory.UnloadDriver(s.MountPath);
+            _mountService.UnloadDriver(s.MountPath);
         }
 
         var storages = await _db.Storages.Where(s => !s.Disabled).ToListAsync(ct);
         foreach (var storage in storages)
         {
-            _driverFactory.LoadDriver(storage);
+            _mountService.LoadDriver(storage);
         }
     }
 
-    public IDriver? GetDriverByMountPath(string mountPath) => _driverFactory.GetDriver(mountPath);
+    public IFileSystem? GetDriverByMountPath(string mountPath) => _mountService.GetFileSystem(mountPath);
 
-    public DriverInfo GetDriverInfo(string driverName) => _driverFactory.GetDriverInfo(driverName);
+    public DriverInfo GetDriverInfo(string driverName) => _mountService.GetDriverInfo(driverName);
 
-    public List<DriverInfo> ListDriverInfos() => _driverFactory.ListDriverInfos();
+    public List<DriverInfo> ListDriverInfos() => _mountService.ListDriverInfos();
 
-    public List<string> ListDriverNames() => _driverFactory.ListDriverNames();
+    public List<string> ListDriverNames() => _mountService.ListDriverNames();
 
     /// <summary>
     /// Go: MustSaveDriverStorage — serialize driver addition and save back to DB.
     /// </summary>
     private async Task SaveAdditionBackAsync(Storage storage, CancellationToken ct)
     {
-        var driver = _driverFactory.GetDriver(storage.MountPath);
+        var driver = _mountService.GetFileSystem(storage.MountPath);
         if (driver == null) return;
-        var additionJson = _driverFactory.SerializeAddition(driver);
+        var additionJson = _mountService.SerializeAddition(driver);
         if (additionJson != null && additionJson != storage.Addition)
         {
             storage.Addition = additionJson;
@@ -189,7 +173,6 @@ public class StorageService : IStorageService
     {
         path = path.Replace('\\', '/');
         if (!path.StartsWith('/')) path = "/" + path;
-        // Clean: remove double slashes, trailing slash (except root), resolve . and ..
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var stack = new Stack<string>();
         foreach (var seg in segments)
@@ -198,7 +181,6 @@ public class StorageService : IStorageService
             if (seg == ".." && stack.Count > 0) stack.Pop();
             else if (seg != "..") stack.Push(seg);
         }
-        var result = "/" + string.Join("/", stack.Reverse());
-        return result;
+        return "/" + string.Join("/", stack.Reverse());
     }
 }

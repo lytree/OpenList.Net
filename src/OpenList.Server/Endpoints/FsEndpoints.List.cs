@@ -120,7 +120,7 @@ public static partial class FsEndpoints
                 else
                 {
                     var detailsDriver = storageService.GetDriverByMountPath(storage.MountPath);
-                    if (detailsDriver is IDriverWithDetails withDetails)
+                    if (detailsDriver is IFileSystemWithDetails withDetails)
                         parentMountDetails = await withDetails.GetDetailsAsync();
                 }
             }
@@ -136,7 +136,7 @@ public static partial class FsEndpoints
                 if (storageForUpload != null)
                 {
                     var driver = storageService.GetDriverByMountPath(storageForUpload.MountPath);
-                    if (driver is IDriverDirectUploader directUploader)
+                    if (driver is IFileSystemDirectUploader directUploader)
                         directUploadTools = directUploader.GetDirectUploadTools();
                 }
             }
@@ -229,8 +229,8 @@ public static partial class FsEndpoints
             var provider = "unknown";
             if (obj is ObjItem objItem && !string.IsNullOrEmpty(objItem.Provider))
                 provider = objItem.Provider;
-            else if (getDriver != null)
-                provider = getDriver.Config().Name;
+            else if (getDriver is IFileSystemDriverMeta metaDriver)
+                provider = metaDriver.Config.Name;
             else if (storage != null)
                 provider = storage.Driver;
 
@@ -258,7 +258,7 @@ public static partial class FsEndpoints
             if (!obj.IsDir())
             {
                 // Go: if storage.Config().MustProxy() || storage.GetStorage().WebProxy
-                var mustProxy = getDriver != null && getDriver.Config().MustProxy();
+                var mustProxy = getDriver is IFileSystemDriverMeta metaDriver2 && metaDriver2.Config.MustProxy();
                 var webProxy = storage?.WebProxy == true;
 
                 if (mustProxy || webProxy)
