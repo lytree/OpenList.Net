@@ -31,20 +31,20 @@ dotnet test
 
 | Project | Purpose |
 |---|---|
-| `src/OpenList.Core` | Models (`IObj`, `User`, `Storage`), driver interfaces (`IDriver`, role-based sub-interfaces), service interfaces (`IService`) |
+| `src/OpenList.Core` | Models (`IObj`, `User`, `Storage`), `ZioDriverBase` and extension interfaces, service interfaces (`IService`) |
 | `src/OpenList.Drivers` | Storage driver implementations — `Local/`, `S3/`, `WebDAV/`, `FtpSftpSmb/`, `Cloud/`, `Stubs/` |
-| `src/OpenList.Infrastructure` | EF Core `DbContext`, service implementations, JWT auth, `DriverFactory`, PostgreSQL support |
+| `src/OpenList.Infrastructure` | EF Core `DbContext`, service implementations, JWT auth, `ZioMountService`, PostgreSQL support |
 | `src/OpenList.Server` | ASP.NET Core entrypoint (`Program.cs`), `Endpoints/` (Minimal APIs), `Middleware/`, `Models/` (DTOs + Resp<T>) |
 | `tests/OpenList.Tests` | NUnit test project (placeholder — only UnitTest1.cs stub) |
 
 ## Driver System
 
-**Auto-discovery**: `DriverFactory` (`src/OpenList.Infrastructure/Services/DriverFactory.cs:29`) scans assemblies starting with `"OpenList"` for `IDriver` implementations. Adding a driver only requires creating a class implementing `IDriver` in `src/OpenList.Drivers`.
+**Auto-discovery**: `ZioMountService` (`src/OpenList.Infrastructure/Services/ZioMountService.cs`) scans assemblies starting with `"OpenList"` for `ZioDriverBase` implementations. Adding a driver only requires creating a class inheriting from `ZioDriverBase` in `src/OpenList.Drivers`.
 
-**Role-based interfaces**: Drivers declare capabilities by implementing optional sub-interfaces:
-- `IDriverGetter`, `IDriverMkdir`/`IDriverMkdirResult`, `IDriverMove`/`IDriverMoveResult`, `IDriverRename`/`IDriverRenameResult`, `IDriverCopy`/`IDriverCopyResult`, `IDriverRemove`, `IDriverPut`/`IDriverPutResult`, `IDriverPutURL`, `IDriverOther`, `IDriverArchiveReader`, `IDriverArchiveDecompress`, `IDriverWithDetails`, `IDriverDirectUploader`
+**Zio-based architecture**: All drivers inherit from `ZioDriverBase` (`src/OpenList.Core/Drivers/Base/ZioDriverBase.cs`), which extends Zio's `FileSystem` base class, providing a unified `IFileSystem` abstraction. Drivers are mounted via `MountFileSystem`.
 
-Base classes at `src/OpenList.Core/Drivers/Base/DriverBase.cs:9`: `DriverBase` (abstract), `RootPathDriver`, `RootIdDriver`.
+**Extension interfaces**: Drivers declare capabilities by implementing optional extension interfaces:
+- `IFileSystemLinkProvider`, `IFileSystemUploader`, `IFileSystemWithDetails`, `IFileSystemArchiveReader`, `IFileSystemArchiveDecompress`, `IFileSystemDirectUploader`
 
 ## Endpoint Organization
 
@@ -82,5 +82,5 @@ Each API group maps to a file in `src/OpenList.Server/Endpoints/`:
 - `/api/authn/*` — WebAuthn
 - `/ap/*path`, `/ae/*path` — signed archive proxy/extract (return 501)
 - `/sad/*` — sharing archive download (returns 404)
-- `IDriverArchiveDecompress` — interface defined but no implementation
-- `IDriverDirectUploader` — interface defined but stubbed
+- `IFileSystemArchiveDecompress` — interface defined but no implementation
+- `IFileSystemDirectUploader` — interface defined but stubbed

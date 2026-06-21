@@ -13,7 +13,7 @@ namespace OpenList.Infrastructure.Services;
 
 /// <summary>
 /// Zio-based mount service that manages filesystem drivers using MountFileSystem.
-/// Replaces DriverFactory for driver discovery, loading, and path resolution.
+/// Handles driver discovery, loading, and path resolution.
 /// </summary>
 public class ZioMountService : IDisposable
 {

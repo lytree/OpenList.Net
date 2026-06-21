@@ -1,5 +1,4 @@
 using OpenList.Core.Drivers;
-using OpenList.Core.Drivers.Base;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using Microsoft.Extensions.Caching.Memory;
@@ -273,7 +272,7 @@ public class FileSystemService : IFileSystemService
 
     public Task<object?> OtherAsync(OtherArgs args, CancellationToken ct = default)
     {
-        // IDriverOther has no Zio equivalent — return null
+        // No Zio equivalent — return null
         return Task.FromResult<object?>(null);
     }
 

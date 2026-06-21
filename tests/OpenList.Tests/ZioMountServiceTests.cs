@@ -6,12 +6,12 @@ using OpenList.Infrastructure.Services;
 
 namespace OpenList.Tests;
 
-public class DriverFactoryTests : IDisposable
+public class ZioMountServiceTests : IDisposable
 {
     private readonly string _tempRoot;
     private readonly ZioMountService _factory;
 
-    public DriverFactoryTests()
+    public ZioMountServiceTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), $"factory_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempRoot);
