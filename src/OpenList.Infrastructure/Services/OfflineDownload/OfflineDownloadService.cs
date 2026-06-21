@@ -26,7 +26,7 @@ public class OfflineDownloadService
     }
 
     /// <summary>Get available download tool names</summary>
-    public List<string> GetToolNames() => ["aria2", "qBittorrent"];
+    public List<string> GetToolNames() => ["aria2", "qBittorrent", "SimpleHttp"];
 
     /// <summary>Get or initialize a download tool</summary>
     public async Task<IOfflineDownloadTool?> GetToolAsync(string name, CancellationToken ct = default)
@@ -38,6 +38,7 @@ public class OfflineDownloadService
         {
             "aria2" => CreateAria2Tool(),
             "qbittorrent" => CreateQBittorrentTool(),
+            "simplehttp" => new SimpleHttpTool(),
             _ => null
         };
 
@@ -58,6 +59,7 @@ public class OfflineDownloadService
         {
             "aria2" => CreateAria2Tool(),
             "qbittorrent" => CreateQBittorrentTool(),
+            "simplehttp" => new SimpleHttpTool(),
             _ => null
         };
 

@@ -17,6 +17,9 @@
     <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="SharpCompress" />
     <PackageReference Include="Mapster" />
+    <PackageReference Include="FubarDev.FtpServer" />
+    <PackageReference Include="FubarDev.FtpServer.FileSystem.DotNet" />
+    <PackageReference Include="SSH.NET" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />

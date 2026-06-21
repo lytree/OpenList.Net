@@ -18,12 +18,12 @@ public static partial class FsEndpoints
         // archive/meta - archive metadata (Go: FsArchiveMetaSplit in fsAndShare with Auth(true))
         archiveGroup.MapMethods("meta", ["GET", "POST"], async (
             IFileSystemService fs, IUserService users, IMetaService metaSvc,
-            ISignService signSvc, ISettingService settings,
+            ISignService signSvc, ISettingService settings, ISharingService sharingSvc,
             HttpContext ctx, [FromBody] ArchiveMetaReq req) =>
         {
             // Go: /@s prefix → sharing archive meta
             if (req.Path.StartsWith("/@s"))
-                return Results.Json(Resp<object>.Error(501, "sharing archive not implemented"));
+                return await HandleSharingArchiveMeta(sharingSvc, fs, settings, ctx, req);
 
             var (user, _, error) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: false);
             if (error != null) return error;
@@ -92,11 +92,12 @@ public static partial class FsEndpoints
         // archive/list - archive content listing (Go: FsArchiveListSplit in fsAndShare with Auth(true))
         archiveGroup.MapMethods("list", ["GET", "POST"], async (
             IFileSystemService fs, IUserService users, IMetaService metaSvc,
+            ISharingService sharingSvc, ISettingService settings,
             HttpContext ctx, [FromBody] ArchiveListReq req) =>
         {
             // Go: /@s prefix → sharing archive list
             if (req.Path.StartsWith("/@s"))
-                return Results.Json(Resp<object>.Error(501, "sharing archive not implemented"));
+                return await HandleSharingArchiveList(sharingSvc, fs, settings, ctx, req);
 
             var (user, _, error) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: false);
             if (error != null) return error;
@@ -213,4 +214,158 @@ public static partial class FsEndpoints
     }
 
     // MapContentTree is now handled by Mapster configuration in MappingConfig.cs
+
+    /// <summary>Handle sharing archive meta (/@s prefix). Go: SharingArchiveMeta in sharing.go</summary>
+    private static async Task<IResult> HandleSharingArchiveMeta(
+        ISharingService sharingSvc, IFileSystemService fs, ISettingService settings,
+        HttpContext ctx, ArchiveMetaReq req)
+    {
+        if (!settings.GetBool("share_archive_preview"))
+            return Results.Json(Resp<object>.Error(403, "sharing archives previewing is not allowed"));
+
+        // Parse: /@s/{sid}/{path...} → strip /@s → /{sid}/{path}
+        var stripped = req.Path[3..].TrimStart('/'); // after /@s
+        var slashIdx = stripped.IndexOf('/');
+        var sid = slashIdx >= 0 ? stripped[..slashIdx] : stripped;
+        var subPath = slashIdx >= 0 ? stripped[(slashIdx + 1)..] : "";
+
+        if (string.IsNullOrEmpty(sid))
+            return Results.Json(Resp<object>.Error(400, "invalid share id"));
+
+        var sharing = await sharingSvc.GetSharingAsync(sid);
+        if (sharing == null)
+            return Results.Json(Resp<object>.Error(404, "sharing not found"));
+        if (!sharing.Valid())
+            return Results.Json(Resp<object>.Error(403, "sharing is invalid or expired"));
+        if (!sharing.Verify(req.Password))
+            return Results.Json(Resp<object>.Error(403, "password is incorrect"));
+
+        // Resolve archive path: sharing.Files[0] + subPath
+        var files = sharing.Files ?? [];
+        var basePath = files.Count == 1 ? files[0] : "";
+        var fullPath = string.IsNullOrEmpty(subPath) ? basePath : $"{basePath.TrimEnd('/')}/{subPath}";
+        fullPath = "/" + fullPath.TrimStart('/');
+
+        // Increment access count
+        var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "";
+        await sharingSvc.IncrementAccessAsync(sid, ip);
+
+        // Get archive meta
+        var archiveArgs = new ArchiveArgs
+        {
+            Password = req.ArchivePass ?? "",
+            LinkArgs = new LinkArgs
+            {
+                Header = ctx.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString()),
+                Type = ctx.Request.Query["type"].ToString()
+            }
+        };
+
+        ArchiveMetaResult? result;
+        try
+        {
+            result = await fs.GetArchiveMetaAsync(fullPath, archiveArgs, ctx.RequestAborted);
+        }
+        catch (WrongArchivePasswordException ex)
+        {
+            return Results.Json(Resp<object>.Error(202, ex.Message));
+        }
+
+        if (result == null)
+            return Results.Json(Resp<object>.Error(500, "failed to read archive meta"));
+
+        // Build RawURL pointing to /sad/{sid}/{path}
+        var baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+        var fakePath = $"/{sid}/{subPath}";
+        var rawUrl = $"{baseUrl}/sad{FsHelpers.EncodePath(fakePath)}";
+        if (!string.IsNullOrEmpty(sharing.Pwd))
+            rawUrl += $"?pwd={sharing.Pwd}";
+
+        var content = result.Content.Adapt<List<ArchiveContentResp>>();
+
+        return Results.Json(new Resp<ArchiveMetaResp>(new ArchiveMetaResp
+        {
+            Comment = result.Comment,
+            IsEncrypted = result.IsEncrypted,
+            Content = content,
+            RawURL = rawUrl,
+            Sign = ""
+        }));
+    }
+
+    /// <summary>Handle sharing archive list (/@s prefix). Go: SharingArchiveList in sharing.go</summary>
+    private static async Task<IResult> HandleSharingArchiveList(
+        ISharingService sharingSvc, IFileSystemService fs, ISettingService settings,
+        HttpContext ctx, ArchiveListReq req)
+    {
+        if (!settings.GetBool("share_archive_preview"))
+            return Results.Json(Resp<object>.Error(403, "sharing archives previewing is not allowed"));
+
+        // Parse: /@s/{sid}/{path...}
+        var stripped = req.Path[3..].TrimStart('/');
+        var slashIdx = stripped.IndexOf('/');
+        var sid = slashIdx >= 0 ? stripped[..slashIdx] : stripped;
+        var subPath = slashIdx >= 0 ? stripped[(slashIdx + 1)..] : "";
+
+        if (string.IsNullOrEmpty(sid))
+            return Results.Json(Resp<object>.Error(400, "invalid share id"));
+
+        var sharing = await sharingSvc.GetSharingAsync(sid);
+        if (sharing == null)
+            return Results.Json(Resp<object>.Error(404, "sharing not found"));
+        if (!sharing.Valid())
+            return Results.Json(Resp<object>.Error(403, "sharing is invalid or expired"));
+        if (!sharing.Verify(req.Password))
+            return Results.Json(Resp<object>.Error(403, "password is incorrect"));
+
+        // Resolve archive path
+        var files = sharing.Files ?? [];
+        var basePath = files.Count == 1 ? files[0] : "";
+        var fullPath = string.IsNullOrEmpty(subPath) ? basePath : $"{basePath.TrimEnd('/')}/{subPath}";
+        fullPath = "/" + fullPath.TrimStart('/');
+
+        // Increment access count
+        var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "";
+        await sharingSvc.IncrementAccessAsync(sid, ip);
+
+        // List archive contents
+        var listArgs = new ArchiveListArgs
+        {
+            ArchiveInnerArgs = new ArchiveInnerArgs
+            {
+                Password = req.ArchivePass ?? "",
+                InnerPath = req.InnerPath ?? "",
+                LinkArgs = new LinkArgs
+                {
+                    Header = ctx.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString()),
+                    Type = ctx.Request.Query["type"].ToString()
+                }
+            },
+            Refresh = req.Refresh,
+            Page = req.Page,
+            PerPage = req.PerPage
+        };
+
+        List<IObj> items;
+        int total;
+        try
+        {
+            (items, total) = await fs.ListArchiveAsync(fullPath, listArgs, ctx.RequestAborted);
+        }
+        catch (WrongArchivePasswordException ex)
+        {
+            return Results.Json(Resp<object>.Error(202, ex.Message));
+        }
+
+        if (items == null)
+            return Results.Json(Resp<object>.Error(500, "failed to list archive"));
+
+        var content = items.Select(FsHelpers.MapObj).ToList();
+
+        return Results.Json(new Resp<ArchiveListResp>(new ArchiveListResp
+        {
+            Content = content,
+            Total = total
+        }));
+    }
 }

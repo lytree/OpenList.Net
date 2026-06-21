@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using OpenList.Core.Interfaces;
+using OpenList.Infrastructure.Services;
 using OpenList.Server.Models;
 
 namespace OpenList.Server.Endpoints;
@@ -17,10 +18,10 @@ public static class PublicEndpoints
         group.MapPost("settings", async (ISettingService settings) =>
             BuildSettingsResp(settings)).WithSummary("获取公共设置 (POST)");
 
-        group.MapGet("offline_download_tools", () =>
-            Results.Json(new Resp<List<string>>(["aria2", "qBittorrent"]))).WithSummary("获取离线下载工具列表");
-        group.MapPost("offline_download_tools", () =>
-            Results.Json(new Resp<List<string>>(["aria2", "qBittorrent"]))).WithSummary("获取离线下载工具列表");
+        group.MapGet("offline_download_tools", (OfflineDownloadService dl) =>
+            Results.Json(new Resp<List<string>>(dl.GetToolNames()))).WithSummary("获取离线下载工具列表");
+        group.MapPost("offline_download_tools", (OfflineDownloadService dl) =>
+            Results.Json(new Resp<List<string>>(dl.GetToolNames()))).WithSummary("获取离线下载工具列表");
 
         group.MapGet("archive_extensions", () =>
             Results.Json(new Resp<List<string>>([".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".rar", ".7z"]))).WithSummary("获取支持的压缩格式列表");

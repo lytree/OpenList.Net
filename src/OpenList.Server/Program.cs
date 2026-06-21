@@ -12,6 +12,8 @@ using OpenList.Infrastructure.Services;
 using OpenList.Server;
 using OpenList.Server.Endpoints;
 using OpenList.Server.Middleware;
+using OpenList.Server.FtpServer;
+using OpenList.Server.SftpServer;
 using Scalar.AspNetCore;
 using Serilog;
 using System.Text;
@@ -81,6 +83,11 @@ builder.Services.AddSingleton<ISearchService, SearchService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
 builder.Services.AddScoped<IScanService, ScanService>();
 builder.Services.AddScoped<OfflineDownloadService>();
+builder.Services.AddSingleton<TorrentService>();
+
+// FTP / SFTP Server (only starts if enabled in config)
+builder.Services.AddHostedService<FtpServerService>();
+builder.Services.AddHostedService<SftpServerService>();
 
 // WebAuthn / FIDO2
 builder.Services.AddScoped<WebAuthnService>();

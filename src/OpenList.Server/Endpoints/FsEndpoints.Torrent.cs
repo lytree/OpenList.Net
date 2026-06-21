@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Infrastructure.Services;
 using OpenList.Server.Models;
 
 namespace OpenList.Server.Endpoints;
@@ -21,7 +22,7 @@ public static partial class FsEndpoints
         var torrentGroup = group.MapGroup("torrent");
 
         // POST torrent/parse - parse torrent file from Base64 data (Go: ParseTorrent)
-        torrentGroup.MapPost("parse", async (HttpContext ctx, [FromBody] TorrentParseReq req) =>
+        torrentGroup.MapPost("parse", (TorrentService torrentSvc, [FromBody] TorrentParseReq req) =>
         {
             if (string.IsNullOrEmpty(req.TorrentData))
                 return Results.Json(Resp<object>.Error(400, "torrent_data is required"));
@@ -30,22 +31,34 @@ public static partial class FsEndpoints
                 return Results.Json(Resp<object>.Error(400, "torrent data too large (max 10MB)"));
 
             byte[] torrentData;
-            try
-            {
-                torrentData = Convert.FromBase64String(req.TorrentData);
-            }
-            catch (FormatException)
-            {
-                return Results.Json(Resp<object>.Error(400, "invalid Base64 encoding"));
-            }
+            try { torrentData = Convert.FromBase64String(req.TorrentData); }
+            catch (FormatException) { return Results.Json(Resp<object>.Error(400, "invalid Base64 encoding")); }
 
-            // TODO: Implement torrent Bencode parsing in C#
-            // Go: torrent.Decode(torrentData) → extracts name, files, pieces, info_hash, CAS
-            return Results.Json(Resp<object>.Error(501, "torrent parsing not yet implemented in C#"));
+            TorrentInfo t;
+            try { t = torrentSvc.Decode(torrentData); }
+            catch (Exception ex) { return Results.Json(Resp<object>.Error(400, $"failed to parse torrent: {ex.Message}")); }
+
+            if (t.PieceCount > 0 && (t.PieceCount * 20) % 20 != 0)
+                return Results.Json(Resp<object>.Error(400, "invalid torrent pieces data"));
+
+            var resp = new TorrentParseResp
+            {
+                Name = t.Name,
+                TotalSize = t.TotalSize,
+                PieceLength = t.PieceLength,
+                PieceCount = t.PieceCount,
+                InfoHash = t.InfoHash,
+                HasCAS = t.HasCAS,
+                Files = t.Files.Select(f => new TorrentFileInfo { Path = f.Path, Size = f.Size }).ToList()
+            };
+            if (t.CAS != null)
+                resp.CAS = new CASInfoResp { FileMD5 = t.CAS.FileMD5, SliceMD5 = t.CAS.SliceMD5, SliceSize = t.CAS.SliceSize, Cloud = t.CAS.Cloud };
+
+            return Results.Json(new Resp<TorrentParseResp>(resp));
         }).RequireAuthorization().WithSummary("解析 Torrent 文件 (Base64)");
 
         // POST torrent/upload_parse - upload and parse torrent file (Go: UploadTorrentAndParse)
-        torrentGroup.MapPost("upload_parse", async (HttpContext ctx) =>
+        torrentGroup.MapPost("upload_parse", async (TorrentService torrentSvc, HttpContext ctx) =>
         {
             if (!ctx.Request.HasFormContentType)
                 return Results.Json(Resp<object>.Error(400, "expected multipart form data"));
@@ -65,9 +78,31 @@ public static partial class FsEndpoints
                 torrentData = ms.ToArray();
             }
 
-            // TODO: Implement torrent Bencode parsing in C#
-            // Go: torrent.Decode(torrentData) → returns ParseTorrentResp + Base64 torrent_data
-            return Results.Json(Resp<object>.Error(501, "torrent parsing not yet implemented in C#"));
+            TorrentInfo t;
+            try { t = torrentSvc.Decode(torrentData); }
+            catch (Exception ex) { return Results.Json(Resp<object>.Error(400, $"failed to parse torrent: {ex.Message}")); }
+
+            if (t.PieceCount > 0 && (t.PieceCount * 20) % 20 != 0)
+                return Results.Json(Resp<object>.Error(400, "invalid torrent pieces data"));
+
+            var info = new TorrentParseResp
+            {
+                Name = t.Name,
+                TotalSize = t.TotalSize,
+                PieceLength = t.PieceLength,
+                PieceCount = t.PieceCount,
+                InfoHash = t.InfoHash,
+                HasCAS = t.HasCAS,
+                Files = t.Files.Select(f => new TorrentFileInfo { Path = f.Path, Size = f.Size }).ToList()
+            };
+            if (t.CAS != null)
+                info.CAS = new CASInfoResp { FileMD5 = t.CAS.FileMD5, SliceMD5 = t.CAS.SliceMD5, SliceSize = t.CAS.SliceSize, Cloud = t.CAS.Cloud };
+
+            return Results.Json(new Resp<object>(new
+            {
+                info,
+                torrent_data = Convert.ToBase64String(torrentData)
+            }));
         }).RequireAuthorization().WithSummary("上传并解析 Torrent 文件");
 
         // POST torrent/rapid_upload - CAS rapid upload from torrent (Go: TorrentRapidUpload, 189PC only)
@@ -90,24 +125,13 @@ public static partial class FsEndpoints
             if (!FsHelpers.CanWrite(user, meta, reqPath))
                 return Results.Json(Resp<object>.Error(403, "permission denied"));
 
-            byte[] torrentData;
-            try
-            {
-                torrentData = Convert.FromBase64String(req.TorrentData);
-            }
-            catch (FormatException)
-            {
-                return Results.Json(Resp<object>.Error(400, "invalid Base64 encoding"));
-            }
-
-            // TODO: Implement torrent CAS rapid upload (189PC driver specific)
-            // Go: checks HasCASInfo → gets storage → verifies Cloud189PC → RapidUploadFromTorrent
-            return Results.Json(Resp<object>.Error(501, "torrent rapid upload not yet implemented in C#"));
+            // CAS rapid upload requires a specific cloud driver (189PC) — not available without cloud drivers
+            return Results.Json(Resp<object>.Error(400, "rapid upload requires a cloud storage driver that supports CAS (e.g. 189PC), no compatible driver is currently available"));
         }).RequireAuthorization().WithSummary("Torrent 快速上传 (CAS)");
 
         // POST torrent/generate - generate torrent for a file path (Go: GenerateTorrentForPath)
         torrentGroup.MapPost("generate", async (
-            IFileSystemService fs, IUserService users, IMetaService metaSvc,
+            TorrentService torrentSvc, IFileSystemService fs, IUserService users, IMetaService metaSvc,
             HttpContext ctx, [FromBody] TorrentGenerateReq req) =>
         {
             var (user, _, error) = await FsHelpers.ResolveUserAsync(ctx, users, allowDisabledGuest: false);
@@ -132,9 +156,55 @@ public static partial class FsEndpoints
             if (obj.GetSize() > MaxTorrentGenFileSize)
                 return Results.Json(Resp<object>.Error(400, "file too large for torrent generation (max 1GB)"));
 
-            // TODO: Implement torrent generation in C#
-            // Go: gets link → RangeRead entire file → torrent.GenerateFromReader/WithCAS → Base64 encode
-            return Results.Json(Resp<object>.Error(501, "torrent generation not yet implemented in C#"));
+            // Get file link/stream
+            var link = await fs.LinkAsync(reqPath, new LinkArgs { IP = ctx.Connection.RemoteIpAddress?.ToString() ?? "" });
+            if (link == null)
+                return Results.Json(Resp<object>.Error(500, "failed to get file link"));
+
+            byte[] torrentData;
+            try
+            {
+                // If local file, read directly; otherwise use HTTP stream
+                Stream contentStream;
+                if (!string.IsNullOrEmpty(link.URL) && !link.URL.StartsWith("http"))
+                {
+                    if (!File.Exists(link.URL))
+                        return Results.Json(Resp<object>.Error(404, "file not accessible"));
+                    contentStream = File.OpenRead(link.URL);
+                }
+                else if (!string.IsNullOrEmpty(link.URL) && link.URL.StartsWith("http"))
+                {
+                    var httpClient = new HttpClient();
+                    foreach (var header in link.Header ?? new())
+                        httpClient.DefaultRequestHeaders.TryAddWithoutValidation(header.Key, header.Value);
+                    contentStream = await httpClient.GetStreamAsync(link.URL, ctx.RequestAborted);
+                }
+                else
+                {
+                    return Results.Json(Resp<object>.Error(400, "storage does not support streaming, cannot generate torrent"));
+                }
+
+                using (contentStream)
+                {
+                    torrentData = torrentSvc.Generate(obj.GetName(), obj.GetSize(), contentStream, req.WithCAS);
+                }
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(Resp<object>.Error(500, $"failed to generate torrent: {ex.Message}"));
+            }
+
+            // Decode the generated torrent to get info_hash
+            var generated = torrentSvc.Decode(torrentData);
+
+            return Results.Json(new Resp<object>(new
+            {
+                torrent_data = Convert.ToBase64String(torrentData),
+                info_hash = generated.InfoHash,
+                file_name = obj.GetName() + ".torrent",
+                size = torrentData.Length,
+                with_cas = req.WithCAS
+            }));
         }).RequireAuthorization().WithSummary("生成 Torrent 文件");
     }
 }
