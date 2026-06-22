@@ -1,391 +1,83 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using System.Text.Json;
+using Microsoft.AspNetCore.Http.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
-using Fido2NetLib;
-using Fido2NetLib.Objects;
 using OpenList.Core.Configuration;
-using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
-using OpenList.Infrastructure.Auth;
 using OpenList.Infrastructure.Services;
-using OpenList.Server;
 using OpenList.Server.Endpoints;
-using OpenList.Server.Middleware;
-using OpenList.Server.FtpServer;
-using OpenList.Server.SftpServer;
-using Scalar.AspNetCore;
-using Serilog;
-using System.Text;
-
-// Configure Mapster type adapter mappings
-MappingConfig.Configure();
-
-// Configure Serilog before building the host
-Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(new ConfigurationBuilder()
-        .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-        .AddEnvironmentVariables()
-        .Build())
-    .Enrich.FromLogContext()
-    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}{NewLine}{Message:lj}{NewLine}{Exception}")
-    .WriteTo.File(
-        path: "data/logs/openlist-.log",
-        rollingInterval: RollingInterval.Day,
-        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}{NewLine}{Message:lj}{NewLine}{Exception}",
-        retainedFileCountLimit: 30,
-        fileSizeLimitBytes: 50 * 1024 * 1024)
-    .CreateLogger();
-
-try
-{
-    Log.Information("Starting OpenList.Net");
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Use Serilog for logging
-builder.Host.UseSerilog();
+// Bind configuration (OpenList__ prefix env vars override)
+builder.Services.Configure<AppConfiguration>(builder.Configuration);
+var appConfig = builder.Configuration.Get<AppConfiguration>() ?? new AppConfiguration();
 
-// Configuration
-var config = new AppConfiguration();
-builder.Configuration.Bind(config);
-if (string.IsNullOrEmpty(config.JwtSecret))
-    config.JwtSecret = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
-
-// Configuration validation
-var configErrors = new List<string>();
-if (config.MaxConnections < 0) configErrors.Add("MaxConnections must be >= 0");
-if (config.Database?.Port is int p and (> 0 and (< 1 or > 65535))) configErrors.Add("Database.Port must be between 1 and 65535");
-if (configErrors.Count > 0)
+// JSON: camelCase, case-insensitive
+builder.Services.Configure<JsonOptions>(o =>
 {
-    var logger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger("ConfigValidation");
-    foreach (var err in configErrors) logger.LogError("Configuration error: {Error}", err);
-    throw new InvalidOperationException($"Invalid configuration: {string.Join("; ", configErrors)}");
-}
-
-builder.Services.AddSingleton(config);
+    o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    o.SerializerOptions.PropertyNameCaseInsensitive = true;
+});
 
 // Database
-builder.Services.AddOpenListDbContext(config.Database);
-
-// Services
-builder.Services.AddScoped<IUserService, UserService>();
-builder.Services.AddScoped<IStorageService, StorageService>();
-builder.Services.AddScoped<IMetaService, MetaService>();
-builder.Services.AddScoped<ISettingService, SettingService>();
-builder.Services.AddScoped<ISharingService, SharingService>();
-builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<ITaskService, TaskService>();
-builder.Services.AddScoped<ISignService, SignService>();
-builder.Services.AddScoped<IFileSystemService, FileSystemService>();
-builder.Services.AddSingleton<ZioMountService>();
-builder.Services.AddSingleton<ISearchService, SearchService>();
-builder.Services.AddScoped<IMessageService, MessageService>();
-builder.Services.AddScoped<IScanService, ScanService>();
-builder.Services.AddScoped<OfflineDownloadService>();
-builder.Services.AddSingleton<TorrentService>();
-
-// FTP / SFTP Server (only starts if enabled in config)
-builder.Services.AddHostedService<FtpServerService>();
-builder.Services.AddHostedService<SftpServerService>();
-
-// WebAuthn / FIDO2
-builder.Services.AddScoped<WebAuthnService>();
-builder.Services.AddSingleton<IFido2>(sp =>
+builder.Services.AddDbContext<OpenListDbContext>(opts =>
 {
-    var origin = string.IsNullOrEmpty(config.SiteURL)
-        ? $"http://localhost:{config.Scheme.HttpPort}"
-        : config.SiteURL.TrimEnd('/');
-    return new Fido2(new Fido2Configuration
+    if (appConfig.Database.Type.Equals("postgres", StringComparison.OrdinalIgnoreCase) ||
+        appConfig.Database.Type.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
     {
-        ServerDomain = new Uri(origin).Host,
-        ServerName = "OpenList",
-        Origins = new HashSet<string> { origin },
-        TimestampDriftTolerance = 300000
-    });
-});
-
-// Authentication
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+        // TODO: configure Npgsql with connection string
+    }
+    else
     {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config.JwtSecret)),
-            ValidateIssuer = false,
-            ValidateAudience = false,
-            ClockSkew = TimeSpan.Zero
-        };
-        // Frontend sends token without "Bearer " prefix
-        options.Events = new JwtBearerEvents
-        {
-            OnMessageReceived = context =>
-            {
-                var token = context.Request.Headers.Authorization.ToString();
-                if (!string.IsNullOrEmpty(token) && !token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-                {
-                    context.Token = token;
-                }
-                return Task.CompletedTask;
-            }
-        };
-    });
-builder.Services.AddAuthorization();
-
-// JSON options for Minimal APIs (camelCase to match frontend)
-builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
-{
-    options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-});
-
-// WebDAV HTTP methods support
-builder.Services.Configure<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>(options =>
-{
-    options.Limits.MaxRequestBodySize = 10L * 1024 * 1024 * 1024; // 10GB
-
-    // HTTPS configuration
-    if (config.Scheme.HttpsPort > 0 && !string.IsNullOrEmpty(config.Scheme.CertFile) && File.Exists(config.Scheme.CertFile))
-    {
-        options.ListenAnyIP(config.Scheme.HttpPort > 0 ? config.Scheme.HttpPort : 80);
-        options.ListenAnyIP(config.Scheme.HttpsPort, listenOptions =>
-        {
-            listenOptions.UseHttps(config.Scheme.CertFile, config.Scheme.CertPassword ?? "");
-        });
+        opts.UseSqlite($"Data Source={appConfig.Database.DBFile}");
     }
 });
 
-// OpenAPI + Scalar
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo
-    {
-        Title = "OpenList.Net API",
-        Version = "v1",
-        Description = "OpenList.Net — 多存储驱动文件管理 API"
-    });
-    // Group endpoints by tag
-    c.TagActionsBy(api =>
-    {
-        if (api.GroupName != null) return [api.GroupName];
-        if (api.ActionDescriptor.RouteValues.TryGetValue("controller", out var ctrl)) return [ctrl];
-        // Infer tag from route
-        var route = api.RelativePath ?? "";
-        if (route.StartsWith("api/auth")) return ["Auth"];
-        if (route.StartsWith("api/fs/archive")) return ["Fs.Archive"];
-        if (route.StartsWith("api/fs/torrent")) return ["Fs.Torrent"];
-        if (route.StartsWith("api/fs")) return ["Fs"];
-        if (route.StartsWith("api/admin/user")) return ["Admin.User"];
-        if (route.StartsWith("api/admin/storage")) return ["Admin.Storage"];
-        if (route.StartsWith("api/admin/meta")) return ["Admin.Meta"];
-        if (route.StartsWith("api/admin/setting")) return ["Admin.Setting"];
-        if (route.StartsWith("api/admin/share")) return ["Admin.Share"];
-        if (route.StartsWith("api/admin/driver")) return ["Admin.Driver"];
-        if (route.StartsWith("api/admin/index")) return ["Admin.Index"];
-        if (route.StartsWith("api/admin/message")) return ["Admin.Message"];
-        if (route.StartsWith("api/admin/scan")) return ["Admin.Scan"];
-        if (route.StartsWith("api/admin/task")) return ["Admin.Task"];
-        if (route.StartsWith("api/admin")) return ["Admin"];
-        if (route.StartsWith("api/share")) return ["Share"];
-        if (route.StartsWith("api/task")) return ["Task"];
-        if (route.StartsWith("api/me")) return ["Me"];
-        if (route.StartsWith("api/public")) return ["Public"];
-        if (route.StartsWith("s3")) return ["S3"];
-        if (route.StartsWith("dav")) return ["WebDAV"];
-        if (route.StartsWith("d/") || route.StartsWith("p/") || route.StartsWith("ad/") || route.StartsWith("ap/") || route.StartsWith("ae/")) return ["Sign"];
-        if (route.StartsWith("sd/") || route.StartsWith("sad/")) return ["SharingDownload"];
-        return ["Other"];
-    });
-    c.DocInclusionPredicate((_, _) => true);
-    // JWT Bearer auth scheme
-    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.OpenApiSecurityScheme
-    {
-        Type = Microsoft.OpenApi.SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        Description = "输入 JWT Token"
-    });
-    c.AddSecurityRequirement(_ => new Microsoft.OpenApi.OpenApiSecurityRequirement
-    {
-        [new Microsoft.OpenApi.OpenApiSecuritySchemeReference("Bearer")] = []
-    });
-});
+// Core services
+builder.Services.AddSingleton<ZioMountService>();
+// TODO: register IAuthService, IFileSystemService, IUserService, etc. (Phase 2+)
 
 // CORS
-builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy =>
-    {
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
-    });
-});
+builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
+    .AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
 
-// Cache
-builder.Services.AddMemoryCache();
+// Kestrel: 10 GB body limit for WebDAV uploads
+builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 10L * 1024 * 1024 * 1024);
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Initialize database
-await app.Services.InitializeDatabaseAsync();
-
-// Initialize default settings and admin user
-using (var scope = app.Services.CreateScope())
-{
-    var settings = scope.ServiceProvider.GetRequiredService<ISettingService>();
-    await settings.DefaultSettingsAsync();
-
-    var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
-    var existingAdmin = await userService.GetUserByNameAsync(config.AdminUsername);
-    if (existingAdmin == null)
-    {
-        var adminUser = new User
-        {
-            Username = config.AdminUsername,
-            Role = UserRole.Admin,
-            Permission = -1,
-            BasePath = "/"
-        };
-        adminUser = await userService.CreateUserAsync(adminUser);
-        await userService.SetPasswordAsync(adminUser, config.AdminPassword);
-        var initLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        initLogger.LogInformation("Initial admin user '{Username}' created", config.AdminUsername);
-    }
-}
-
-// Load storages
-using (var scope = app.Services.CreateScope())
-{
-    var storageService = scope.ServiceProvider.GetRequiredService<IStorageService>();
-    await storageService.LoadAllStoragesAsync();
-}
-StoragesLoadedMiddleware.MarkLoaded();
-
-// Middleware
 app.UseCors();
-app.UseMiddleware<RequestLoggingMiddleware>();
-app.UseMiddleware<CorsMiddleware>();
-if (config.Scheme.ForceHttps && config.Scheme.HttpPort != -1 && config.Scheme.HttpsPort != -1)
-    app.UseMiddleware<ForceHttpsMiddleware>();
-if (config.MaxConnections > 0)
-    app.UseMiddleware<MaxConnectionsMiddleware>();
-app.UseMiddleware<StoragesLoadedMiddleware>();
-app.UseMiddleware<FsUpMiddleware>();
-app.UseMiddleware<RateLimitMiddleware>();
-app.UseMiddleware<DownloadRateLimiterMiddleware>();
-app.UseMiddleware<UploadRateLimiterMiddleware>();
-app.UseAuthentication();
-app.UseAuthorization();
-app.UseWhen(ctx => ctx.Request.Path.StartsWithSegments("/dav"), builder =>
-    builder.UseMiddleware<WebDavAuthMiddleware>());
+app.UseRouting();
 
-// OpenAPI + Scalar
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.MapScalarApiReference(options =>
-    {
-        options
-            .WithTitle("OpenList.Net API")
-            .WithTheme(ScalarTheme.DeepSpace)
-            .WithDefaultHttpClient(ScalarTarget.Shell, ScalarClient.Curl)
-            .AddPreferredSecuritySchemes("Bearer");
-    });
-}
-
-// Static files for frontend
-if (!string.IsNullOrEmpty(config.DistDir))
-{
-    var distPath = Path.GetFullPath(config.DistDir);
-    if (Directory.Exists(distPath))
-    {
-        var distFileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(distPath);
-        app.UseDefaultFiles(new DefaultFilesOptions
-        {
-            FileProvider = distFileProvider,
-            RequestPath = ""
-        });
-        app.UseStaticFiles(new StaticFileOptions
-        {
-            FileProvider = distFileProvider,
-            RequestPath = ""
-        });
-    }
+    app.UseSwaggerUI();
 }
 
 // Health check
-app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
+app.MapHealthEndpoints();
 
-// Static meta endpoints
-app.MapGet("/favicon.ico", (ISettingService settings) =>
+// TODO: register MapAuthApi, MapFsApi, MapAdminApi, MapShareApi, MapTaskApi,
+//       MapMeApi, MapPublicApi, MapSignApi, MapSharingDownloadApi, MapS3Api, MapWebDavApi
+//       (Phase 2+ — see README for implementation plan)
+
+// SPA fallback
+app.MapFallback(ctx =>
 {
-    var favicon = settings.GetString("favicon");
-    if (!string.IsNullOrEmpty(favicon) && Uri.TryCreate(favicon, UriKind.Absolute, out var uri))
-        return Results.Redirect(uri.ToString());
-    return Results.NoContent();
-}).AllowAnonymous();
-
-app.MapGet("/robots.txt", (ISettingService settings) =>
-{
-    var robotsTxt = settings.GetString("robots_txt");
-    return string.IsNullOrEmpty(robotsTxt)
-        ? Results.Text("User-agent: *\nAllow: /\n", "text/plain")
-        : Results.Text(robotsTxt, "text/plain");
-}).AllowAnonymous();
-
-app.MapGet("/manifest.json", (ISettingService settings) =>
-    Results.Json(new
+    var distDir = appConfig.DistDir;
+    var indexPath = Path.Combine(distDir, "index.html");
+    if (File.Exists(indexPath))
     {
-        name = settings.GetString("title") ?? "OpenList",
-        display = "standalone",
-        scope = "/",
-        start_url = "/",
-        icons = new[]
-        {
-            new { src = (settings.GetString("logo") ?? "").Split('\n')[0], sizes = "512x512", type = "image/png" }
-        }
-    }, statusCode: 200)).AllowAnonymous();
-
-// Minimal API endpoints
-app.MapAuthApi();
-app.MapFsApi();
-app.MapAdminApi();
-app.MapShareApi();
-app.MapTaskApi();
-app.MapMeApi();
-app.MapPublicApi();
-app.MapSignRoutes();
-app.MapSharingDownloadRoutes();
-app.MapS3Api();
-app.MapWebDavApi();
-
-// Fallback for SPA
-if (!string.IsNullOrEmpty(config.DistDir))
-{
-    var distPath = Path.GetFullPath(config.DistDir);
-    if (Directory.Exists(distPath))
-    {
-        app.MapFallbackToFile("index.html", new StaticFileOptions
-        {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(distPath)
-        });
+        ctx.Response.ContentType = "text/html";
+        return ctx.Response.SendFileAsync(indexPath);
     }
-}
-
-// Graceful shutdown
-var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-lifetime.ApplicationStopping.Register(() =>
-{
-    Log.Information("Application is shutting down gracefully...");
+    ctx.Response.StatusCode = 404;
+    return Task.CompletedTask;
 });
 
 app.Run();
-}
-catch (Exception ex)
-{
-    Log.Fatal(ex, "Application terminated unexpectedly");
-}
-finally
-{
-    Log.CloseAndFlush();
-}

@@ -1,9 +1,11 @@
 namespace OpenList.Core.Interfaces;
 
+/// <summary>
+/// Sign service: generates and verifies signed URLs for /d/, /p/, /ad/, /ap/, /ae/ routes.
+/// Mirrors OpenList Go <c>server/common/sign.go</c>.
+/// </summary>
 public interface ISignService
 {
-    string Sign(string path);
-    string SignArchive(string path);
-    bool Verify(string sign, string path);
-    bool VerifyArchive(string sign, string path);
+    string Sign(string path, long? expiration = null);
+    bool Verify(string path, string sign);
 }

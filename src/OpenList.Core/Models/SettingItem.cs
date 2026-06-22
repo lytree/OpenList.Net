@@ -1,39 +1,27 @@
 namespace OpenList.Core.Models;
 
-public enum SettingGroup
+public enum SettingValueType : int
 {
-    Single = 0,
-    Site = 1,
-    Style = 2,
-    Preview = 3,
-    Global = 4,
-    OfflineDownload = 5,
-    Index = 6,
-    SSO = 7,
-    LDAP = 8,
-    S3 = 9,
-    FTP = 10,
-    Traffic = 11
+    String = 0,
+    Number = 1,
+    Bool = 2,
+    Select = 3,
 }
 
-public enum SettingFlag
+public enum SettingFlag : int
 {
     Public = 0,
     Private = 1,
-    ReadOnly = 2,
-    Deprecated = 3
+    Readonly = 2,
 }
 
-public class SettingItem
+public sealed class SettingItem
 {
     public string Key { get; set; } = string.Empty;
-    public string? Value { get; set; }
+    public string Value { get; set; } = string.Empty;
     public string? Help { get; set; }
-    public string? Type { get; set; }
-    public string? Options { get; set; }
-    public SettingGroup Group { get; set; }
+    public SettingValueType Type { get; set; }
     public SettingFlag Flag { get; set; }
-    public uint Index { get; set; }
-
-    public bool IsDeprecated => Flag == SettingFlag.Deprecated;
+    public string? Options { get; set; }
+    public string? Group { get; set; }
 }

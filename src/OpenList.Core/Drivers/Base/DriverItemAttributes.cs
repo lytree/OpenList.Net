@@ -1,21 +1,15 @@
 namespace OpenList.Core.Drivers.Base;
 
 /// <summary>
-/// Specifies the options for a select-type driver item
+/// Describes a single driver config field (name, type, help, options).
+/// Populated from <see cref="DriverConfigItemAttribute"/> via reflection.
 /// </summary>
-[AttributeUsage(AttributeTargets.Property)]
-public class DriverItemOptionsAttribute : Attribute
+public sealed class DriverItemAttributes
 {
-    public string Options { get; }
-    public DriverItemOptionsAttribute(string options) => Options = options;
-}
-
-/// <summary>
-/// Specifies the type override for a driver item (e.g., "select", "text", "number")
-/// </summary>
-[AttributeUsage(AttributeTargets.Property)]
-public class DriverItemTypeAttribute : Attribute
-{
-    public string Type { get; }
-    public DriverItemTypeAttribute(string type) => Type = type;
+    public string Name { get; set; } = string.Empty;
+    public string Help { get; set; } = string.Empty;
+    public bool Required { get; set; }
+    public string? Options { get; set; }
+    public Type ValueType { get; set; } = typeof(string);
+    public object? Default { get; set; }
 }

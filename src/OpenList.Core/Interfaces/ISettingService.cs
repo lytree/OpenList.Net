@@ -4,16 +4,20 @@ namespace OpenList.Core.Interfaces;
 
 public interface ISettingService
 {
-    Task<string?> GetSettingAsync(string key, CancellationToken ct = default);
-    Task<SettingItem?> GetSettingItemAsync(string key, CancellationToken ct = default);
-    Task<List<SettingItem>> GetSettingsInKeysAsync(List<string> keys, CancellationToken ct = default);
-    Task<List<SettingItem>> ListSettingsAsync(CancellationToken ct = default);
-    Task<List<SettingItem>> ListSettingsByGroupsAsync(List<int> groups, CancellationToken ct = default);
-    Task SaveSettingsAsync(List<SettingItem> settings, CancellationToken ct = default);
-    Task DeleteSettingAsync(string key, CancellationToken ct = default);
-    Task<List<SettingItem>> DefaultSettingsAsync(CancellationToken ct = default);
-    Task<List<SettingItem>> DefaultSettingsByGroupsAsync(List<int> groups, CancellationToken ct = default);
-    Task<string> ResetTokenAsync(CancellationToken ct = default);
-    bool GetBool(string key);
-    string? GetString(string key);
+    Task<Resp<List<SettingItem>>> ListAsync(CancellationToken ct = default);
+    Task<Resp<SettingItem>> GetAsync(string key, CancellationToken ct = default);
+    Task<Resp> SaveAsync(List<SettingItem> items, CancellationToken ct = default);
+    Task<Resp> DeleteAsync(string key, CancellationToken ct = default);
+    Task<Resp> DefaultAsync(CancellationToken ct = default);
+    Task<Resp> ResetTokenAsync(CancellationToken ct = default);
+    Task<Resp<List<SettingItem>>> GetPublicAsync(CancellationToken ct = default);
+    Task<Resp<List<OfflineDownloadTool>>> GetOfflineDownloadToolsAsync(CancellationToken ct = default);
+    Task<Resp<string[]>> GetArchiveExtensionsAsync(CancellationToken ct = default);
+}
+
+public sealed class OfflineDownloadTool
+{
+    public string Name { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+    public string? Help { get; set; }
 }

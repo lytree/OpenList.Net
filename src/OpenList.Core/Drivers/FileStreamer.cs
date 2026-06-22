@@ -1,17 +1,15 @@
-using OpenList.Core.Models;
-
 namespace OpenList.Core.Drivers;
 
 /// <summary>
-/// Represents a file stream for upload operations.
+/// Streams a file from a driver with optional range support.
+/// Used by download/proxy endpoints.
 /// </summary>
-public class FileStreamer
+public sealed class FileStreamer
 {
-    public Stream? Stream { get; set; }
-    public IObj Obj { get; set; } = null!;
-    public string Mimetype { get; set; } = string.Empty;
-    public bool NeedStore { get; set; }
-    public bool IsForceStreamUpload { get; set; }
-    public IObj? Exist { get; set; }
-    public long Size { get; set; }
+    public Stream Stream { get; set; }
+    public long? Length { get; set; }
+    public string? ContentType { get; set; }
+    public DateTimeOffset? LastModified { get; set; }
+
+    public FileStreamer(Stream stream) => Stream = stream;
 }

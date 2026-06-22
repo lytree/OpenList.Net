@@ -1,64 +1,38 @@
 namespace OpenList.Core.Models;
 
-using System.ComponentModel.DataAnnotations.Schema;
-using System.Text.Json.Serialization;
-
-public enum UserRole
+public enum UserRole : int
 {
-    General = 0,
-    Guest = 1,
-    Admin = 2
+    Guest = 0,
+    Normal = 1,
+    Admin = 2,
 }
 
-[Flags]
-public enum UserPermission
+public sealed class User
 {
-    None = 0,
-    CanSeeHides = 1 << 0,
-    CanAccessWithoutPassword = 1 << 1,
-    CanAddOfflineDownloadTasks = 1 << 2,
-    CanWriteContent = 1 << 3,
-    CanRename = 1 << 4,
-    CanMove = 1 << 5,
-    CanCopy = 1 << 6,
-    CanRemove = 1 << 7,
-    CanWebdavRead = 1 << 8,
-    CanWebdavManage = 1 << 9,
-    CanFTPAccess = 1 << 10,
-    CanFTPManage = 1 << 11,
-    CanReadArchives = 1 << 12,
-    CanDecompress = 1 << 13,
-    CanShare = 1 << 14,
-    CanCustomizeShareID = 1 << 15
-}
-
-public class User
-{
-    public uint Id { get; set; }
+    public long Id { get; set; }
     public string Username { get; set; } = string.Empty;
-    [JsonIgnore] public string PwdHash { get; set; } = string.Empty;
-    [JsonIgnore] public long PwdTS { get; set; }
-    [JsonIgnore] public string Salt { get; set; } = string.Empty;
-    [NotMapped]
     public string Password { get; set; } = string.Empty;
-    [JsonPropertyName("base_path")] public string BasePath { get; set; } = "/";
-    public UserRole Role { get; set; } = UserRole.General;
+    public string PasswordHash { get; set; } = string.Empty;
+    public UserRole Role { get; set; } = UserRole.Normal;
     public bool Disabled { get; set; }
     public int Permission { get; set; }
-    [JsonIgnore] public string? OtpSecret { get; set; }
-    [JsonPropertyName("sso_id")] public string? SsoID { get; set; }
-    [JsonIgnore] public string? Authn { get; set; }
-    [JsonPropertyName("allow_ldap")] public bool AllowLdap { get; set; } = true;
+    public string? BasePath { get; set; }
+    public bool TwoFactorEnabled { get; set; }
+    public string? TwoFactorSecret { get; set; }
+    public bool SsoID { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
 
-    public bool IsGuest => Role == UserRole.Guest;
-    public bool IsAdmin => Role == UserRole.Admin;
-
-    public bool HasPermission(UserPermission perm) => (Permission & (int)perm) != 0;
-
-    public string JoinPath(string reqPath)
-    {
-        if (string.IsNullOrEmpty(BasePath) || BasePath == "/")
-            return reqPath;
-        return Path.Join(BasePath, reqPath.TrimStart('/'));
-    }
+public sealed class UserPublic
+{
+    public long Id { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public UserRole Role { get; set; }
+    public bool Disabled { get; set; }
+    public int Permission { get; set; }
+    public string? BasePath { get; set; }
+    public bool TwoFactorEnabled { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }

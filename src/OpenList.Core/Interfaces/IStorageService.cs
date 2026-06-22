@@ -1,21 +1,46 @@
-using OpenList.Core.Drivers;
 using OpenList.Core.Models;
-using Zio;
 
 namespace OpenList.Core.Interfaces;
 
 public interface IStorageService
 {
-    Task<(List<Storage> Storages, int Total)> ListStoragesAsync(int page, int perPage, CancellationToken ct = default);
-    Task<Storage?> GetStorageByIdAsync(uint id, CancellationToken ct = default);
-    Task<uint> CreateStorageAsync(Storage storage, CancellationToken ct = default);
-    Task UpdateStorageAsync(Storage storage, CancellationToken ct = default);
-    Task DeleteStorageAsync(uint id, CancellationToken ct = default);
-    Task EnableStorageAsync(uint id, CancellationToken ct = default);
-    Task DisableStorageAsync(uint id, CancellationToken ct = default);
-    Task LoadAllStoragesAsync(CancellationToken ct = default);
-    IFileSystem? GetDriverByMountPath(string mountPath);
-    DriverInfo GetDriverInfo(string driverName);
-    List<DriverInfo> ListDriverInfos();
-    List<string> ListDriverNames();
+    Task<Resp<List<StorageWithDriver>>> ListAsync(CancellationToken ct = default);
+    Task<Resp<StorageWithDriver>> GetAsync(long id, CancellationToken ct = default);
+    Task<Resp<Storage>> CreateAsync(CreateStorageReq req, CancellationToken ct = default);
+    Task<Resp> UpdateAsync(long id, CreateStorageReq req, CancellationToken ct = default);
+    Task<Resp> DeleteAsync(long id, CancellationToken ct = default);
+    Task<Resp> EnableAsync(long id, CancellationToken ct = default);
+    Task<Resp> DisableAsync(long id, CancellationToken ct = default);
+    Task<Resp> LoadAllAsync(CancellationToken ct = default);
+    Task<Resp<List<DriverInfo>>> ListDriversAsync(CancellationToken ct = default);
+    Task<Resp<List<string>>> ListDriverNamesAsync(CancellationToken ct = default);
+    Task<Resp<DriverInfo>> GetDriverInfoAsync(string driverName, CancellationToken ct = default);
+}
+
+public sealed class CreateStorageReq
+{
+    public string MountPath { get; set; } = string.Empty;
+    public string Driver { get; set; } = string.Empty;
+    public string Addition { get; set; } = "{}";
+    public int Order { get; set; }
+    public bool Disabled { get; set; }
+    public string? Remark { get; set; }
+}
+
+public sealed class DriverInfo
+{
+    public string Name { get; set; } = string.Empty;
+    public bool ReadOnly { get; set; }
+    public bool IsCloudDriver { get; set; }
+    public List<DriverConfigField> Config { get; set; } = [];
+}
+
+public sealed class DriverConfigField
+{
+    public string Name { get; set; } = string.Empty;
+    public string Help { get; set; } = string.Empty;
+    public bool Required { get; set; }
+    public string? Options { get; set; }
+    public Type ValueType { get; set; } = typeof(string);
+    public object? Default { get; set; }
 }

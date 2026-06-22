@@ -1,6 +1,0 @@
-using OpenList.Core.Drivers;
-using OpenList.Core.Drivers.Base;
-using OpenList.Core.Models;
-
-namespace OpenList.Drivers.GitHub { public class GitHubDriver : ZioDriverBase { public override DriverConfig Config { get; } = new() { Name = "GitHub" }; public override object Addition => new(); public override DriverInfo GetDriverInfo() => new() { Common = [], Additional = [], Config = Config }; public override Task InitAsync(CancellationToken ct = default) => Task.CompletedTask; public override Task DropAsync(CancellationToken ct = default) => Task.CompletedTask; } public class GitHubReleasesDriver : ZioDriverBase { public override DriverConfig Config { get; } = new() { Name = "GitHubReleases" }; public override object Addition => new(); public override DriverInfo GetDriverInfo() => new() { Common = [], Additional = [], Config = Config }; public override Task InitAsync(CancellationToken ct = default) => Task.CompletedTask; public override Task DropAsync(CancellationToken ct = default) => Task.CompletedTask; } }
-
