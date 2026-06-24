@@ -58,7 +58,8 @@ builder.Services.AddSingleton<ISettingService, SettingService>();
 builder.Services.AddSingleton<IMetaService, MetaService>();
 builder.Services.AddSingleton<IMessageService, MessageService>();
 builder.Services.AddSingleton<IScanService, ScanService>();
-// TODO: register IShareService, ITaskService, etc. (Phase 5+)
+builder.Services.AddSingleton<ITaskService, TaskService>();
+// TODO: register IShareService, etc. (Phase 5+)
 
 // JWT auth — frontend sends token WITHOUT "Bearer " prefix.
 var jwtSecret = string.IsNullOrWhiteSpace(appConfig.JwtSecret)
@@ -134,11 +135,13 @@ app.MapMeApi();
 app.MapAdminApi();
 // Phase 4: Filesystem operations
 app.MapFsApi();
+// Phase 6: Task management
+app.MapTaskApi();
 // Phase 10: S3-compatible gateway
 app.MapS3Api();
 // Phase 11: WebDAV server
 app.MapWebDavApi();
-// TODO: MapShareApi, MapTaskApi, MapPublicApi, MapSignApi,
+// TODO: MapShareApi, MapPublicApi, MapSignApi,
 //       MapSharingDownloadApi (Phase 5+)
 
 // SPA fallback

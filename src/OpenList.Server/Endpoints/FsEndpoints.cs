@@ -97,6 +97,16 @@ public static class FsEndpoints
             return Results.Ok(await scan.StartAsync(req.Path));
         });
 
+        // --- Offline download (Phase 6) ---
+        g.MapPost("/add_offline_download", async (OfflineDownloadReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+            Results.Ok(await svc.AddOfflineDownloadAsync(req, user.ToUser())));
+
+        // --- Torrent endpoints (Phase 6 — not yet implemented, return 501) ---
+        g.MapGet("/torrent/list", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
+        g.MapGet("/torrent/info", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
+        g.MapPost("/torrent/add", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
+        g.MapPost("/torrent/cancel", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
+
         return app;
     }
 }

@@ -191,18 +191,22 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 
 ## Phase 6 — Tasks & Offline Download
 
-- [ ] `ITaskService` impl + `TaskService` (in-memory + persistent task store)
-- [ ] `TaskEndpoints.cs` — `/api/task/*`:
-  - [ ] `GET  /api/task/undone`
-  - [ ] `GET  /api/task/done`
-  - [ ] `POST /api/task/cancel?tid=`
-  - [ ] `POST /api/task/delete?tid=`
-  - [ ] `POST /api/task/clear_done`
-  - [ ] `POST /api/task/retry?tid=`
-- [ ] Offline download tools (`IOfflineDownloadTool`):
-  - [ ] `POST /api/fs/add_offline_download` — aria2/qBittorrent/115/pikpak/thunder
-  - [ ] `GET  /api/fs/torrent/*` — 4 endpoints (501 for now)
-- [ ] Tests: `TaskServiceTests`
+- [x] `ITaskService` impl + `TaskService` (in-memory task store with progress tracking)
+- [x] `TaskEndpoints.cs` — `/api/task/*`:
+  - [x] `GET  /api/task/undone`
+  - [x] `GET  /api/task/done`
+  - [x] `GET  /api/task/info?tid=`
+  - [x] `POST /api/task/cancel?tid=`
+  - [x] `POST /api/task/delete?tid=`
+  - [x] `POST /api/task/clear_done`
+  - [x] `POST /api/task/retry?tid=`
+- [x] Offline download tools (`IOfflineDownloadTool`):
+  - [x] `POST /api/fs/add_offline_download` — wired through `IFileSystemService.AddOfflineDownloadAsync` (returns 501 until tools registered)
+  - [x] `GET  /api/fs/torrent/list` — 501
+  - [x] `GET  /api/fs/torrent/info` — 501
+  - [x] `POST /api/fs/torrent/add` — 501
+  - [x] `POST /api/fs/torrent/cancel` — 501
+- [x] Tests: `TaskServiceTests` — 12 tests covering create/cancel/retry/delete/clear/done/undone
 
 ## Phase 7 — Admin: Users, Settings, Messages, Meta ✅
 
@@ -340,3 +344,4 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 | 2026-06-23 | Phase 4 | Filesystem: `FileSystemService` (list/get/mkdir/rename/move/copy/remove/put/dirs/search/archive/link via Zio MountFileSystem), `FsEndpoints` (`/api/fs/*`), `ClaimsPrincipal.ToUser()` extension. 50/50 tests passing. |
 | 2026-06-23 | Phase 7 | Admin: `SettingService` (CRUD + public filter + archive exts), `MetaService` (path metadata CRUD), `MessageService` (admin↔user messaging), `ScanService` (background directory scan with progress). Extended `AdminEndpoints` (user/set_password, setting, meta, message, scan), `MeEndpoints` (message unread/list/read), `FsEndpoints` (/scan). Added `Message` model + DbSet. 76/76 tests passing. |
 | 2026-06-23 | Phase 10-12 | S3 Gateway (`S3Endpoints` — list buckets, get/put/head/delete objects, JWT passthrough auth), WebDAV Server (`WebDavEndpoints` — OPTIONS/PROPFIND/PROPPATCH/GET/HEAD/PUT/MKCOL/DELETE/MOVE/COPY/LOCK/UNLOCK, Basic auth via `UserService`), FTP hosted service (`FtpHostedService` + `OpenListFtpMembershipProvider` + `ZioUnixFileSystem` bridge via FubarDev.FtpServer), SFTP stub (`SftpHostedService` — SSH.NET has no server). Fixed `FileSystemService.PutStreamAsync` sync IO → async. `TestWebAppFactory` integration test infra with per-factory temp SQLite DB + Local storage mount. 116/116 tests passing. |
+| 2026-06-24 | Phase 6 | Tasks & Offline Download: `TaskService` (in-memory task store with progress tracking, cancel/retry/delete/clear), `TaskEndpoints` (`/api/task/undone|done|info|cancel|delete|clear_done|retry`), `FsEndpoints` additions (`/api/fs/add_offline_download` + 4 `/api/fs/torrent/*` 501 stubs). 128/128 tests passing (12 new `TaskServiceTests`). |

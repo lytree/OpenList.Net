@@ -1,0 +1,169 @@
+using System.Collections.Concurrent;
+using OpenList.Core.Interfaces;
+using OpenList.Core.Models;
+
+namespace OpenList.Infrastructure.Services;
+
+/// <summary>
+/// In-memory background task service with progress tracking.
+/// Tracks copy/upload/transfer/download/decompress/move tasks by id.
+/// Mirrors OpenList Go <c>pkg/task</c> task manager.
+/// </summary>
+public sealed class TaskService : ITaskService
+{
+    private readonly TimeProvider _time;
+    private readonly ConcurrentDictionary<string, TaskRecord> _tasks = new();
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _cts = new();
+    private int _seq;
+
+    public TaskService(TimeProvider? time = null) => _time = time ?? TimeProvider.System;
+
+    public Task<Resp<TaskInfo>> InfoAsync(TaskType type, string tid, CancellationToken ct = default)
+    {
+        if (!_tasks.TryGetValue(tid, out var rec) || rec.Info.Type != type)
+            return Task.FromResult(Resp<TaskInfo>.Fail("task not found", RespCodes.NotFound));
+        return Task.FromResult(Resp<TaskInfo>.Ok(rec.Info));
+    }
+
+    public Task<Resp<List<TaskInfo>>> DoneAsync(TaskType type, CancellationToken ct = default)
+    {
+        var list = _tasks.Values
+            .Where(r => r.Info.Type == type && r.Info.State is "succeeded" or "failed" or "canceled")
+            .OrderByDescending(r => r.Info.CompletedAt ?? DateTimeOffset.MaxValue)
+            .Select(r => r.Info)
+            .ToList();
+        return Task.FromResult(Resp<List<TaskInfo>>.Ok(list));
+    }
+
+    public Task<Resp<List<TaskInfo>>> UndoneAsync(TaskType type, CancellationToken ct = default)
+    {
+        var list = _tasks.Values
+            .Where(r => r.Info.Type == type && r.Info.State is "pending" or "running")
+            .OrderBy(r => r.Info.CreatedAt)
+            .Select(r => r.Info)
+            .ToList();
+        return Task.FromResult(Resp<List<TaskInfo>>.Ok(list));
+    }
+
+    public async Task<Resp> DeleteAsync(TaskType type, string tid, CancellationToken ct = default)
+    {
+        if (!_tasks.TryRemove(tid, out var rec) || rec.Info.Type != type)
+            return Resp.Fail("task not found", RespCodes.NotFound);
+        await CancelInternalAsync(tid);
+        return Resp.Ok();
+    }
+
+    public async Task<Resp> CancelAsync(TaskType type, string tid, CancellationToken ct = default)
+    {
+        if (!_tasks.TryGetValue(tid, out var rec) || rec.Info.Type != type)
+            return Resp.Fail("task not found", RespCodes.NotFound);
+        if (rec.Info.State is "succeeded" or "failed" or "canceled")
+            return Resp.Fail("task already finished", RespCodes.BadRequest);
+        await CancelInternalAsync(tid);
+        rec.Info.State = "canceled";
+        rec.Info.CompletedAt = _time.GetUtcNow();
+        return Resp.Ok();
+    }
+
+    public Task<Resp> ClearAsync(TaskType type, CancellationToken ct = default)
+    {
+        var finishedStates = new HashSet<string> { "succeeded", "failed", "canceled" };
+        foreach (var kvp in _tasks)
+        {
+            if (kvp.Value.Info.Type == type && finishedStates.Contains(kvp.Value.Info.State))
+                _tasks.TryRemove(kvp.Key, out _);
+        }
+        return Task.FromResult(Resp.Ok());
+    }
+
+    public async Task<Resp> RetryAsync(TaskType type, string tid, CancellationToken ct = default)
+    {
+        if (!_tasks.TryGetValue(tid, out var rec) || rec.Info.Type != type)
+            return Resp.Fail("task not found", RespCodes.NotFound);
+        if (rec.Info.State != "failed" && rec.Info.State != "canceled")
+            return Resp.Fail("only failed or canceled tasks can be retried", RespCodes.BadRequest);
+
+        // Reset state and re-run the original work.
+        rec.Info.State = "pending";
+        rec.Info.Error = null;
+        rec.Info.Progress = 0;
+        rec.Info.CompletedAt = null;
+        await RunAsync(tid, rec);
+        return Resp.Ok();
+    }
+
+    public Task<string> CreateAsync(TaskType type, Func<IProgress<TaskProgress>, CancellationToken, Task> work, CancellationToken ct = default)
+    {
+        var id = Interlocked.Increment(ref _seq).ToString();
+        var tid = type.ToString().ToLowerInvariant() + "-" + id;
+        var cts = new CancellationTokenSource();
+        _cts[tid] = cts;
+
+        var rec = new TaskRecord
+        {
+            Info = new TaskInfo
+            {
+                Id = tid,
+                Type = type,
+                Name = type.ToString(),
+                State = "pending",
+                CreatedAt = _time.GetUtcNow(),
+            },
+            Work = work,
+            Cts = cts,
+        };
+        _tasks[tid] = rec;
+
+        _ = RunAsync(tid, rec);
+        return Task.FromResult(tid);
+    }
+
+    private async Task RunAsync(string tid, TaskRecord rec)
+    {
+        var progress = new Progress<TaskProgress>(p =>
+        {
+            rec.Info.Progress = p.Current;
+            rec.Info.Total = p.Total;
+            if (rec.Info.State == "pending") rec.Info.State = "running";
+        });
+
+        try
+        {
+            rec.Info.State = "running";
+            await rec.Work(progress, rec.Cts.Token);
+            rec.Info.State = "succeeded";
+            rec.Info.Progress = rec.Info.Total > 0 ? rec.Info.Total : rec.Info.Progress;
+        }
+        catch (OperationCanceledException)
+        {
+            rec.Info.State = "canceled";
+        }
+        catch (Exception ex)
+        {
+            rec.Info.State = "failed";
+            rec.Info.Error = ex.Message;
+        }
+        finally
+        {
+            rec.Info.CompletedAt = _time.GetUtcNow();
+            _cts.TryRemove(tid, out _);
+        }
+    }
+
+    private Task CancelInternalAsync(string tid)
+    {
+        if (_cts.TryRemove(tid, out var cts))
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+        return Task.CompletedTask;
+    }
+
+    private sealed class TaskRecord
+    {
+        public required TaskInfo Info { get; init; }
+        public required Func<IProgress<TaskProgress>, CancellationToken, Task> Work { get; init; }
+        public required CancellationTokenSource Cts { get; init; }
+    }
+}
