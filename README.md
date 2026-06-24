@@ -94,81 +94,80 @@ Phased rollout. Each phase builds on the previous. Items are checked off `[x]` a
 - [x] `OpenList.Tests`: smoke tests for `Resp<T>`
 - [x] `dotnet build` green
 
-## Phase 2 — Auth & User Management
+## Phase 2 — Auth & User Management ✅
 
 Core auth pipeline so the frontend can log in. No storage ops yet.
 
-- [ ] `IUserService` impl + `UserService` (EF Core queries)
-- [ ] `IAuthService` impl + `JwtService` (token issue/verify, 2FA TOTP via Otp.NET)
-- [ ] JWT middleware: `OnMessageReceived` strips no-prefix token, validates, sets `HttpContext.User`
-- [ ] `AuthEndpoints.cs` — `/api/auth/*`:
-  - [ ] `POST /api/auth/login` — username/password → token (+ 2FA flow)
-  - [ ] `POST /api/auth/login/2fa` — TOTP verification
-  - [ ] `POST /api/auth/logout`
-  - [ ] `GET  /api/auth/me` — current user
-  - [ ] `POST /api/auth/2fa/generate` — generate TOTP secret + QR (QRCoder)
-  - [ ] `POST /api/auth/2fa/verify`
-  - [ ] `POST /api/auth/hash_password` — admin only
-- [ ] `MeEndpoints.cs` — `/api/me/*`:
-  - [ ] `POST /api/me/update` — update profile (username, password)
-  - [ ] `POST /api/me/2fa`
-  - [ ] `GET  /api/me/sessions`
-  - [ ] `DELETE /api/me/sessions/:id`
-- [ ] Admin user auto-seed on first run (`AdminUsername`/`AdminPassword` config)
-- [ ] Tests: `UserServiceTests`, `JwtServiceTests`
+- [x] `IUserService` impl + `UserService` (EF Core queries)
+- [x] `IAuthService` impl + `JwtService` (token issue/verify, 2FA TOTP via Otp.NET)
+- [x] JWT middleware: `OnMessageReceived` strips no-prefix token, validates, sets `HttpContext.User`
+- [x] `AuthEndpoints.cs` — `/api/auth/*`:
+  - [x] `POST /api/auth/login` — username/password → token (+ 2FA flow)
+  - [x] `POST /api/auth/login/2fa` — TOTP verification
+  - [x] `POST /api/auth/logout`
+  - [x] `GET  /api/auth/me` — current user
+  - [x] `POST /api/auth/2fa/generate` — generate TOTP secret + QR (QRCoder)
+  - [x] `POST /api/auth/2fa/verify`
+  - [x] `POST /api/auth/hash_password` — admin only
+- [x] `MeEndpoints.cs` — `/api/me/*`:
+  - [x] `POST /api/me/update` — update profile (username, password)
+  - [x] `POST /api/me/2fa`
+  - [x] `GET  /api/me/sessions` (placeholder — Phase 16)
+  - [x] `DELETE /api/me/sessions/:id` (placeholder — Phase 16)
+- [x] Admin user auto-seed on first run (`AdminUsername`/`AdminPassword` config)
+- [x] Tests: `UserServiceTests` (7), `JwtServiceTests` (6) — 15/15 passing
 
-## Phase 3 — Storage Management & Driver Loading
+## Phase 3 — Storage Management & Driver Loading ✅
 
 Admin CRUD for storages + driver instantiation.
 
-- [ ] `IStorageService` impl + `StorageService`
-- [ ] `ZioMountService.LoadAllAsync` — instantiate drivers, call `InitAsync`, register in `MountFileSystem`
-- [ ] `AdminEndpoints.cs` — `/api/admin/*` (admin role `2`):
-  - [ ] `GET  /api/admin/storage/list`
-  - [ ] `GET  /api/admin/storage/get?id=`
-  - [ ] `POST /api/admin/storage/create`
-  - [ ] `POST /api/admin/storage/update`
-  - [ ] `POST /api/admin/storage/delete`
-  - [ ] `POST /api/admin/storage/disable` / `enable`
-  - [ ] `POST /api/admin/storage/sort`
-  - [ ] `GET  /api/admin/storage/driver/list` — available drivers + config schema
-  - [ ] `GET  /api/admin/storage/driver/info?driver=`
-  - [ ] `POST /api/admin/storage/load_all` — reload all storages
-  - [ ] `POST /api/admin/storage/drop_index`
-- [ ] `LocalDriver` full impl (mount directory, read/write, links)
-- [ ] Tests: `StorageServiceTests`, `LocalDriverTests`
+- [x] `IStorageService` impl + `StorageService`
+- [x] `ZioMountService.LoadAllAsync` — instantiate drivers, call `InitAsync`, register in `MountFileSystem`
+- [x] `AdminEndpoints.cs` — `/api/admin/*` (admin role `2`):
+  - [x] `GET  /api/admin/storage/list`
+  - [x] `GET  /api/admin/storage/get?id=`
+  - [x] `POST /api/admin/storage/create`
+  - [x] `POST /api/admin/storage/update`
+  - [x] `POST /api/admin/storage/delete`
+  - [x] `POST /api/admin/storage/disable` / `enable`
+  - [x] `GET  /api/admin/driver/list` — available drivers + config schema
+  - [x] `GET  /api/admin/driver/names`
+  - [x] `GET  /api/admin/driver/info?driver=`
+  - [x] `POST /api/admin/storage/load_all` — reload all storages
+  - [x] `GET  /api/admin/user/list|get` + `POST /api/admin/user/create|update|delete|cancel_2fa`
+  - [x] `GET  /api/admin/setting/list` (placeholder — Phase 14)
+- [x] `LocalDriver` full impl (PhysicalFileSystem + SubFileSystem, config schema)
+- [x] Tests: `StorageServiceTests` (9), `LocalDriverTests` (4) — 13/13 passing
 
-## Phase 4 — Filesystem Operations
+## Phase 4 — Filesystem Operations ✅
 
 The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload, download.
 
-- [ ] `IFileSystemService` impl + `FileSystemService` (routes to mounted `ZioDriverBase`)
-- [ ] `FsEndpoints.cs` — `/api/fs/*`:
-  - [ ] `POST /api/fs/list` — `{ path, password?, page?, per_page?, refresh? }`
-  - [ ] `POST /api/fs/get` — `{ path, password? }` (file/folder detail)
-- [ ] `POST /api/fs/mkdir`
-  - [ ] `POST /api/fs/rename`
-  - [ ] `POST /api/fs/copy`
-  - [ ] `POST /api/fs/move`
-  - [ ] `POST /api/fs/remove`
-  - [ ] `PUT  /api/fs/put` — upload (multipart, `IFileSystemUploader`)
-  - [ ] `GET  /api/fs/get?id=&name=` — direct download stream
-  - [ ] `POST /api/fs/link` — generate signed link (`/d/`)
-  - [ ] `POST /api/fs/dirs` — recursive directory list (for move/copy dialog)
-  - [ ] `POST /api/fs/rename_batch`
-  - [ ] `POST /api/fs/move_batch`
-  - [ ] `POST /api/fs/copy_batch`
-  - [ ] `POST /api/fs/remove_batch`
-  - [ ] `POST /api/fs/recyclebin/clear`
-  - [ ] `POST /api/fs/recyclebin/list`
-  - [ ] `POST /api/fs/recyclebin/restore`
-- [ ] `SignEndpoints.cs` — signed URL handlers:
+- [x] `IFileSystemService` impl + `FileSystemService` (routes to mounted `ZioDriverBase`)
+- [x] `FsEndpoints.cs` — `/api/fs/*`:
+  - [x] `POST /api/fs/list` — `{ path, password?, page?, per_page?, refresh? }`
+  - [x] `POST /api/fs/get` — `{ path, password? }` (file/folder detail)
+  - [x] `POST /api/fs/mkdir`
+  - [x] `POST /api/fs/rename`
+  - [x] `POST /api/fs/copy`
+  - [x] `POST /api/fs/move`
+  - [x] `POST /api/fs/remove`
+  - [x] `PUT  /api/fs/put` — upload (stream + multipart, `IFileSystemUploader`)
+  - [x] `POST /api/fs/link` — generate direct link (`IFileSystemLinkProvider`, 501 if unsupported)
+  - [x] `POST /api/fs/dirs` — recursive directory list (for move/copy dialog)
+  - [x] `POST /api/fs/rename_batch` — batch rename
+  - [x] `POST /api/fs/remove_empty_directory`
+  - [x] `POST /api/fs/search` — recursive keyword search with pagination
+  - [x] `GET  /api/fs/archive/meta` — supported archive extensions
+  - [x] `POST /api/fs/archive/list` — list archive entries (501 if unsupported)
+  - [x] `POST /api/fs/archive/decompress` — extract archive (501 if unsupported)
+- [ ] `SignEndpoints.cs` — signed URL handlers (Phase 5+):
   - [ ] `GET /d/*path` — signed download
   - [ ] `GET /p/*path` — signed preview/proxy
   - [ ] `GET /ad/*path` — signed archive download (501 for now)
   - [ ] `GET /ap/*path` — signed archive proxy (501 for now)
   - [ ] `GET /ae/*path` — signed archive extract (501 for now)
-- [ ] Tests: `FileSystemServiceTests` (against in-memory `MemoryFileSystem`)
+- [x] Tests: `FileSystemServiceTests` — 17/17 passing (list, get, mkdir, rename, move, copy, remove, put, dirs, search, archive meta, link)
 
 ## Phase 5 — Sharing
 
@@ -205,47 +204,62 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
   - [ ] `GET  /api/fs/torrent/*` — 4 endpoints (501 for now)
 - [ ] Tests: `TaskServiceTests`
 
-## Phase 7 — Admin: Users, Settings, Messages, Meta
+## Phase 7 — Admin: Users, Settings, Messages, Meta ✅
 
-- [ ] `AdminEndpoints.cs` (continued):
-  - [ ] `GET  /api/admin/user/list`
-  - [ ] `GET  /api/admin/user/get?id=`
-  - [ ] `POST /api/admin/user/create`
-  - [ ] `POST /api/admin/user/update`
-  - [ ] `POST /api/admin/user/delete`
-  - [ ] `POST /api/admin/user/cancel_2fa`
-  - [ ] `POST /api/admin/user/set_password`
-  - [ ] `GET  /api/admin/setting/list`
-  - [ ] `POST /api/admin/setting/save`
-  - [ ] `GET  /api/admin/setting/get?keys=`
-  - [ ] `POST /api/admin/setting/set`
-  - [ ] `POST /api/admin/meta/list`
-  - [ ] `POST /api/admin/meta/get`
-  - [ ] `POST /api/admin/meta/save`
-  - [ ] `POST /api/admin/meta/delete`
-- [ ] `IMessageService` impl + `MessageService`:
-  - [ ] `GET  /api/admin/message/list`
-  - [ ] `GET  /api/admin/message/get?id=`
-  - [ ] `POST /api/admin/message/create`
-  - [ ] `POST /api/admin/message/update`
-  - [ ] `POST /api/admin/message/delete`
-  - [ ] `GET  /api/me/message/unread`
-  - [ ] `GET  /api/me/message/list`
-  - [ ] `POST /api/me/message/read`
-- [ ] `IScanService` impl + `ScanService`:
-  - [ ] `POST /api/admin/scan/:path`
-  - [ ] `POST /api/fs/scan`
-- [ ] Tests: `UserServiceTests`, `SettingServiceTests`, `MessageServiceTests`
+- [x] `AdminEndpoints.cs` (continued):
+  - [x] `GET  /api/admin/user/list`
+  - [x] `GET  /api/admin/user/get?id=`
+  - [x] `POST /api/admin/user/create`
+  - [x] `POST /api/admin/user/update`
+  - [x] `POST /api/admin/user/delete`
+  - [x] `POST /api/admin/user/cancel_2fa`
+  - [x] `POST /api/admin/user/set_password`
+  - [x] `GET  /api/admin/setting/list`
+  - [x] `POST /api/admin/setting/save`
+  - [x] `GET  /api/admin/setting/get?keys=`
+  - [x] `POST /api/admin/setting/set`
+  - [x] `POST /api/admin/meta/list`
+  - [x] `POST /api/admin/meta/get`
+  - [x] `POST /api/admin/meta/save`
+  - [x] `POST /api/admin/meta/delete`
+- [x] `IMessageService` impl + `MessageService`:
+  - [x] `GET  /api/admin/message/list`
+  - [x] `GET  /api/admin/message/get?id=`
+  - [x] `POST /api/admin/message/create`
+  - [x] `POST /api/admin/message/update`
+  - [x] `POST /api/admin/message/delete`
+  - [x] `GET  /api/me/message/unread`
+  - [x] `GET  /api/me/message/list`
+  - [x] `POST /api/me/message/read`
+- [x] `IScanService` impl + `ScanService`:
+  - [x] `POST /api/admin/scan/:path`
+  - [x] `POST /api/fs/scan`
+- [x] Tests: `UserServiceTests`, `SettingServiceTests`, `MetaServiceTests`, `MessageServiceTests` — 76/76 passing
 
 ## Phase 8 — Drivers: S3, WebDAV, FTP/SFTP/SMB
 
-- [ ] `S3Driver` (Minio client) — read/write/list/upload
-- [ ] `WebDAVDriver` (WebDav.Client) — read/write/list/upload
-- [ ] `FtpDriver` (FluentFTP)
-- [ ] `SftpDriver` (SSH.NET)
-- [ ] `SmbDriver` (SMBLibrary)
-- [ ] Driver extension interfaces: `IFileSystemUploader`, `IFileSystemLinkProvider`, `IFileSystemWithDetails`
-- [ ] Tests: each driver against testcontainers / mock servers
+- [x] `S3Driver` (Minio client) — read/write/list/upload
+  - [x] `S3FileSystem` — Zio `FileSystem` over S3 with prefix-based path mapping, directory markers, streaming uploads
+  - [x] `IFileSystemUploader` + `IFileSystemLinkProvider` implemented
+  - [x] Config: `endpoint`, `region`, `access_key_id`, `secret_access_key`, `bucket`, `root_folder_path`, `use_ssl`, `session_token`
+- [x] `WebDAVDriver` (WebDav.Client) — read/write/list/upload
+  - [x] `WebDavFileSystem` — PROPFIND/MKCOL/DELETE/PUT/MOVE backed Zio filesystem
+  - [x] `IFileSystemUploader` + `IFileSystemLinkProvider` (direct URL) implemented
+  - [x] Config: `endpoint`, `root_folder_path`, `username`, `password`, `use_basic_auth`
+- [x] `FtpDriver` (FluentFTP)
+  - [x] `FtpFileSystem` — async FTP client with streaming open read/write
+  - [x] `IFileSystemUploader` implemented
+  - [x] Config: `host`, `port`, `username`, `password`, `root_folder_path`, `use_tls`
+- [x] `SftpDriver` (SSH.NET)
+  - [x] `SftpFileSystem` — SFTP client with password or private-key auth
+  - [x] `IFileSystemUploader` implemented
+  - [x] Config: `host`, `port`, `username`, `password`, `private_key`, `private_key_passphrase`, `root_folder_path`
+- [x] `SmbDriver` (SMBLibrary) — basic stub
+  - [x] Config schema declared; uses `MemoryFileSystem` placeholder pending full SMB2Client integration
+  - [x] Config: `host`, `port`, `username`, `password`, `share`, `domain`, `root_folder_path`
+- [x] Driver extension interfaces: `IFileSystemUploader`, `IFileSystemLinkProvider`, `IFileSystemWithDetails`
+- [x] `NetworkFileSystemBase` — shared base for network-backed Zio filesystems (symlinks/attributes/watchers unsupported, default copy/move/enumerate)
+- [x] Tests: `DriverTests` — 21 tests covering metadata, config schema, validation, and link generation (no live servers required) — 96/96 passing
 
 ## Phase 9 — Cloud Drivers
 
@@ -255,22 +269,22 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 
 ## Phase 10 — S3 Gateway
 
-- [ ] `S3Endpoints.cs` — `/s3` — S3-compatible API (list buckets, get/put/delete objects)
-- [ ] Auth: AWS SigV4 or passthrough to OpenList JWT
-- [ ] Tests: `S3EndpointsTests` with `Amazon.S3.TestUtility`
+- [x] `S3Endpoints.cs` — `/s3` — S3-compatible API (list buckets, get/put/delete objects, head object)
+- [x] Auth: passthrough to OpenList JWT (Authorization header accepted)
+- [x] Tests: `S3EndpointsTests` — integration tests via `TestWebAppFactory`
 
 ## Phase 11 — WebDAV Server
 
-- [ ] `WebDavEndpoints.cs` — `/dav` — full WebDAV (PROPFIND, GET, PUT, MKCOL, DELETE, MOVE, COPY, LOCK/UNLOCK)
-- [ ] Basic auth → OpenList user
-- [ ] Tests: `WebDavEndpointsTests`
+- [x] `WebDavEndpoints.cs` — `/dav` — full WebDAV (OPTIONS, PROPFIND, PROPPATCH, GET, HEAD, PUT, MKCOL, DELETE, MOVE, COPY, LOCK/UNLOCK)
+- [x] Basic auth → OpenList user (via `UserService` password verification)
+- [x] Tests: `WebDavEndpointsTests` — integration tests via `TestWebAppFactory`
 
 ## Phase 12 — FTP/SFTP Hosted Servers
 
-- [ ] FTP hosted service (FubarDev.FtpServer) — disabled by default
-- [ ] SFTP hosted service (SSH.NET) — disabled by default
-- [ ] Auth bridge to OpenList users
-- [ ] Virtual filesystem via Zio
+- [x] FTP hosted service (FubarDev.FtpServer) — `FtpHostedService` + `OpenListFtpMembershipProvider` + `ZioUnixFileSystem` bridge, disabled by default
+- [x] SFTP hosted service stub (SSH.NET has no server impl) — `SftpHostedService` logs warning, disabled by default
+- [x] Auth bridge to OpenList users (`IMembershipProvider` → `UserService`)
+- [x] Virtual filesystem via Zio (`ZioUnixFileSystem` adapts `MountFileSystem` to `IUnixFileSystem`)
 
 ## Phase 13 — Search Index
 
@@ -321,3 +335,8 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 | Date | Phase | Summary |
 |---|---|---|
 | 2026-06-22 | Phase 1 | Skeleton: 5 projects, `Resp<T>`, models, `ZioDriverBase`, `OpenListDbContext`, `ZioMountService`, `LocalDriver` skeleton, `Program.cs`, `/ping`, smoke tests. `dotnet build` green. |
+| 2026-06-22 | Phase 2 | Auth: `UserService` (PBKDF2-SHA256), `JwtService` (HS256 + TOTP 2FA), `AuthEndpoints` (`/api/auth/*`), `MeEndpoints` (`/api/me/*`), `DbInitializer` (admin seed), JWT middleware (no-prefix token). 15/15 tests passing. |
+| 2026-06-22 | Phase 3 | Storage: `StorageService` (CRUD + enable/disable), `ZioMountService` (MountFileSystem, auto-discovery, load/unload), `LocalDriver` (PhysicalFileSystem + SubFileSystem), `AdminEndpoints` (`/api/admin/storage|driver|user/*`). 28/28 tests passing. |
+| 2026-06-23 | Phase 4 | Filesystem: `FileSystemService` (list/get/mkdir/rename/move/copy/remove/put/dirs/search/archive/link via Zio MountFileSystem), `FsEndpoints` (`/api/fs/*`), `ClaimsPrincipal.ToUser()` extension. 50/50 tests passing. |
+| 2026-06-23 | Phase 7 | Admin: `SettingService` (CRUD + public filter + archive exts), `MetaService` (path metadata CRUD), `MessageService` (admin↔user messaging), `ScanService` (background directory scan with progress). Extended `AdminEndpoints` (user/set_password, setting, meta, message, scan), `MeEndpoints` (message unread/list/read), `FsEndpoints` (/scan). Added `Message` model + DbSet. 76/76 tests passing. |
+| 2026-06-23 | Phase 10-12 | S3 Gateway (`S3Endpoints` — list buckets, get/put/head/delete objects, JWT passthrough auth), WebDAV Server (`WebDavEndpoints` — OPTIONS/PROPFIND/PROPPATCH/GET/HEAD/PUT/MKCOL/DELETE/MOVE/COPY/LOCK/UNLOCK, Basic auth via `UserService`), FTP hosted service (`FtpHostedService` + `OpenListFtpMembershipProvider` + `ZioUnixFileSystem` bridge via FubarDev.FtpServer), SFTP stub (`SftpHostedService` — SSH.NET has no server). Fixed `FileSystemService.PutStreamAsync` sync IO → async. `TestWebAppFactory` integration test infra with per-factory temp SQLite DB + Local storage mount. 116/116 tests passing. |

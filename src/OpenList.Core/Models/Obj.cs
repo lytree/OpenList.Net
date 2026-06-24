@@ -6,7 +6,7 @@ namespace OpenList.Core.Models;
 /// Unified file/directory object returned by drivers and endpoints.
 /// Mirrors OpenList Go <c>model.Obj</c>.
 /// </summary>
-public abstract class Obj
+public class Obj
 {
     public string Name { get; set; } = string.Empty;
     public long Size { get; set; }

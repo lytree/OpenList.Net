@@ -4,6 +4,12 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Zio" />
+    <PackageReference Include="Minio" />
+    <PackageReference Include="WebDav.Client" />
+    <PackageReference Include="FluentFTP" />
+    <PackageReference Include="SSH.NET" />
+    <PackageReference Include="SMBLibrary" />
+    <PackageReference Include="SharpCompress" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
