@@ -19,7 +19,8 @@ public sealed class User
     public string? BasePath { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public string? TwoFactorSecret { get; set; }
-    public bool SsoID { get; set; }
+    public string? SsoID { get; set; }
+    public bool AllowLdap { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -33,6 +34,8 @@ public sealed class UserPublic
     public int Permission { get; set; }
     public string? BasePath { get; set; }
     public bool TwoFactorEnabled { get; set; }
+    public string? SsoID { get; set; }
+    public bool AllowLdap { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

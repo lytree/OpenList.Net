@@ -5,6 +5,7 @@ using FubarDev.FtpServer.FileSystem;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
@@ -34,6 +35,7 @@ builder.Services.Configure<JsonOptions>(o =>
 builder.Services.AddSingleton(TimeProvider.System);
 
 // Database
+builder.Services.AddSingleton(appConfig);
 builder.Services.AddSingleton(appConfig.Database);
 builder.Services.AddDbContext<OpenListDbContext>(opts =>
 {
@@ -49,22 +51,27 @@ builder.Services.AddDbContext<OpenListDbContext>(opts =>
 });
 
 // Core services
+// DbContext-consuming services are Scoped to match the EF Core DbContext lifetime.
 builder.Services.AddSingleton<ZioMountService>();
-builder.Services.AddSingleton<IUserService, UserService>();
-builder.Services.AddSingleton<IAuthService, JwtService>();
-builder.Services.AddSingleton<IStorageService, StorageService>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IAuthService, JwtService>();
+builder.Services.AddScoped<IStorageService, StorageService>();
 builder.Services.AddSingleton<IFileSystemService, FileSystemService>();
-builder.Services.AddSingleton<ISettingService, SettingService>();
-builder.Services.AddSingleton<IMetaService, MetaService>();
-builder.Services.AddSingleton<IMessageService, MessageService>();
+builder.Services.AddScoped<ISettingService, SettingService>();
+builder.Services.AddScoped<IMetaService, MetaService>();
+builder.Services.AddScoped<IMessageService, MessageService>();
 builder.Services.AddSingleton<IScanService, ScanService>();
 builder.Services.AddSingleton<ITaskService, TaskService>();
 // TODO: register IShareService, etc. (Phase 5+)
 
 // JWT auth — frontend sends token WITHOUT "Bearer " prefix.
-var jwtSecret = string.IsNullOrWhiteSpace(appConfig.JwtSecret)
-    ? (Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"))[..32]
-    : appConfig.JwtSecret;
+// Auto-generate a stable secret once at startup if none is configured, and write it
+// back to appConfig so JwtService (signing) and JwtBearer (validation) use the same key.
+if (string.IsNullOrWhiteSpace(appConfig.JwtSecret))
+{
+    appConfig.JwtSecret = (Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"))[..32];
+}
+var jwtSecret = appConfig.JwtSecret;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -98,7 +105,7 @@ builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 10L * 1024 *
 // Phase 12: FTP/SFTP hosted servers (disabled by default via FTP:Enable / SFTP:Enable)
 builder.Services.AddFtpServer(s => s
     .Services
-    .AddSingleton<FubarDev.FtpServer.AccountManagement.IMembershipProvider, OpenListFtpMembershipProvider>()
+    .AddScoped<FubarDev.FtpServer.AccountManagement.IMembershipProvider, OpenListFtpMembershipProvider>()
     .AddSingleton<FubarDev.FtpServer.FileSystem.IFileSystemClassFactory, ZioFtpFileSystemFactory>());
 builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opts =>
 {
@@ -130,6 +137,7 @@ app.MapHealthEndpoints();
 
 // Phase 2: Auth + Me
 app.MapAuthApi();
+app.MapAuthnApi();
 app.MapMeApi();
 // Phase 3: Admin (storage + driver + user management)
 app.MapAdminApi();
@@ -141,9 +149,19 @@ app.MapTaskApi();
 app.MapS3Api();
 // Phase 11: WebDAV server
 app.MapWebDavApi();
-// TODO: MapShareApi, MapPublicApi, MapSignApi,
+// Public settings + archive extensions
+app.MapPublicApi();
+// TODO: MapShareApi, MapSignApi,
 //       MapSharingDownloadApi (Phase 5+)
-
+var distFullPath = Path.GetFullPath(appConfig.DistDir);
+if (Directory.Exists(distFullPath))
+{
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(distFullPath),
+        RequestPath = "" // Optional: use "" if files are at the root, or "/dist" if they are under a /dist/ URL
+    });
+}
 // SPA fallback
 app.MapFallback(ctx =>
 {
@@ -152,6 +170,12 @@ app.MapFallback(ctx =>
     if (File.Exists(indexPath))
     {
         ctx.Response.ContentType = "text/html";
+        // 🚨 Prevent caching of index.html so users always get the latest app shell
+        ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+        ctx.Response.Headers.Pragma = "no-cache";
+        ctx.Response.Headers.Expires = "0";
+
+        // await ctx.Response.SendFileAsync(indexPath);
         return ctx.Response.SendFileAsync(indexPath);
     }
     ctx.Response.StatusCode = 404;

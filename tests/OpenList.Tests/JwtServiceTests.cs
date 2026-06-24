@@ -80,7 +80,7 @@ public class JwtServiceTests
             .Options;
         var db = new OpenListDbContext(opts, new DatabaseConfig());
         await db.Database.EnsureCreatedAsync();
-        var users = new UserService(db);
+        var users = new UserService(db, new AppConfiguration());
         await users.CreateAsync(new CreateUserReq { Username = "alice", Password = "pw" });
         var config = new AppConfiguration { JwtSecret = Secret, TokenExpiresIn = 1 };
         var svc = new JwtService(users, config);

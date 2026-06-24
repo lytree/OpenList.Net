@@ -2,8 +2,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenList.Core.Configuration;
-using OpenList.Core.Interfaces;
-using OpenList.Infrastructure.Services;
 
 namespace OpenList.Server.Hosting;
 
@@ -22,18 +20,10 @@ public sealed class SftpHostedService : IHostedService
 {
     private readonly ILogger<SftpHostedService> _logger;
     private readonly SftpConfig _config;
-    private readonly IUserService _userService;
-    private readonly ZioMountService _mount;
 
-    public SftpHostedService(
-        IOptions<AppConfiguration> config,
-        IUserService userService,
-        ZioMountService mount,
-        ILogger<SftpHostedService> logger)
+    public SftpHostedService(IOptions<AppConfiguration> config, ILogger<SftpHostedService> logger)
     {
         _config = config.Value.SFTP;
-        _userService = userService;
-        _mount = mount;
         _logger = logger;
     }
 

@@ -16,6 +16,31 @@ public static class MeEndpoints
     {
         var g = app.MapGroup("/api/me").WithTags("Me").RequireAuthorization();
 
+        // GET /api/me — current user profile (frontend expects camelCase fields
+        // matching the Go reference: id, username, password, base_path, role,
+        // disabled, permission, sso_id, otp, allow_ldap).
+        g.MapGet("/", async (ClaimsPrincipal user, IUserService users) =>
+        {
+            var id = user.UserId();
+            if (id is null) return Results.Ok(Resp.Fail("unauthorized", RespCodes.Unauthorized));
+            var r = await users.GetCurrentAsync(id.Value);
+            if (r.Code != 200) return Results.Ok(r);
+            var u = r.Data!;
+            return Results.Ok(Resp<object>.Ok(new
+            {
+                id = u.Id,
+                username = u.Username,
+                password = "",
+                base_path = u.BasePath ?? "/",
+                role = (int)u.Role,
+                disabled = u.Disabled,
+                permission = u.Permission,
+                sso_id = u.SsoID ?? "",
+                otp = u.TwoFactorEnabled,
+                allow_ldap = u.AllowLdap,
+            }));
+        });
+
         g.MapPost("/update", async (ClaimsPrincipal user, UpdateMeReq req, IUserService users) =>
         {
             var id = user.UserId();

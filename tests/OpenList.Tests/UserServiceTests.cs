@@ -26,7 +26,7 @@ public class UserServiceTests
     public async Task CreateAsync_Persists_User_And_Hashes_Password()
     {
         await using var ctx = BuildContext();
-        var svc = new UserService(ctx);
+        var svc = NewUserService(ctx);
         var r = await svc.CreateAsync(new CreateUserReq
         {
             Username = "alice",
@@ -43,7 +43,7 @@ public class UserServiceTests
     public async Task CreateAsync_Rejects_Duplicate_Username()
     {
         await using var ctx = BuildContext();
-        var svc = new UserService(ctx);
+        var svc = NewUserService(ctx);
         await svc.CreateAsync(new CreateUserReq { Username = "bob", Password = "pw" });
         var dup = await svc.CreateAsync(new CreateUserReq { Username = "bob", Password = "pw" });
         await Assert.That(dup.Code).IsEqualTo(409);
@@ -53,7 +53,7 @@ public class UserServiceTests
     public async Task GetByNameAsync_Returns_User()
     {
         await using var ctx = BuildContext();
-        var svc = new UserService(ctx);
+        var svc = NewUserService(ctx);
         await svc.CreateAsync(new CreateUserReq { Username = "carol", Password = "pw" });
         var r = await svc.GetByNameAsync("carol");
         await Assert.That(r.Code).IsEqualTo(200);
@@ -64,7 +64,7 @@ public class UserServiceTests
     public async Task UpdateAsync_Updates_Password_And_Role()
     {
         await using var ctx = BuildContext();
-        var svc = new UserService(ctx);
+        var svc = NewUserService(ctx);
         var created = await svc.CreateAsync(new CreateUserReq { Username = "dave", Password = "pw" });
         var r = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq
         {
@@ -81,7 +81,7 @@ public class UserServiceTests
     public async Task DeleteAsync_Refuses_Admin()
     {
         await using var ctx = BuildContext();
-        var svc = new UserService(ctx);
+        var svc = NewUserService(ctx);
         var created = await svc.CreateAsync(new CreateUserReq
         {
             Username = "admin2",
@@ -93,10 +93,43 @@ public class UserServiceTests
     }
 
     [Test]
+    public async Task SuperAdmin_Cannot_Be_Demoted_Deleted_Or_Renamed()
+    {
+        await using var ctx = BuildContext();
+        // Config with a custom super-admin username.
+        var config = new AppConfiguration { AdminUsername = "root", AdminPassword = "rootpw" };
+        var svc = new UserService(ctx, config);
+
+        // Seed the super admin directly (DbInitializer would normally do this).
+        var created = await svc.CreateAsync(new CreateUserReq
+        {
+            Username = "root",
+            Password = "rootpw",
+            Role = UserRole.Admin,
+        });
+
+        // Demotion is forbidden.
+        var demote = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Role = UserRole.Normal });
+        await Assert.That(demote.Code).IsEqualTo(403);
+
+        // Rename is forbidden.
+        var rename = await svc.UpdateAsync(created.Data.Id, new UpdateUserReq { Username = "hacker" });
+        await Assert.That(rename.Code).IsEqualTo(403);
+
+        // Disable is forbidden.
+        var disable = await svc.UpdateAsync(created.Data.Id, new UpdateUserReq { Disabled = true });
+        await Assert.That(disable.Code).IsEqualTo(403);
+
+        // Deletion is forbidden.
+        var del = await svc.DeleteAsync(created.Data.Id);
+        await Assert.That(del.Code).IsEqualTo(403);
+    }
+
+    [Test]
     public async Task Cancel2FaAsync_Clears_State()
     {
         await using var ctx = BuildContext();
-        var svc = new UserService(ctx);
+        var svc = NewUserService(ctx);
         var created = await svc.CreateAsync(new CreateUserReq { Username = "eve", Password = "pw" });
         await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq
         {
@@ -119,4 +152,8 @@ public class UserServiceTests
         ctx.Database.EnsureCreated();
         return ctx;
     }
+
+    private static AppConfiguration DefaultConfig() => new();
+
+    private static UserService NewUserService(OpenListDbContext ctx) => new(ctx, DefaultConfig());
 }

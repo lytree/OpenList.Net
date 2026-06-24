@@ -82,18 +82,21 @@ public sealed class SettingService : ISettingService
         return Task.FromResult(Resp.Ok());
     }
 
-    public async Task<Resp<List<SettingItem>>> GetPublicAsync(CancellationToken ct = default)
+    public async Task<Resp<Dictionary<string, string>>> GetPublicAsync(CancellationToken ct = default)
     {
         _cache ??= await _db.Settings.AsNoTracking().ToListAsync(ct);
-        var publicItems = _cache.Where(s => s.Flag == SettingFlag.Public).OrderBy(s => s.Key).ToList();
-        return Resp<List<SettingItem>>.Ok(publicItems);
+        var dict = _cache
+            .Where(s => s.Flag == SettingFlag.Public)
+            .ToDictionary(s => s.Key, s => s.Value ?? string.Empty);
+        return Resp<Dictionary<string, string>>.Ok(dict);
     }
 
-    public Task<Resp<List<OfflineDownloadTool>>> GetOfflineDownloadToolsAsync(CancellationToken ct = default)
+    public Task<Resp<string[]>> GetOfflineDownloadToolsAsync(CancellationToken ct = default)
     {
-        // Phase 6 will populate this with actual tools (aria2, qBittorrent, etc.).
-        var tools = new List<OfflineDownloadTool>();
-        return Task.FromResult(Resp<List<OfflineDownloadTool>>.Ok(tools));
+        // Returns enabled offline download tool names. Actual tool integration
+        // (aria2, qBittorrent, etc.) will be added in a later phase.
+        var tools = Array.Empty<string>();
+        return Task.FromResult(Resp<string[]>.Ok(tools));
     }
 
     public Task<Resp<string[]>> GetArchiveExtensionsAsync(CancellationToken ct = default)

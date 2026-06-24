@@ -33,6 +33,14 @@ public static class AuthEndpoints
                 : Results.Ok(new { code = r.Code, message = r.Message, data = (object?)null });
         }).AllowAnonymous();
 
+        g.MapPost("/login/hash", async (LoginReq req, IAuthService auth) =>
+        {
+            var r = await auth.LoginHashAsync(req.Username, req.Password, req.OtpCode);
+            return r.Code == 200
+                ? Results.Ok(new { code = 200, message = "success", data = new { token = r.Data } })
+                : Results.Ok(new { code = r.Code, message = r.Message, data = (object?)null });
+        }).AllowAnonymous();
+
         g.MapPost("/logout", async (HttpContext ctx, IAuthService auth) =>
         {
             var token = ExtractToken(ctx);
@@ -72,8 +80,16 @@ public static class AuthEndpoints
         }).RequireAuthorization();
 
         g.MapPost("/hash_password", (HashPasswordReq req) =>
-            Results.Ok(new HashPasswordResp { Hash = UserService.HashPassword(req.Password) }))
+            Results.Ok(Resp<HashPasswordResp>.Ok(new HashPasswordResp { Hash = UserService.HashPassword(req.Password) })))
          .RequireAuthorization("admin");
+
+        // --- SSO login (Phase 15 — not yet implemented) ---
+        g.MapGet("/sso/providers", () => Results.Ok(Resp.Fail("sso not implemented", RespCodes.NotImplemented)))
+         .AllowAnonymous();
+        g.MapGet("/sso/{provider}", () => Results.Ok(Resp.Fail("sso not implemented", RespCodes.NotImplemented)))
+         .AllowAnonymous();
+        g.MapPost("/sso/{provider}/callback", () => Results.Ok(Resp.Fail("sso not implemented", RespCodes.NotImplemented)))
+         .AllowAnonymous();
 
         return app;
     }
@@ -84,6 +100,26 @@ public static class AuthEndpoints
         if (string.IsNullOrEmpty(auth)) return null;
         // Frontend sends token WITHOUT "Bearer " prefix — accept both.
         return auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..] : auth;
+    }
+}
+
+/// <summary>WebAuthn endpoints (Phase 15 — not yet implemented).</summary>
+public static class AuthnEndpoints
+{
+    public static IEndpointRouteBuilder MapAuthnApi(this IEndpointRouteBuilder app)
+    {
+        var g = app.MapGroup("/api/authn").WithTags("Authn");
+
+        g.MapPost("/begin/register", () => Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
+         .RequireAuthorization();
+        g.MapPost("/finish/register", () => Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
+         .RequireAuthorization();
+        g.MapPost("/begin/login", () => Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
+         .AllowAnonymous();
+        g.MapPost("/finish/login", () => Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
+         .AllowAnonymous();
+
+        return app;
     }
 }
 

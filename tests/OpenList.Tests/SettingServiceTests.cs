@@ -84,7 +84,9 @@ public class SettingServiceTests
         ]);
         var r = await svc.GetPublicAsync();
         await Assert.That(r.Data!.Count).IsEqualTo(2);
-        await Assert.That(r.Data.All(s => s.Flag == SettingFlag.Public)).IsTrue();
+        await Assert.That(r.Data["pub1"]).IsEqualTo("1");
+        await Assert.That(r.Data["pub2"]).IsEqualTo("3");
+        await Assert.That(r.Data.ContainsKey("priv1")).IsFalse();
     }
 
     [Test]

@@ -10,8 +10,8 @@ public interface ISettingService
     Task<Resp> DeleteAsync(string key, CancellationToken ct = default);
     Task<Resp> DefaultAsync(CancellationToken ct = default);
     Task<Resp> ResetTokenAsync(CancellationToken ct = default);
-    Task<Resp<List<SettingItem>>> GetPublicAsync(CancellationToken ct = default);
-    Task<Resp<List<OfflineDownloadTool>>> GetOfflineDownloadToolsAsync(CancellationToken ct = default);
+    Task<Resp<Dictionary<string, string>>> GetPublicAsync(CancellationToken ct = default);
+    Task<Resp<string[]>> GetOfflineDownloadToolsAsync(CancellationToken ct = default);
     Task<Resp<string[]>> GetArchiveExtensionsAsync(CancellationToken ct = default);
 }
 

@@ -39,7 +39,7 @@ public sealed class JwtService : IAuthService
 
         if (u.TwoFactorEnabled)
         {
-            if (string.IsNullOrEmpty(otpCode)) return Resp<string>.Fail("2fa required", 401);
+            if (string.IsNullOrEmpty(otpCode)) return Resp<string>.Fail("2fa required", 402);
             if (!VerifyOtp(u.TwoFactorSecret!, otpCode))
                 return Resp<string>.Fail("invalid 2fa code", RespCodes.Unauthorized);
         }
@@ -59,18 +59,29 @@ public sealed class JwtService : IAuthService
         if (!r.IsSuccess()) return Resp<string>.Fail("wrong username or password", RespCodes.Unauthorized);
         var u = r.Data!;
         if (u.Disabled) return Resp<string>.Fail("user disabled", RespCodes.Forbidden);
-        if (!CryptographicOperations.FixedTimeEquals(
-                Convert.FromBase64String(u.PasswordHash),
-                Convert.FromBase64String(passwordHash)))
+        if (!VerifyHash(u.PasswordHash, passwordHash))
             return Resp<string>.Fail("wrong username or password", RespCodes.Unauthorized);
 
         if (u.TwoFactorEnabled)
         {
-            if (string.IsNullOrEmpty(otpCode)) return Resp<string>.Fail("2fa required", 401);
+            if (string.IsNullOrEmpty(otpCode)) return Resp<string>.Fail("2fa required", 402);
             if (!VerifyOtp(u.TwoFactorSecret!, otpCode))
                 return Resp<string>.Fail("invalid 2fa code", RespCodes.Unauthorized);
         }
         return Resp<string>.Ok(IssueToken(u));
+    }
+
+    /// <summary>
+    /// Constant-time comparison of two hex password hashes. Returns false on any
+    /// length mismatch instead of throwing.
+    /// </summary>
+    private static bool VerifyHash(string storedHash, string providedHash)
+    {
+        if (string.IsNullOrEmpty(storedHash) || string.IsNullOrEmpty(providedHash)) return false;
+        if (storedHash.Length != providedHash.Length) return false;
+        return CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(storedHash),
+            System.Text.Encoding.UTF8.GetBytes(providedHash));
     }
 
     public Task<Resp<string>> LoginLdapAsync(string username, string password, CancellationToken ct = default)
@@ -83,15 +94,9 @@ public sealed class JwtService : IAuthService
     {
         var r = await _users.GetAsync(userId, ct);
         if (!r.IsSuccess()) return Resp<string>.Fail("user not found", RespCodes.NotFound);
-        var u = r.Data!;
         var secret = GenerateOtpSecret();
-        u.TwoFactorSecret = secret;
-        u.TwoFactorEnabled = false; // enabled only after Verify2FaAsync
-        await _users.UpdateAsync(userId, new UpdateUserReq { TwoFactorEnabled = false }, ct);
-        // Persist secret via direct update — IUserService doesn't expose secret setter,
-        // so we re-use UpdateAsync by stashing secret on the entity tracked by the DbContext.
-        // (UserService.UpdateAsync reads from its own DbContext; for now we accept this limitation
-        // and rely on the endpoint to call a dedicated method in Phase 7.)
+        // Persist the secret; 2FA stays disabled until Verify2FaAsync confirms a valid code.
+        await _users.SetTwoFactorSecretAsync(userId, secret, ct);
         return Resp<string>.Ok(secret);
     }
 

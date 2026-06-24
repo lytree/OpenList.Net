@@ -13,6 +13,7 @@ public interface IUserService
     Task<Resp> UpdateAsync(long id, UpdateUserReq req, CancellationToken ct = default);
     Task<Resp> DeleteAsync(long id, CancellationToken ct = default);
     Task<Resp> Cancel2FaAsync(long id, CancellationToken ct = default);
+    Task<Resp> SetTwoFactorSecretAsync(long id, string secret, CancellationToken ct = default);
     Task<Resp> DelCacheAsync(long id, CancellationToken ct = default);
     Task<Resp<List<SshKey>>> ListSshKeysAsync(long userId, CancellationToken ct = default);
     Task<Resp> DeleteSshKeyAsync(long keyId, CancellationToken ct = default);
