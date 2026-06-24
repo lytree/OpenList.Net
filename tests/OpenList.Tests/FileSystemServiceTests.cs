@@ -89,8 +89,8 @@ public class FileSystemServiceTests
         var r = await svc.GetAsync(new FsGetReq { Path = "/test/hello.txt" }, TestUser);
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!.IsDir).IsFalse();
-        await Assert.That(r.Data.Obj!.Name).IsEqualTo("hello.txt");
-        await Assert.That(r.Data.Obj.Size).IsEqualTo(11);
+        await Assert.That(r.Data.Name).IsEqualTo("hello.txt");
+        await Assert.That(r.Data.Size).IsEqualTo(11);
     }
 
     [Test]

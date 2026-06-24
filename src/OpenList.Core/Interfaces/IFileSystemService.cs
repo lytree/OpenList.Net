@@ -57,15 +57,13 @@ public sealed class FsGetReq
     public string? Password { get; set; }
 }
 
-public sealed class FsGetResp
+public sealed class FsGetResp : Obj
 {
-    public Obj? Obj { get; set; }
-    public List<Obj> Files { get; set; } = [];
-    public bool IsDir { get; set; }
+    public string? RawUrl { get; set; }
     public string? Readme { get; set; }
     public string? Header { get; set; }
-    public bool Write { get; set; }
     public string? Provider { get; set; }
+    public List<Obj> Related { get; set; } = [];
 }
 
 public sealed class BatchRenameItem

@@ -62,13 +62,21 @@ public sealed class FileSystemService : IFileSystemService
             ? _mount.Root.GetFileEntry(path)
             : isDir ? _mount.Root.GetDirectoryEntry(path) : null;
         var driver = _mount.FindDriverForPath(req.Path);
-        return Task.FromResult(Resp<FsGetResp>.Ok(new FsGetResp
+        var resp = new FsGetResp
         {
-            Obj = entry is null ? null : ToObj(entry),
-            IsDir = isDir,
-            Write = driver?.ReadOnly == false,
             Provider = driver?.DriverName,
-        }));
+        };
+        if (entry is not null)
+        {
+            var obj = ToObj(entry);
+            resp.Name = obj.Name;
+            resp.Size = obj.Size;
+            resp.IsDir = obj.IsDir;
+            resp.Modified = obj.Modified;
+            resp.Created = obj.Created;
+            resp.Type = obj.Type;
+        }
+        return Task.FromResult(Resp<FsGetResp>.Ok(resp));
     }
 
     public Task<Resp> MkdirAsync(string path, User user, CancellationToken ct = default)

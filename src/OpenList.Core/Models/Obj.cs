@@ -1,22 +1,26 @@
+using System.Text.Json.Serialization;
 using Zio;
 
 namespace OpenList.Core.Models;
 
 /// <summary>
 /// Unified file/directory object returned by drivers and endpoints.
-/// Mirrors OpenList Go <c>model.Obj</c>.
+/// Mirrors OpenList Go <c>server/handles.ObjResp</c>.
 /// </summary>
 public class Obj
 {
     public string Name { get; set; } = string.Empty;
     public long Size { get; set; }
+    [JsonPropertyName("is_dir")]
+    public bool IsDir { get; set; }
     public DateTimeOffset Modified { get; set; }
     public DateTimeOffset Created { get; set; }
-    public bool IsDir { get; set; }
     public string? Sign { get; set; }
     public string? Thumb { get; set; }
     public int Type { get; set; }
+    [JsonPropertyName("hashinfo")]
     public string? HashInfo { get; set; }
+    [JsonPropertyName("hash_info")]
     public HashInfo? HashInfoObj { get; set; }
 }
 
