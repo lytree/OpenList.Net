@@ -61,8 +61,8 @@ public class StorageServiceTests
         await svc.CreateAsync(new CreateStorageReq { MountPath = "/a", Driver = "Local", Order = 1, Disabled = true });
         var r = await svc.ListAsync();
         await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(r.Data!).HasCount().EqualTo(2);
-        await Assert.That(r.Data[0].MountPath).IsEqualTo("/a");
+        await Assert.That(r.Data!.Content).HasCount().EqualTo(2);
+        await Assert.That(r.Data.Content[0].MountPath).IsEqualTo("/a");
     }
 
     [Test]
@@ -117,7 +117,27 @@ public class StorageServiceTests
         var svc = new StorageService(ctx, new ZioMountService());
         var r = await svc.ListDriversAsync();
         await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(r.Data!.Select(d => d.Name)).Contains("Local");
+        await Assert.That(r.Data!.Keys).Contains("Local");
+    }
+
+    [Test]
+    public async Task ListDriversAsync_LocalDriver_HasCommonFields()
+    {
+        await using var ctx = BuildContext();
+        var svc = new StorageService(ctx, new ZioMountService());
+        var r = await svc.ListDriversAsync();
+        var local = r.Data!["Local"];
+        var commonNames = local.Common.Select(c => c.Name).ToList();
+        await Assert.That(commonNames).Contains("mount_path");
+        await Assert.That(commonNames).Contains("order");
+        await Assert.That(commonNames).Contains("remark");
+        await Assert.That(commonNames).Contains("cache_expiration");
+        await Assert.That(commonNames).Contains("webdav_policy");
+        await Assert.That(commonNames).Contains("extract_folder");
+        await Assert.That(commonNames).Contains("enable_sign");
+        var mountPath = local.Common.First(c => c.Name == "mount_path");
+        await Assert.That(mountPath.Required).IsTrue();
+        await Assert.That(mountPath.Type).IsEqualTo("string");
     }
 
     [Test]
@@ -127,8 +147,9 @@ public class StorageServiceTests
         var svc = new StorageService(ctx, new ZioMountService());
         var r = await svc.GetDriverInfoAsync("Local");
         await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(r.Data!.Config).HasCount().EqualTo(3);
-        await Assert.That(r.Data.Config[0].Name).IsEqualTo("root_folder_path");
+        await Assert.That(r.Data!.Additional).HasCount().EqualTo(3);
+        await Assert.That(r.Data.Additional[0].Name).IsEqualTo("root_folder_path");
+        await Assert.That(r.Data.Config.Name).IsEqualTo("Local");
     }
 
     private static OpenListDbContext BuildContext()

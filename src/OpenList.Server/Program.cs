@@ -62,14 +62,26 @@ builder.Services.AddScoped<IMetaService, MetaService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
 builder.Services.AddSingleton<IScanService, ScanService>();
 builder.Services.AddSingleton<ITaskService, TaskService>();
+// SignService must be singleton (matches ZioMountService lifetime) so FileSystemService
+// can resolve it. Uses the same JWT secret for HMAC signing.
+builder.Services.AddSingleton<ISignService, SignService>();
 // TODO: register IShareService, etc. (Phase 5+)
 
 // JWT auth — frontend sends token WITHOUT "Bearer " prefix.
-// Auto-generate a stable secret once at startup if none is configured, and write it
-// back to appConfig so JwtService (signing) and JwtBearer (validation) use the same key.
+// Auto-generate a stable secret once and persist it next to the database file so
+// tokens survive server restarts. If JwtSecret is set explicitly in config, that takes precedence.
 if (string.IsNullOrWhiteSpace(appConfig.JwtSecret))
 {
-    appConfig.JwtSecret = (Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"))[..32];
+    var dataDir = Path.GetDirectoryName(Path.GetFullPath(appConfig.Database.DBFile)) ?? AppContext.BaseDirectory;
+    var secretFile = Path.Combine(dataDir, "jwt_secret");
+    if (File.Exists(secretFile))
+        appConfig.JwtSecret = File.ReadAllText(secretFile).Trim();
+    if (string.IsNullOrWhiteSpace(appConfig.JwtSecret))
+    {
+        appConfig.JwtSecret = (Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"))[..32];
+        Directory.CreateDirectory(dataDir);
+        File.WriteAllText(secretFile, appConfig.JwtSecret);
+    }
 }
 var jwtSecret = appConfig.JwtSecret;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -97,7 +109,8 @@ builder.Services.AddAuthorizationBuilder()
 
 // CORS
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
-    .AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
+    .AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()
+    .WithExposedHeaders("Content-Range", "Accept-Ranges", "Content-Length")));
 
 // Kestrel: 10 GB body limit for WebDAV uploads
 builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 10L * 1024 * 1024 * 1024);
@@ -120,6 +133,18 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+// Serve static files BEFORE routing so that asset requests (e.g. /assets/*.js)
+// are handled here and never reach the SPA fallback catch-all ({*path}).
+var distFullPath = Path.GetFullPath(appConfig.DistDir);
+if (Directory.Exists(distFullPath))
+{
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(distFullPath),
+        RequestPath = ""
+    });
+}
 
 app.UseCors();
 app.UseRouting();
@@ -151,31 +176,24 @@ app.MapS3Api();
 app.MapWebDavApi();
 // Public settings + archive extensions
 app.MapPublicApi();
-// TODO: MapShareApi, MapSignApi,
-//       MapSharingDownloadApi (Phase 5+)
-var distFullPath = Path.GetFullPath(appConfig.DistDir);
-if (Directory.Exists(distFullPath))
-{
-    app.UseStaticFiles(new StaticFileOptions
-    {
-        FileProvider = new PhysicalFileProvider(distFullPath),
-        RequestPath = "" // Optional: use "" if files are at the root, or "/dist" if they are under a /dist/ URL
-    });
-}
-// SPA fallback
-app.MapFallback(ctx =>
+// Signed download/proxy endpoints (/d/, /p/) — public, HMAC-verified
+app.MapSignApi();
+// TODO: MapShareApi, MapSharingDownloadApi (Phase 5+)
+// SPA fallback — matches ALL unmatched paths (including those with file extensions),
+// mirroring Go's NoRoute catch-all. The default MapFallback uses {*path:nonfile}
+// which excludes paths with extensions (e.g. /somefile.txt) and returns 404.
+app.MapFallback("{*path}", ctx =>
 {
     var distDir = appConfig.DistDir;
     var indexPath = Path.Combine(distDir, "index.html");
     if (File.Exists(indexPath))
     {
         ctx.Response.ContentType = "text/html";
-        // 🚨 Prevent caching of index.html so users always get the latest app shell
+        // Prevent caching of index.html so users always get the latest app shell
         ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
         ctx.Response.Headers.Pragma = "no-cache";
         ctx.Response.Headers.Expires = "0";
 
-        // await ctx.Response.SendFileAsync(indexPath);
         return ctx.Response.SendFileAsync(indexPath);
     }
     ctx.Response.StatusCode = 404;

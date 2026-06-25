@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using OpenList.Core.Models;
 
 namespace OpenList.Core.Interfaces;
@@ -31,6 +32,9 @@ public sealed class CreateUserReq
 
 public sealed class UpdateUserReq
 {
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
     public string? Username { get; set; }
     public string? Password { get; set; }
     public UserRole? Role { get; set; }

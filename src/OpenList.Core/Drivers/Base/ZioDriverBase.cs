@@ -25,6 +25,36 @@ public abstract class ZioDriverBase : IDisposable, IAsyncDisposable
     /// <summary>Whether the driver requires network access (cloud drivers).</summary>
     public virtual bool IsCloudDriver => false;
 
+    /// <summary>Whether the driver sorts files locally (adds order_by/order_direction fields).</summary>
+    public virtual bool LocalSort => false;
+
+    /// <summary>Whether the driver only supports proxy access (forces native_proxy webdav_policy).</summary>
+    public virtual bool OnlyProxy => false;
+
+    /// <summary>Whether the driver disables caching (hides cache_expiration field).</summary>
+    public virtual bool NoCache => false;
+
+    /// <summary>Whether the driver disables uploads.</summary>
+    public virtual bool NoUpload => false;
+
+    /// <summary>Whether the driver needs a message round-trip (e.g. validation code).</summary>
+    public virtual bool NeedMs => false;
+
+    /// <summary>Default root path/id used when root_folder_* is empty.</summary>
+    public virtual string DefaultRoot => string.Empty;
+
+    /// <summary>Alert message shown in the driver config UI (use '|' to split status|message).</summary>
+    public virtual string Alert => string.Empty;
+
+    /// <summary>Whether the driver only stores file indices (e.g. UrlTree).</summary>
+    public virtual bool OnlyIndices => false;
+
+    /// <summary>Whether the driver prefers proxy download even if a direct link is available.</summary>
+    public virtual bool PreferProxy => false;
+
+    /// <summary>Whether the driver supports range proxy (adds proxy_range field).</summary>
+    public virtual bool ProxyRangeOption => false;
+
     /// <summary>Driver-specific configuration parsed from <c>Storage.Addition</c> JSON.</summary>
     public abstract Task InitAsync(DriverConfig config, CancellationToken ct = default);
 

@@ -17,8 +17,16 @@ namespace OpenList.Infrastructure.Services;
 public sealed class FileSystemService : IFileSystemService
 {
     private readonly ZioMountService _mount;
+    private readonly ISignService? _signs;
 
     public FileSystemService(ZioMountService mount) => _mount = mount;
+
+    /// <summary>Constructor with sign service for generating raw_url in GetAsync.</summary>
+    public FileSystemService(ZioMountService mount, ISignService signs)
+    {
+        _mount = mount;
+        _signs = signs;
+    }
 
     public Task<Resp<FsListResp>> ListAsync(FsListReq req, User user, CancellationToken ct = default)
     {
@@ -36,8 +44,10 @@ public sealed class FileSystemService : IFileSystemService
             .ToList();
 
         var total = entries.Count;
+        // Mirror Go's PageReq.Validate(): page<1 → 1; per_page<1 → int.MaxValue (return all).
+        // The frontend may omit per_page (defaults to 0), in which case all entries should be returned.
         var page = Math.Max(1, req.Page);
-        var perPage = Math.Max(1, req.PerPage);
+        var perPage = req.PerPage < 1 ? int.MaxValue : req.PerPage;
         var paged = entries.Skip((page - 1) * perPage).Take(perPage).ToList();
 
         var driver = _mount.FindDriverForPath(req.Path);
@@ -76,7 +86,27 @@ public sealed class FileSystemService : IFileSystemService
             resp.Created = obj.Created;
             resp.Type = obj.Type;
         }
+        // For files, generate a raw_url pointing to the signed /p/ proxy endpoint.
+        // This is what the frontend uses as the media source for video/audio/pdf preview.
+        if (isFile && _signs is not null)
+        {
+            resp.RawUrl = BuildRawUrl(req.Path);
+        }
         return Task.FromResult(Resp<FsGetResp>.Ok(resp));
+    }
+
+    /// <summary>
+    /// Builds a signed proxy URL: /p/{path}?sign={hmac}. Path segments are URL-encoded
+    /// individually so that '/' separators are preserved (needed for ASP.NET catch-all routing).
+    /// </summary>
+    private string BuildRawUrl(string path)
+    {
+        var sign = _signs!.Sign(path);
+        // Encode each segment separately to preserve '/' as path separators.
+        // Leading '/' produces an empty first segment; trim it to avoid a double slash.
+        var segments = path.Split('/').SkipWhile(string.IsNullOrEmpty).Select(Uri.EscapeDataString);
+        var encoded = string.Join('/', segments);
+        return $"/p/{encoded}?sign={Uri.EscapeDataString(sign)}";
     }
 
     public Task<Resp> MkdirAsync(string path, User user, CancellationToken ct = default)
@@ -329,8 +359,9 @@ public sealed class FileSystemService : IFileSystemService
         var results = new List<Obj>();
         SearchRecursive(parent, req.Keywords, req.Recursive, results);
         var total = results.Count;
+        // Mirror Go's PageReq.Validate(): page<1 → 1; per_page<1 → int.MaxValue (return all).
         var page = Math.Max(1, req.Page);
-        var perPage = Math.Max(1, req.PerPage);
+        var perPage = req.PerPage < 1 ? int.MaxValue : req.PerPage;
         var paged = results.Skip((page - 1) * perPage).Take(perPage).ToList();
         return Task.FromResult(Resp<SearchResp>.Ok(new SearchResp { Content = paged, Total = total }));
     }
@@ -354,9 +385,43 @@ public sealed class FileSystemService : IFileSystemService
             Size = isDir ? 0 : (entry as FileEntry)?.Length ?? 0,
             Modified = entry.LastWriteTime,
             Created = entry.CreationTime,
-            Type = isDir ? 1 : 0,
+            Type = GetObjType(entry.Name, isDir),
         };
     }
+
+    // Mirror Go's conf const iota: UNKNOWN=0, FOLDER=1, VIDEO=2, AUDIO=3, TEXT=4, IMAGE=5.
+    // The frontend uses obj.type to pick the preview component (video player, image viewer, etc.).
+    private const int TypeUnknown = 0;
+    private const int TypeFolder = 1;
+    private const int TypeVideo = 2;
+    private const int TypeAudio = 3;
+    private const int TypeText = 4;
+    private const int TypeImage = 5;
+
+    // Default extension lists from Go's internal/bootstrap/data/setting.go.
+    private static readonly HashSet<string> AudioExts = new(StringComparer.OrdinalIgnoreCase)
+        { "mp3", "flac", "ogg", "m4a", "wav", "opus", "wma" };
+    private static readonly HashSet<string> VideoExts = new(StringComparer.OrdinalIgnoreCase)
+        { "mp4", "mkv", "avi", "mov", "rmvb", "webm", "flv", "m3u8" };
+    private static readonly HashSet<string> ImageExts = new(StringComparer.OrdinalIgnoreCase)
+        { "jpg", "tiff", "jpeg", "png", "gif", "bmp", "svg", "ico", "swf", "webp", "avif" };
+    private static readonly HashSet<string> TextExts = new(StringComparer.OrdinalIgnoreCase)
+        { "txt", "htm", "html", "xml", "java", "properties", "sql", "js", "md", "json", "conf", "ini", "vue", "php", "py", "bat", "gitignore", "yml", "go", "sh", "c", "cpp", "h", "hpp", "tsx", "vtt", "srt", "ass", "rs", "lrc", "strm" };
+
+    private static int GetFileType(string name)
+    {
+        var dot = name.LastIndexOf('.');
+        if (dot < 0 || dot == name.Length - 1) return TypeUnknown;
+        var ext = name[(dot + 1)..];
+        if (AudioExts.Contains(ext)) return TypeAudio;
+        if (VideoExts.Contains(ext)) return TypeVideo;
+        if (ImageExts.Contains(ext)) return TypeImage;
+        if (TextExts.Contains(ext)) return TypeText;
+        return TypeUnknown;
+    }
+
+    private static int GetObjType(string name, bool isDir)
+        => isDir ? TypeFolder : GetFileType(name);
 
     private void CollectDirs(UPath path, List<string> dirs, int maxDepth)
     {

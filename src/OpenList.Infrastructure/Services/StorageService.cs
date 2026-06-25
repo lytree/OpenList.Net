@@ -23,7 +23,7 @@ public sealed class StorageService : IStorageService
         _time = time ?? TimeProvider.System;
     }
 
-    public async Task<Resp<List<StorageWithDriver>>> ListAsync(CancellationToken ct = default)
+    public async Task<Resp<PageResp<StorageWithDriver>>> ListAsync(CancellationToken ct = default)
     {
         var list = await _db.Storages.AsNoTracking()
             .OrderBy(s => s.Order).ThenBy(s => s.Id)
@@ -37,11 +37,13 @@ public sealed class StorageService : IStorageService
             Order = s.Order,
             Disabled = s.Disabled,
             Remark = s.Remark,
+            Status = s.Status,
             CreatedAt = s.CreatedAt,
             UpdatedAt = s.UpdatedAt,
             DriverName = _mount.GetDriverName(s.Driver),
         }).ToList();
-        return Resp<List<StorageWithDriver>>.Ok(result);
+        var page = new PageResp<StorageWithDriver> { Content = result, Total = result.Count };
+        return Resp<PageResp<StorageWithDriver>>.Ok(page);
     }
 
     public async Task<Resp<StorageWithDriver>> GetAsync(long id, CancellationToken ct = default)
@@ -57,6 +59,7 @@ public sealed class StorageService : IStorageService
             Order = s.Order,
             Disabled = s.Disabled,
             Remark = s.Remark,
+            Status = s.Status,
             CreatedAt = s.CreatedAt,
             UpdatedAt = s.UpdatedAt,
             DriverName = _mount.GetDriverName(s.Driver),
@@ -154,60 +157,150 @@ public sealed class StorageService : IStorageService
         return Resp.Ok();
     }
 
-    public Task<Resp<List<DriverInfo>>> ListDriversAsync(CancellationToken ct = default)
+    public Task<Resp<Dictionary<string, DriverInfo>>> ListDriversAsync(CancellationToken ct = default)
     {
-        var infos = _mount.DiscoverDriverTypes()
-            .Select(t => Activator.CreateInstance(t) as ZioDriverBase)
-            .Where(d => d is not null)
-            .Select(d => new DriverInfo
-            {
-                Name = d!.DriverName,
-                ReadOnly = d.ReadOnly,
-                IsCloudDriver = d.IsCloudDriver,
-                Config = d.ConfigItems.Select(c => new DriverConfigField
-                {
-                    Name = c.Name,
-                    Help = c.Help,
-                    Required = c.Required,
-                    Options = c.Options,
-                    ValueType = c.ValueType,
-                    Default = c.Default,
-                }).ToList(),
-            }).ToList();
-        return Task.FromResult(Resp<List<DriverInfo>>.Ok(infos));
+        var map = new Dictionary<string, DriverInfo>(StringComparer.Ordinal);
+        foreach (var d in EnumerateDrivers())
+        {
+            map[d.DriverName] = BuildDriverInfo(d);
+        }
+        return Task.FromResult(Resp<Dictionary<string, DriverInfo>>.Ok(map));
     }
 
     public Task<Resp<List<string>>> ListDriverNamesAsync(CancellationToken ct = default)
     {
-        var names = _mount.DiscoverDriverTypes()
-            .Select(t => Activator.CreateInstance(t) as ZioDriverBase)
-            .Where(d => d is not null)
-            .Select(d => d!.DriverName)
-            .ToList();
+        var names = EnumerateDrivers().Select(d => d.DriverName).ToList();
         return Task.FromResult(Resp<List<string>>.Ok(names));
     }
 
     public Task<Resp<DriverInfo>> GetDriverInfoAsync(string driverName, CancellationToken ct = default)
     {
-        var type = _mount.DiscoverDriverTypes()
-            .FirstOrDefault(t => (Activator.CreateInstance(t) as ZioDriverBase)?.DriverName.Equals(driverName, StringComparison.OrdinalIgnoreCase) == true);
-        if (type is null) return Task.FromResult(Resp<DriverInfo>.Fail("driver not found", RespCodes.NotFound));
-        var d = (ZioDriverBase)Activator.CreateInstance(type)!;
-        return Task.FromResult(Resp<DriverInfo>.Ok(new DriverInfo
+        var d = EnumerateDrivers().FirstOrDefault(x => x.DriverName.Equals(driverName, StringComparison.OrdinalIgnoreCase));
+        if (d is null) return Task.FromResult(Resp<DriverInfo>.Fail("driver not found", RespCodes.NotFound));
+        return Task.FromResult(Resp<DriverInfo>.Ok(BuildDriverInfo(d)));
+    }
+
+    private IEnumerable<ZioDriverBase> EnumerateDrivers() => _mount.DiscoverDriverTypes()
+        .Select(t => Activator.CreateInstance(t) as ZioDriverBase)
+        .Where(d => d is not null)
+        .Select(d => d!)!;
+
+    /// <summary>
+    /// Builds the <see cref="DriverInfo"/> (common + additional + config) for a driver.
+    /// Mirrors OpenList Go <c>op.getMainItems</c> + <c>op.getAdditionalItems</c>.
+    /// </summary>
+    private static DriverInfo BuildDriverInfo(ZioDriverBase d)
+    {
+        return new DriverInfo
         {
-            Name = d.DriverName,
-            ReadOnly = d.ReadOnly,
-            IsCloudDriver = d.IsCloudDriver,
-            Config = d.ConfigItems.Select(c => new DriverConfigField
+            Common = BuildCommonItems(d),
+            Additional = BuildAdditionalItems(d),
+            Config = new DriverInfoConfig
+            {
+                Name = d.DriverName,
+                LocalSort = d.LocalSort,
+                OnlyProxy = d.OnlyProxy,
+                NoCache = d.NoCache,
+                NoUpload = d.NoUpload,
+                NeedMs = d.NeedMs,
+                DefaultRoot = d.DefaultRoot,
+                Alert = d.Alert,
+                OnlyIndices = d.OnlyIndices,
+                PreferProxy = d.PreferProxy,
+            },
+        };
+    }
+
+    private static List<DriverInfoItem> BuildCommonItems(ZioDriverBase d)
+    {
+        var items = new List<DriverInfoItem>
+        {
+            new() { Name = "mount_path", Type = "string", Required = true, Help = "The path you want to mount to, it is unique and cannot be repeated" },
+            new() { Name = "order", Type = "number", Help = "use to sort" },
+            new() { Name = "remark", Type = "text" },
+        };
+
+        if (!d.NoCache)
+        {
+            items.Add(new() { Name = "cache_expiration", Type = "number", Default = "30", Required = true, Help = "The cache expiration time for this storage" });
+            items.Add(new() { Name = "custom_cache_policies", Type = "text", Default = "", Help = "The cache expiration rules for this storage" });
+        }
+
+        var mustProxy = d.OnlyProxy;
+        if (mustProxy)
+        {
+            items.Add(new() { Name = "webdav_policy", Type = "select", Default = "native_proxy", Options = "use_proxy_url,native_proxy", Required = true });
+        }
+        else
+        {
+            var defaultProxy = d.PreferProxy;
+            items.Add(new() { Name = "web_proxy", Type = "bool", Default = defaultProxy ? "true" : "" });
+            items.Add(new()
+            {
+                Name = "webdav_policy",
+                Type = "select",
+                Options = "302_redirect,use_proxy_url,native_proxy",
+                Default = defaultProxy ? "native_proxy" : "302_redirect",
+                Required = true,
+            });
+            if (d.ProxyRangeOption)
+            {
+                items.Add(new() { Name = "proxy_range", Type = "bool", Help = "Need to enable proxy" });
+            }
+        }
+
+        items.Add(new() { Name = "down_proxy_url", Type = "text" });
+        items.Add(new() { Name = "disable_proxy_sign", Type = "bool", Default = "false", Help = "Disable sign for Download proxy URL" });
+
+        if (d.LocalSort)
+        {
+            items.Add(new() { Name = "order_by", Type = "select", Options = "name,size,modified" });
+            items.Add(new() { Name = "order_direction", Type = "select", Options = "asc,desc" });
+        }
+
+        items.Add(new() { Name = "extract_folder", Type = "select", Options = "front,back" });
+        items.Add(new() { Name = "disable_index", Type = "bool", Default = "false", Required = true });
+        items.Add(new() { Name = "enable_sign", Type = "bool", Default = "false", Required = true });
+        return items;
+    }
+
+    private static List<DriverInfoItem> BuildAdditionalItems(ZioDriverBase d)
+    {
+        var items = new List<DriverInfoItem>();
+        foreach (var c in d.ConfigItems)
+        {
+            var item = new DriverInfoItem
             {
                 Name = c.Name,
-                Help = c.Help,
+                Type = MapTypeName(c.ValueType, c.Options),
+                Default = c.Default?.ToString() ?? string.Empty,
+                Options = c.Options ?? string.Empty,
                 Required = c.Required,
-                Options = c.Options,
-                ValueType = c.ValueType,
-                Default = c.Default,
-            }).ToList(),
-        }));
+                Help = c.Help,
+            };
+            // root_folder_* defaults to DefaultRoot and becomes required when a default exists.
+            if ((item.Name == "root_folder_id" || item.Name == "root_folder_path") && string.IsNullOrEmpty(item.Default))
+            {
+                item.Default = d.DefaultRoot;
+                item.Required = !string.IsNullOrEmpty(d.DefaultRoot);
+            }
+            items.Add(item);
+        }
+        return items;
+    }
+
+    /// <summary>Maps a CLR <see cref="Type"/> to the OpenList frontend type string.</summary>
+    private static string MapTypeName(Type t, string? options)
+    {
+        if (!string.IsNullOrEmpty(options)) return "select";
+        var code = Type.GetTypeCode(t);
+        return code switch
+        {
+            TypeCode.Boolean => "bool",
+            TypeCode.Int32 or TypeCode.Int64 or TypeCode.Int16 or TypeCode.Byte => "number",
+            TypeCode.Single or TypeCode.Double or TypeCode.Decimal => "float",
+            _ => "string",
+        };
     }
 
     private static string? Validate(CreateStorageReq req)

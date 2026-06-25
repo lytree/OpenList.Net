@@ -26,8 +26,8 @@ public static class AdminEndpoints
         g.MapPost("/storage/create", async (CreateStorageReq req, IStorageService svc) =>
             Results.Ok(await svc.CreateAsync(req)));
 
-        g.MapPost("/storage/update", async (long id, CreateStorageReq req, IStorageService svc) =>
-            Results.Ok(await svc.UpdateAsync(id, req)));
+        g.MapPost("/storage/update", async (CreateStorageReq req, IStorageService svc) =>
+            Results.Ok(await svc.UpdateAsync(req.Id, req)));
 
         g.MapPost("/storage/delete", async (long id, IStorageService svc) =>
             Results.Ok(await svc.DeleteAsync(id)));
@@ -61,8 +61,8 @@ public static class AdminEndpoints
         g.MapPost("/user/create", async (CreateUserReq req, IUserService users) =>
             Results.Ok(await users.CreateAsync(req)));
 
-        g.MapPost("/user/update", async (long id, UpdateUserReq req, IUserService users) =>
-            Results.Ok(await users.UpdateAsync(id, req)));
+        g.MapPost("/user/update", async (UpdateUserReq req, IUserService users) =>
+            Results.Ok(await users.UpdateAsync(req.Id, req)));
 
         g.MapPost("/user/cancel_2fa", async (long id, IUserService users) =>
             Results.Ok(await users.Cancel2FaAsync(id)));

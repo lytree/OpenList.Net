@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using OpenList.Core.Models;
 
 namespace OpenList.Core.Interfaces;
@@ -38,6 +39,7 @@ public sealed class FsListReq
     public string? Password { get; set; }
     public bool Refresh { get; set; }
     public int Page { get; set; } = 1;
+    [JsonPropertyName("per_page")]
     public int PerPage { get; set; } = 30;
 }
 
@@ -59,6 +61,7 @@ public sealed class FsGetReq
 
 public sealed class FsGetResp : Obj
 {
+    [JsonPropertyName("raw_url")]
     public string? RawUrl { get; set; }
     public string? Readme { get; set; }
     public string? Header { get; set; }
@@ -115,6 +118,7 @@ public sealed class SearchReq
     public string Keywords { get; set; } = string.Empty;
     public bool Recursive { get; set; } = true;
     public int Page { get; set; } = 1;
+    [JsonPropertyName("per_page")]
     public int PerPage { get; set; } = 30;
 }
 

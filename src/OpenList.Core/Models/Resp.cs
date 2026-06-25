@@ -20,6 +20,16 @@ public sealed class Resp<T> : Resp
     public static new Resp<T> Fail(string message, int code = 500) => new() { Code = code, Message = message, Data = default };
 }
 
+/// <summary>
+/// Paginated response payload. Mirrors Go <c>common.PageResp</c>.
+/// Serializes to <c>{ "content": [...], "total": N }</c>.
+/// </summary>
+public sealed class PageResp<T>
+{
+    public List<T> Content { get; set; } = [];
+    public long Total { get; set; }
+}
+
 public static class RespCodes
 {
     public const int Ok = 200;

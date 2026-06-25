@@ -59,6 +59,7 @@ public static class DbInitializer
         var additions = new (string Table, string Column, string Decl)[]
         {
             ("x_users", "AllowLdap", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_storages", "Status", "TEXT NOT NULL DEFAULT 'work'"),
         };
 
         foreach (var (table, column, decl) in additions)
@@ -104,7 +105,12 @@ public static class DbInitializer
     private static async Task SeedAdminAsync(OpenListDbContext db, AppConfiguration config, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
-        var desiredHash = UserService.HashPassword(config.AdminPassword);
+        // Only override the password when a non-empty value is provided in config.
+        // An empty AdminPassword means "leave the existing password untouched".
+        var hasConfigPassword = !string.IsNullOrWhiteSpace(config.AdminPassword);
+        var desiredHash = hasConfigPassword
+            ? UserService.HashPassword(config.AdminPassword)
+            : null;
 
         // The config-defined super admin: identified by the configured username.
         // On every startup we reconcile it with the configuration so that changing
@@ -124,7 +130,7 @@ public static class DbInitializer
             db.Users.Add(new User
             {
                 Username = config.AdminUsername,
-                PasswordHash = desiredHash,
+                PasswordHash = desiredHash ?? UserService.HashPassword("admin"),
                 Role = UserRole.Admin,
                 Permission = 0,
                 Disabled = false,
@@ -136,7 +142,9 @@ public static class DbInitializer
         {
             // Sync credentials + role from config on every startup.
             admin.Username = config.AdminUsername;
-            admin.PasswordHash = desiredHash;
+            // Only overwrite the password when config provides a non-empty value.
+            if (desiredHash is not null)
+                admin.PasswordHash = desiredHash;
             admin.Role = UserRole.Admin;
             admin.Disabled = false;
             admin.UpdatedAt = now;

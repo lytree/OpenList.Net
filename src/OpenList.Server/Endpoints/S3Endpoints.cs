@@ -59,7 +59,7 @@ public static class S3Endpoints
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
 
         var storages = await storageSvc.ListAsync(ctx.RequestAborted);
-        var buckets = storages.Data?
+        var buckets = storages.Data?.Content
             .Where(s => !s.Disabled)
             .Select(s => new S3Bucket
             {

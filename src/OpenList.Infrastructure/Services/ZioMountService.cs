@@ -30,8 +30,28 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
     /// <summary>Currently mounted drivers keyed by mount path.</summary>
     public IReadOnlyDictionary<string, ZioDriverBase> Mounted => _mounted;
 
+    /// <summary>
+    /// Ensures the <c>OpenList.Drivers</c> assembly is loaded into the AppDomain.
+    /// The assembly is referenced only at the project level (no direct type usage in
+    /// Server/Infrastructure), so the CLR won't load it on demand — we must load it
+    /// explicitly before scanning for <see cref="ZioDriverBase"/> subclasses.
+    /// </summary>
+    private static void EnsureDriverAssembliesLoaded()
+    {
+        var loaded = new HashSet<string>(AppDomain.CurrentDomain.GetAssemblies()
+            .Select(a => a.GetName().Name ?? string.Empty), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in new[] { "OpenList.Drivers", "OpenList.Core" })
+        {
+            if (loaded.Contains(name)) continue;
+            try { AppDomain.CurrentDomain.Load(new AssemblyName(name)); }
+            catch { /* assembly may not be present in this host */ }
+        }
+    }
+
     public IEnumerable<Type> DiscoverDriverTypes()
     {
+        EnsureDriverAssembliesLoaded();
         return AppDomain.CurrentDomain.GetAssemblies()
             .Where(a => a.GetName().Name?.StartsWith("OpenList", StringComparison.OrdinalIgnoreCase) == true)
             .SelectMany(SafeGetTypes)
