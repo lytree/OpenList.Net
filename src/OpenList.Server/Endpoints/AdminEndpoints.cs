@@ -167,6 +167,69 @@ public static class AdminEndpoints
             return Results.Ok(r);
         });
 
+        // --- Offline-download-tool config routes ---
+        // Each route mirrors the Go /admin/setting/set_{tool} endpoints used by the
+        // frontend's Other.tsx. They accept a tool-specific body and persist the
+        // values via SaveAsync under the canonical setting keys.
+        g.MapPost("/setting/set_aria2", async (SetAria2Req req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "aria2_uri", Value = req.Uri ?? "" },
+                new() { Key = "aria2_secret", Value = req.Secret ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_qbit", async (SetQbitReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "qbittorrent_url", Value = req.Url ?? "" },
+                new() { Key = "qbittorrent_seedtime", Value = req.Seedtime ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_transmission", async (SetTransmissionReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "transmission_uri", Value = req.Uri ?? "" },
+                new() { Key = "transmission_seedtime", Value = req.Seedtime ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_123_pan", async (SetTempDirReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "123_pan_temp_dir", Value = req.TempDir ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_115", async (SetTempDirReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "115_temp_dir", Value = req.TempDir ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_115_open", async (SetTempDirReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "115_open_temp_dir", Value = req.TempDir ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_123_open", async (Set123OpenReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "123_open_temp_dir", Value = req.TempDir ?? "" },
+                new() { Key = "123_open_callback_url", Value = req.CallbackUrl ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_pikpak", async (SetTempDirReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "pikpak_temp_dir", Value = req.TempDir ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_thunder", async (SetTempDirReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "thunder_temp_dir", Value = req.TempDir ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_thunderx", async (SetTempDirReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "thunderx_temp_dir", Value = req.TempDir ?? "" },
+            ])));
+
+        g.MapPost("/setting/set_thunder_browser", async (SetTempDirReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "thunder_browser_temp_dir", Value = req.TempDir ?? "" },
+            ])));
+
         // --- Meta management ---
         // Mirrors the frontend's Metas.tsx / AddOrEdit.tsx:
         //   GET    /admin/meta/list              -> { content, total }
@@ -282,3 +345,10 @@ public sealed class SetPasswordReq { public long Id { get; set; } public string 
 public sealed class CreateMessageReq { public long UserId { get; set; } public string Title { get; set; } = ""; public string Content { get; set; } = ""; }
 public sealed class ScanStartReq { public string? Path { get; set; } public double Limit { get; set; } }
 public sealed class IndexBuildReq { public List<string>? Paths { get; set; } public int MaxDepth { get; set; } = -1; }
+
+// --- Offline-download-tool config request DTOs (frontend Other.tsx) ---
+public sealed class SetAria2Req { public string? Uri { get; set; } public string? Secret { get; set; } }
+public sealed class SetQbitReq { public string? Url { get; set; } public string? Seedtime { get; set; } }
+public sealed class SetTransmissionReq { public string? Uri { get; set; } public string? Seedtime { get; set; } }
+public sealed class SetTempDirReq { public string? TempDir { get; set; } }
+public sealed class Set123OpenReq { public string? TempDir { get; set; } public string? CallbackUrl { get; set; } }

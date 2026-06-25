@@ -41,6 +41,17 @@ public static class AuthEndpoints
                 : Results.Ok(new { code = r.Code, message = r.Message, data = (object?)null });
         }).AllowAnonymous();
 
+        // POST /api/auth/login/ldap — LDAP login. Same body as /login/hash.
+        // The frontend's login page toggles this when the user enables LDAP mode.
+        // The service currently returns 501 until an LDAP backend is wired up.
+        g.MapPost("/login/ldap", async (LoginReq req, IAuthService auth) =>
+        {
+            var r = await auth.LoginLdapAsync(req.Username, req.Password);
+            return r.Code == 200
+                ? Results.Ok(new { code = 200, message = "success", data = new { token = r.Data } })
+                : Results.Ok(new { code = r.Code, message = r.Message, data = (object?)null });
+        }).AllowAnonymous();
+
         g.MapPost("/logout", async (HttpContext ctx, IAuthService auth) =>
         {
             var token = ExtractToken(ctx);
@@ -110,6 +121,7 @@ public static class AuthnEndpoints
     {
         var g = app.MapGroup("/api/authn").WithTags("Authn");
 
+        // Legacy snake_case routes (kept for back-compat with older clients).
         g.MapPost("/begin/register", () => Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
          .RequireAuthorization();
         g.MapPost("/finish/register", () => Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
@@ -118,6 +130,28 @@ public static class AuthnEndpoints
          .AllowAnonymous();
         g.MapPost("/finish/login", () => Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
          .AllowAnonymous();
+
+        // Frontend-facing routes (login/index.tsx + users/Profile.tsx +
+        // users/Webauthnitems.tsx). All return 501 until a WebAuthn backend
+        // (Fido2NetLib) is wired up; registering them avoids 404s on the client.
+        g.MapGet("/webauthn_begin_login", () =>
+            Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
+         .AllowAnonymous();
+        g.MapGet("/webauthn_begin_registration", () =>
+            Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
+         .RequireAuthorization();
+        g.MapPost("/webauthn_finish_registration", () =>
+            Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
+         .RequireAuthorization();
+        g.MapPost("/webauthn_finish_login", () =>
+            Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
+         .AllowAnonymous();
+        g.MapPost("/delete_authn", () =>
+            Results.Ok(Resp.Fail("webauthn not implemented", RespCodes.NotImplemented)))
+         .RequireAuthorization();
+        g.MapGet("/getcredentials", () =>
+            Results.Ok(Resp<List<object>>.Ok([])))
+         .RequireAuthorization();
 
         return app;
     }

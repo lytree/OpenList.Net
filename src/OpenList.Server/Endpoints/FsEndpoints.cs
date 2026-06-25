@@ -125,11 +125,26 @@ public static class FsEndpoints
         g.MapPost("/add_offline_download", async (OfflineDownloadReq req, IFileSystemService svc, ClaimsPrincipal user) =>
             Results.Ok(await svc.AddOfflineDownloadAsync(req, user.ToUser())));
 
+        // POST /fs/other — driver-specific operations (e.g. aliyun video_preview).
+        // Body: { path, password, method, ... }. Delegates to
+        // IFileSystemService.OtherAsync(path, method); drivers that don't override
+        // it return 501 so the frontend shows "unsupported" cleanly.
+        g.MapPost("/other", async (FsOtherReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+            Results.Ok(await svc.OtherAsync(req.Path, req.Method ?? "", user.ToUser())));
+
         // --- Torrent endpoints (Phase 6 — not yet implemented, return 501) ---
+        // Route names match the Go reference + frontend api.ts:
+        //   /fs/torrent/parse         (POST, body: { torrent_data })
+        //   /fs/torrent/upload_parse  (POST, multipart "torrent")
+        //   /fs/torrent/rapid_upload  (POST, body: { torrent_data, path })
+        // Legacy /torrent/list|info|add|cancel stubs retained for older clients.
         g.MapGet("/torrent/list", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
         g.MapGet("/torrent/info", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
         g.MapPost("/torrent/add", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
         g.MapPost("/torrent/cancel", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
+        g.MapPost("/torrent/parse", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
+        g.MapPost("/torrent/upload_parse", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
+        g.MapPost("/torrent/rapid_upload", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
 
         return app;
     }
@@ -169,3 +184,4 @@ public sealed class ArchiveListReq { public string Path { get; set; } = ""; publ
 public sealed class ArchiveDecompressReq { public string Path { get; set; } = ""; public string DestPath { get; set; } = ""; public string? Password { get; set; } }
 public sealed class DirectUploadInfoReq { public string Path { get; set; } = ""; public string? FileName { get; set; } public long FileSize { get; set; } public string? Tool { get; set; } }
 public sealed class RecursiveMoveReq { public string SrcDir { get; set; } = ""; public string DstDir { get; set; } = ""; }
+public sealed class FsOtherReq { public string Path { get; set; } = "/"; public string? Password { get; set; } public string? Method { get; set; } }
