@@ -1,18 +1,34 @@
+using System.Runtime.Serialization;
+using System.Text.Json.Serialization;
+
 namespace OpenList.Core.Models;
 
+/// <summary>
+/// Setting value type. Serialized as lowercase string to match the frontend
+/// <c>Type</c> enum (string/select/bool/text/number/float/multipath).
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SettingValueType : int
 {
-    String = 0,
-    Number = 1,
-    Bool = 2,
-    Select = 3,
+    [EnumMember(Value = "string")] String = 0,
+    [EnumMember(Value = "number")] Number = 1,
+    [EnumMember(Value = "bool")] Bool = 2,
+    [EnumMember(Value = "select")] Select = 3,
+    [EnumMember(Value = "text")] Text = 4,
+    [EnumMember(Value = "float")] Float = 5,
+    [EnumMember(Value = "multipath")] MultiPath = 6,
 }
 
+/// <summary>
+/// Setting visibility/permission flag. Serialized as int to match the frontend
+/// <c>Flag</c> enum (0=PUBLIC, 1=PRIVATE, 2=READONLY, 3=DEPRECATED).
+/// </summary>
 public enum SettingFlag : int
 {
     Public = 0,
     Private = 1,
     Readonly = 2,
+    Deprecated = 3,
 }
 
 public sealed class SettingItem

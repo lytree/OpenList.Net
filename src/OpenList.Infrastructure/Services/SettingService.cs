@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
@@ -12,12 +13,14 @@ namespace OpenList.Infrastructure.Services;
 public sealed class SettingService : ISettingService
 {
     private readonly OpenListDbContext _db;
+    private readonly AppConfiguration _appConfig;
     private readonly TimeProvider _time;
     private List<SettingItem>? _cache;
 
-    public SettingService(OpenListDbContext db, TimeProvider? time = null)
+    public SettingService(OpenListDbContext db, AppConfiguration appConfig, TimeProvider? time = null)
     {
         _db = db;
+        _appConfig = appConfig;
         _time = time ?? TimeProvider.System;
     }
 
@@ -70,15 +73,43 @@ public sealed class SettingService : ISettingService
         return Resp.Ok();
     }
 
-    public Task<Resp> DefaultAsync(CancellationToken ct = default)
+    public async Task<Resp> DefaultAsync(string? group = null, CancellationToken ct = default)
     {
-        // Restore default settings — placeholder; full implementation in Phase 14.
-        return Task.FromResult(Resp.Ok());
+        // Restore default values for settings in the given group (or all if null).
+        // Mirrors Go setting/default?group=. Settings not in DefaultSettings are left
+        // untouched (they're user-defined keys like storage driver configs).
+        var defaults = DbInitializer.DefaultSettings;
+        if (!string.IsNullOrEmpty(group))
+            defaults = defaults.Where(d => string.Equals(d.Group, group, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (defaults.Length == 0) return Resp.Ok();
+
+        var keys = defaults.Select(d => d.Key).ToHashSet();
+        var items = await _db.Settings.Where(s => keys.Contains(s.Key)).ToListAsync(ct);
+        var byKey = items.ToDictionary(s => s.Key);
+        foreach (var (key, value, _, _, _) in defaults)
+        {
+            if (byKey.TryGetValue(key, out var item))
+                item.Value = value;
+        }
+        await _db.SaveChangesAsync(ct);
+        _cache = null;
+        return Resp.Ok();
     }
 
     public Task<Resp> ResetTokenAsync(CancellationToken ct = default)
     {
-        // Reset JWT token — placeholder; full implementation in Phase 14.
+        // Rotate the JWT signing secret. Updates the singleton AppConfiguration
+        // (shared by JwtService + SignService, which read it per-call) and persists
+        // the new secret to <dataDir>/jwt_secret so it survives restarts. Existing
+        // tokens become invalid immediately; the caller (AdminEndpoints) is
+        // responsible for also updating the bearer validation parameters so the
+        // middleware validates against the new secret.
+        var newSecret = (Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"))[..32];
+        _appConfig.JwtSecret = newSecret;
+
+        var dataDir = Path.GetDirectoryName(Path.GetFullPath(_appConfig.Database.DBFile)) ?? AppContext.BaseDirectory;
+        Directory.CreateDirectory(dataDir);
+        File.WriteAllText(Path.Combine(dataDir, "jwt_secret"), newSecret);
         return Task.FromResult(Resp.Ok());
     }
 

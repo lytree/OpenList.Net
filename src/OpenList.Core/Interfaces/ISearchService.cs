@@ -8,8 +8,10 @@ namespace OpenList.Core.Interfaces;
 /// </summary>
 public interface ISearchService
 {
-    Task<Resp> BuildIndexAsync(CancellationToken ct = default);
-    Task<Resp> UpdateIndexAsync(string path, CancellationToken ct = default);
+    /// <summary>Full rebuild of the search index. paths defaults to ["/"], maxDepth -1 = unlimited.</summary>
+    Task<Resp> BuildIndexAsync(IReadOnlyList<string> paths, int maxDepth, CancellationToken ct = default);
+    /// <summary>Incremental update for the given paths.</summary>
+    Task<Resp> UpdateIndexAsync(IReadOnlyList<string> paths, int maxDepth, CancellationToken ct = default);
     Task<Resp> StopIndexAsync(CancellationToken ct = default);
     Task<Resp> ClearIndexAsync(CancellationToken ct = default);
     Task<Resp<IndexProgress>> GetProgressAsync(CancellationToken ct = default);
@@ -23,4 +25,8 @@ public sealed class IndexProgress
     public long Total { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
+    /// <summary>Timestamp of the last successful build/update completion (persisted).</summary>
+    public DateTimeOffset? LastDoneTime { get; set; }
+    /// <summary>Error message from the last run (empty if none).</summary>
+    public string Error { get; set; } = string.Empty;
 }

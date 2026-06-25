@@ -18,15 +18,24 @@ public sealed class MetaService : IMetaService
     public async Task<Resp<List<Meta>>> ListAsync(CancellationToken ct = default)
     {
         var list = await _db.Metas.AsNoTracking().OrderBy(m => m.Path).ToListAsync(ct);
+        foreach (var m in list) m.Hydrate();
         return Resp<List<Meta>>.Ok(list);
     }
 
     public async Task<Resp<Meta>> GetAsync(string path, CancellationToken ct = default)
     {
         var meta = await _db.Metas.AsNoTracking().FirstOrDefaultAsync(m => m.Path == path, ct);
-        return meta is null
-            ? Resp<Meta>.Fail("meta not found", RespCodes.NotFound)
-            : Resp<Meta>.Ok(meta);
+        if (meta is null) return Resp<Meta>.Fail("meta not found", RespCodes.NotFound);
+        meta.Hydrate();
+        return Resp<Meta>.Ok(meta);
+    }
+
+    public async Task<Resp<Meta>> GetByIdAsync(long id, CancellationToken ct = default)
+    {
+        var meta = await _db.Metas.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+        if (meta is null) return Resp<Meta>.Fail("meta not found", RespCodes.NotFound);
+        meta.Hydrate();
+        return Resp<Meta>.Ok(meta);
     }
 
     public async Task<Resp<Meta>> CreateAsync(Meta meta, CancellationToken ct = default)
@@ -37,6 +46,7 @@ public sealed class MetaService : IMetaService
         if (await _db.Metas.AnyAsync(m => m.Path == meta.Path, ct))
             return Resp<Meta>.Fail("meta already exists", RespCodes.Conflict);
 
+        meta.SyncJson();
         _db.Metas.Add(meta);
         await _db.SaveChangesAsync(ct);
         return Resp<Meta>.Ok(meta);
@@ -50,14 +60,19 @@ public sealed class MetaService : IMetaService
         existing.Path = meta.Path;
         existing.Password = meta.Password;
         existing.PSub = meta.PSub;
+        existing.ReadUsers = meta.ReadUsers;
+        existing.ReadUsersSub = meta.ReadUsersSub;
+        existing.WriteUsers = meta.WriteUsers;
+        existing.WriteUsersSub = meta.WriteUsersSub;
         existing.Write = meta.Write;
+        existing.WSub = meta.WSub;
         existing.Header = meta.Header;
+        existing.HeaderSub = meta.HeaderSub;
         existing.Readme = meta.Readme;
+        existing.RSub = meta.RSub;
         existing.Hide = meta.Hide;
-        existing.WebdavPolicy = meta.WebdavPolicy;
-        existing.WebdavRead = meta.WebdavRead;
-        existing.WebdavWrite = meta.WebdavWrite;
-        existing.WebdavManagement = meta.WebdavManagement;
+        existing.HideSub = meta.HideSub;
+        existing.SyncJson();
 
         await _db.SaveChangesAsync(ct);
         return Resp.Ok();

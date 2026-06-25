@@ -8,7 +8,7 @@ public interface ISettingService
     Task<Resp<SettingItem>> GetAsync(string key, CancellationToken ct = default);
     Task<Resp> SaveAsync(List<SettingItem> items, CancellationToken ct = default);
     Task<Resp> DeleteAsync(string key, CancellationToken ct = default);
-    Task<Resp> DefaultAsync(CancellationToken ct = default);
+    Task<Resp> DefaultAsync(string? group = null, CancellationToken ct = default);
     Task<Resp> ResetTokenAsync(CancellationToken ct = default);
     Task<Resp<Dictionary<string, string>>> GetPublicAsync(CancellationToken ct = default);
     Task<Resp<string[]>> GetOfflineDownloadToolsAsync(CancellationToken ct = default);

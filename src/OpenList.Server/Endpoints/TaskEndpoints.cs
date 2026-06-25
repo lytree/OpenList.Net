@@ -7,9 +7,9 @@ using OpenList.Server.Models;
 namespace OpenList.Server.Endpoints;
 
 /// <summary>
-/// Task management endpoints: list done/undone, cancel, delete, clear, retry.
-/// Mirrors OpenList Go <c>server/handles/task.go</c>.
-/// All endpoints require authentication.
+/// Task management endpoints. Routes use the frontend's <c>/task/{type}/...</c>
+/// pattern (type in the URL path, not query string). Mirrors OpenList Go
+/// <c>server/handles/task.go</c>. All endpoints require authentication.
 /// </summary>
 public static class TaskEndpoints
 {
@@ -17,29 +17,26 @@ public static class TaskEndpoints
     {
         var g = app.MapGroup("/api/task").WithTags("Task").RequireAuthorization();
 
-        // GET /api/task/undone?type= — list pending/running tasks
-        g.MapGet("/undone", async (HttpContext ctx, ITaskService tasks) =>
+        // GET /api/task/{type}/{done} — list tasks. {done} is "done" or "undone".
+        g.MapGet("/{type}/{done}", async (string type, string done, ITaskService tasks, HttpContext ctx) =>
         {
-            var type = ParseType(ctx.Request.Query["type"]);
-            var r = await tasks.UndoneAsync(type, ctx.RequestAborted);
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
+            var r = done switch
+            {
+                "done" => await tasks.DoneAsync(taskType, ctx.RequestAborted),
+                "undone" => await tasks.UndoneAsync(taskType, ctx.RequestAborted),
+                _ => Resp<List<TaskInfo>>.Fail($"invalid list state: {done}", RespCodes.BadRequest),
+            };
             return Results.Ok(r);
         });
 
-        // GET /api/task/done?type= — list finished tasks (succeeded/failed/canceled)
-        g.MapGet("/done", async (HttpContext ctx, ITaskService tasks) =>
-        {
-            var type = ParseType(ctx.Request.Query["type"]);
-            var r = await tasks.DoneAsync(type, ctx.RequestAborted);
-            return Results.Ok(r);
-        });
-
-        // POST /api/task/info?tid= — get task info
+        // GET /api/task/info?tid= — get task info (no type prefix; searches all types).
         g.MapGet("/info", async (HttpContext ctx, ITaskService tasks) =>
         {
             var tid = ctx.Request.Query["tid"].ToString();
             if (string.IsNullOrEmpty(tid))
                 return Results.Ok(Resp.Fail("tid is required", RespCodes.BadRequest));
-            // Try each task type to find the matching task.
             foreach (TaskType type in Enum.GetValues<TaskType>())
             {
                 var r = await tasks.InfoAsync(type, tid, ctx.RequestAborted);
@@ -48,62 +45,115 @@ public static class TaskEndpoints
             return Results.Ok(Resp<TaskInfo>.Fail("task not found", RespCodes.NotFound));
         });
 
-        // POST /api/task/cancel?tid= — cancel a running task
-        g.MapPost("/cancel", async (HttpContext ctx, ITaskService tasks) =>
+        // POST /api/task/{type}/cancel?tid= — cancel a running task
+        g.MapPost("/{type}/cancel", async (string type, HttpContext ctx, ITaskService tasks) =>
         {
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
             var tid = ctx.Request.Query["tid"].ToString();
             if (string.IsNullOrEmpty(tid))
                 return Results.Ok(Resp.Fail("tid is required", RespCodes.BadRequest));
-            var type = InferType(tid);
-            var r = await tasks.CancelAsync(type, tid, ctx.RequestAborted);
-            return Results.Ok(r);
+            return Results.Ok(await tasks.CancelAsync(taskType, tid, ctx.RequestAborted));
         });
 
-        // POST /api/task/delete?tid= — delete a task
-        g.MapPost("/delete", async (HttpContext ctx, ITaskService tasks) =>
+        // POST /api/task/{type}/delete?tid= — delete a task
+        g.MapPost("/{type}/delete", async (string type, HttpContext ctx, ITaskService tasks) =>
         {
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
             var tid = ctx.Request.Query["tid"].ToString();
             if (string.IsNullOrEmpty(tid))
                 return Results.Ok(Resp.Fail("tid is required", RespCodes.BadRequest));
-            var type = InferType(tid);
-            var r = await tasks.DeleteAsync(type, tid, ctx.RequestAborted);
-            return Results.Ok(r);
+            return Results.Ok(await tasks.DeleteAsync(taskType, tid, ctx.RequestAborted));
         });
 
-        // POST /api/task/clear_done?type= — clear all finished tasks of a type
-        g.MapPost("/clear_done", async (HttpContext ctx, ITaskService tasks) =>
+        // POST /api/task/{type}/retry?tid= — retry a failed/canceled task
+        g.MapPost("/{type}/retry", async (string type, HttpContext ctx, ITaskService tasks) =>
         {
-            var type = ParseType(ctx.Request.Query["type"]);
-            var r = await tasks.ClearAsync(type, ctx.RequestAborted);
-            return Results.Ok(r);
-        });
-
-        // POST /api/task/retry?tid= — retry a failed/canceled task
-        g.MapPost("/retry", async (HttpContext ctx, ITaskService tasks) =>
-        {
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
             var tid = ctx.Request.Query["tid"].ToString();
             if (string.IsNullOrEmpty(tid))
                 return Results.Ok(Resp.Fail("tid is required", RespCodes.BadRequest));
-            var type = InferType(tid);
-            var r = await tasks.RetryAsync(type, tid, ctx.RequestAborted);
-            return Results.Ok(r);
+            return Results.Ok(await tasks.RetryAsync(taskType, tid, ctx.RequestAborted));
+        });
+
+        // POST /api/task/{type}/clear_done — clear all finished tasks of a type
+        g.MapPost("/{type}/clear_done", async (string type, ITaskService tasks, HttpContext ctx) =>
+        {
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
+            return Results.Ok(await tasks.ClearAsync(taskType, ctx.RequestAborted));
+        });
+
+        // POST /api/task/{type}/clear_succeeded — clear only succeeded tasks
+        g.MapPost("/{type}/clear_succeeded", async (string type, ITaskService tasks, HttpContext ctx) =>
+        {
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
+            return Results.Ok(await tasks.ClearSucceededAsync(taskType, ctx.RequestAborted));
+        });
+
+        // POST /api/task/{type}/retry_failed — retry all failed/canceled tasks of a type
+        g.MapPost("/{type}/retry_failed", async (string type, ITaskService tasks, HttpContext ctx) =>
+        {
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
+            return Results.Ok(await tasks.RetryFailedAsync(taskType, ctx.RequestAborted));
+        });
+
+        // POST /api/task/{type}/cancel_some — batch cancel; body is string[] of tids.
+        // Returns { data: { tid: errorMsg, ... } } — empty object means all succeeded.
+        g.MapPost("/{type}/cancel_some", async (string type, List<string> tids, ITaskService tasks, HttpContext ctx) =>
+        {
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
+            return Results.Ok(await tasks.CancelSomeAsync(taskType, tids, ctx.RequestAborted));
+        });
+
+        // POST /api/task/{type}/delete_some — batch delete
+        g.MapPost("/{type}/delete_some", async (string type, List<string> tids, ITaskService tasks, HttpContext ctx) =>
+        {
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
+            return Results.Ok(await tasks.DeleteSomeAsync(taskType, tids, ctx.RequestAborted));
+        });
+
+        // POST /api/task/{type}/retry_some — batch retry
+        g.MapPost("/{type}/retry_some", async (string type, List<string> tids, ITaskService tasks, HttpContext ctx) =>
+        {
+            if (!TryParseType(type, out var taskType))
+                return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
+            return Results.Ok(await tasks.RetrySomeAsync(taskType, tids, ctx.RequestAborted));
         });
 
         return app;
     }
 
-    private static TaskType ParseType(string? value)
+    // Frontend sends task types as snake_case strings (e.g. "offline_download",
+    // "decompress_upload", "aria2_down"). The C# enum uses PascalCase names, so
+    // Enum.TryParse won't match the snake_case forms — map them explicitly.
+    private static readonly Dictionary<string, TaskType> TypeAliases = new(StringComparer.Ordinal)
     {
-        if (string.IsNullOrEmpty(value)) return TaskType.Copy;
-        return Enum.TryParse<TaskType>(value, ignoreCase: true, out var t) ? t : TaskType.Copy;
-    }
+        ["copy"] = TaskType.Copy,
+        ["upload"] = TaskType.Upload,
+        ["transfer"] = TaskType.Transfer,
+        ["download"] = TaskType.Download,
+        ["decompress"] = TaskType.Decompress,
+        ["decompress_upload"] = TaskType.DecompressUpload,
+        ["move"] = TaskType.Move,
+        ["offline_download"] = TaskType.OfflineDownload,
+        ["offline_download_transfer"] = TaskType.OfflineDownloadTransfer,
+        ["aria2_down"] = TaskType.Aria2Down,
+        ["aria2_transfer"] = TaskType.Aria2Transfer,
+        ["qbit_down"] = TaskType.QbitDown,
+        ["qbit_transfer"] = TaskType.QbitTransfer,
+    };
 
-    /// <summary>Task ids are formatted as "{type-lower}-{n}". Infer the type from the prefix.</summary>
-    private static TaskType InferType(string tid)
+    private static bool TryParseType(string? value, out TaskType type)
     {
-        var idx = tid.IndexOf('-');
-        if (idx <= 0) return TaskType.Copy;
-        var prefix = tid[..idx];
-        return Enum.TryParse<TaskType>(prefix, ignoreCase: true, out var t) ? t : TaskType.Copy;
+        if (value is not null && TypeAliases.TryGetValue(value, out type))
+            return true;
+        return Enum.TryParse(value, ignoreCase: true, out type);
     }
 }

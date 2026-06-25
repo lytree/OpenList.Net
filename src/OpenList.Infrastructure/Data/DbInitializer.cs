@@ -60,6 +60,29 @@ public static class DbInitializer
         {
             ("x_users", "AllowLdap", "INTEGER NOT NULL DEFAULT 0"),
             ("x_storages", "Status", "TEXT NOT NULL DEFAULT 'work'"),
+            // Sharing: extended fields mirroring Go model.Sharing.
+            ("x_sharings", "ShareCode", "TEXT NOT NULL DEFAULT ''"),
+            ("x_sharings", "FilesJson", "TEXT NOT NULL DEFAULT '[]'"),
+            ("x_sharings", "MaxAccessed", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_sharings", "Accessed", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_sharings", "Disabled", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_sharings", "Remark", "TEXT NULL"),
+            ("x_sharings", "Readme", "TEXT NULL"),
+            ("x_sharings", "Header", "TEXT NULL"),
+            ("x_sharings", "OrderBy", "TEXT NULL"),
+            ("x_sharings", "OrderDirection", "TEXT NULL"),
+            ("x_sharings", "ExtractFolder", "TEXT NULL"),
+            // SshKey: last-used timestamp for the frontend's last_used_time column.
+            ("x_sshkeys", "LastUsedTime", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'"),
+            // Meta: extended fields mirroring the frontend Meta type.
+            ("x_metas", "ReadUsersJson", "TEXT NOT NULL DEFAULT '[]'"),
+            ("x_metas", "ReadUsersSub", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "WriteUsersJson", "TEXT NOT NULL DEFAULT '[]'"),
+            ("x_metas", "WriteUsersSub", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "WSub", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "HideSub", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "RSub", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "HeaderSub", "INTEGER NOT NULL DEFAULT 0"),
         };
 
         foreach (var (table, column, decl) in additions)
@@ -154,6 +177,25 @@ public static class DbInitializer
     }
 
     /// <summary>
+    /// Default settings keyed by group. Used both for initial seeding and for
+    /// <c>POST /admin/setting/default?group=</c> (restore group to defaults).
+    /// </summary>
+    public static readonly (string Key, string Value, SettingValueType Type, SettingFlag Flag, string? Group)[] DefaultSettings =
+    {
+        // Group values are the frontend's Group enum (number-as-string):
+        // 1=SITE, 2=STYLE, 6=INDEX. See frontend src/types/setting.ts.
+        ("logo", "", SettingValueType.String, SettingFlag.Public, "2"),
+        ("site_title", "OpenList", SettingValueType.String, SettingFlag.Public, "1"),
+        ("announcement", "", SettingValueType.Text, SettingFlag.Public, "1"),
+        ("home_container", "10", SettingValueType.Number, SettingFlag.Public, "2"),
+        ("home_icon", "", SettingValueType.String, SettingFlag.Public, "2"),
+        ("share_icon", "", SettingValueType.String, SettingFlag.Public, "2"),
+        ("share_summary_content", "", SettingValueType.Text, SettingFlag.Public, "2"),
+        ("search_index", "", SettingValueType.String, SettingFlag.Public, "6"),
+        ("filter_readme_scripts", "false", SettingValueType.Bool, SettingFlag.Public, "2"),
+    };
+
+    /// <summary>
     /// Seeds the default public settings expected by the frontend. The SolidJS SPA
     /// reads these via <c>GET /api/public/settings</c> and calls methods like
     /// <c>.split('\n')</c> on the values, so every key must exist with at least an
@@ -161,25 +203,22 @@ public static class DbInitializer
     /// </summary>
     private static async Task SeedDefaultSettingsAsync(OpenListDbContext db, CancellationToken ct)
     {
-        var defaults = new (string Key, string Value, SettingValueType Type, SettingFlag Flag, string? Group)[]
+        // Migrate legacy group="ui" to the frontend's numeric group values,
+        // and correct any type mismatches (e.g. announcement String → Text).
+        var defaultsByKey = DefaultSettings.ToDictionary(d => d.Key, StringComparer.Ordinal);
+        var allSettings = await db.Settings.ToListAsync(ct);
+        foreach (var s in allSettings)
         {
-            ("logo", "", SettingValueType.String, SettingFlag.Public, "ui"),
-            ("site_title", "OpenList", SettingValueType.String, SettingFlag.Public, "ui"),
-            ("announcement", "", SettingValueType.String, SettingFlag.Public, "ui"),
-            ("home_container", "10", SettingValueType.String, SettingFlag.Public, "ui"),
-            ("home_icon", "", SettingValueType.String, SettingFlag.Public, "ui"),
-            ("share_icon", "", SettingValueType.String, SettingFlag.Public, "ui"),
-            ("share_summary_content", "", SettingValueType.String, SettingFlag.Public, "ui"),
-            ("search_index", "", SettingValueType.String, SettingFlag.Public, "ui"),
-            ("filter_readme_scripts", "false", SettingValueType.Bool, SettingFlag.Public, "ui"),
-        };
+            if (defaultsByKey.TryGetValue(s.Key, out var def))
+            {
+                if (s.Group != def.Group) s.Group = def.Group;
+                if (s.Type != def.Type) s.Type = def.Type;
+            }
+        }
 
-        var existing = await db.Settings.AsNoTracking()
-            .Select(s => s.Key)
-            .ToListAsync(ct);
-        var existingSet = new HashSet<string>(existing, StringComparer.Ordinal);
+        var existingSet = new HashSet<string>(allSettings.Select(s => s.Key), StringComparer.Ordinal);
 
-        foreach (var (key, value, type, flag, group) in defaults)
+        foreach (var (key, value, type, flag, group) in DefaultSettings)
         {
             if (existingSet.Contains(key))
                 continue;

@@ -76,6 +76,60 @@ public sealed class TaskService : ITaskService
         return Task.FromResult(Resp.Ok());
     }
 
+    public Task<Resp> ClearSucceededAsync(TaskType type, CancellationToken ct = default)
+    {
+        foreach (var kvp in _tasks)
+        {
+            if (kvp.Value.Info.Type == type && kvp.Value.Info.State == "succeeded")
+                _tasks.TryRemove(kvp.Key, out _);
+        }
+        return Task.FromResult(Resp.Ok());
+    }
+
+    public async Task<Resp> RetryFailedAsync(TaskType type, CancellationToken ct = default)
+    {
+        var failed = _tasks.Values
+            .Where(r => r.Info.Type == type && r.Info.State is "failed" or "canceled")
+            .Select(r => r.Info.Id)
+            .ToList();
+        foreach (var tid in failed)
+            await RetryAsync(type, tid, ct);
+        return Resp.Ok();
+    }
+
+    public async Task<Resp<Dictionary<string, string>>> CancelSomeAsync(TaskType type, IReadOnlyList<string> tids, CancellationToken ct = default)
+    {
+        var errors = new Dictionary<string, string>();
+        foreach (var tid in tids)
+        {
+            var r = await CancelAsync(type, tid, ct);
+            if (r.Code != 200) errors[tid] = r.Message;
+        }
+        return Resp<Dictionary<string, string>>.Ok(errors);
+    }
+
+    public async Task<Resp<Dictionary<string, string>>> DeleteSomeAsync(TaskType type, IReadOnlyList<string> tids, CancellationToken ct = default)
+    {
+        var errors = new Dictionary<string, string>();
+        foreach (var tid in tids)
+        {
+            var r = await DeleteAsync(type, tid, ct);
+            if (r.Code != 200) errors[tid] = r.Message;
+        }
+        return Resp<Dictionary<string, string>>.Ok(errors);
+    }
+
+    public async Task<Resp<Dictionary<string, string>>> RetrySomeAsync(TaskType type, IReadOnlyList<string> tids, CancellationToken ct = default)
+    {
+        var errors = new Dictionary<string, string>();
+        foreach (var tid in tids)
+        {
+            var r = await RetryAsync(type, tid, ct);
+            if (r.Code != 200) errors[tid] = r.Message;
+        }
+        return Resp<Dictionary<string, string>>.Ok(errors);
+    }
+
     public async Task<Resp> RetryAsync(TaskType type, string tid, CancellationToken ct = default)
     {
         if (!_tasks.TryGetValue(tid, out var rec) || rec.Info.Type != type)

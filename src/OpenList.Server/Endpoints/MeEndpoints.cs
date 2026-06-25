@@ -71,6 +71,37 @@ public static class MeEndpoints
         g.MapGet("/sessions", () => Results.Ok(Resp<List<object>>.Ok([])));
         g.MapDelete("/sessions/{id}", (string id) => Results.Ok(Resp.Ok()));
 
+        // --- SSH public keys ---
+        // GET /api/me/sshkey/list — current user's keys (paged response shape:
+        // { content, total } to match the frontend's PageResp<SSHPublicKey>).
+        g.MapGet("/sshkey/list", async (ClaimsPrincipal user, ISshKeyService svc) =>
+        {
+            var id = user.UserId();
+            if (id is null) return Results.Ok(Resp.Fail("unauthorized", RespCodes.Unauthorized));
+            var r = await svc.ListAsync(id.Value);
+            if (r.Code != 200) return Results.Ok(r);
+            return Results.Ok(Resp<object>.Ok(new { content = r.Data!, total = r.Data!.Count }));
+        });
+
+        // POST /api/me/sshkey/add — body { title, key }
+        g.MapPost("/sshkey/add", async (ClaimsPrincipal user, SshKeyAddReq req, ISshKeyService svc) =>
+        {
+            var id = user.UserId();
+            if (id is null) return Results.Ok(Resp.Fail("unauthorized", RespCodes.Unauthorized));
+            return Results.Ok(await svc.AddAsync(id.Value, req.Title, req.Key));
+        });
+
+        // POST /api/me/sshkey/delete?id={id} — returns remaining keys
+        g.MapPost("/sshkey/delete", async (HttpRequest http, ClaimsPrincipal user, ISshKeyService svc) =>
+        {
+            var id = user.UserId();
+            if (id is null) return Results.Ok(Resp.Fail("unauthorized", RespCodes.Unauthorized));
+            if (!long.TryParse(http.Query["id"], out var keyId))
+                return Results.Ok(Resp.Fail("invalid id", RespCodes.BadRequest));
+            // Non-admin: pass isAdmin=false so the service enforces ownership.
+            return Results.Ok(await svc.DeleteAsync(id.Value, keyId, isAdmin: false));
+        });
+
         // --- Messages ---
         g.MapGet("/message/unread", async (ClaimsPrincipal user, IMessageService msgs) =>
         {
@@ -99,3 +130,9 @@ public static class MeEndpoints
 }
 
 public sealed class ReadMessageReq { public long Id { get; set; } }
+
+public sealed class SshKeyAddReq
+{
+    public string Title { get; set; } = string.Empty;
+    public string Key { get; set; } = string.Empty;
+}

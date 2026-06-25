@@ -17,7 +17,7 @@ public class SettingServiceTests
     public async Task SaveAsync_Inserts_New_Settings()
     {
         await using var ctx = BuildContext();
-        var svc = new SettingService(ctx);
+        var svc = BuildService(ctx);
         var r = await svc.SaveAsync([
             new SettingItem { Key = "site_title", Value = "OpenList", Flag = SettingFlag.Public },
             new SettingItem { Key = "jwt_secret", Value = "abc", Flag = SettingFlag.Private },
@@ -30,7 +30,7 @@ public class SettingServiceTests
     public async Task SaveAsync_Updates_Existing_Settings()
     {
         await using var ctx = BuildContext();
-        var svc = new SettingService(ctx);
+        var svc = BuildService(ctx);
         await svc.SaveAsync([new SettingItem { Key = "site_title", Value = "Old" }]);
         await svc.SaveAsync([new SettingItem { Key = "site_title", Value = "New" }]);
         var item = (await svc.GetAsync("site_title")).Data!;
@@ -41,7 +41,7 @@ public class SettingServiceTests
     public async Task ListAsync_Returns_All_Settings()
     {
         await using var ctx = BuildContext();
-        var svc = new SettingService(ctx);
+        var svc = BuildService(ctx);
         await svc.SaveAsync([
             new SettingItem { Key = "b", Value = "2" },
             new SettingItem { Key = "a", Value = "1" },
@@ -56,7 +56,7 @@ public class SettingServiceTests
     public async Task GetAsync_Returns_NotFound_For_Missing()
     {
         await using var ctx = BuildContext();
-        var svc = new SettingService(ctx);
+        var svc = BuildService(ctx);
         var r = await svc.GetAsync("nope");
         await Assert.That(r.Code).IsEqualTo(404);
     }
@@ -65,7 +65,7 @@ public class SettingServiceTests
     public async Task DeleteAsync_Removes_Setting()
     {
         await using var ctx = BuildContext();
-        var svc = new SettingService(ctx);
+        var svc = BuildService(ctx);
         await svc.SaveAsync([new SettingItem { Key = "temp", Value = "x" }]);
         var r = await svc.DeleteAsync("temp");
         await Assert.That(r.Code).IsEqualTo(200);
@@ -76,7 +76,7 @@ public class SettingServiceTests
     public async Task GetPublicAsync_Returns_Only_Public_Settings()
     {
         await using var ctx = BuildContext();
-        var svc = new SettingService(ctx);
+        var svc = BuildService(ctx);
         await svc.SaveAsync([
             new SettingItem { Key = "pub1", Value = "1", Flag = SettingFlag.Public },
             new SettingItem { Key = "priv1", Value = "2", Flag = SettingFlag.Private },
@@ -93,7 +93,7 @@ public class SettingServiceTests
     public async Task GetArchiveExtensionsAsync_Returns_Supported_Formats()
     {
         await using var ctx = BuildContext();
-        var svc = new SettingService(ctx);
+        var svc = BuildService(ctx);
         var r = await svc.GetArchiveExtensionsAsync();
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!).Contains(".zip");
@@ -105,7 +105,7 @@ public class SettingServiceTests
     public async Task GetOfflineDownloadToolsAsync_Returns_Empty_List()
     {
         await using var ctx = BuildContext();
-        var svc = new SettingService(ctx);
+        var svc = BuildService(ctx);
         var r = await svc.GetOfflineDownloadToolsAsync();
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!).IsEmpty();
@@ -122,4 +122,13 @@ public class SettingServiceTests
         ctx.Database.EnsureCreated();
         return ctx;
     }
+
+    private static AppConfiguration BuildAppConfig() => new()
+    {
+        JwtSecret = "testsecret_testsecret_testsecret_",
+        Database = new DatabaseConfig(),
+    };
+
+    private static SettingService BuildService(OpenListDbContext ctx)
+        => new(ctx, BuildAppConfig());
 }

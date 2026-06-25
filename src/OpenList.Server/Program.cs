@@ -60,7 +60,10 @@ builder.Services.AddSingleton<IFileSystemService, FileSystemService>();
 builder.Services.AddScoped<ISettingService, SettingService>();
 builder.Services.AddScoped<IMetaService, MetaService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
+builder.Services.AddScoped<ISharingService, SharingService>();
+builder.Services.AddScoped<ISshKeyService, SshKeyService>();
 builder.Services.AddSingleton<IScanService, ScanService>();
+builder.Services.AddSingleton<ISearchService, SearchService>();
 builder.Services.AddSingleton<ITaskService, TaskService>();
 // SignService must be singleton (matches ZioMountService lifetime) so FileSystemService
 // can resolve it. Uses the same JWT secret for HMAC signing.
@@ -178,7 +181,12 @@ app.MapWebDavApi();
 app.MapPublicApi();
 // Signed download/proxy endpoints (/d/, /p/) — public, HMAC-verified
 app.MapSignApi();
-// TODO: MapShareApi, MapSharingDownloadApi (Phase 5+)
+// Plist (iOS IPA manifest) — public
+app.MapMiscApi();
+// Sharing system (Phase 5)
+app.MapShareApi();
+// Sharing signed download (/sd/{sid}[/*path]) — public, share-verified
+app.MapSharingDownloadApi();
 // SPA fallback — matches ALL unmatched paths (including those with file extensions),
 // mirroring Go's NoRoute catch-all. The default MapFallback uses {*path:nonfile}
 // which excludes paths with extensions (e.g. /somefile.txt) and returns 404.

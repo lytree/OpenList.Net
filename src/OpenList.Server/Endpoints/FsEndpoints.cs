@@ -40,6 +40,19 @@ public static class FsEndpoints
         g.MapPost("/rename_batch", async (BatchRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
             Results.Ok(await svc.BatchRenameAsync(req.Items, user.ToUser())));
 
+        // POST /fs/batch_rename — frontend variant. Body: { src_dir, rename_objects: [{src_name, new_name}] }
+        // rename_objects carry only file names; src_dir is prepended to form full paths.
+        g.MapPost("/batch_rename", async (FsBatchRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        {
+            var dir = req.SrcDir?.TrimEnd('/') ?? "/";
+            var items = req.RenameObjects.Select(o => new BatchRenameItem
+            {
+                SrcName = string.IsNullOrEmpty(dir) || dir == "/" ? o.SrcName : $"{dir}/{o.SrcName}",
+                NewName = string.IsNullOrEmpty(dir) || dir == "/" ? o.NewName : $"{dir}/{o.NewName}",
+            }).ToList();
+            return Results.Ok(await svc.BatchRenameAsync(items, user.ToUser()));
+        });
+
         g.MapPost("/move", async (MoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
             Results.Ok(await svc.MoveAsync(req.SrcPaths, req.DestDir, user.ToUser())));
 
@@ -53,28 +66,39 @@ public static class FsEndpoints
             Results.Ok(await svc.RemoveEmptyDirectoryAsync(req.Path, user.ToUser())));
 
         // --- Upload ---
+        // Go: handles.FsStream. Path from "File-Path" header (URL-encoded), like the frontend.
         g.MapPut("/put", async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
         {
-            var path = ctx.Request.Query["path"].ToString();
-            if (string.IsNullOrEmpty(path))
-                return Results.Ok(Resp.Fail("path is required", RespCodes.BadRequest));
-            if (ctx.Request.ContentType?.Contains("multipart/form-data", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
-                foreach (var file in form.Files)
-                {
-                    await using var stream = file.OpenReadStream();
-                    var r = await svc.PutFormAsync(path, stream, file.FileName, user.ToUser(), ctx.RequestAborted);
-                    if (r.Code != 200) return Results.Ok(r);
-                }
-                return Results.Ok(Resp.Ok());
-            }
-            else
-            {
-                await using var stream = ctx.Request.Body;
-                return Results.Ok(await svc.PutStreamAsync(path, stream, user.ToUser(), ctx.RequestAborted));
-            }
+            var path = ReadFilePathHeader(ctx);
+            if (path is null)
+                return Results.Ok(Resp.Fail("File-Path header is required", RespCodes.BadRequest));
+            await using var stream = ctx.Request.Body;
+            return Results.Ok(await svc.PutStreamAsync(path, stream, user.ToUser(), ctx.RequestAborted));
         });
+
+        // Go: handles.FsForm. Multipart form upload. Path from "File-Path" header.
+        g.MapPut("/form", async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        {
+            var path = ReadFilePathHeader(ctx);
+            if (path is null)
+                return Results.Ok(Resp.Fail("File-Path header is required", RespCodes.BadRequest));
+            var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
+            foreach (var file in form.Files)
+            {
+                await using var stream = file.OpenReadStream();
+                var r = await svc.PutFormAsync(path, stream, file.FileName, user.ToUser(), ctx.RequestAborted);
+                if (r.Code != 200) return Results.Ok(r);
+            }
+            return Results.Ok(Resp.Ok());
+        });
+
+        // Go: handles.FsGetDirectUploadInfo. Returns presigned upload URL if driver supports it.
+        g.MapPost("/get_direct_upload_info", async (DirectUploadInfoReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+            Results.Ok(await svc.GetDirectUploadInfoAsync(req.Path, req.FileSize, user.ToUser())));
+
+        // Go: handles.FsRecursiveMove (alias for move with single src).
+        g.MapPost("/recursive_move", async (RecursiveMoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+            Results.Ok(await svc.RecursiveMoveAsync(req.SrcDir, req.DstDir, user.ToUser())));
 
         // --- Link / Archive ---
         g.MapPost("/link", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
@@ -109,6 +133,18 @@ public static class FsEndpoints
 
         return app;
     }
+
+    /// <summary>
+    /// Reads the URL-encoded "File-Path" header (matches Go frontend convention).
+    /// Returns null if missing or invalid.
+    /// </summary>
+    private static string? ReadFilePathHeader(HttpContext ctx)
+    {
+        var raw = ctx.Request.Headers["File-Path"].ToString();
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        try { return Uri.UnescapeDataString(raw); }
+        catch { return null; }
+    }
 }
 
 // --- Request DTOs ---
@@ -117,7 +153,19 @@ public sealed class PathReq { public string Path { get; set; } = "/"; }
 public sealed class DirsReq { public string Path { get; set; } = "/"; }
 public sealed class RenameReq { public string Path { get; set; } = ""; public string NewPath { get; set; } = ""; }
 public sealed class BatchRenameReq { public List<BatchRenameItem> Items { get; set; } = []; }
+public sealed class FsBatchRenameReq
+{
+    public string? SrcDir { get; set; }
+    public List<RenameObjDto> RenameObjects { get; set; } = [];
+}
+public sealed class RenameObjDto
+{
+    public string SrcName { get; set; } = "";
+    public string NewName { get; set; } = "";
+}
 public sealed class MoveReq { public List<string> SrcPaths { get; set; } = []; public string DestDir { get; set; } = ""; }
 public sealed class RemoveReq { public List<string> Paths { get; set; } = []; }
 public sealed class ArchiveListReq { public string Path { get; set; } = ""; public string? Password { get; set; } }
 public sealed class ArchiveDecompressReq { public string Path { get; set; } = ""; public string DestPath { get; set; } = ""; public string? Password { get; set; } }
+public sealed class DirectUploadInfoReq { public string Path { get; set; } = ""; public string? FileName { get; set; } public long FileSize { get; set; } public string? Tool { get; set; } }
+public sealed class RecursiveMoveReq { public string SrcDir { get; set; } = ""; public string DstDir { get; set; } = ""; }

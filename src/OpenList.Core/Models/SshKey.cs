@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace OpenList.Core.Models;
 
 public sealed class SshKey
@@ -8,4 +10,5 @@ public sealed class SshKey
     public string PublicKey { get; set; } = string.Empty;
     public string Fingerprint { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset LastUsedTime { get; set; }
 }
