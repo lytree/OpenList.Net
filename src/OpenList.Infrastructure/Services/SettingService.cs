@@ -73,27 +73,35 @@ public sealed class SettingService : ISettingService
         return Resp.Ok();
     }
 
-    public async Task<Resp> DefaultAsync(string? group = null, CancellationToken ct = default)
+    public async Task<Resp<List<SettingItem>>> DefaultAsync(string? group = null, CancellationToken ct = default)
     {
-        // Restore default values for settings in the given group (or all if null).
-        // Mirrors Go setting/default?group=. Settings not in DefaultSettings are left
-        // untouched (they're user-defined keys like storage driver configs).
+        // Restore default values for settings in the given group (or all if null),
+        // then return the resulting SettingItem list (frontend sets its store from
+        // the response data). Mirrors Go setting/default?group=.
         var defaults = DbInitializer.DefaultSettings;
         if (!string.IsNullOrEmpty(group) && int.TryParse(group, out var groupNum))
             defaults = defaults.Where(d => d.Group == groupNum).ToArray();
-        if (defaults.Length == 0) return Resp.Ok();
+        if (defaults.Length == 0) return Resp<List<SettingItem>>.Ok([]);
 
         var keys = defaults.Select(d => d.Key).ToHashSet();
         var items = await _db.Settings.Where(s => keys.Contains(s.Key)).ToListAsync(ct);
         var byKey = items.ToDictionary(s => s.Key);
-        foreach (var (key, value, _, _, _) in defaults)
+        foreach (var (key, value, _, _, _, _) in defaults)
         {
             if (byKey.TryGetValue(key, out var item))
                 item.Value = value;
         }
         await _db.SaveChangesAsync(ct);
         _cache = null;
-        return Resp.Ok();
+
+        // Build the response from current DB state (preserves non-default fields
+        // like Help/Options that may have been customized).
+        var refreshed = await _db.Settings.AsNoTracking().Where(s => keys.Contains(s.Key)).ToListAsync(ct);
+        var refreshedByKey = refreshed.ToDictionary(s => s.Key);
+        var result = defaults.Select(d => refreshedByKey.TryGetValue(d.Key, out var item)
+            ? item
+            : new SettingItem { Key = d.Key, Value = d.Value, Type = d.Type, Flag = d.Flag, Group = d.Group, Options = d.Options }).ToList();
+        return Resp<List<SettingItem>>.Ok(result);
     }
 
     public Task<Resp> ResetTokenAsync(CancellationToken ct = default)

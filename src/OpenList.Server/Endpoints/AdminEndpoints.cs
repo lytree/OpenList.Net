@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
@@ -345,7 +346,12 @@ public static class AdminEndpoints
 public sealed class SetPasswordReq { public long Id { get; set; } public string Password { get; set; } = ""; }
 public sealed class CreateMessageReq { public long UserId { get; set; } public string Title { get; set; } = ""; public string Content { get; set; } = ""; }
 public sealed class ScanStartReq { public string? Path { get; set; } public double Limit { get; set; } }
-public sealed class IndexBuildReq { public List<string>? Paths { get; set; } public int MaxDepth { get; set; } = -1; }
+public sealed class IndexBuildReq
+{
+    public List<string>? Paths { get; set; }
+    [JsonPropertyName("max_depth")]
+    public int MaxDepth { get; set; } = -1;
+}
 
 // --- Offline-download-tool config request DTOs (frontend Other.tsx) ---
 public sealed class SetAria2Req { public string? Uri { get; set; } public string? Secret { get; set; } }
