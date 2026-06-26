@@ -57,7 +57,7 @@ public class JwtServiceTests
     public async Task LogoutAsync_Revokes_Token()
     {
         var (svc, _) = await BuildAsync();
-        var token = svc.IssueToken(new User { Id = 1, Username = "alice", Role = UserRole.Normal });
+        var token = svc.IssueToken(new User { Id = 1, Username = "alice", Role = UserRole.General });
         await svc.LogoutAsync(token);
         var id = await svc.ValidateTokenAsync(token);
         await Assert.That(id).IsNull();

@@ -50,7 +50,11 @@ public sealed class FsListResp
     public string? Readme { get; set; }
     public string? Header { get; set; }
     public bool Write { get; set; }
+    [JsonPropertyName("write_content_bypass")]
+    public bool WriteContentBypass { get; set; }
     public string? Provider { get; set; }
+    [JsonPropertyName("direct_upload_tools")]
+    public List<string>? DirectUploadTools { get; set; }
 }
 
 public sealed class FsGetReq
@@ -83,9 +87,12 @@ public sealed class LinkResp
 
 public sealed class OfflineDownloadReq
 {
-    public string Url { get; set; } = string.Empty;
+    [JsonPropertyName("urls")]
+    public List<string> Urls { get; set; } = [];
     public string Path { get; set; } = string.Empty;
     public string? Tool { get; set; }
+    [JsonPropertyName("delete_policy")]
+    public int DeletePolicy { get; set; }
 }
 
 public sealed class ArchiveMetaResp
@@ -116,16 +123,31 @@ public sealed class SearchReq
 {
     public string Parent { get; set; } = "/";
     public string Keywords { get; set; } = string.Empty;
+    /// <summary>Search scope (frontend scope: 0=default, ...). Accepted but ignored by the current search impl.</summary>
+    public int Scope { get; set; }
     public bool Recursive { get; set; } = true;
     public int Page { get; set; } = 1;
     [JsonPropertyName("per_page")]
     public int PerPage { get; set; } = 30;
+    public string? Password { get; set; }
 }
 
 public sealed class SearchResp
 {
-    public List<Obj> Content { get; set; } = [];
+    public List<SearchNode> Content { get; set; } = [];
     public int Total { get; set; }
+}
+
+/// <summary>Flat search result node matching the frontend's SearchNode type.</summary>
+public sealed class SearchNode
+{
+    public string Parent { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    [JsonPropertyName("is_dir")]
+    public bool IsDir { get; set; }
+    public long Size { get; set; }
+    public string Path { get; set; } = string.Empty;
+    public int Type { get; set; }
 }
 
 public sealed class DirectUploadInfo

@@ -61,6 +61,7 @@ public sealed class UserService : IUserService
         if (!string.IsNullOrWhiteSpace(req.Username)) u.Username = req.Username;
         if (!string.IsNullOrWhiteSpace(req.Password)) u.PasswordHash = HashPassword(req.Password);
         if (req.Disabled.HasValue) u.Disabled = req.Disabled.Value;
+        if (req.SsoID is not null) u.SsoID = string.IsNullOrWhiteSpace(req.SsoID) ? null : req.SsoID;
         u.UpdatedAt = _time.GetUtcNow();
         await _db.SaveChangesAsync(ct);
         return Resp.Ok();
@@ -103,6 +104,7 @@ public sealed class UserService : IUserService
             Permission = req.Permission,
             BasePath = req.BasePath,
             Disabled = req.Disabled,
+            AllowLdap = req.AllowLdap,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -136,6 +138,8 @@ public sealed class UserService : IUserService
         if (req.BasePath is not null) u.BasePath = req.BasePath;
         if (req.Disabled.HasValue) u.Disabled = req.Disabled.Value;
         if (req.TwoFactorEnabled.HasValue) u.TwoFactorEnabled = req.TwoFactorEnabled.Value;
+        if (req.AllowLdap.HasValue) u.AllowLdap = req.AllowLdap.Value;
+        if (req.SsoID is not null) u.SsoID = string.IsNullOrWhiteSpace(req.SsoID) ? null : req.SsoID;
         u.UpdatedAt = _time.GetUtcNow();
         await _db.SaveChangesAsync(ct);
         return Resp.Ok();

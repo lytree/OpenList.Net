@@ -79,8 +79,8 @@ public sealed class SettingService : ISettingService
         // Mirrors Go setting/default?group=. Settings not in DefaultSettings are left
         // untouched (they're user-defined keys like storage driver configs).
         var defaults = DbInitializer.DefaultSettings;
-        if (!string.IsNullOrEmpty(group))
-            defaults = defaults.Where(d => string.Equals(d.Group, group, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (!string.IsNullOrEmpty(group) && int.TryParse(group, out var groupNum))
+            defaults = defaults.Where(d => d.Group == groupNum).ToArray();
         if (defaults.Length == 0) return Resp.Ok();
 
         var keys = defaults.Select(d => d.Key).ToHashSet();

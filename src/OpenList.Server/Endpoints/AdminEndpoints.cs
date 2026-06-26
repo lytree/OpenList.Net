@@ -20,6 +20,7 @@ public static class AdminEndpoints
         var g = app.MapGroup("/api/admin").WithTags("Admin").RequireAuthorization("admin");
 
         // --- Storage management ---
+        // GET /admin/storage/list -> Resp<PageResp<StorageWithDriver>> = { content, total }
         g.MapGet("/storage/list", async (IStorageService svc) =>
             Results.Ok(await svc.ListAsync()));
 
@@ -101,22 +102,22 @@ public static class AdminEndpoints
 
         // --- Setting management ---
         // GET /admin/setting/list?group=N  or  ?groups=N1,N2  — filter by group.
-        // group values are the frontend's Group enum (number-as-string).
+        // group values are the frontend's Group enum (numeric).
         g.MapGet("/setting/list", async (string? group, string? groups, ISettingService svc) =>
         {
             var r = await svc.ListAsync();
             if (r.Code != 200 || r.Data is null) return Results.Ok(r);
 
-            var wanted = new HashSet<string>(StringComparer.Ordinal);
-            if (!string.IsNullOrEmpty(group)) wanted.Add(group);
+            var wanted = new HashSet<int>();
+            if (!string.IsNullOrEmpty(group) && int.TryParse(group, out var g1)) wanted.Add(g1);
             if (!string.IsNullOrEmpty(groups))
             {
                 foreach (var g in groups.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    wanted.Add(g);
+                    if (int.TryParse(g, out var gn)) wanted.Add(gn);
             }
             if (wanted.Count == 0) return Results.Ok(r);
 
-            var filtered = r.Data.Where(s => s.Group is not null && wanted.Contains(s.Group)).ToList();
+            var filtered = r.Data.Where(s => wanted.Contains(s.Group)).ToList();
             return Results.Ok(Resp<List<SettingItem>>.Ok(filtered));
         });
 

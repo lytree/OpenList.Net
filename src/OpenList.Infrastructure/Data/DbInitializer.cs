@@ -60,6 +60,14 @@ public static class DbInitializer
         {
             ("x_users", "AllowLdap", "INTEGER NOT NULL DEFAULT 0"),
             ("x_storages", "Status", "TEXT NOT NULL DEFAULT 'work'"),
+            // Storage: extended fields mirroring Go model.Storage / frontend Storage type.
+            ("x_storages", "OrderBy", "TEXT NULL"),
+            ("x_storages", "OrderDirection", "TEXT NULL"),
+            ("x_storages", "ExtractFolder", "TEXT NULL"),
+            ("x_storages", "WebProxy", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_storages", "WebdavPolicy", "TEXT NULL"),
+            ("x_storages", "EnableSign", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_storages", "Modified", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'"),
             // Sharing: extended fields mirroring Go model.Sharing.
             ("x_sharings", "ShareCode", "TEXT NOT NULL DEFAULT ''"),
             ("x_sharings", "FilesJson", "TEXT NOT NULL DEFAULT '[]'"),
@@ -179,20 +187,20 @@ public static class DbInitializer
     /// <summary>
     /// Default settings keyed by group. Used both for initial seeding and for
     /// <c>POST /admin/setting/default?group=</c> (restore group to defaults).
+    /// Group values are the frontend's Group enum (int):
+    /// 1=SITE, 2=STYLE, 6=INDEX. See frontend src/types/setting.ts.
     /// </summary>
-    public static readonly (string Key, string Value, SettingValueType Type, SettingFlag Flag, string? Group)[] DefaultSettings =
+    public static readonly (string Key, string Value, SettingValueType Type, SettingFlag Flag, int Group)[] DefaultSettings =
     {
-        // Group values are the frontend's Group enum (number-as-string):
-        // 1=SITE, 2=STYLE, 6=INDEX. See frontend src/types/setting.ts.
-        ("logo", "", SettingValueType.String, SettingFlag.Public, "2"),
-        ("site_title", "OpenList", SettingValueType.String, SettingFlag.Public, "1"),
-        ("announcement", "", SettingValueType.Text, SettingFlag.Public, "1"),
-        ("home_container", "10", SettingValueType.Number, SettingFlag.Public, "2"),
-        ("home_icon", "", SettingValueType.String, SettingFlag.Public, "2"),
-        ("share_icon", "", SettingValueType.String, SettingFlag.Public, "2"),
-        ("share_summary_content", "", SettingValueType.Text, SettingFlag.Public, "2"),
-        ("search_index", "", SettingValueType.String, SettingFlag.Public, "6"),
-        ("filter_readme_scripts", "false", SettingValueType.Bool, SettingFlag.Public, "2"),
+        ("logo", "", SettingValueType.String, SettingFlag.Public, 2),
+        ("site_title", "OpenList", SettingValueType.String, SettingFlag.Public, 1),
+        ("announcement", "", SettingValueType.Text, SettingFlag.Public, 1),
+        ("home_container", "10", SettingValueType.Number, SettingFlag.Public, 2),
+        ("home_icon", "", SettingValueType.String, SettingFlag.Public, 2),
+        ("share_icon", "", SettingValueType.String, SettingFlag.Public, 2),
+        ("share_summary_content", "", SettingValueType.Text, SettingFlag.Public, 2),
+        ("search_index", "", SettingValueType.String, SettingFlag.Public, 6),
+        ("filter_readme_scripts", "false", SettingValueType.Bool, SettingFlag.Public, 2),
     };
 
     /// <summary>

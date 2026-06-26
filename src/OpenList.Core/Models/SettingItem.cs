@@ -31,6 +31,27 @@ public enum SettingFlag : int
     Deprecated = 3,
 }
 
+/// <summary>
+/// Setting group. Numeric values match the frontend's Group enum
+/// (0=SINGLE, 1=SITE, 2=STYLE, 3=PREVIEW, 4=GLOBAL, 5=ARIA2, 6=INDEX,
+/// 7=SSO, 8=LDAP, 9=S3, 10=FTP, 11=TRAFFIC).
+/// </summary>
+public enum SettingGroup : int
+{
+    Single = 0,
+    Site = 1,
+    Style = 2,
+    Preview = 3,
+    Global = 4,
+    Aria2 = 5,
+    Index = 6,
+    Sso = 7,
+    Ldap = 8,
+    S3 = 9,
+    Ftp = 10,
+    Traffic = 11,
+}
+
 public sealed class SettingItem
 {
     public string Key { get; set; } = string.Empty;
@@ -39,5 +60,5 @@ public sealed class SettingItem
     public SettingValueType Type { get; set; }
     public SettingFlag Flag { get; set; }
     public string? Options { get; set; }
-    public string? Group { get; set; }
+    public int Group { get; set; }
 }

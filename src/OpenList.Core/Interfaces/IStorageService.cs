@@ -31,6 +31,24 @@ public sealed class CreateStorageReq
     public int Order { get; set; }
     public bool Disabled { get; set; }
     public string? Remark { get; set; }
+
+    [JsonPropertyName("order_by")]
+    public string? OrderBy { get; set; }
+
+    [JsonPropertyName("order_direction")]
+    public string? OrderDirection { get; set; }
+
+    [JsonPropertyName("extract_folder")]
+    public string? ExtractFolder { get; set; }
+
+    [JsonPropertyName("web_proxy")]
+    public bool WebProxy { get; set; }
+
+    [JsonPropertyName("webdav_policy")]
+    public string? WebdavPolicy { get; set; }
+
+    [JsonPropertyName("enable_sign")]
+    public bool EnableSign { get; set; }
 }
 
 /// <summary>
@@ -62,17 +80,28 @@ public sealed class DriverInfoItem
 
 /// <summary>
 /// Driver capability flags shown in the UI. Mirrors OpenList Go <c>driver.Config</c>.
+/// Field names use snake_case to match the frontend's DriverConfig type.
 /// </summary>
 public sealed class DriverInfoConfig
 {
     public string Name { get; set; } = string.Empty;
+    [JsonPropertyName("local_sort")]
     public bool LocalSort { get; set; }
+    [JsonPropertyName("only_local")]
+    public bool OnlyLocal { get; set; }
+    [JsonPropertyName("only_proxy")]
     public bool OnlyProxy { get; set; }
+    [JsonPropertyName("no_cache")]
     public bool NoCache { get; set; }
+    [JsonPropertyName("no_upload")]
     public bool NoUpload { get; set; }
+    [JsonPropertyName("need_ms")]
     public bool NeedMs { get; set; }
+    [JsonPropertyName("default_root")]
     public string DefaultRoot { get; set; } = string.Empty;
-    public string Alert { get; set; } = string.Empty;
+    public string? Alert { get; set; }
+    [JsonIgnore]
     public bool OnlyIndices { get; set; }
+    [JsonIgnore]
     public bool PreferProxy { get; set; }
 }

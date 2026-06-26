@@ -24,10 +24,13 @@ public sealed class CreateUserReq
 {
     public string Username { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
-    public UserRole Role { get; set; } = UserRole.Normal;
+    public UserRole Role { get; set; } = UserRole.General;
     public int Permission { get; set; }
+    [JsonPropertyName("base_path")]
     public string? BasePath { get; set; }
     public bool Disabled { get; set; }
+    [JsonPropertyName("allow_ldap")]
+    public bool AllowLdap { get; set; }
 }
 
 public sealed class UpdateUserReq
@@ -39,7 +42,13 @@ public sealed class UpdateUserReq
     public string? Password { get; set; }
     public UserRole? Role { get; set; }
     public int? Permission { get; set; }
+    [JsonPropertyName("base_path")]
     public string? BasePath { get; set; }
     public bool? Disabled { get; set; }
+    [JsonPropertyName("otp")]
     public bool? TwoFactorEnabled { get; set; }
+    [JsonPropertyName("allow_ldap")]
+    public bool? AllowLdap { get; set; }
+    [JsonPropertyName("sso_id")]
+    public string? SsoID { get; set; }
 }

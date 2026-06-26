@@ -49,6 +49,7 @@ public static class MeEndpoints
             {
                 Username = req.Username,
                 Password = req.Password,
+                SsoID = req.SsoId,
             });
             return Results.Ok(r);
         });

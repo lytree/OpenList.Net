@@ -31,11 +31,11 @@ public class UserServiceTests
         {
             Username = "alice",
             Password = "pw",
-            Role = UserRole.Normal,
+            Role = UserRole.General,
         });
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!.Username).IsEqualTo("alice");
-        await Assert.That(r.Data.Role).IsEqualTo(UserRole.Normal);
+        await Assert.That(r.Data.Role).IsEqualTo(UserRole.General);
         await Assert.That(UserService.VerifyPassword("pw", ctx.Users.First().PasswordHash)).IsTrue();
     }
 
@@ -109,7 +109,7 @@ public class UserServiceTests
         });
 
         // Demotion is forbidden.
-        var demote = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Role = UserRole.Normal });
+        var demote = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Role = UserRole.General });
         await Assert.That(demote.Code).IsEqualTo(403);
 
         // Rename is forbidden.

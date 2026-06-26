@@ -27,9 +27,10 @@ public sealed class TaskService : ITaskService
 
     public Task<Resp<List<TaskInfo>>> DoneAsync(TaskType type, CancellationToken ct = default)
     {
+        var finished = new HashSet<TaskState> { TaskState.Succeeded, TaskState.Errored, TaskState.Canceled };
         var list = _tasks.Values
-            .Where(r => r.Info.Type == type && r.Info.State is "succeeded" or "failed" or "canceled")
-            .OrderByDescending(r => r.Info.CompletedAt ?? DateTimeOffset.MaxValue)
+            .Where(r => r.Info.Type == type && finished.Contains(r.Info.State))
+            .OrderByDescending(r => r.Info.EndTime ?? DateTimeOffset.MaxValue)
             .Select(r => r.Info)
             .ToList();
         return Task.FromResult(Resp<List<TaskInfo>>.Ok(list));
@@ -37,9 +38,10 @@ public sealed class TaskService : ITaskService
 
     public Task<Resp<List<TaskInfo>>> UndoneAsync(TaskType type, CancellationToken ct = default)
     {
+        var unfinished = new HashSet<TaskState> { TaskState.Pending, TaskState.Running, TaskState.Canceling };
         var list = _tasks.Values
-            .Where(r => r.Info.Type == type && r.Info.State is "pending" or "running")
-            .OrderBy(r => r.Info.CreatedAt)
+            .Where(r => r.Info.Type == type && unfinished.Contains(r.Info.State))
+            .OrderBy(r => r.Info.StartTime ?? r.Info.CreatedAt)
             .Select(r => r.Info)
             .ToList();
         return Task.FromResult(Resp<List<TaskInfo>>.Ok(list));
@@ -57,20 +59,21 @@ public sealed class TaskService : ITaskService
     {
         if (!_tasks.TryGetValue(tid, out var rec) || rec.Info.Type != type)
             return Resp.Fail("task not found", RespCodes.NotFound);
-        if (rec.Info.State is "succeeded" or "failed" or "canceled")
+        if (IsFinished(rec.Info.State))
             return Resp.Fail("task already finished", RespCodes.BadRequest);
+        rec.Info.State = TaskState.Canceling;
         await CancelInternalAsync(tid);
-        rec.Info.State = "canceled";
-        rec.Info.CompletedAt = _time.GetUtcNow();
+        rec.Info.State = TaskState.Canceled;
+        rec.Info.EndTime = _time.GetUtcNow();
+        rec.Info.CompletedAt = rec.Info.EndTime;
         return Resp.Ok();
     }
 
     public Task<Resp> ClearAsync(TaskType type, CancellationToken ct = default)
     {
-        var finishedStates = new HashSet<string> { "succeeded", "failed", "canceled" };
         foreach (var kvp in _tasks)
         {
-            if (kvp.Value.Info.Type == type && finishedStates.Contains(kvp.Value.Info.State))
+            if (kvp.Value.Info.Type == type && IsFinished(kvp.Value.Info.State))
                 _tasks.TryRemove(kvp.Key, out _);
         }
         return Task.FromResult(Resp.Ok());
@@ -80,7 +83,7 @@ public sealed class TaskService : ITaskService
     {
         foreach (var kvp in _tasks)
         {
-            if (kvp.Value.Info.Type == type && kvp.Value.Info.State == "succeeded")
+            if (kvp.Value.Info.Type == type && kvp.Value.Info.State == TaskState.Succeeded)
                 _tasks.TryRemove(kvp.Key, out _);
         }
         return Task.FromResult(Resp.Ok());
@@ -89,7 +92,7 @@ public sealed class TaskService : ITaskService
     public async Task<Resp> RetryFailedAsync(TaskType type, CancellationToken ct = default)
     {
         var failed = _tasks.Values
-            .Where(r => r.Info.Type == type && r.Info.State is "failed" or "canceled")
+            .Where(r => r.Info.Type == type && (r.Info.State == TaskState.Errored || r.Info.State == TaskState.Canceled))
             .Select(r => r.Info.Id)
             .ToList();
         foreach (var tid in failed)
@@ -134,13 +137,14 @@ public sealed class TaskService : ITaskService
     {
         if (!_tasks.TryGetValue(tid, out var rec) || rec.Info.Type != type)
             return Resp.Fail("task not found", RespCodes.NotFound);
-        if (rec.Info.State != "failed" && rec.Info.State != "canceled")
+        if (rec.Info.State != TaskState.Errored && rec.Info.State != TaskState.Canceled)
             return Resp.Fail("only failed or canceled tasks can be retried", RespCodes.BadRequest);
 
         // Reset state and re-run the original work.
-        rec.Info.State = "pending";
+        rec.Info.State = TaskState.Pending;
         rec.Info.Error = null;
         rec.Info.Progress = 0;
+        rec.Info.EndTime = null;
         rec.Info.CompletedAt = null;
         await RunAsync(tid, rec);
         return Resp.Ok();
@@ -153,6 +157,7 @@ public sealed class TaskService : ITaskService
         var cts = new CancellationTokenSource();
         _cts[tid] = cts;
 
+        var now = _time.GetUtcNow();
         var rec = new TaskRecord
         {
             Info = new TaskInfo
@@ -160,8 +165,9 @@ public sealed class TaskService : ITaskService
                 Id = tid,
                 Type = type,
                 Name = type.ToString(),
-                State = "pending",
-                CreatedAt = _time.GetUtcNow(),
+                State = TaskState.Pending,
+                CreatedAt = now,
+                StartTime = now,
             },
             Work = work,
             Cts = cts,
@@ -178,31 +184,35 @@ public sealed class TaskService : ITaskService
         {
             rec.Info.Progress = p.Current;
             rec.Info.Total = p.Total;
-            if (rec.Info.State == "pending") rec.Info.State = "running";
+            if (rec.Info.State == TaskState.Pending) rec.Info.State = TaskState.Running;
         });
 
         try
         {
-            rec.Info.State = "running";
+            rec.Info.State = TaskState.Running;
             await rec.Work(progress, rec.Cts.Token);
-            rec.Info.State = "succeeded";
+            rec.Info.State = TaskState.Succeeded;
             rec.Info.Progress = rec.Info.Total > 0 ? rec.Info.Total : rec.Info.Progress;
         }
         catch (OperationCanceledException)
         {
-            rec.Info.State = "canceled";
+            rec.Info.State = TaskState.Canceled;
         }
         catch (Exception ex)
         {
-            rec.Info.State = "failed";
+            rec.Info.State = TaskState.Errored;
             rec.Info.Error = ex.Message;
         }
         finally
         {
-            rec.Info.CompletedAt = _time.GetUtcNow();
+            rec.Info.EndTime = _time.GetUtcNow();
+            rec.Info.CompletedAt = rec.Info.EndTime;
             _cts.TryRemove(tid, out _);
         }
     }
+
+    private static bool IsFinished(TaskState s)
+        => s == TaskState.Succeeded || s == TaskState.Errored || s == TaskState.Canceled;
 
     private Task CancelInternalAsync(string tid)
     {

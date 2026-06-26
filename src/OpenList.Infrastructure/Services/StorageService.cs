@@ -38,6 +38,13 @@ public sealed class StorageService : IStorageService
             Disabled = s.Disabled,
             Remark = s.Remark,
             Status = s.Status,
+            OrderBy = s.OrderBy,
+            OrderDirection = s.OrderDirection,
+            ExtractFolder = s.ExtractFolder,
+            WebProxy = s.WebProxy,
+            WebdavPolicy = s.WebdavPolicy,
+            EnableSign = s.EnableSign,
+            Modified = s.Modified == default ? s.UpdatedAt : s.Modified,
             CreatedAt = s.CreatedAt,
             UpdatedAt = s.UpdatedAt,
             DriverName = _mount.GetDriverName(s.Driver),
@@ -60,6 +67,13 @@ public sealed class StorageService : IStorageService
             Disabled = s.Disabled,
             Remark = s.Remark,
             Status = s.Status,
+            OrderBy = s.OrderBy,
+            OrderDirection = s.OrderDirection,
+            ExtractFolder = s.ExtractFolder,
+            WebProxy = s.WebProxy,
+            WebdavPolicy = s.WebdavPolicy,
+            EnableSign = s.EnableSign,
+            Modified = s.Modified == default ? s.UpdatedAt : s.Modified,
             CreatedAt = s.CreatedAt,
             UpdatedAt = s.UpdatedAt,
             DriverName = _mount.GetDriverName(s.Driver),
@@ -83,6 +97,13 @@ public sealed class StorageService : IStorageService
             Order = req.Order,
             Disabled = req.Disabled,
             Remark = req.Remark,
+            OrderBy = req.OrderBy,
+            OrderDirection = req.OrderDirection,
+            ExtractFolder = req.ExtractFolder,
+            WebProxy = req.WebProxy,
+            WebdavPolicy = req.WebdavPolicy,
+            EnableSign = req.EnableSign,
+            Modified = now,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -111,7 +132,14 @@ public sealed class StorageService : IStorageService
         s.Order = req.Order;
         s.Disabled = req.Disabled;
         s.Remark = req.Remark;
-        s.UpdatedAt = _time.GetUtcNow();
+        s.OrderBy = req.OrderBy;
+        s.OrderDirection = req.OrderDirection;
+        s.ExtractFolder = req.ExtractFolder;
+        s.WebProxy = req.WebProxy;
+        s.WebdavPolicy = req.WebdavPolicy;
+        s.EnableSign = req.EnableSign;
+        s.Modified = _time.GetUtcNow();
+        s.UpdatedAt = s.Modified;
         await _db.SaveChangesAsync(ct);
 
         if (!s.Disabled) await _mount.LoadAsync(s, ct);

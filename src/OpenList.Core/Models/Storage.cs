@@ -18,7 +18,31 @@ public class Storage
     /// <summary>Runtime status of the mounted storage (e.g. "work", "failed"). Mirrors Go <c>model.Storage.Status</c>.</summary>
     public string Status { get; set; } = "work";
 
+    [JsonPropertyName("order_by")]
+    public string? OrderBy { get; set; }
+
+    [JsonPropertyName("order_direction")]
+    public string? OrderDirection { get; set; }
+
+    [JsonPropertyName("extract_folder")]
+    public string? ExtractFolder { get; set; }
+
+    [JsonPropertyName("web_proxy")]
+    public bool WebProxy { get; set; }
+
+    [JsonPropertyName("webdav_policy")]
+    public string? WebdavPolicy { get; set; }
+
+    [JsonPropertyName("enable_sign")]
+    public bool EnableSign { get; set; }
+
+    /// <summary>Frontend reads <c>modified</c> (ISO string) for the last-modified column.</summary>
+    [JsonPropertyName("modified")]
+    public DateTimeOffset Modified { get; set; }
+
+    [JsonIgnore]
     public DateTimeOffset CreatedAt { get; set; }
+    [JsonIgnore]
     public DateTimeOffset UpdatedAt { get; set; }
 }
 

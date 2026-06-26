@@ -21,11 +21,16 @@ public class TaskServiceTests
         });
         await Assert.That(tid).Contains("copy-");
 
-        // Wait for completion
-        await Task.Delay(200);
-        var info = await svc.InfoAsync(TaskType.Copy, tid);
+        // Wait for completion (poll until finished to avoid timing flakes).
+        Resp<TaskInfo>? info = null;
+        for (var i = 0; i < 50; i++)
+        {
+            info = await svc.InfoAsync(TaskType.Copy, tid);
+            if (info.Data!.State is not (TaskState.Pending or TaskState.Running)) break;
+            await Task.Delay(20);
+        }
         await Assert.That(info.Code).IsEqualTo(200);
-        await Assert.That(info.Data!.State).IsEqualTo("succeeded");
+        await Assert.That(info.Data!.State).IsEqualTo(TaskState.Succeeded);
         await Assert.That(info.Data.Progress).IsEqualTo(100);
     }
 
@@ -61,11 +66,11 @@ public class TaskServiceTests
         {
             progress.Report(new TaskProgress { Current = 100, Total = 100 });
         });
-        await Task.Delay(200);
+        await WaitFinishedAsync(svc, TaskType.Copy, tid);
 
         var done = await svc.DoneAsync(TaskType.Copy);
         await Assert.That(done.Data!.Count).IsEqualTo(1);
-        await Assert.That(done.Data[0].State).IsEqualTo("succeeded");
+        await Assert.That(done.Data[0].State).IsEqualTo(TaskState.Succeeded);
     }
 
     [Test]
@@ -81,10 +86,8 @@ public class TaskServiceTests
 
         var r = await svc.CancelAsync(TaskType.Copy, tid);
         await Assert.That(r.Code).IsEqualTo(200);
-        await Task.Delay(100);
-
-        var info = await svc.InfoAsync(TaskType.Copy, tid);
-        await Assert.That(info.Data!.State).IsEqualTo("canceled");
+        var info = await WaitFinishedAsync(svc, TaskType.Copy, tid);
+        await Assert.That(info.Data!.State).IsEqualTo(TaskState.Canceled);
     }
 
     [Test]
@@ -103,7 +106,7 @@ public class TaskServiceTests
         {
             progress.Report(new TaskProgress { Current = 100, Total = 100 });
         });
-        await Task.Delay(200);
+        await WaitFinishedAsync(svc, TaskType.Copy, tid);
 
         var r = await svc.CancelAsync(TaskType.Copy, tid);
         await Assert.That(r.Code).IsEqualTo(400);
@@ -117,7 +120,7 @@ public class TaskServiceTests
         {
             progress.Report(new TaskProgress { Current = 100, Total = 100 });
         });
-        await Task.Delay(200);
+        await WaitFinishedAsync(svc, TaskType.Copy, tid);
 
         var r = await svc.DeleteAsync(TaskType.Copy, tid);
         await Assert.That(r.Code).IsEqualTo(200);
@@ -141,7 +144,7 @@ public class TaskServiceTests
             progress.Report(new TaskProgress { Current = 1, Total = 100 });
             await Task.Delay(2000, ct);
         });
-        await Task.Delay(200);
+        await WaitFinishedAsync(svc, TaskType.Copy, t1);
 
         var r = await svc.ClearAsync(TaskType.Copy);
         await Assert.That(r.Code).IsEqualTo(200);
@@ -166,18 +169,14 @@ public class TaskServiceTests
             if (attempt == 1) throw new Exception("first attempt fails");
             progress.Report(new TaskProgress { Current = 100, Total = 100 });
         });
-        await Task.Delay(200);
-
-        var info = await svc.InfoAsync(TaskType.Copy, tid);
-        await Assert.That(info.Data!.State).IsEqualTo("failed");
+        var info = await WaitFinishedAsync(svc, TaskType.Copy, tid);
+        await Assert.That(info.Data!.State).IsEqualTo(TaskState.Errored);
         await Assert.That(info.Data.Error).IsEqualTo("first attempt fails");
 
         var r = await svc.RetryAsync(TaskType.Copy, tid);
         await Assert.That(r.Code).IsEqualTo(200);
-        await Task.Delay(200);
-
-        var info2 = await svc.InfoAsync(TaskType.Copy, tid);
-        await Assert.That(info2.Data!.State).IsEqualTo("succeeded");
+        var info2 = await WaitFinishedAsync(svc, TaskType.Copy, tid);
+        await Assert.That(info2.Data!.State).IsEqualTo(TaskState.Succeeded);
     }
 
     [Test]
@@ -205,6 +204,19 @@ public class TaskServiceTests
         await Assert.That(r.Code).IsEqualTo(404);
     }
 
+    /// <summary>Poll until the task reaches a finished state (or timeout).</summary>
+    private static async Task<Resp<TaskInfo>> WaitFinishedAsync(TaskService svc, TaskType type, string tid)
+    {
+        Resp<TaskInfo> info = await svc.InfoAsync(type, tid);
+        for (var i = 0; i < 50; i++)
+        {
+            if (info.Data!.State is not (TaskState.Pending or TaskState.Running)) break;
+            await Task.Delay(20);
+            info = await svc.InfoAsync(type, tid);
+        }
+        return info;
+    }
+
     [Test]
     public async Task Tasks_Are_Separated_By_Type()
     {
@@ -217,7 +229,8 @@ public class TaskServiceTests
         {
             progress.Report(new TaskProgress { Current = 100, Total = 100 });
         });
-        await Task.Delay(200);
+        await WaitFinishedAsync(svc, TaskType.Copy, copyTid);
+        await WaitFinishedAsync(svc, TaskType.Move, moveTid);
 
         var copyDone = await svc.DoneAsync(TaskType.Copy);
         await Assert.That(copyDone.Data!.Count).IsEqualTo(1);

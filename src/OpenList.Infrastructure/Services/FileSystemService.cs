@@ -363,7 +363,16 @@ public sealed class FileSystemService : IFileSystemService
         var page = Math.Max(1, req.Page);
         var perPage = req.PerPage < 1 ? int.MaxValue : req.PerPage;
         var paged = results.Skip((page - 1) * perPage).Take(perPage).ToList();
-        return Task.FromResult(Resp<SearchResp>.Ok(new SearchResp { Content = paged, Total = total }));
+        var nodes = paged.ConvertAll(o => new SearchNode
+        {
+            Parent = UPath.Combine(parent, "").ToString(),
+            Name = o.Name,
+            IsDir = o.IsDir,
+            Size = o.Size,
+            Path = UPath.Combine(parent, o.Name).ToString(),
+            Type = o.Type,
+        });
+        return Task.FromResult(Resp<SearchResp>.Ok(new SearchResp { Content = nodes, Total = total }));
     }
 
     // --- helpers ---

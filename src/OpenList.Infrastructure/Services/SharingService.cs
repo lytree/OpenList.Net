@@ -185,7 +185,7 @@ public sealed class SharingService : ISharingService
             OrderDirection = s.OrderDirection,
             ExtractFolder = s.ExtractFolder,
             Creator = owner?.Username ?? string.Empty,
-            CreatorRole = (int)(owner?.Role ?? UserRole.Normal),
+            CreatorRole = (int)(owner?.Role ?? UserRole.General),
         };
     }
 

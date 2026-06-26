@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace OpenList.Server.Models;
 
 /// <summary>Login request body for <c>POST /api/auth/login</c>.</summary>
@@ -31,6 +33,8 @@ public sealed class UpdateMeReq
 {
     public string? Username { get; set; }
     public string? Password { get; set; }
+    [JsonPropertyName("sso_id")]
+    public string? SsoId { get; set; }
 }
 
 public sealed class HashPasswordReq
