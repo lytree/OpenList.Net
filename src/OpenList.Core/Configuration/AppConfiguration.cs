@@ -18,6 +18,27 @@ public sealed class AppConfiguration
     public FtpConfig FTP { get; set; } = new();
     public SftpConfig SFTP { get; set; } = new();
     public string SearchIndex { get; set; } = "database";
+    public LdapConfig Ldap { get; set; } = new();
+}
+
+/// <summary>
+/// LDAP server configuration for <c>/api/auth/login/ldap</c>.
+/// All fields optional — empty <see cref="Url"/> disables LDAP entirely.
+/// </summary>
+public sealed class LdapConfig
+{
+    /// <summary>Server URL, e.g. <c>ldap://host:389</c> or <c>ldaps://host:636</c>. Empty = disabled.</summary>
+    public string Url { get; set; } = string.Empty;
+    /// <summary>Bind DN template with <c>%s</c> placeholder for the username (e.g. <c>uid=%s,ou=users,dc=example,dc=com</c>).</summary>
+    public string BindDn { get; set; } = "uid=%s,ou=users,dc=example,dc=com";
+    /// <summary>Base DN for user lookups when <see cref="BindDn"/> is not a template.</summary>
+    public string UserBase { get; set; } = string.Empty;
+    /// <summary>Attribute used as the username filter (default <c>uid</c>).</summary>
+    public string UserFilter { get; set; } = "uid";
+    /// <summary>Whether TLS is required for plain <c>ldap://</c> URLs (STARTTLS).</summary>
+    public bool StartTls { get; set; }
+    /// <summary>Skip certificate validation (useful for self-signed dev servers).</summary>
+    public bool SkipVerify { get; set; } = true;
 }
 
 public sealed class DatabaseConfig

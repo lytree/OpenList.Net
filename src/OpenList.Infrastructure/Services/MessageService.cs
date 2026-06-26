@@ -29,6 +29,13 @@ public sealed class MessageService : IMessageService
         return Resp<List<Message>>.Ok(list);
     }
 
+    public async Task<Resp<Message>> GetByIdAsync(long messageId, CancellationToken ct = default)
+    {
+        var msg = await _db.Messages.AsNoTracking().FirstOrDefaultAsync(m => m.Id == messageId, ct);
+        if (msg is null) return Resp<Message>.Fail("message not found", RespCodes.NotFound);
+        return Resp<Message>.Ok(msg);
+    }
+
     public async Task<Resp> SendAsync(long userId, string title, string content, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(content))
@@ -51,6 +58,15 @@ public sealed class MessageService : IMessageService
         var msg = await _db.Messages.FindAsync([messageId], ct);
         if (msg is null) return Resp.Fail("message not found", RespCodes.NotFound);
         msg.Read = true;
+        await _db.SaveChangesAsync(ct);
+        return Resp.Ok();
+    }
+
+    public async Task<Resp> DeleteAsync(long messageId, CancellationToken ct = default)
+    {
+        var msg = await _db.Messages.FindAsync([messageId], ct);
+        if (msg is null) return Resp.Fail("message not found", RespCodes.NotFound);
+        _db.Messages.Remove(msg);
         await _db.SaveChangesAsync(ct);
         return Resp.Ok();
     }

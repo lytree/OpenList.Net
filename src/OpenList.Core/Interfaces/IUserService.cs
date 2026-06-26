@@ -7,6 +7,8 @@ public interface IUserService
 {
     Task<Resp<User>> GetAsync(long id, CancellationToken ct = default);
     Task<Resp<User>> GetByNameAsync(string username, CancellationToken ct = default);
+    /// <summary>Look up a user by their SSO provider id. Used by the SSO callback flow.</summary>
+    Task<Resp<User>> GetBySsoIdAsync(string ssoId, CancellationToken ct = default);
     Task<Resp<UserPublic>> GetCurrentAsync(long userId, CancellationToken ct = default);
     Task<Resp> UpdateCurrentAsync(long userId, UpdateUserReq req, CancellationToken ct = default);
     Task<Resp<List<UserPublic>>> ListAsync(CancellationToken ct = default);

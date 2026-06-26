@@ -18,6 +18,8 @@ public enum TaskType
     Aria2Transfer,
     QbitDown,
     QbitTransfer,
+    TransmissionDown,
+    TransmissionTransfer,
 }
 
 /// <summary>

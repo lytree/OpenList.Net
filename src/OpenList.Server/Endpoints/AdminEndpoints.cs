@@ -265,20 +265,33 @@ public static class AdminEndpoints
             Results.Ok(await svc.DeleteAsync(id)));
 
         // --- Message management ---
+        // Persistent admin-to-user messages (CRUD).
         g.MapGet("/message/list", async (long user_id, IMessageService svc) =>
             Results.Ok(await svc.GetAsync(user_id)));
 
+        // GET /admin/message/get?id= — fetch a single persistent message by id.
         g.MapGet("/message/get", async (long id, IMessageService svc) =>
-            Results.Ok(await svc.GetAsync(id)));
+            Results.Ok(await svc.GetByIdAsync(id)));
 
         g.MapPost("/message/create", async (CreateMessageReq req, IMessageService svc) =>
             Results.Ok(await svc.SendAsync(req.UserId, req.Title, req.Content)));
 
+        // Alias: frontend Messenger uses /admin/message/send with { message } body for
+        // admin broadcast (in-memory). Kept alongside /message/create for API compat.
+        g.MapPost("/message/send", async (SendBroadcastReq? req, IBroadcastService svc) =>
+            Results.Ok(await svc.SendAsync(req?.Message ?? new BroadcastMessage())));
+
         g.MapPost("/message/update", async (long id, IMessageService svc) =>
             Results.Ok(await svc.MarkReadAsync(id)));
 
+        // POST /admin/message/delete?id= — delete a persistent message.
         g.MapPost("/message/delete", async (long id, IMessageService svc) =>
-            Results.Ok(Resp.Ok())); // TODO: add DeleteAsync to IMessageService if needed
+            Results.Ok(await svc.DeleteAsync(id)));
+
+        // POST /admin/message/get (no body) — retrieve the latest admin broadcast.
+        // The frontend Messenger polls this to display site-wide announcements.
+        g.MapPost("/message/get", async (IBroadcastService svc) =>
+            Results.Ok(await svc.GetAsync()));
 
         // --- Scan ---
         // --- Scan management ---
@@ -345,6 +358,7 @@ public static class AdminEndpoints
 
 public sealed class SetPasswordReq { public long Id { get; set; } public string Password { get; set; } = ""; }
 public sealed class CreateMessageReq { public long UserId { get; set; } public string Title { get; set; } = ""; public string Content { get; set; } = ""; }
+public sealed class SendBroadcastReq { public BroadcastMessage? Message { get; set; } }
 public sealed class ScanStartReq { public string? Path { get; set; } public double Limit { get; set; } }
 public sealed class IndexBuildReq
 {

@@ -24,6 +24,8 @@ public sealed class OpenListDbContext : DbContext
     public DbSet<SettingItem> Settings => Set<SettingItem>();
     public DbSet<SshKey> SshKeys => Set<SshKey>();
     public DbSet<Message> Messages => Set<Message>();
+    public DbSet<SearchIndexEntry> SearchIndex => Set<SearchIndexEntry>();
+    public DbSet<WebAuthnCredential> AuthnCredentials => Set<WebAuthnCredential>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -67,6 +69,23 @@ public sealed class OpenListDbContext : DbContext
             e.ToTable(prefix + "messages");
             e.HasKey(m => m.Id);
             e.HasIndex(m => m.UserId);
+        });
+        b.Entity<SearchIndexEntry>(e =>
+        {
+            e.ToTable(prefix + "search_index");
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.Name);
+            e.HasIndex(s => s.Parent);
+            e.HasIndex(s => s.Path).IsUnique();
+        });
+        b.Entity<WebAuthnCredential>(e =>
+        {
+            e.ToTable(prefix + "authn_credentials");
+            e.HasKey(c => c.Id);
+            e.HasIndex(c => c.UserId);
+            // Credential ids must be unique per user so re-registering a key
+            // with the same authenticator replaces rather than duplicates.
+            e.HasIndex(c => new { c.UserId, c.CredentialId }).IsUnique();
         });
     }
 }

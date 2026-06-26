@@ -47,6 +47,13 @@ public sealed class UserService : IUserService
         return u is null ? Resp<User>.Fail("user not found", RespCodes.NotFound) : Resp<User>.Ok(u);
     }
 
+    public async Task<Resp<User>> GetBySsoIdAsync(string ssoId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(ssoId)) return Resp<User>.Fail("sso id required", RespCodes.BadRequest);
+        var u = await _db.Users.FirstOrDefaultAsync(x => x.SsoID == ssoId, ct);
+        return u is null ? Resp<User>.Fail("user not found", RespCodes.NotFound) : Resp<User>.Ok(u);
+    }
+
     public async Task<Resp<UserPublic>> GetCurrentAsync(long userId, CancellationToken ct = default)
     {
         var u = await _db.Users.FindAsync([userId], ct);

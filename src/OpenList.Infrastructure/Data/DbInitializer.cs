@@ -107,6 +107,68 @@ public static class DbInitializer
                 // Column may already exist (race) or table missing — ignore.
             }
         }
+
+        // Ensure whole tables introduced after the initial EnsureCreated run exist.
+        // EnsureCreatedAsync only creates tables on a fresh database; for databases
+        // created earlier we CREATE TABLE IF NOT EXISTS.
+        await EnsureTableAsync(db, "x_search_index", """
+            CREATE TABLE IF NOT EXISTS x_search_index (
+                Id INTEGER NOT NULL CONSTRAINT PK_x_search_index PRIMARY KEY AUTOINCREMENT,
+                Parent TEXT NOT NULL DEFAULT '',
+                Name TEXT NOT NULL DEFAULT '',
+                IsDir INTEGER NOT NULL DEFAULT 0,
+                Size INTEGER NOT NULL DEFAULT 0,
+                Path TEXT NOT NULL DEFAULT '',
+                Type INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS ix_x_search_index_Name ON x_search_index (Name);
+            CREATE INDEX IF NOT EXISTS ix_x_search_index_Parent ON x_search_index (Parent);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_x_search_index_Path ON x_search_index (Path);
+            """, ct);
+
+        await EnsureTableAsync(db, "x_authn_credentials", """
+            CREATE TABLE IF NOT EXISTS x_authn_credentials (
+                Id INTEGER NOT NULL CONSTRAINT PK_x_authn_credentials PRIMARY KEY AUTOINCREMENT,
+                UserId INTEGER NOT NULL,
+                CredentialId TEXT NOT NULL,
+                UserHandle TEXT NOT NULL,
+                PublicKey TEXT NOT NULL,
+                SignCount INTEGER NOT NULL DEFAULT 0,
+                Aaguid TEXT NOT NULL DEFAULT '',
+                Transports TEXT NOT NULL DEFAULT '',
+                Discoverable INTEGER NOT NULL DEFAULT 0,
+                CreatedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'
+            );
+            CREATE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId ON x_authn_credentials (UserId);
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId_CredentialId ON x_authn_credentials (UserId, CredentialId);
+            """, ct);
+    }
+
+    private static async Task EnsureTableAsync(
+        OpenListDbContext db, string table, string ddl, CancellationToken ct)
+    {
+        if (await TableExistsAsync(db, table, ct)) return;
+        try { await db.Database.ExecuteSqlRawAsync(ddl, ct); }
+        catch { /* race or already exists — ignore */ }
+    }
+
+    private static async Task<bool> TableExistsAsync(
+        OpenListDbContext db, string table, CancellationToken ct)
+    {
+        var conn = db.Database.GetDbConnection();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name=@t;";
+        var p = cmd.CreateParameter();
+        p.ParameterName = "@t";
+        p.Value = table;
+        cmd.Parameters.Add(p);
+        if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(ct);
+        try
+        {
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            return await reader.ReadAsync(ct);
+        }
+        finally { if (conn.State == System.Data.ConnectionState.Open) await conn.CloseAsync(); }
     }
 
     private static async Task<bool> ColumnExistsAsync(
@@ -198,6 +260,7 @@ public static class DbInitializer
     {
         // --- Group 0: SINGLE (token + offline-download tool temp dirs, shown on /settings/other) ---
         ("token", "", SettingValueType.String, SettingFlag.Private, 0, null),
+        ("webauthn_login_enabled", "false", SettingValueType.Bool, SettingFlag.Public, 0, null),
         ("115_temp_dir", "", SettingValueType.String, SettingFlag.Private, 0, null),
         ("115_open_temp_dir", "", SettingValueType.String, SettingFlag.Private, 0, null),
         ("123_pan_temp_dir", "", SettingValueType.String, SettingFlag.Private, 0, null),

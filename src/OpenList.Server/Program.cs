@@ -54,20 +54,51 @@ builder.Services.AddDbContext<OpenListDbContext>(opts =>
 // DbContext-consuming services are Scoped to match the EF Core DbContext lifetime.
 builder.Services.AddSingleton<ZioMountService>();
 builder.Services.AddScoped<IUserService, UserService>();
+// ILdapAuthenticator is a singleton because it only depends on AppConfiguration.
+// JwtService picks it up optionally — empty Url means Enabled=false and /login/ldap returns 501.
+builder.Services.AddSingleton<ILdapAuthenticator, LdapAuthenticator>();
 builder.Services.AddScoped<IAuthService, JwtService>();
+// ISsoService depends on IUserService + IAuthService (both scoped) so it's scoped too.
+// It reads SSO config from the settings table at request time — admins can toggle
+// sso_login_enabled / sso_client_id etc. from the frontend without a restart.
+builder.Services.AddHttpClient("sso");
+builder.Services.AddScoped<ISsoService, SsoService>();
 builder.Services.AddScoped<IStorageService, StorageService>();
-builder.Services.AddSingleton<IFileSystemService, FileSystemService>();
 builder.Services.AddScoped<ISettingService, SettingService>();
 builder.Services.AddScoped<IMetaService, MetaService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
+builder.Services.AddSingleton<IBroadcastService, BroadcastService>();
 builder.Services.AddScoped<ISharingService, SharingService>();
 builder.Services.AddScoped<ISshKeyService, SshKeyService>();
+// IHttpContextAccessor lets WebAuthnService read the browser origin (scheme + host)
+// to build the FIDO2 Relying Party config per request.
+builder.Services.AddHttpContextAccessor();
+// IWebAuthnService depends on OpenListDbContext + IAuthService + ISettingService
+// (all scoped) + IHttpContextAccessor (singleton) so it's scoped too.
+builder.Services.AddScoped<IWebAuthnService, WebAuthnService>();
 builder.Services.AddSingleton<IScanService, ScanService>();
 builder.Services.AddSingleton<ISearchService, SearchService>();
 builder.Services.AddSingleton<ITaskService, TaskService>();
 // SignService must be singleton (matches ZioMountService lifetime) so FileSystemService
 // can resolve it. Uses the same JWT secret for HMAC signing.
 builder.Services.AddSingleton<ISignService, SignService>();
+// Offline-download tool adapters (aria2 / qBittorrent / Transmission) talk to external
+// daemons over HTTP — register a named HttpClient per tool so timeouts/policies can be
+// tuned independently. IHttpClientFactory is the standard ASP.NET Core pattern.
+builder.Services.AddHttpClient("offline_download_aria2");
+builder.Services.AddHttpClient("offline_download_qbit");
+builder.Services.AddHttpClient("offline_download_transmission");
+// IOfflineDownloadService is a singleton because it only depends on singletons
+// (ITaskService, IFileSystemService, IHttpClientFactory) + IServiceScopeFactory for
+// the scoped ISettingService lookups.
+builder.Services.AddSingleton<IOfflineDownloadService, OfflineDownloadService>();
+// FileSystemService is a singleton; the new 3-arg constructor wires in ISignService
+// and IOfflineDownloadService (both singletons) so AddOfflineDownloadAsync can delegate.
+builder.Services.AddSingleton<IFileSystemService>(sp =>
+    ActivatorUtilities.CreateInstance<FileSystemService>(sp,
+        sp.GetRequiredService<ZioMountService>(),
+        sp.GetService<ISignService>(),
+        sp.GetService<IOfflineDownloadService>()));
 // TODO: register IShareService, etc. (Phase 5+)
 
 // JWT auth — frontend sends token WITHOUT "Bearer " prefix.

@@ -18,6 +18,7 @@ public sealed class FileSystemService : IFileSystemService
 {
     private readonly ZioMountService _mount;
     private readonly ISignService? _signs;
+    private readonly IOfflineDownloadService? _offline;
 
     public FileSystemService(ZioMountService mount) => _mount = mount;
 
@@ -26,6 +27,14 @@ public sealed class FileSystemService : IFileSystemService
     {
         _mount = mount;
         _signs = signs;
+    }
+
+    /// <summary>Constructor with offline-download orchestration support.</summary>
+    public FileSystemService(ZioMountService mount, ISignService? signs, IOfflineDownloadService? offline)
+    {
+        _mount = mount;
+        _signs = signs;
+        _offline = offline;
     }
 
     public Task<Resp<FsListResp>> ListAsync(FsListReq req, User user, CancellationToken ct = default)
@@ -298,8 +307,13 @@ public sealed class FileSystemService : IFileSystemService
         return Task.FromResult(Resp<LinkResp>.Fail("link not supported", RespCodes.NotImplemented));
     }
 
-    public Task<Resp> AddOfflineDownloadAsync(OfflineDownloadReq req, User user, CancellationToken ct = default)
-        => Task.FromResult(Resp.Fail("offline download not implemented", RespCodes.NotImplemented));
+    public async Task<Resp> AddOfflineDownloadAsync(OfflineDownloadReq req, User user, CancellationToken ct = default)
+    {
+        if (_offline is null)
+            return Resp.Fail("offline download not configured", RespCodes.NotImplemented);
+        var r = await _offline.AddAsync(req, user, ct);
+        return r.Code == 200 ? Resp.Ok() : Resp.Fail(r.Message, r.Code);
+    }
 
     public Task<Resp<ArchiveMetaResp>> ArchiveMetaAsync(string path, User user, CancellationToken ct = default)
         => Task.FromResult(Resp<ArchiveMetaResp>.Ok(new ArchiveMetaResp

@@ -148,6 +148,8 @@ public static class TaskEndpoints
         ["aria2_transfer"] = TaskType.Aria2Transfer,
         ["qbit_down"] = TaskType.QbitDown,
         ["qbit_transfer"] = TaskType.QbitTransfer,
+        ["transmission_down"] = TaskType.TransmissionDown,
+        ["transmission_transfer"] = TaskType.TransmissionTransfer,
     };
 
     private static bool TryParseType(string? value, out TaskType type)

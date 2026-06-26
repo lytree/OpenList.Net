@@ -19,13 +19,15 @@ public sealed class JwtService : IAuthService
     private readonly IUserService _users;
     private readonly AppConfiguration _config;
     private readonly TimeProvider _time;
+    private readonly ILdapAuthenticator? _ldap;
     private readonly HashSet<string> _revoked = new(StringComparer.Ordinal);
 
-    public JwtService(IUserService users, AppConfiguration config, TimeProvider? time = null)
+    public JwtService(IUserService users, AppConfiguration config, TimeProvider? time = null, ILdapAuthenticator? ldap = null)
     {
         _users = users;
         _config = config;
         _time = time ?? TimeProvider.System;
+        _ldap = ldap;
     }
 
     public async Task<Resp<string>> LoginAsync(string username, string password, string? otpCode = null, CancellationToken ct = default)
@@ -84,10 +86,48 @@ public sealed class JwtService : IAuthService
             System.Text.Encoding.UTF8.GetBytes(providedHash));
     }
 
-    public Task<Resp<string>> LoginLdapAsync(string username, string password, CancellationToken ct = default)
+    public async Task<Resp<string>> LoginLdapAsync(string username, string password, CancellationToken ct = default)
     {
-        // LDAP login deferred to Phase 15 (SSO).
-        return Task.FromResult(Resp<string>.Fail("ldap login not implemented", RespCodes.NotImplemented));
+        // LDAP login flow:
+        //   1. Authenticator verifies (username, password) against the directory.
+        //   2. Look up the local user by name.
+        //      - If they exist and have AllowLdap enabled, issue a token.
+        //      - If they don't exist, auto-provision a disabled-password local account
+        //        (random password hash, General role) so LDAP users can log in without
+        //        admin pre-registration — matching OpenList Go behaviour.
+        //   3. Existing users without AllowLdap are rejected so admins keep control.
+        if (_ldap is null || !_ldap.Enabled)
+            return Resp<string>.Fail("ldap not configured", RespCodes.NotImplemented);
+
+        var ok = await _ldap.AuthenticateAsync(username, password, ct);
+        if (!ok) return Resp<string>.Fail("wrong username or password", RespCodes.Unauthorized);
+
+        var r = await _users.GetByNameAsync(username, ct);
+        User u;
+        if (r.IsSuccess())
+        {
+            u = r.Data!;
+            if (u.Disabled) return Resp<string>.Fail("user disabled", RespCodes.Forbidden);
+            if (!u.AllowLdap)
+                return Resp<string>.Fail("ldap login not allowed for this user", RespCodes.Forbidden);
+        }
+        else
+        {
+            // Auto-provision: a random 32-byte hash makes the password route unusable,
+            // so the local account is effectively LDAP-only.
+            var create = await _users.CreateAsync(new CreateUserReq
+            {
+                Username = username,
+                Password = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)),
+                Role = UserRole.General,
+                AllowLdap = true,
+            }, ct);
+            if (!create.IsSuccess()) return Resp<string>.Fail(create.Message, create.Code);
+            var fetched = await _users.GetByNameAsync(username, ct);
+            if (!fetched.IsSuccess()) return Resp<string>.Fail("ldap user provisioning failed", RespCodes.InternalError);
+            u = fetched.Data!;
+        }
+        return Resp<string>.Ok(IssueToken(u));
     }
 
     public async Task<Resp<string>> Generate2FaAsync(long userId, CancellationToken ct = default)
