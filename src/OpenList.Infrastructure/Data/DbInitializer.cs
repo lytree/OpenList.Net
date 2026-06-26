@@ -158,12 +158,14 @@ public static class DbInitializer
         if (admin is null)
         {
             // First run — create the super admin from config.
+            // Permission: all 16 bits set (frontend UserPermissions has 16 entries;
+            // userCan does not bypass for admins, so the super admin needs every bit).
             db.Users.Add(new User
             {
                 Username = config.AdminUsername,
                 PasswordHash = desiredHash ?? UserService.HashPassword("admin"),
                 Role = UserRole.Admin,
-                Permission = 0,
+                Permission = (1 << 16) - 1,
                 Disabled = false,
                 CreatedAt = now,
                 UpdatedAt = now,
@@ -177,6 +179,7 @@ public static class DbInitializer
             if (desiredHash is not null)
                 admin.PasswordHash = desiredHash;
             admin.Role = UserRole.Admin;
+            admin.Permission = (1 << 16) - 1;
             admin.Disabled = false;
             admin.UpdatedAt = now;
         }

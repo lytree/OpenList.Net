@@ -26,7 +26,7 @@ public sealed class SshKeyService : ISshKeyService
     {
         var keys = await _db.SshKeys.AsNoTracking()
             .Where(k => k.UserId == userId)
-            .OrderByDescending(k => k.CreatedAt)
+            .OrderByDescending(k => k.Id)
             .ToListAsync(ct);
         return Resp<List<SshKeyInfo>>.Ok(keys.Select(ToInfo).ToList());
     }
@@ -73,7 +73,7 @@ public sealed class SshKeyService : ISshKeyService
         // Return the remaining keys for the affected user (frontend updates its list).
         var remaining = await _db.SshKeys.AsNoTracking()
             .Where(k => k.UserId == targetUserId)
-            .OrderByDescending(k => k.CreatedAt)
+            .OrderByDescending(k => k.Id)
             .ToListAsync(ct);
         return Resp<List<SshKeyInfo>>.Ok(remaining.Select(ToInfo).ToList());
     }

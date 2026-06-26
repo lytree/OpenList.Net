@@ -189,7 +189,7 @@ public sealed class UserService : IUserService
     {
         var list = await _db.SshKeys.AsNoTracking()
             .Where(k => k.UserId == userId)
-            .OrderByDescending(k => k.CreatedAt)
+            .OrderByDescending(k => k.Id)
             .ToListAsync(ct);
         return Resp<List<SshKey>>.Ok(list);
     }
