@@ -51,11 +51,17 @@ builder.Services.AddDbContext<OpenListDbContext>(opts =>
             Password = appConfig.Database.Password,
             Database = appConfig.Database.Name,
         }.ToString();
-        opts.UseNpgsql(connStr);
+        // Each provider has its own migration assembly (EF Core 10 dropped
+        // MigrationsNamespace; separate assemblies are the official multi-
+        // provider approach). Column types differ: BOOLEAN vs INTEGER,
+        // TIMESTAMPTZ vs TEXT, BIGSERIAL vs INTEGER AUTOINCREMENT.
+        opts.UseNpgsql(connStr, npgsql => npgsql
+            .MigrationsAssembly("OpenList.Migrations.Postgres"));
     }
     else
     {
-        opts.UseSqlite($"Data Source={appConfig.Database.DBFile}");
+        opts.UseSqlite($"Data Source={appConfig.Database.DBFile}", sqlite => sqlite
+            .MigrationsAssembly("OpenList.Migrations.Sqlite"));
     }
 });
 

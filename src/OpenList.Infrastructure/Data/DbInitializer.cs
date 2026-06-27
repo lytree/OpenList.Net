@@ -25,27 +25,40 @@ public static class DbInitializer
                 Directory.CreateDirectory(dir);
         }
 
-        // Apply pending migrations if any are configured.
+        // Prefer EF Core migrations (one assembly per provider — see
+        // OpenListDbContextFactory + Program.cs MigrationsAssembly()).
+        // Fresh DB: MigrateAsync creates the schema + __EFMigrationsHistory.
+        // Already-migrated DB: GetPendingMigrations is empty, nothing to do.
+        // Legacy EnsureCreated DB (tables exist, no __EFMigrationsHistory):
+        //   GetPendingMigrations returns all migrations, MigrateAsync throws
+        //   because the tables already exist — the catch falls through to the
+        //   EnsureCreated + MigrateSchemaAsync path which is idempotent.
+        var migrated = false;
         try
         {
-            var migrations = await db.Database.GetPendingMigrationsAsync(ct);
-            if (migrations.Any())
-            {
+            var pending = await db.Database.GetPendingMigrationsAsync(ct);
+            if (pending.Any())
                 await db.Database.MigrateAsync(ct);
-                await SeedAdminAsync(db, config, ct);
-                return;
-            }
+            migrated = true;
         }
-        catch { /* no migrations assembly — fall through to EnsureCreated */ }
+        catch
+        {
+            // No migration assembly registered, or a pre-migration EnsureCreated
+            // database whose tables collide with the Init migration. Either way
+            // fall back to the legacy EnsureCreated + additive ALTER TABLE path.
+            migrated = false;
+        }
 
-        // No migrations — create schema directly from the model.
-        await db.Database.EnsureCreatedAsync(ct);
+        if (!migrated)
+        {
+            // Legacy path: create schema directly from the model (no-op if the
+            // database already exists) then patch additive columns.
+            await db.Database.EnsureCreatedAsync(ct);
+            await MigrateSchemaAsync(db, isPostgres, ct);
+        }
 
-        // EnsureCreated only creates the schema once; for databases created
-        // before new columns were added to the model, patch the schema with
-        // additive ALTER TABLE statements (SQLite supports ADD COLUMN).
-        await MigrateSchemaAsync(db, isPostgres, ct);
-
+        // Seed on BOTH paths — previously the MigrateAsync path skipped
+        // SeedDefaultSettingsAsync, leaving fresh databases without defaults.
         await SeedAdminAsync(db, config, ct);
         await SeedDefaultSettingsAsync(db, ct);
     }

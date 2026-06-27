@@ -3,6 +3,12 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- EF Core tools require Design in the startup project (this assembly).
+         PrivateAssets keeps it out of the published runtime deps. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Swashbuckle.AspNetCore" />
     <PackageReference Include="Scalar.AspNetCore" />
     <PackageReference Include="Mapster" />
@@ -17,5 +23,10 @@
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
     <ProjectReference Include="..\OpenList.Infrastructure\OpenList.Infrastructure.csproj" />
     <ProjectReference Include="..\OpenList.Drivers\OpenList.Drivers.csproj" />
+    <!-- Migration assemblies: Program.cs picks one at runtime via MigrationsAssembly().
+         Both are referenced so the deployable carries whichever provider is configured,
+         and so `dotnet ef` (which uses this as startup-project) can locate them. -->
+    <ProjectReference Include="..\OpenList.Migrations.Sqlite\OpenList.Migrations.Sqlite.csproj" />
+    <ProjectReference Include="..\OpenList.Migrations.Postgres\OpenList.Migrations.Postgres.csproj" />
   </ItemGroup>
 </Project>
