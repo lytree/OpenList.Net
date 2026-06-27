@@ -117,13 +117,19 @@ jobs:
   bundle:
     needs: [resolve-frontend, resolve-version, build-test]
     runs-on: ubuntu-latest
-    env:
-      VERSIONED_BUNDLE: ${{ env.BUNDLE_NAME }}-${{ needs.resolve-version.outputs.semver }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      # Compose the versioned bundle name once. Job-level env cannot reference the
+      # env context (GitHub Actions restriction), so we publish it via $GITHUB_ENV
+      # — subsequent steps then see both $VERSIONED_BUNDLE (shell) and
+      # ${{ env.VERSIONED_BUNDLE }} (context expression).
+      - name: Set versioned bundle name
+        run: |
+          echo "VERSIONED_BUNDLE=${BUNDLE_NAME}-${{ needs.resolve-version.outputs.semver }}" >> "$GITHUB_ENV"
 
       - name: Download upstream frontend dist (non-lite)
         env:
