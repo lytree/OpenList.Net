@@ -1,59 +1,169 @@
-name: Build and Test
+name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  CONFIGURATION: Release
+  BUNDLE_NAME: openlist-net-framework-dependent
 
 jobs:
-  build:
+  # Resolve the latest non-lite frontend release tag from the upstream repo once,
+  # so every downstream job uses the same version.
+  resolve-frontend:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        dotnet-version: ['10.0.x']
-
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
     steps:
-    - uses: actions/checkout@v4
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$(gh release view --repo OpenListTeam/OpenList-Frontend --json tagName -q .tagName)"
+          echo "Resolved frontend tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ matrix.dotnet-version }}
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore OpenList.slnx
+      - run: dotnet build OpenList.slnx -c ${{ env.CONFIGURATION }} --no-restore
+      - run: dotnet test OpenList.slnx -c ${{ env.CONFIGURATION }} --no-build --logger "trx;LogFileName=tests.trx"
 
-    - name: Restore dependencies
-      run: dotnet restore
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+          if-no-files-found: ignore
+          retention-days: 7
 
-    - name: Build
-      run: dotnet build --no-restore -c Release
+  # Framework-dependent bundle: app/ + frontend/dist/ + launchers + README, packaged as tar.gz.
+  bundle:
+    needs: [resolve-frontend, build-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
 
-    - name: Test
-      run: dotnet test --no-build -c Release --verbosity normal
+      - name: Download upstream frontend dist (non-lite)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p fe "$BUNDLE_NAME/frontend/dist"
+          # Exact asset name (tag-qualified) avoids matching the -lite- variant.
+          gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
+            --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
+          tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" \
+            -C "$BUNDLE_NAME/frontend/dist"
+          printf '%s' "$FE_TAG" > "$BUNDLE_NAME/frontend/dist/VERSION"
 
+      - name: Publish server (framework-dependent)
+        run: |
+          dotnet publish src/OpenList.Server/OpenList.Server.csproj \
+            -c "$CONFIGURATION" \
+            -o "$BUNDLE_NAME/app" \
+            -p:UseAppHost=false \
+            -p:SelfContained=false
+
+      - name: Write launchers and README
+        working-directory: ${{ env.BUNDLE_NAME }}
+        run: |
+          cat > run.sh <<'EOF'
+          #!/usr/bin/env sh
+          cd "$(dirname "$0")/app" || exit 1
+          export OpenList__DistDir="../frontend/dist"
+          exec dotnet OpenList.Server.dll
+          EOF
+          chmod +x run.sh
+
+          cat > run.bat <<'EOF'
+          @echo off
+          cd /d "%~dp0app"
+          set OpenList__DistDir=../frontend/dist
+          dotnet OpenList.Server.dll
+          EOF
+
+          cat > README.txt <<'EOF'
+          openlist-net-framework-dependent
+          ================================
+
+          Layout:
+            app/             .NET server (framework-dependent publish output; needs .NET 10 runtime)
+            frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)
+            run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
+            README.txt       This file
+
+          Run:
+            Linux/macOS:  ./run.sh
+            Windows:      run.bat
+
+          Requires the .NET 10 runtime on the host. The launcher exports
+          OpenList__DistDir=../frontend/dist (relative to app/) so the server finds the SPA
+          without editing appsettings.json. Default port: http://0.0.0.0:5244
+
+          Data is stored under app/data/ by default. Configure via OpenList__ environment
+          variables (e.g. OpenList__Database__Type=postgres).
+          EOF
+
+      - name: Package bundle
+        run: tar -czf "$BUNDLE_NAME.tar.gz" "$BUNDLE_NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BUNDLE_NAME }}
+          path: ${{ env.BUNDLE_NAME }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  # On pushes to main, build and push the Docker image to GHCR (amd64 only for speed;
+  # release.yml produces the full multi-arch images).
   docker:
-    needs: build
-    runs-on: ubuntu-latest
+    needs: [build-test, resolve-frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Login to Docker Hub
-      if: github.event_name != 'pull_request'
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Build and push
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        push: ${{ github.event_name != 'pull_request' }}
-        tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/openlist-net:latest
-          ${{ secrets.DOCKERHUB_USERNAME }}/openlist-net:${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            FRONTEND_VERSION=${{ needs.resolve-frontend.outputs.tag }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/openlist-net:latest
+            ghcr.io/${{ github.repository_owner }}/openlist-net:main-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

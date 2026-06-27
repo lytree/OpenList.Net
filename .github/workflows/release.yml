@@ -1,0 +1,225 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag / release version (e.g. v1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  CONFIGURATION: Release
+
+jobs:
+  resolve-frontend:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$(gh release view --repo OpenListTeam/OpenList-Frontend --json tagName -q .tagName)"
+          echo "Resolved frontend tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  # Self-contained single-file binaries for 8 runtime identifiers.
+  binaries:
+    needs: resolve-frontend
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            archive: tar.gz
+          - rid: linux-arm64
+            archive: tar.gz
+          - rid: linux-musl-x64
+            archive: tar.gz
+          - rid: linux-musl-arm64
+            archive: tar.gz
+          - rid: win-x64
+            archive: zip
+          - rid: win-arm64
+            archive: zip
+          - rid: osx-x64
+            archive: tar.gz
+          - rid: osx-arm64
+            archive: tar.gz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish server (self-contained single-file)
+        run: |
+          BUNDLE="openlist-net-${{ matrix.rid }}"
+          dotnet publish src/OpenList.Server/OpenList.Server.csproj \
+            -c "$CONFIGURATION" \
+            -o "$BUNDLE/app" \
+            -r ${{ matrix.rid }} \
+            -p:PublishSingleFile=true \
+            -p:SelfContained=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true
+
+      - name: Download upstream frontend dist (non-lite)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
+        run: |
+          set -euo pipefail
+          BUNDLE="openlist-net-${{ matrix.rid }}"
+          mkdir -p fe "$BUNDLE/frontend/dist"
+          # Exact asset name (tag-qualified) avoids matching the -lite- variant.
+          gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
+            --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
+          tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" -C "$BUNDLE/frontend/dist"
+          printf '%s' "$FE_TAG" > "$BUNDLE/frontend/dist/VERSION"
+
+      - name: Write launchers and README
+        env:
+          RID: ${{ matrix.rid }}
+        run: |
+          set -euo pipefail
+          BUNDLE="openlist-net-${{ matrix.rid }}"
+          cd "$BUNDLE"
+
+          case "$RID" in
+            win-*)
+              cat > run.bat <<'EOF'
+          @echo off
+          cd /d "%~dp0app"
+          set OpenList__DistDir=../frontend/dist
+          OpenList.Server.exe
+          EOF
+              ;;
+            *)
+              cat > run.sh <<'EOF'
+          #!/usr/bin/env sh
+          cd "$(dirname "$0")/app" || exit 1
+          export OpenList__DistDir="../frontend/dist"
+          exec ./OpenList.Server
+          EOF
+              chmod +x run.sh
+              ;;
+          esac
+
+          cat > README.txt <<'EOF'
+          openlist-net-${{ matrix.rid }}
+          =========================
+
+          Self-contained single-file build — no .NET runtime required on the host.
+
+          Layout:
+            app/             .NET server (self-contained single-file executable)
+            frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)
+            run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
+            README.txt       This file
+
+          Run:
+            Linux/macOS:  ./run.sh
+            Windows:      run.bat
+
+          The launcher exports OpenList__DistDir=../frontend/dist (relative to app/) so the
+          server finds the SPA without editing appsettings.json. Default port: http://0.0.0.0:5244
+
+          Data is stored under app/data/ by default. Configure via OpenList__ environment
+          variables (e.g. OpenList__Database__Type=postgres).
+          EOF
+
+      - name: Package bundle
+        env:
+          RID: ${{ matrix.rid }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          set -euo pipefail
+          BUNDLE="openlist-net-${{ matrix.rid }}"
+          if [ "$ARCHIVE" = "zip" ]; then
+            zip -r "$BUNDLE.zip" "$BUNDLE"
+          else
+            tar -czf "$BUNDLE.tar.gz" "$BUNDLE"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openlist-net-${{ matrix.rid }}
+          path: openlist-net-${{ matrix.rid }}.${{ matrix.archive }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # Publish all binary archives to the GitHub Release for the pushed tag.
+  release:
+    needs: [resolve-frontend, binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: openlist-net-*
+          merge-multiple: false
+
+      - name: Flatten artifacts for upload
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release-assets/ \;
+          ls -la release-assets
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || github.event.inputs.tag }}
+          name: ${{ github.ref_name || github.event.inputs.tag }}
+          generate_release_notes: true
+          body: |
+            ## Frontend
+            Bundled upstream non-lite OpenList-Frontend: `${{ needs.resolve-frontend.outputs.tag }}`
+            (fetched from https://github.com/OpenListTeam/OpenList-Frontend/releases)
+          files: release-assets/*
+
+  # Multi-arch Docker image (amd64 + arm64) tagged with the release version + latest.
+  docker:
+    needs: [resolve-frontend, binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            FRONTEND_VERSION=${{ needs.resolve-frontend.outputs.tag }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/openlist-net:${{ github.ref_name || github.event.inputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/openlist-net:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
