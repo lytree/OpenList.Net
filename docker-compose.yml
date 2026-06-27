@@ -8,7 +8,7 @@ services:
       - openlist-data:/app/data
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - OpenList__Database__Type=sqlite3
+      - OpenList__Database__Type=sqlite
       - OpenList__Database__DBFile=/app/data/data.db
     restart: unless-stopped
 

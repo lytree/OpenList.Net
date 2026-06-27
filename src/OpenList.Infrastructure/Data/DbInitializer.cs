@@ -14,9 +14,16 @@ public static class DbInitializer
 {
     public static async Task InitializeAsync(OpenListDbContext db, AppConfiguration config, CancellationToken ct = default)
     {
-        var dir = Path.GetDirectoryName(config.Database.DBFile);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
+        var isPostgres = IsPostgres(config.Database.Type);
+
+        // SQLite stores its database in a local file — make sure the parent
+        // directory exists. PostgreSQL is a remote server; no file to create.
+        if (!isPostgres)
+        {
+            var dir = Path.GetDirectoryName(config.Database.DBFile);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+        }
 
         // Apply pending migrations if any are configured.
         try
@@ -37,7 +44,7 @@ public static class DbInitializer
         // EnsureCreated only creates the schema once; for databases created
         // before new columns were added to the model, patch the schema with
         // additive ALTER TABLE statements (SQLite supports ADD COLUMN).
-        await MigrateSchemaAsync(db, ct);
+        await MigrateSchemaAsync(db, isPostgres, ct);
 
         await SeedAdminAsync(db, config, ct);
         await SeedDefaultSettingsAsync(db, ct);
@@ -47,56 +54,57 @@ public static class DbInitializer
     /// Lightweight additive schema migration for databases created by
     /// <see cref="DatabaseFacade.EnsureCreatedAsync"/>. Adds columns that were
     /// introduced after the initial schema without requiring EF migrations.
-    /// SQLite's ALTER TABLE ADD COLUMN is non-destructive and idempotent when
-    /// guarded by a column-existence check.
+    /// ALTER TABLE ADD COLUMN is non-destructive and idempotent when guarded
+    /// by a column-existence check. Both SQLite and PostgreSQL are supported.
     /// </summary>
-    private static async Task MigrateSchemaAsync(OpenListDbContext db, CancellationToken ct)
+    private static async Task MigrateSchemaAsync(OpenListDbContext db, bool isPostgres, CancellationToken ct)
     {
-        // Columns to add: (table, column, sqlite type declaration).
+        // Columns to add: (table, column, sqlite declaration, postgres declaration).
         // Only additive changes are safe with ALTER TABLE ADD COLUMN.
         // SsoID already exists as INTEGER (from bool); SQLite's dynamic typing
         // allows TEXT values in INTEGER columns, so no change is needed there.
-        var additions = new (string Table, string Column, string Decl)[]
+        var additions = new (string Table, string Column, string SqliteDecl, string PgDecl)[]
         {
-            ("x_users", "AllowLdap", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_storages", "Status", "TEXT NOT NULL DEFAULT 'work'"),
+            ("x_users", "AllowLdap", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("x_storages", "Status", "TEXT NOT NULL DEFAULT 'work'", "TEXT NOT NULL DEFAULT 'work'"),
             // Storage: extended fields mirroring Go model.Storage / frontend Storage type.
-            ("x_storages", "OrderBy", "TEXT NULL"),
-            ("x_storages", "OrderDirection", "TEXT NULL"),
-            ("x_storages", "ExtractFolder", "TEXT NULL"),
-            ("x_storages", "WebProxy", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_storages", "WebdavPolicy", "TEXT NULL"),
-            ("x_storages", "EnableSign", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_storages", "Modified", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'"),
+            ("x_storages", "OrderBy", "TEXT NULL", "TEXT NULL"),
+            ("x_storages", "OrderDirection", "TEXT NULL", "TEXT NULL"),
+            ("x_storages", "ExtractFolder", "TEXT NULL", "TEXT NULL"),
+            ("x_storages", "WebProxy", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("x_storages", "WebdavPolicy", "TEXT NULL", "TEXT NULL"),
+            ("x_storages", "EnableSign", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("x_storages", "Modified", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'", "TIMESTAMPTZ NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'"),
             // Sharing: extended fields mirroring Go model.Sharing.
-            ("x_sharings", "ShareCode", "TEXT NOT NULL DEFAULT ''"),
-            ("x_sharings", "FilesJson", "TEXT NOT NULL DEFAULT '[]'"),
-            ("x_sharings", "MaxAccessed", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_sharings", "Accessed", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_sharings", "Disabled", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_sharings", "Remark", "TEXT NULL"),
-            ("x_sharings", "Readme", "TEXT NULL"),
-            ("x_sharings", "Header", "TEXT NULL"),
-            ("x_sharings", "OrderBy", "TEXT NULL"),
-            ("x_sharings", "OrderDirection", "TEXT NULL"),
-            ("x_sharings", "ExtractFolder", "TEXT NULL"),
+            ("x_sharings", "ShareCode", "TEXT NOT NULL DEFAULT ''", "TEXT NOT NULL DEFAULT ''"),
+            ("x_sharings", "FilesJson", "TEXT NOT NULL DEFAULT '[]'", "TEXT NOT NULL DEFAULT '[]'"),
+            ("x_sharings", "MaxAccessed", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_sharings", "Accessed", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_sharings", "Disabled", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("x_sharings", "Remark", "TEXT NULL", "TEXT NULL"),
+            ("x_sharings", "Readme", "TEXT NULL", "TEXT NULL"),
+            ("x_sharings", "Header", "TEXT NULL", "TEXT NULL"),
+            ("x_sharings", "OrderBy", "TEXT NULL", "TEXT NULL"),
+            ("x_sharings", "OrderDirection", "TEXT NULL", "TEXT NULL"),
+            ("x_sharings", "ExtractFolder", "TEXT NULL", "TEXT NULL"),
             // SshKey: last-used timestamp for the frontend's last_used_time column.
-            ("x_sshkeys", "LastUsedTime", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'"),
+            ("x_sshkeys", "LastUsedTime", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'", "TIMESTAMPTZ NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'"),
             // Meta: extended fields mirroring the frontend Meta type.
-            ("x_metas", "ReadUsersJson", "TEXT NOT NULL DEFAULT '[]'"),
-            ("x_metas", "ReadUsersSub", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_metas", "WriteUsersJson", "TEXT NOT NULL DEFAULT '[]'"),
-            ("x_metas", "WriteUsersSub", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_metas", "WSub", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_metas", "HideSub", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_metas", "RSub", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_metas", "HeaderSub", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "ReadUsersJson", "TEXT NOT NULL DEFAULT '[]'", "TEXT NOT NULL DEFAULT '[]'"),
+            ("x_metas", "ReadUsersSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "WriteUsersJson", "TEXT NOT NULL DEFAULT '[]'", "TEXT NOT NULL DEFAULT '[]'"),
+            ("x_metas", "WriteUsersSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "WSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "HideSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "RSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "HeaderSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
         };
 
-        foreach (var (table, column, decl) in additions)
+        foreach (var (table, column, sqliteDecl, pgDecl) in additions)
         {
-            if (await ColumnExistsAsync(db, table, column, ct))
+            if (await ColumnExistsAsync(db, table, column, isPostgres, ct))
                 continue;
+            var decl = isPostgres ? pgDecl : sqliteDecl;
             try
             {
                 await db.Database.ExecuteSqlRawAsync(
@@ -111,53 +119,93 @@ public static class DbInitializer
         // Ensure whole tables introduced after the initial EnsureCreated run exist.
         // EnsureCreatedAsync only creates tables on a fresh database; for databases
         // created earlier we CREATE TABLE IF NOT EXISTS.
-        await EnsureTableAsync(db, "x_search_index", """
-            CREATE TABLE IF NOT EXISTS x_search_index (
-                Id INTEGER NOT NULL CONSTRAINT PK_x_search_index PRIMARY KEY AUTOINCREMENT,
-                Parent TEXT NOT NULL DEFAULT '',
-                Name TEXT NOT NULL DEFAULT '',
-                IsDir INTEGER NOT NULL DEFAULT 0,
-                Size INTEGER NOT NULL DEFAULT 0,
-                Path TEXT NOT NULL DEFAULT '',
-                Type INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE INDEX IF NOT EXISTS ix_x_search_index_Name ON x_search_index (Name);
-            CREATE INDEX IF NOT EXISTS ix_x_search_index_Parent ON x_search_index (Parent);
-            CREATE UNIQUE INDEX IF NOT EXISTS ix_x_search_index_Path ON x_search_index (Path);
-            """, ct);
+        if (isPostgres)
+        {
+            await EnsureTableAsync(db, "x_search_index", isPostgres, """
+                CREATE TABLE IF NOT EXISTS x_search_index (
+                    Id BIGSERIAL PRIMARY KEY,
+                    Parent TEXT NOT NULL DEFAULT '',
+                    Name TEXT NOT NULL DEFAULT '',
+                    IsDir BOOLEAN NOT NULL DEFAULT FALSE,
+                    Size BIGINT NOT NULL DEFAULT 0,
+                    Path TEXT NOT NULL DEFAULT '',
+                    Type INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS ix_x_search_index_Name ON x_search_index (Name);
+                CREATE INDEX IF NOT EXISTS ix_x_search_index_Parent ON x_search_index (Parent);
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_x_search_index_Path ON x_search_index (Path);
+                """, ct);
 
-        await EnsureTableAsync(db, "x_authn_credentials", """
-            CREATE TABLE IF NOT EXISTS x_authn_credentials (
-                Id INTEGER NOT NULL CONSTRAINT PK_x_authn_credentials PRIMARY KEY AUTOINCREMENT,
-                UserId INTEGER NOT NULL,
-                CredentialId TEXT NOT NULL,
-                UserHandle TEXT NOT NULL,
-                PublicKey TEXT NOT NULL,
-                SignCount INTEGER NOT NULL DEFAULT 0,
-                Aaguid TEXT NOT NULL DEFAULT '',
-                Transports TEXT NOT NULL DEFAULT '',
-                Discoverable INTEGER NOT NULL DEFAULT 0,
-                CreatedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'
-            );
-            CREATE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId ON x_authn_credentials (UserId);
-            CREATE UNIQUE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId_CredentialId ON x_authn_credentials (UserId, CredentialId);
-            """, ct);
+            await EnsureTableAsync(db, "x_authn_credentials", isPostgres, """
+                CREATE TABLE IF NOT EXISTS x_authn_credentials (
+                    Id BIGSERIAL PRIMARY KEY,
+                    UserId BIGINT NOT NULL,
+                    CredentialId TEXT NOT NULL,
+                    UserHandle TEXT NOT NULL,
+                    PublicKey TEXT NOT NULL,
+                    SignCount INTEGER NOT NULL DEFAULT 0,
+                    Aaguid TEXT NOT NULL DEFAULT '',
+                    Transports TEXT NOT NULL DEFAULT '',
+                    Discoverable BOOLEAN NOT NULL DEFAULT FALSE,
+                    CreatedAt TIMESTAMPTZ NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'
+                );
+                CREATE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId ON x_authn_credentials (UserId);
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId_CredentialId ON x_authn_credentials (UserId, CredentialId);
+                """, ct);
+        }
+        else
+        {
+            await EnsureTableAsync(db, "x_search_index", isPostgres, """
+                CREATE TABLE IF NOT EXISTS x_search_index (
+                    Id INTEGER NOT NULL CONSTRAINT PK_x_search_index PRIMARY KEY AUTOINCREMENT,
+                    Parent TEXT NOT NULL DEFAULT '',
+                    Name TEXT NOT NULL DEFAULT '',
+                    IsDir INTEGER NOT NULL DEFAULT 0,
+                    Size INTEGER NOT NULL DEFAULT 0,
+                    Path TEXT NOT NULL DEFAULT '',
+                    Type INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS ix_x_search_index_Name ON x_search_index (Name);
+                CREATE INDEX IF NOT EXISTS ix_x_search_index_Parent ON x_search_index (Parent);
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_x_search_index_Path ON x_search_index (Path);
+                """, ct);
+
+            await EnsureTableAsync(db, "x_authn_credentials", isPostgres, """
+                CREATE TABLE IF NOT EXISTS x_authn_credentials (
+                    Id INTEGER NOT NULL CONSTRAINT PK_x_authn_credentials PRIMARY KEY AUTOINCREMENT,
+                    UserId INTEGER NOT NULL,
+                    CredentialId TEXT NOT NULL,
+                    UserHandle TEXT NOT NULL,
+                    PublicKey TEXT NOT NULL,
+                    SignCount INTEGER NOT NULL DEFAULT 0,
+                    Aaguid TEXT NOT NULL DEFAULT '',
+                    Transports TEXT NOT NULL DEFAULT '',
+                    Discoverable INTEGER NOT NULL DEFAULT 0,
+                    CreatedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'
+                );
+                CREATE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId ON x_authn_credentials (UserId);
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId_CredentialId ON x_authn_credentials (UserId, CredentialId);
+                """, ct);
+        }
     }
 
     private static async Task EnsureTableAsync(
-        OpenListDbContext db, string table, string ddl, CancellationToken ct)
+        OpenListDbContext db, string table, bool isPostgres, string ddl, CancellationToken ct)
     {
-        if (await TableExistsAsync(db, table, ct)) return;
+        if (await TableExistsAsync(db, table, isPostgres, ct)) return;
         try { await db.Database.ExecuteSqlRawAsync(ddl, ct); }
         catch { /* race or already exists — ignore */ }
     }
 
     private static async Task<bool> TableExistsAsync(
-        OpenListDbContext db, string table, CancellationToken ct)
+        OpenListDbContext db, string table, bool isPostgres, CancellationToken ct)
     {
         var conn = db.Database.GetDbConnection();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name=@t;";
+        // SQLite: query sqlite_master; PostgreSQL: query information_schema.
+        cmd.CommandText = isPostgres
+            ? "SELECT 1 FROM information_schema.tables WHERE table_name = @t LIMIT 1;"
+            : "SELECT name FROM sqlite_master WHERE type='table' AND name=@t;";
         var p = cmd.CreateParameter();
         p.ParameterName = "@t";
         p.Value = table;
@@ -172,28 +220,52 @@ public static class DbInitializer
     }
 
     private static async Task<bool> ColumnExistsAsync(
-        OpenListDbContext db, string table, string column, CancellationToken ct)
+        OpenListDbContext db, string table, string column, bool isPostgres, CancellationToken ct)
     {
         var conn = db.Database.GetDbConnection();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"PRAGMA table_info({table});";
-        var rows = new List<string>();
-        await conn.OpenAsync(ct);
+        if (isPostgres)
+        {
+            // PostgreSQL: query information_schema.columns.
+            cmd.CommandText = "SELECT 1 FROM information_schema.columns WHERE table_name = @t AND column_name = @c LIMIT 1;";
+            var pt = cmd.CreateParameter();
+            pt.ParameterName = "@t";
+            pt.Value = table;
+            cmd.Parameters.Add(pt);
+            var pc = cmd.CreateParameter();
+            pc.ParameterName = "@c";
+            pc.Value = column;
+            cmd.Parameters.Add(pc);
+        }
+        else
+        {
+            // SQLite: PRAGMA table_info — column name is at ordinal 1.
+            cmd.CommandText = $"PRAGMA table_info({table});";
+        }
+
+        if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(ct);
         try
         {
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+            if (isPostgres)
             {
-                // Column name is at ordinal 1 in PRAGMA table_info output.
-                rows.Add(reader.GetString(1));
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                return await reader.ReadAsync(ct);
+            }
+            else
+            {
+                var rows = new List<string>();
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                    rows.Add(reader.GetString(1));
+                return rows.Contains(column, StringComparer.OrdinalIgnoreCase);
             }
         }
-        finally
-        {
-            await conn.CloseAsync();
-        }
-        return rows.Contains(column, StringComparer.OrdinalIgnoreCase);
+        finally { if (conn.State == System.Data.ConnectionState.Open) await conn.CloseAsync(); }
     }
+
+    private static bool IsPostgres(string type)
+        => type.Equals("postgres", StringComparison.OrdinalIgnoreCase) ||
+           type.Equals("postgresql", StringComparison.OrdinalIgnoreCase);
 
     private static async Task SeedAdminAsync(OpenListDbContext db, AppConfiguration config, CancellationToken ct)
     {

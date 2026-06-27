@@ -42,7 +42,16 @@ builder.Services.AddDbContext<OpenListDbContext>(opts =>
     if (appConfig.Database.Type.Equals("postgres", StringComparison.OrdinalIgnoreCase) ||
         appConfig.Database.Type.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
     {
-        // TODO (Phase 16): configure Npgsql with connection string
+        // Npgsql: build connection string from DatabaseConfig fields.
+        var connStr = new Npgsql.NpgsqlConnectionStringBuilder
+        {
+            Host = appConfig.Database.Host,
+            Port = appConfig.Database.Port,
+            Username = appConfig.Database.User,
+            Password = appConfig.Database.Password,
+            Database = appConfig.Database.Name,
+        }.ToString();
+        opts.UseNpgsql(connStr);
     }
     else
     {
