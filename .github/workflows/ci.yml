@@ -34,7 +34,59 @@ jobs:
           echo "Resolved frontend tag: $TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+  # Compute the semantic version once via GitVersion so build/publish/docker all agree.
+  # Requires full Git history (fetch-depth: 0) for accurate version calculation.
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      semver: ${{ steps.gv.outputs.semver }}
+      fullSemVer: ${{ steps.gv.outputs.fullSemVer }}
+      assemblyVer: ${{ steps.gv.outputs.assemblyVer }}
+      fileVer: ${{ steps.gv.outputs.fileVer }}
+      infoVer: ${{ steps.gv.outputs.infoVer }}
+      sha: ${{ steps.gv.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet tool restore
+      - id: gv
+        run: |
+          set -euo pipefail
+          # -output json on stdout; -nocache avoids stale caches across runs.
+          JSON="$(dotnet gitversion -output json -nocache)"
+          # jq extracts the fields; fall back to sed if jq is missing.
+          pick() { printf '%s' "$JSON" | jq -r "$1 // empty" 2>/dev/null || printf '%s' "$JSON" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\).*/\1/p"; }
+          SEM="$(pick '.SemVer')"
+          FULL="$(pick '.FullSemVer')"
+          ASM="$(pick '.AssemblySemVer')"
+          FILE="$(pick '.AssemblySemFileVer')"
+          INFO="$(pick '.InformationalVersion')"
+          SHA="$(pick '.Sha')"
+          # Derive a 4-part assembly version from SemVer if GitVersion didn't supply one.
+          # e.g. 0.0.1-39 -> 0.0.1.0 ; 1.2.3+sha -> 1.2.3.0
+          if [ -z "$ASM" ]; then
+            BASE="${SEM%%-*}"; BASE="${BASE%%+*}"
+            IFS='.' read -r MA MI PA _ <<<"$BASE"
+            ASM="${MA:-0}.${MI:-0}.${PA:-0}.0"
+          fi
+          [ -z "$FILE" ] && FILE="$ASM"
+          [ -z "$INFO" ] && INFO="${FULL:-$SEM}"
+          {
+            echo "semver=$SEM"
+            echo "fullSemVer=$FULL"
+            echo "assemblyVer=$ASM"
+            echo "fileVer=$FILE"
+            echo "infoVer=$INFO"
+            echo "sha=$SHA"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $SEM (assembly=$ASM, sha=$SHA)"
+
   build-test:
+    needs: resolve-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +94,13 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: dotnet restore OpenList.slnx
-      - run: dotnet build OpenList.slnx -c ${{ env.CONFIGURATION }} --no-restore
+      - run: |
+          dotnet build OpenList.slnx -c "$CONFIGURATION" --no-restore \
+            -p:Version="${{ needs.resolve-version.outputs.semver }}" \
+            -p:AssemblyVersion="${{ needs.resolve-version.outputs.assemblyVer }}" \
+            -p:FileVersion="${{ needs.resolve-version.outputs.fileVer }}" \
+            -p:InformationalVersion="${{ needs.resolve-version.outputs.infoVer }}" \
+            -p:SourceRevisionId="${{ needs.resolve-version.outputs.sha }}"
       - run: dotnet test OpenList.slnx -c ${{ env.CONFIGURATION }} --no-build --logger "trx;LogFileName=tests.trx"
 
       - name: Upload test results
@@ -55,9 +113,12 @@ jobs:
           retention-days: 7
 
   # Framework-dependent bundle: app/ + frontend/dist/ + launchers + README, packaged as tar.gz.
+  # Bundle directory + archive name are version-suffixed (e.g. openlist-net-framework-dependent-0.0.1-39).
   bundle:
-    needs: [resolve-frontend, build-test]
+    needs: [resolve-frontend, resolve-version, build-test]
     runs-on: ubuntu-latest
+    env:
+      VERSIONED_BUNDLE: ${{ env.BUNDLE_NAME }}-${{ needs.resolve-version.outputs.semver }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -70,24 +131,38 @@ jobs:
           FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
         run: |
           set -euo pipefail
-          mkdir -p fe "$BUNDLE_NAME/frontend/dist"
+          mkdir -p fe "$VERSIONED_BUNDLE/frontend/dist"
           # Exact asset name (tag-qualified) avoids matching the -lite- variant.
           gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
             --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
           tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" \
-            -C "$BUNDLE_NAME/frontend/dist"
-          printf '%s' "$FE_TAG" > "$BUNDLE_NAME/frontend/dist/VERSION"
+            -C "$VERSIONED_BUNDLE/frontend/dist"
+          printf '%s' "$FE_TAG" > "$VERSIONED_BUNDLE/frontend/dist/VERSION"
 
       - name: Publish server (framework-dependent)
         run: |
           dotnet publish src/OpenList.Server/OpenList.Server.csproj \
             -c "$CONFIGURATION" \
-            -o "$BUNDLE_NAME/app" \
+            -o "$VERSIONED_BUNDLE/app" \
             -p:UseAppHost=false \
-            -p:SelfContained=false
+            -p:SelfContained=false \
+            -p:Version="${{ needs.resolve-version.outputs.semver }}" \
+            -p:AssemblyVersion="${{ needs.resolve-version.outputs.assemblyVer }}" \
+            -p:FileVersion="${{ needs.resolve-version.outputs.fileVer }}" \
+            -p:InformationalVersion="${{ needs.resolve-version.outputs.infoVer }}" \
+            -p:SourceRevisionId="${{ needs.resolve-version.outputs.sha }}"
+          # Drop a VERSION file alongside the assembly for runtime build-info display.
+          {
+            echo "semver=${{ needs.resolve-version.outputs.semver }}"
+            echo "fullSemVer=${{ needs.resolve-version.outputs.fullSemVer }}"
+            echo "assemblyVer=${{ needs.resolve-version.outputs.assemblyVer }}"
+            echo "fileVer=${{ needs.resolve-version.outputs.fileVer }}"
+            echo "informationalVer=${{ needs.resolve-version.outputs.infoVer }}"
+            echo "sha=${{ needs.resolve-version.outputs.sha }}"
+          } > "$VERSIONED_BUNDLE/app/VERSION"
 
       - name: Write launchers and README
-        working-directory: ${{ env.BUNDLE_NAME }}
+        working-directory: ${{ env.VERSIONED_BUNDLE }}
         run: |
           cat > run.sh <<'EOF'
           #!/usr/bin/env sh
@@ -104,9 +179,12 @@ jobs:
           dotnet OpenList.Server.dll
           EOF
 
-          cat > README.txt <<'EOF'
-          openlist-net-framework-dependent
+          cat > README.txt <<EOF
+          $VERSIONED_BUNDLE
           ================================
+
+          Build: ${{ needs.resolve-version.outputs.semver }} (sha ${{ needs.resolve-version.outputs.sha }})
+          Frontend: ${{ needs.resolve-frontend.outputs.tag }}
 
           Layout:
             app/             .NET server (framework-dependent publish output; needs .NET 10 runtime)
@@ -127,23 +205,25 @@ jobs:
           EOF
 
       - name: Package bundle
-        run: tar -czf "$BUNDLE_NAME.tar.gz" "$BUNDLE_NAME"
+        run: tar -czf "$VERSIONED_BUNDLE.tar.gz" "$VERSIONED_BUNDLE"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.BUNDLE_NAME }}
-          path: ${{ env.BUNDLE_NAME }}.tar.gz
+          name: ${{ env.VERSIONED_BUNDLE }}
+          path: ${{ env.VERSIONED_BUNDLE }}.tar.gz
           if-no-files-found: error
           retention-days: 14
 
   # On pushes to main, build and push the Docker image to GHCR (amd64 only for speed;
-  # release.yml produces the full multi-arch images).
+  # release.yml produces the full multi-arch images). Tagged with the GitVersion semver.
   docker:
-    needs: [build-test, resolve-frontend]
+    needs: [build-test, resolve-frontend, resolve-version]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
@@ -162,8 +242,13 @@ jobs:
           push: true
           build-args: |
             FRONTEND_VERSION=${{ needs.resolve-frontend.outputs.tag }}
+            VERSION=${{ needs.resolve-version.outputs.semver }}
+            ASSEMBLY_VERSION=${{ needs.resolve-version.outputs.assemblyVer }}
+            FILE_VERSION=${{ needs.resolve-version.outputs.fileVer }}
+            INFORMATIONAL_VERSION=${{ needs.resolve-version.outputs.infoVer }}
+            SOURCE_REVISION_ID=${{ needs.resolve-version.outputs.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/openlist-net:latest
-            ghcr.io/${{ github.repository_owner }}/openlist-net:main-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/openlist-net:${{ needs.resolve-version.outputs.semver }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

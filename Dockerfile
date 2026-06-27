@@ -19,6 +19,14 @@ RUN apk add --no-cache curl tar \
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
+# Version build-args (forwarded by CI/release workflows from GitVersion).
+# Defaults produce 0.0.0.0 so a local `docker build` without args still works.
+ARG VERSION=0.0.0.0
+ARG ASSEMBLY_VERSION=0.0.0.0
+ARG FILE_VERSION=0.0.0.0
+ARG INFORMATIONAL_VERSION=0.0.0.0
+ARG SOURCE_REVISION_ID=unknown
+
 # Copy solution + central build files first for layer caching
 COPY OpenList.slnx .
 COPY Directory.Build.props .
@@ -32,9 +40,21 @@ COPY src/OpenList.Infrastructure/OpenList.Infrastructure.csproj src/OpenList.Inf
 COPY src/OpenList.Server/OpenList.Server.csproj src/OpenList.Server/
 RUN dotnet restore
 
-# Copy source and publish
+# Copy source and publish. MSBuild version props are forwarded so the assemblies
+# carry the GitVersion-derived metadata (visible via file properties / dotnet --version).
 COPY src/ src/
-RUN dotnet publish src/OpenList.Server/OpenList.Server.csproj -c Release -o /app/publish
+RUN dotnet publish src/OpenList.Server/OpenList.Server.csproj \
+      -c Release -o /app/publish \
+      -p:Version="$VERSION" \
+      -p:AssemblyVersion="$ASSEMBLY_VERSION" \
+      -p:FileVersion="$FILE_VERSION" \
+      -p:InformationalVersion="$INFORMATIONAL_VERSION" \
+      -p:SourceRevisionId="$SOURCE_REVISION_ID"
+
+# Persist build metadata alongside the binary for runtime build-info display.
+RUN printf 'semver=%s\nassemblyVer=%s\nfileVer=%s\ninformationalVer=%s\nsha=%s\n' \
+      "$VERSION" "$ASSEMBLY_VERSION" "$FILE_VERSION" "$INFORMATIONAL_VERSION" "$SOURCE_REVISION_ID" \
+      > /app/publish/VERSION
 
 # === Stage 3: Runtime image ===
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime

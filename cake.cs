@@ -5,9 +5,11 @@
 // Run a task:
 //   dotnet cake.cs --target=Test
 //   dotnet cake.cs --target=Format
+//   dotnet cake.cs --target=Version                              # compute & print GitVersion
 //   dotnet cake.cs --target=Package --rid=linux-x64 --archive=tar.gz
 //   dotnet cake.cs --target=CI                                   # framework-dependent bundle
 //   dotnet cake.cs --target=Bundle --frontend-dist=frontend      # use committed frontend, skip fetch
+//   dotnet cake.cs --target=Publish --semver=1.2.3               # publish with injected semver
 //
 // Arguments:
 //   --configuration=Release    MSBuild configuration
@@ -17,6 +19,7 @@
 //   --frontend-dist=<path>     Frontend dist source (skip upstream fetch if it exists)
 //   --frontend-version=<tag>   Pin upstream frontend tag (default: latest release)
 //   --archive=zip|tar.gz       Package format (Package target)
+//   --semver=<x.y.z>           Pre-computed semver (skips local GitVersion; CI uses this)
 
 using System;
 using System.Linq;
@@ -31,6 +34,9 @@ var selfContained = Argument<bool>("self-contained", false);
 var frontendDist  = Argument("frontend-dist", "");
 var frontendVer   = Argument("frontend-version", "");
 var archive       = Argument("archive", "zip");
+// Allow callers to inject a pre-computed semver (e.g. CI workflow that runs GitVersion itself).
+// When empty, the Version task computes it locally via `dotnet gitversion`.
+var semverArg     = Argument("semver", "");
 
 const string SolutionFile  = "OpenList.slnx";
 const string ServerProject = "src/OpenList.Server/OpenList.Server.csproj";
@@ -39,9 +45,27 @@ const string UpstreamRepo  = "OpenListTeam/OpenList-Frontend";
 // When --frontend-dist is given, use it; otherwise stage the upstream fetch under <output>/frontend-dist.
 string FeDistDir() => string.IsNullOrEmpty(frontendDist) ? $"{output}/frontend-dist" : frontendDist;
 
+// Computed by the Version task. Empty until that task runs; consumers (Build/Publish/Bundle/Package)
+// treat empty as "no versioning" so local dev builds don't require GitVersion to be installed.
+string _semver = semverArg;
+string _assemblyVer = "";
+string _fileVer = "";
+string _infoVer = "";
+string _fullSemVer = "";
+string _sha = "";
+string _commitDate = "";
+
+// Bundle name carries the semver when available (e.g. openlist-net-1.2.3-linux-x64).
+// Falls back to the non-versioned name when semver is not yet known (e.g. inside Setup).
 string BundleName() => string.IsNullOrEmpty(rid)
     ? "openlist-net-framework-dependent"
     : $"openlist-net-{rid}";
+
+string BundleNameVersioned()
+{
+    var baseName = BundleName();
+    return string.IsNullOrEmpty(_semver) ? baseName : $"{baseName}-{_semver}";
+}
 
 //////////////////////////////////////////////////////////////////////
 // SETUP
@@ -50,7 +74,110 @@ Setup(_ =>
 {
     Information($"Target={target} Configuration={configuration} Output={output}");
     Information($"Rid={(string.IsNullOrEmpty(rid) ? "<framework-dependent>" : rid)} SelfContained={selfContained}");
+    if (!string.IsNullOrEmpty(semverArg))
+        Information($"Pre-injected semver={semverArg}");
 });
+
+//////////////////////////////////////////////////////////////////////
+// VERSION
+//////////////////////////////////////////////////////////////////////
+
+// Ensure the GitVersion .NET tool is installed locally (.config/dotnet-tools.json).
+void EnsureGitVersionTool()
+{
+    var exit = StartProcess("dotnet", $"tool restore");
+    if (exit != 0)
+        throw new InvalidOperationException($"dotnet tool restore exited with {exit}");
+}
+
+// Run `dotnet gitversion` and parse the JSON output into the version variables.
+// Respects GitVersion.yml at the repo root. Uses -output json for parseable output
+// and -nocache to avoid stale caches in CI runners.
+void ComputeGitVersion()
+{
+    EnsureGitVersionTool();
+
+    // Use System.Diagnostics.Process directly so we can capture stdout/stderr reliably
+    // (Cake's ProcessSettings output redirection quirks vary across versions).
+    var psi = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = "dotnet",
+        Arguments = "gitversion -output json -nocache",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        WorkingDirectory = System.IO.Directory.GetCurrentDirectory(),
+    };
+    var stdout = new System.Text.StringBuilder();
+    var stderr = new System.Text.StringBuilder();
+    using var proc = new System.Diagnostics.Process { StartInfo = psi };
+    proc.OutputDataReceived += (_, e) => { if (e.Data != null) stdout.AppendLine(e.Data); };
+    proc.ErrorDataReceived  += (_, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
+    proc.Start();
+    proc.BeginOutputReadLine();
+    proc.BeginErrorReadLine();
+    proc.WaitForExit();
+    var exit = proc.ExitCode;
+
+    if (exit != 0)
+        throw new InvalidOperationException(
+            $"dotnet gitversion exited with {exit}.\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}");
+
+    using var doc = JsonDocument.Parse(stdout.ToString());
+    var root = doc.RootElement;
+
+    string Get(string name) =>
+        root.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String
+            ? p.GetString() ?? ""
+            : "";
+
+    _semver      = Get("SemVer");
+    _fullSemVer  = Get("FullSemVer");
+    _assemblyVer = Get("AssemblySemVer");
+    _fileVer     = Get("AssemblySemFileVer");
+    _infoVer     = Get("InformationalVersion");
+    _sha         = Get("Sha");
+    _commitDate  = Get("CommitDate");
+
+    if (string.IsNullOrEmpty(_assemblyVer)) _assemblyVer = $"{_semver.Split('+')[0]}.0";
+    if (string.IsNullOrEmpty(_fileVer))     _fileVer     = _assemblyVer;
+    if (string.IsNullOrEmpty(_infoVer))     _infoVer     = string.IsNullOrEmpty(_fullSemVer) ? _semver : _fullSemVer;
+
+    Information($"GitVersion: SemVer={_semver} FullSemVer={_fullSemVer}");
+    Information($"  AssemblyVer={_assemblyVer} FileVer={_fileVer}");
+    Information($"  InformationalVer={_infoVer} Sha={_sha} CommitDate={_commitDate}");
+}
+
+// Apply version properties to an MSBuild settings object.
+// These match the MSBuild properties GitVersion normally injects via its /updateassemblyinfo path.
+DotNetMSBuildSettings WithVersionProps(DotNetMSBuildSettings settings)
+{
+    if (string.IsNullOrEmpty(_semver)) return settings;
+    return settings
+        .WithProperty("Version", _semver)
+        .WithProperty("VersionPrefix", _semver)
+        .WithProperty("AssemblyVersion", _assemblyVer)
+        .WithProperty("FileVersion", _fileVer)
+        .WithProperty("InformationalVersion", _infoVer)
+        .WithProperty("SourceRevisionId", _sha);
+}
+
+// Write a VERSION file (used by the runtime to display build info) into the publish output.
+void WriteVersionMetadata(string publishDir)
+{
+    if (string.IsNullOrEmpty(_semver)) return;
+    var lines = new[]
+    {
+        $"semver={_semver}",
+        $"fullSemVer={_fullSemVer}",
+        $"assemblyVer={_assemblyVer}",
+        $"fileVer={_fileVer}",
+        $"informationalVer={_infoVer}",
+        $"sha={_sha}",
+        $"commitDate={_commitDate}",
+    };
+    System.IO.File.WriteAllLines(System.IO.Path.Combine(publishDir, "VERSION"), lines);
+}
 
 //////////////////////////////////////////////////////////////////////
 // HELPERS
@@ -145,7 +272,7 @@ void WriteRunScripts(string bundleRoot)
 
 void WriteReadme(string bundleRoot)
 {
-    var name = BundleName();
+    var name = BundleNameVersioned();
     var isFdd = string.IsNullOrEmpty(rid);
     var runUnix = isFdd ? "sh run.sh" : "./run.sh";
     System.IO.File.WriteAllLines(System.IO.Path.Combine(bundleRoot, "README.txt"), new[]
@@ -192,6 +319,33 @@ Task("Format")
         throw new InvalidOperationException($"dotnet format exited with {exit}");
 });
 
+// Compute the version. If --semver is passed it is used as-is (CI mode: the workflow runs
+// `dotnet gitversion` itself and forwards the result via --semver). Otherwise the task
+// restores the local GitVersion tool and runs it.
+Task("Version")
+    .Description("Compute semantic version via GitVersion (or honor --semver=<x.y.z>)")
+    .Does(() =>
+{
+    if (!string.IsNullOrEmpty(_semver))
+    {
+        // Caller pre-injected a semver via --semver=. Derive deterministic assembly/file versions
+        // and informational version so MSBuild gets consistent inputs.
+        var baseVer = _semver.Split('+')[0];
+        var parts = baseVer.Split('-')[0].Split('.');
+        var major = parts.Length > 0 && int.TryParse(parts[0], out var ma) ? ma : 0;
+        var minor = parts.Length > 1 && int.TryParse(parts[1], out var mi) ? mi : 0;
+        var patch = parts.Length > 2 && int.TryParse(parts[2], out var pa) ? pa : 0;
+        _assemblyVer = $"{major}.{minor}.{patch}.0";
+        _fileVer     = _assemblyVer;
+        _fullSemVer  = _semver;
+        _infoVer     = _semver;
+        Information($"Using injected semver={_semver} (AssemblyVer={_assemblyVer})");
+        return;
+    }
+
+    ComputeGitVersion();
+});
+
 Task("Restore")
     .Description("dotnet restore")
     .Does(() =>
@@ -204,10 +358,14 @@ Task("Build")
     .IsDependentOn("Restore")
     .Does(() =>
 {
+    // Version props are applied only when Version has already run (e.g. via Publish or explicit
+    // --target=Version). For local dev (Default = Restore+Build+Test) this is a no-op so the
+    // build does not require GitVersion to be installed.
     DotNetBuild(SolutionFile, new DotNetBuildSettings
     {
         Configuration = configuration,
         NoRestore = true,
+        MSBuildSettings = WithVersionProps(new DotNetMSBuildSettings()),
     });
 });
 
@@ -241,6 +399,7 @@ Task("Frontend")
 
 Task("Publish")
     .Description("dotnet publish — framework-dependent unless --rid is set")
+    .IsDependentOn("Version")
     .Does(() =>
 {
     var msbuild = new DotNetMSBuildSettings();
@@ -257,13 +416,19 @@ Task("Publish")
         msbuild.WithProperty("SelfContained", "false")
                .WithProperty("UseAppHost", "false");
     }
+    WithVersionProps(msbuild);
 
+    var publishDir = $"{output}/publish";
     DotNetPublish(ServerProject, new DotNetPublishSettings
     {
         Configuration = configuration,
-        OutputDirectory = $"{output}/publish",
+        OutputDirectory = publishDir,
         MSBuildSettings = msbuild,
     });
+
+    // Drop a VERSION file alongside the assembly so deployments can surface build metadata
+    // (matching the frontend's frontend/dist/VERSION convention).
+    WriteVersionMetadata(publishDir);
 });
 
 Task("Bundle")
@@ -272,7 +437,8 @@ Task("Bundle")
     .IsDependentOn("Publish")
     .Does(() =>
 {
-    var bundleRoot = $"{output}/bundle/{BundleName()}";
+    var name = BundleNameVersioned();
+    var bundleRoot = $"{output}/bundle/{name}";
     if (DirectoryExists(bundleRoot)) CleanDirectory(bundleRoot);
     EnsureDirectoryExists($"{bundleRoot}/app");
     EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
@@ -290,7 +456,7 @@ Task("Package")
     .IsDependentOn("Bundle")
     .Does(() =>
 {
-    var name = BundleName();
+    var name = BundleNameVersioned();
     var bundleRoot = $"{output}/bundle/{name}";
     var ext = archive == "tar.gz" ? "tar.gz" : "zip";
     var archivePath = $"{output}/{name}.{ext}";

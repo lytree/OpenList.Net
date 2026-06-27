@@ -1,0 +1,23 @@
+# GitVersion configuration for OpenList.Net
+# Docs: https://gitversion.net/docs/reference/configuration
+#
+# v6 breaking changes (https://github.com/GitTools/GitVersion/blob/main/BREAKING_CHANGES.md):
+#   mode enum values renamed:
+#     ContinuousDelivery -> ManualDeployment
+#     ContinuousDeployment -> ContinuousDelivery
+#     ContinuousDeployment (new)
+#   Mainline mode was removed; use ContinuousDelivery for per-commit pre-release versions
+#   on main, or ManualDeployment to only bump on tags.
+mode: ContinuousDelivery
+tag-prefix: 'v'
+major-version-bump-message: '\+semver:\s?(breaking|major)'
+minor-version-bump-message: '\+semver:\s?(feature|minor)'
+patch-version-bump-message: '\+semver:\s?(fix|patch)'
+no-bump-message: '\+semver:\s?(none|skip)'
+assembly-versioning-scheme: MajorMinorPatch
+assembly-file-versioning-scheme: MajorMinorPatch
+assembly-informational-format: '{SemVer}+Sha.{Sha}'
+commit-message-incrementing: Enabled
+update-build-number: false
+ignore:
+  commits-before: 2025-01-01T00:00:00

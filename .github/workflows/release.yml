@@ -34,9 +34,58 @@ jobs:
           echo "Resolved frontend tag: $TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+  # Compute the semantic version once via GitVersion so binaries/docker/release all agree.
+  # On a v* tag push, GitVersion produces the clean tag version (e.g. v1.2.3 -> 1.2.3).
+  # Requires full Git history (fetch-depth: 0) for accurate version calculation.
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      semver: ${{ steps.gv.outputs.semver }}
+      fullSemVer: ${{ steps.gv.outputs.fullSemVer }}
+      assemblyVer: ${{ steps.gv.outputs.assemblyVer }}
+      fileVer: ${{ steps.gv.outputs.fileVer }}
+      infoVer: ${{ steps.gv.outputs.infoVer }}
+      sha: ${{ steps.gv.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet tool restore
+      - id: gv
+        run: |
+          set -euo pipefail
+          JSON="$(dotnet gitversion -output json -nocache)"
+          pick() { printf '%s' "$JSON" | jq -r "$1 // empty" 2>/dev/null || printf '%s' "$JSON" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\).*/\1/p"; }
+          SEM="$(pick '.SemVer')"
+          FULL="$(pick '.FullSemVer')"
+          ASM="$(pick '.AssemblySemVer')"
+          FILE="$(pick '.AssemblySemFileVer')"
+          INFO="$(pick '.InformationalVersion')"
+          SHA="$(pick '.Sha')"
+          if [ -z "$ASM" ]; then
+            BASE="${SEM%%-*}"; BASE="${BASE%%+*}"
+            IFS='.' read -r MA MI PA _ <<<"$BASE"
+            ASM="${MA:-0}.${MI:-0}.${PA:-0}.0"
+          fi
+          [ -z "$FILE" ] && FILE="$ASM"
+          [ -z "$INFO" ] && INFO="${FULL:-$SEM}"
+          {
+            echo "semver=$SEM"
+            echo "fullSemVer=$FULL"
+            echo "assemblyVer=$ASM"
+            echo "fileVer=$FILE"
+            echo "infoVer=$INFO"
+            echo "sha=$SHA"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $SEM (assembly=$ASM, sha=$SHA)"
+
   # Self-contained single-file binaries for 8 runtime identifiers.
+  # Bundle directory + archive name are version-suffixed (e.g. openlist-net-1.2.3-linux-x64).
   binaries:
-    needs: resolve-frontend
+    needs: [resolve-frontend, resolve-version]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -58,6 +107,12 @@ jobs:
             archive: tar.gz
           - rid: osx-arm64
             archive: tar.gz
+    env:
+      SEMVER: ${{ needs.resolve-version.outputs.semver }}
+      ASM_VER: ${{ needs.resolve-version.outputs.assemblyVer }}
+      FILE_VER: ${{ needs.resolve-version.outputs.fileVer }}
+      INFO_VER: ${{ needs.resolve-version.outputs.infoVer }}
+      SHA: ${{ needs.resolve-version.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -66,7 +121,7 @@ jobs:
 
       - name: Publish server (self-contained single-file)
         run: |
-          BUNDLE="openlist-net-${{ matrix.rid }}"
+          BUNDLE="openlist-net-${SEMVER}-${{ matrix.rid }}"
           dotnet publish src/OpenList.Server/OpenList.Server.csproj \
             -c "$CONFIGURATION" \
             -o "$BUNDLE/app" \
@@ -74,7 +129,20 @@ jobs:
             -p:PublishSingleFile=true \
             -p:SelfContained=true \
             -p:IncludeNativeLibrariesForSelfExtract=true \
-            -p:EnableCompressionInSingleFile=true
+            -p:EnableCompressionInSingleFile=true \
+            -p:Version="$SEMVER" \
+            -p:AssemblyVersion="$ASM_VER" \
+            -p:FileVersion="$FILE_VER" \
+            -p:InformationalVersion="$INFO_VER" \
+            -p:SourceRevisionId="$SHA"
+          {
+            echo "semver=$SEMVER"
+            echo "assemblyVer=$ASM_VER"
+            echo "fileVer=$FILE_VER"
+            echo "informationalVer=$INFO_VER"
+            echo "sha=$SHA"
+          } > "$BUNDLE/app/VERSION"
+          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
 
       - name: Download upstream frontend dist (non-lite)
         env:
@@ -82,9 +150,7 @@ jobs:
           FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
         run: |
           set -euo pipefail
-          BUNDLE="openlist-net-${{ matrix.rid }}"
           mkdir -p fe "$BUNDLE/frontend/dist"
-          # Exact asset name (tag-qualified) avoids matching the -lite- variant.
           gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
             --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
           tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" -C "$BUNDLE/frontend/dist"
@@ -95,7 +161,6 @@ jobs:
           RID: ${{ matrix.rid }}
         run: |
           set -euo pipefail
-          BUNDLE="openlist-net-${{ matrix.rid }}"
           cd "$BUNDLE"
 
           case "$RID" in
@@ -118,9 +183,12 @@ jobs:
               ;;
           esac
 
-          cat > README.txt <<'EOF'
-          openlist-net-${{ matrix.rid }}
+          cat > README.txt <<EOF
+          $BUNDLE
           =========================
+
+          Build: $SEMVER (sha $SHA)
+          Frontend: ${{ needs.resolve-frontend.outputs.tag }}
 
           Self-contained single-file build — no .NET runtime required on the host.
 
@@ -143,11 +211,9 @@ jobs:
 
       - name: Package bundle
         env:
-          RID: ${{ matrix.rid }}
           ARCHIVE: ${{ matrix.archive }}
         run: |
           set -euo pipefail
-          BUNDLE="openlist-net-${{ matrix.rid }}"
           if [ "$ARCHIVE" = "zip" ]; then
             zip -r "$BUNDLE.zip" "$BUNDLE"
           else
@@ -156,14 +222,14 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: openlist-net-${{ matrix.rid }}
-          path: openlist-net-${{ matrix.rid }}.${{ matrix.archive }}
+          name: openlist-net-${{ needs.resolve-version.outputs.semver }}-${{ matrix.rid }}
+          path: openlist-net-${{ needs.resolve-version.outputs.semver }}-${{ matrix.rid }}.${{ matrix.archive }}
           if-no-files-found: error
           retention-days: 7
 
   # Publish all binary archives to the GitHub Release for the pushed tag.
   release:
-    needs: [resolve-frontend, binaries]
+    needs: [resolve-frontend, resolve-version, binaries]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -189,6 +255,9 @@ jobs:
           name: ${{ github.ref_name || github.event.inputs.tag }}
           generate_release_notes: true
           body: |
+            ## Version
+            ${{ needs.resolve-version.outputs.semver }} (sha ${{ needs.resolve-version.outputs.sha }})
+
             ## Frontend
             Bundled upstream non-lite OpenList-Frontend: `${{ needs.resolve-frontend.outputs.tag }}`
             (fetched from https://github.com/OpenListTeam/OpenList-Frontend/releases)
@@ -196,10 +265,12 @@ jobs:
 
   # Multi-arch Docker image (amd64 + arm64) tagged with the release version + latest.
   docker:
-    needs: [resolve-frontend, binaries]
+    needs: [resolve-frontend, resolve-version, binaries]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
@@ -218,8 +289,13 @@ jobs:
           push: true
           build-args: |
             FRONTEND_VERSION=${{ needs.resolve-frontend.outputs.tag }}
+            VERSION=${{ needs.resolve-version.outputs.semver }}
+            ASSEMBLY_VERSION=${{ needs.resolve-version.outputs.assemblyVer }}
+            FILE_VERSION=${{ needs.resolve-version.outputs.fileVer }}
+            INFORMATIONAL_VERSION=${{ needs.resolve-version.outputs.infoVer }}
+            SOURCE_REVISION_ID=${{ needs.resolve-version.outputs.sha }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/openlist-net:${{ github.ref_name || github.event.inputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/openlist-net:${{ needs.resolve-version.outputs.semver }}
             ghcr.io/${{ github.repository_owner }}/openlist-net:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
