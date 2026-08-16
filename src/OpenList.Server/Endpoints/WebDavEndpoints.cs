@@ -271,36 +271,93 @@ public static class WebDavEndpoints
         return Results.Ok();
     }
 
-    // --- LOCK: return a fake lock token ---
+    // --- LOCK: issue and persist an exclusive in-memory lock token ---
+    // Mirrors Go's webdav.NewMemLS(): per-path exclusive locks with opaque tokens.
+    // If the path is already locked by another (non-expired) token, return 423 Locked.
 
-    private static Task<IResult> LockAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
+    private static async Task<IResult> LockAsync(
+        string path,
+        HttpContext ctx,
+        ZioMountService mount,
+        IStorageService storageSvc,
+        IWebDavLockStore lockStore)
     {
-        var upath = NormalizePath(path);
+        var user = await ResolveUserAsync(ctx, storageSvc);
+        if (user is null) return Results.Unauthorized();
+
+        var fullPath = "/" + path.TrimStart('/');
+        var depth = ctx.Request.Headers["Depth"].ToString();
+        if (string.IsNullOrEmpty(depth)) depth = "infinity";
+
+        var timeoutSeconds = ParseTimeout(ctx.Request.Headers["Timeout"].ToString());
+
+        // If already locked (and not expired), refuse with 423 Locked.
+        var existing = await lockStore.GetAsync(fullPath, ctx.RequestAborted);
+        if (existing is not null)
+        {
+            return Results.StatusCode(StatusCodes.Status423Locked);
+        }
+
         var token = "opaquelocktoken:" + Guid.NewGuid().ToString("N");
+        var now = DateTimeOffset.UtcNow;
+        await lockStore.SetAsync(fullPath, new WebDavLock(token, "exclusive", depth, timeoutSeconds, now), ctx.RequestAborted);
+
         ctx.Response.Headers["Lock-Token"] = $"<{token}>";
 
         var activelock = new DavActiveLock
         {
             Type = new DavLockType(),
             Scope = new DavLockScope { Exclusive = new object() },
-            Depth = ctx.Request.Headers["Depth"].ToString() ?? "infinity",
-            Timeout = "Second-3600",
+            Depth = depth,
+            Timeout = $"Second-{timeoutSeconds}",
             Token = new DavLockToken { Href = token },
         };
         var prop = new DavProp { LockDiscovery = new DavLockDiscovery { ActiveLock = activelock } };
         var response = new DavResponse
         {
-            Href = "/" + path.TrimStart('/'),
+            Href = fullPath,
             Propstat = [new DavPropstat { Prop = prop, Status = "HTTP/1.1 200 OK" }],
         };
-        return Task.FromResult(MultistatusResult(new DavMultistatus { Responses = [response] }));
+        return MultistatusResult(new DavMultistatus { Responses = [response] });
     }
 
-    // --- UNLOCK: no-op (in-memory locks) ---
+    // --- UNLOCK: validate the Lock-Token header and remove the in-memory lock ---
 
-    private static Task<IResult> UnlockAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
+    private static async Task<IResult> UnlockAsync(
+        string path,
+        HttpContext ctx,
+        ZioMountService mount,
+        IStorageService storageSvc,
+        IWebDavLockStore lockStore)
     {
-        return Task.FromResult<IResult>(Results.NoContent());
+        var user = await ResolveUserAsync(ctx, storageSvc);
+        if (user is null) return Results.Unauthorized();
+
+        var fullPath = "/" + path.TrimStart('/');
+
+        // Lock-Token header is wrapped in <...> per RFC 4918.
+        var rawToken = ctx.Request.Headers["Lock-Token"].ToString().Trim();
+        if (rawToken.StartsWith('<') && rawToken.EndsWith('>'))
+            rawToken = rawToken[1..^1];
+
+        if (string.IsNullOrEmpty(rawToken))
+            return Results.BadRequest("Lock-Token header required");
+
+        var removed = await lockStore.RemoveAsync(fullPath, rawToken, ctx.RequestAborted);
+        return removed ? Results.NoContent() : Results.Conflict();
+    }
+
+    private static int ParseTimeout(string? header)
+    {
+        // WebDAV Timeout header: "Second-3600", "Infinite, Second-3600", etc.
+        if (string.IsNullOrEmpty(header)) return 3600;
+        foreach (var part in header.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (part.StartsWith("Second-", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(part[7..], out var secs) && secs > 0)
+                return Math.Min(secs, 86400); // cap at 24h
+        }
+        return 3600;
     }
 
     // --- Helpers ---

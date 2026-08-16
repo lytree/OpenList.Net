@@ -22,7 +22,51 @@ public static class ShareDownloadEndpoints
         app.MapGet("/sd/{sid}", HandleAsync).AllowAnonymous();
         app.MapMethods("/sd/{sid}/{**path}", new[] { "HEAD" }, HandleAsync).AllowAnonymous();
         app.MapMethods("/sd/{sid}", new[] { "HEAD" }, HandleAsync).AllowAnonymous();
+
+        // GET/HEAD /sad/{sid}[/{**path}]?pwd=... — archive extract from a share.
+        // Mirrors Go's SharingArchiveExtract. Verifies the share (same as /sd/), then
+        // delegates to IFileSystemService.ArchiveDecompressAsync. Returns 501 when the
+        // driver does not implement IFileSystemArchiveDecompress (route in place, driver
+        // layer pending).
+        // HEAD probes the archive file size via the same /sd/ stream handler (no decompression
+        // side-effect on HEAD).
+        app.MapGet("/sad/{sid}/{**path}", HandleArchiveAsync).AllowAnonymous();
+        app.MapGet("/sad/{sid}", HandleArchiveAsync).AllowAnonymous();
+        app.MapMethods("/sad/{sid}/{**path}", new[] { "HEAD" }, HandleAsync).AllowAnonymous();
+        app.MapMethods("/sad/{sid}", new[] { "HEAD" }, HandleAsync).AllowAnonymous();
         return app;
+    }
+
+    private static readonly User GuestUser = new() { Id = 0, Username = "", Role = UserRole.Guest };
+
+    private static async Task<IResult> HandleArchiveAsync(
+        HttpContext ctx,
+        ISharingService shares,
+        IFileSystemService fs)
+    {
+        var sid = ctx.GetRouteValue("sid")?.ToString();
+        if (string.IsNullOrEmpty(sid))
+            return Results.NotFound();
+
+        var pwd = ctx.Request.Query["pwd"].ToString();
+        var verify = await shares.VerifyAsync(sid, string.IsNullOrEmpty(pwd) ? null : pwd, ctx.RequestAborted);
+        if (verify.Code != RespCodes.Ok)
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Results.Json(verify, statusCode: StatusCodes.Status403Forbidden);
+        }
+        var share = verify.Data!;
+
+        // Resolve archive path (same logic as /sd/).
+        var relPath = ctx.GetRouteValue("path")?.ToString() ?? string.Empty;
+        var actualPath = ResolveActualPath(share, relPath);
+        if (actualPath is null)
+            return Results.NotFound("path not in share");
+
+        // Decompress into the archive's parent directory (Go's SharingArchiveExtract behaviour).
+        var parent = actualPath.TrimEnd('/').LastIndexOf('/');
+        var destDir = parent <= 0 ? "/" : actualPath[..parent];
+        return Results.Ok(await fs.ArchiveDecompressAsync(actualPath, destDir, null, GuestUser));
     }
 
     private static async Task<IResult> HandleAsync(

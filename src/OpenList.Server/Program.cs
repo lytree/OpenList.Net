@@ -114,7 +114,9 @@ builder.Services.AddSingleton<IFileSystemService>(sp =>
         sp.GetRequiredService<ZioMountService>(),
         sp.GetService<ISignService>(),
         sp.GetService<IOfflineDownloadService>()));
-// TODO: register IShareService, etc. (Phase 5+)
+// WebDAV in-memory lock store — singleton so LOCK/UNLOCK state persists across
+// requests in the same process (mirrors Go's webdav.NewMemLS()).
+builder.Services.AddSingleton<IWebDavLockStore, InMemoryWebDavLockStore>();
 
 // JWT auth — frontend sends token WITHOUT "Bearer " prefix.
 // Auto-generate a stable secret once and persist it next to the database file so

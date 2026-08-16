@@ -53,7 +53,8 @@ public static class AuthEndpoints
                 : Results.Ok(new { code = r.Code, message = r.Message, data = (object?)null });
         }).AllowAnonymous();
 
-        g.MapPost("/logout", async (HttpContext ctx, IAuthService auth) =>
+        // Go registers GET /auth/logout. Accept GET (Go/frontend) and POST (older .NET clients).
+        g.MapMethods("/logout", new[] { "GET", "POST" }, async (HttpContext ctx, IAuthService auth) =>
         {
             var token = ExtractToken(ctx);
             if (token is null) return Results.Ok(Resp.Fail("no token", RespCodes.Unauthorized));

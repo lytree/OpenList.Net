@@ -176,4 +176,110 @@ public class WebDavEndpointsTests
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
         }
     }
+
+    // --- LOCK / UNLOCK (in-memory lock store) ---
+
+    [Test]
+    public async Task Lock_ReturnsToken_And_LockDiscovery()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("lockable.txt", "x"u8.ToArray());
+
+            var req = new HttpRequestMessage(new HttpMethod("LOCK"), "/dav/test/lockable.txt");
+            req.Headers.Add("Timeout", "Second-60");
+            var resp = await client.SendAsync(req);
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.MultiStatus);
+            await Assert.That(resp.Headers.Contains("Lock-Token")).IsTrue();
+            var xml = await resp.Content.ReadAsStringAsync();
+            await Assert.That(xml).Contains("activelock");
+            await Assert.That(xml).Contains("exclusive");
+            await Assert.That(xml).Contains("Second-60");
+        }
+    }
+
+    [Test]
+    public async Task Lock_Twice_SamePath_Returns423Locked()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("conflict.txt", "x"u8.ToArray());
+
+            var first = new HttpRequestMessage(new HttpMethod("LOCK"), "/dav/test/conflict.txt");
+            var firstResp = await client.SendAsync(first);
+            await Assert.That(firstResp.StatusCode).IsEqualTo(HttpStatusCode.MultiStatus);
+
+            var second = new HttpRequestMessage(new HttpMethod("LOCK"), "/dav/test/conflict.txt");
+            var secondResp = await client.SendAsync(second);
+            await Assert.That(secondResp.StatusCode).IsEqualTo(HttpStatusCode.Locked); // 423
+        }
+    }
+
+    [Test]
+    public async Task Unlock_WithMatchingToken_Returns204()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("unlock.txt", "x"u8.ToArray());
+
+            var lockReq = new HttpRequestMessage(new HttpMethod("LOCK"), "/dav/test/unlock.txt");
+            var lockResp = await client.SendAsync(lockReq);
+            var token = lockResp.Headers.GetValues("Lock-Token").First().Trim('<', '>');
+
+            var unlockReq = new HttpRequestMessage(new HttpMethod("UNLOCK"), "/dav/test/unlock.txt");
+            unlockReq.Headers.Add("Lock-Token", $"<{token}>");
+            var unlockResp = await client.SendAsync(unlockReq);
+            await Assert.That(unlockResp.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+
+            // After unlock, a new lock should succeed.
+            var relockResp = await client.SendAsync(new HttpRequestMessage(new HttpMethod("LOCK"), "/dav/test/unlock.txt"));
+            await Assert.That(relockResp.StatusCode).IsEqualTo(HttpStatusCode.MultiStatus);
+        }
+    }
+
+    [Test]
+    public async Task Unlock_WithMismatchedToken_Returns409()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("mismatch.txt", "x"u8.ToArray());
+
+            var lockReq = new HttpRequestMessage(new HttpMethod("LOCK"), "/dav/test/mismatch.txt");
+            await client.SendAsync(lockReq);
+
+            var unlockReq = new HttpRequestMessage(new HttpMethod("UNLOCK"), "/dav/test/mismatch.txt");
+            unlockReq.Headers.Add("Lock-Token", "<opaquelocktoken:wrong-token>");
+            var unlockResp = await client.SendAsync(unlockReq);
+            await Assert.That(unlockResp.StatusCode).IsEqualTo(HttpStatusCode.Conflict); // 409
+        }
+    }
+
+    [Test]
+    public async Task Unlock_WithoutLockTokenHeader_Returns400()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            var req = new HttpRequestMessage(new HttpMethod("UNLOCK"), "/dav/test/anything.txt");
+            var resp = await client.SendAsync(req);
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        }
+    }
+
+    [Test]
+    public async Task Lock_Unauthorized_WithoutAuth()
+    {
+        var (factory, _) = await SetupAsync();
+        await using (factory)
+        {
+            var client = factory.CreateClient(); // no auth
+            var req = new HttpRequestMessage(new HttpMethod("LOCK"), "/dav/test/x.txt");
+            var resp = await client.SendAsync(req);
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+        }
+    }
 }

@@ -19,17 +19,21 @@ public static class FsEndpoints
         var g = app.MapGroup("/api/fs").WithTags("Fs").RequireAuthorization();
 
         // --- Read ---
+        // Go's fsAndShare group allows guest access (Auth(true)) for these read endpoints.
+        // AllowAnonymous here lets unauthenticated visitors browse public shares; JWT, if
+        // present, is still parsed by JwtBearer so ClaimsPrincipal.ToUser() yields the real
+        // user (or a guest User with Id=0/Role=Guest when anonymous).
         g.MapPost("/list", async (FsListReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.ListAsync(req, user.ToUser())));
+            Results.Ok(await svc.ListAsync(req, user.ToUser()))).AllowAnonymous();
 
         g.MapPost("/get", async (FsGetReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.GetAsync(req, user.ToUser())));
+            Results.Ok(await svc.GetAsync(req, user.ToUser()))).AllowAnonymous();
 
         g.MapPost("/dirs", async (DirsReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.DirsAsync(req.Path, user.ToUser()))); // password/force_root accepted but ignored (no driver uses them yet)
+            Results.Ok(await svc.DirsAsync(req.Path, user.ToUser()))).AllowAnonymous(); // password/force_root accepted but ignored (no driver uses them yet)
 
         g.MapPost("/search", async (SearchReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.SearchAsync(req, user.ToUser())));
+            Results.Ok(await svc.SearchAsync(req, user.ToUser()))).AllowAnonymous();
 
         // --- Manage ---
         g.MapPost("/mkdir", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
@@ -160,6 +164,7 @@ public static class FsEndpoints
         //   /fs/torrent/parse         (POST, body: { torrent_data })
         //   /fs/torrent/upload_parse  (POST, multipart "torrent")
         //   /fs/torrent/rapid_upload  (POST, body: { torrent_data, path })
+        //   /fs/torrent/generate      (POST, body: { path }) — generate torrent for path
         // Legacy /torrent/list|info|add|cancel stubs retained for older clients.
         g.MapGet("/torrent/list", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
         g.MapGet("/torrent/info", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
@@ -168,6 +173,7 @@ public static class FsEndpoints
         g.MapPost("/torrent/parse", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
         g.MapPost("/torrent/upload_parse", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
         g.MapPost("/torrent/rapid_upload", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
+        g.MapPost("/torrent/generate", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
 
         return app;
     }

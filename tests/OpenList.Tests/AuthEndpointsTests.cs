@@ -146,6 +146,25 @@ public class AuthEndpointsTests
     }
 
     [Test]
+    public async Task Logout_Accepts_Get_And_Post()
+    {
+        // Go registers GET /auth/logout; .NET accepts both GET and POST so the
+        // unmodified frontend keeps working.
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            var token = await LoginAsync(client);
+            Authed(client, token);
+
+            var getResp = await client.GetAsync("/api/auth/logout");
+            await Assert.That(getResp.StatusCode).IsEqualTo(HttpStatusCode.OK);
+
+            var postResp = await client.PostAsync("/api/auth/logout", null);
+            await Assert.That(postResp.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        }
+    }
+
+    [Test]
     public async Task HashPassword_Requires_Admin()
     {
         var (factory, client) = await SetupAsync();
@@ -173,26 +192,28 @@ public class AuthEndpointsTests
     }
 
     [Test]
-    public async Task SSO_Providers_Returns_501()
+    public async Task SSO_Providers_Returns_403_When_Disabled()
     {
+        // Route is GET /api/auth/sso?method=<provider>; SSO not configured → 403.
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
-            var resp = await client.GetAsync("/api/auth/sso/providers");
+            var resp = await client.GetAsync("/api/auth/sso?method=google");
             var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(501);
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
         }
     }
 
     [Test]
-    public async Task WebAuthn_Begin_Login_Returns_501()
+    public async Task WebAuthn_Begin_Login_Returns_403_When_Disabled()
     {
+        // Route is GET /api/authn/webauthn_begin_login?username=<user>; WebAuthn not enabled → 403.
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
-            var resp = await client.PostAsync("/api/authn/begin/login", null);
+            var resp = await client.GetAsync("/api/authn/webauthn_begin_login?username=admin");
             var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(501);
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
         }
     }
 

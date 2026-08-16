@@ -1,0 +1,113 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using OpenList.Core.Interfaces;
+using TUnit.Core;
+
+namespace OpenList.Tests;
+
+/// <summary>
+/// Integration tests for the signed archive routes /ad/, /ap/, /ae/ (P1-5).
+/// Verifies signature enforcement and that handlers return 501 when the underlying
+/// driver does not implement IFileSystemArchiveReader / IFileSystemArchiveDecompress.
+/// </summary>
+[NotInParallel("WebIntegration")]
+public class SignEndpointsTests
+{
+    private static async Task<(TestWebAppFactory factory, HttpClient client)> SetupAsync()
+    {
+        var factory = new TestWebAppFactory();
+        var client = factory.CreateClient();
+        await factory.SeedStorageAsync();
+        return (factory, client);
+    }
+
+    private static async Task<string> SignAsync(HttpClient client, string path)
+    {
+        // Login as admin, then use the /api/fs/link endpoint (or internal SignService) to
+        // obtain a signature. The simplest path is to hit /api/fs/get which returns RawUrl
+        // containing the sign parameter.
+        var loginResp = await client.PostAsync("/api/auth/login",
+            JsonContent.Create(new { username = "admin", password = "admin" }));
+        var loginJson = await loginResp.Content.ReadFromJsonAsync<JsonDocument>();
+        var token = loginJson!.RootElement.GetProperty("data").GetProperty("token").GetString()!;
+        client.DefaultRequestHeaders.Authorization = new("Bearer", token);
+
+        var resp = await client.PostAsync("/api/fs/get",
+            JsonContent.Create(new { path }));
+        var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+        var rawUrl = json!.RootElement.GetProperty("data").GetProperty("raw_url").GetString()!;
+        // raw_url is like "/p/<path>?sign=<sig>" — extract the sign value.
+        var idx = rawUrl.IndexOf("sign=", StringComparison.Ordinal);
+        return rawUrl[(idx + 5)..];
+    }
+
+    [Test]
+    public async Task Ad_Rejects_Missing_Signature()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("a.zip", new byte[] { 0x50, 0x4B, 0x03, 0x04 });
+            var resp = await client.GetAsync("/ad/test/a.zip");
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+        }
+    }
+
+    [Test]
+    public async Task Ad_Returns_501_When_Driver_Lacks_Archive_Reader()
+    {
+        // Signature is valid but LocalDriver does not implement IFileSystemArchiveReader,
+        // so the handler returns Resp code=501 (HTTP 200 with body code=501).
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("a.zip", new byte[] { 0x50, 0x4B, 0x03, 0x04 });
+            var sign = await SignAsync(client, "/test/a.zip");
+            // Clear auth header — /ad/ is anonymous (signature-only).
+            client.DefaultRequestHeaders.Authorization = null;
+
+            var resp = await client.GetAsync($"/ad/test/a.zip?sign={sign}");
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
+            var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(501);
+        }
+    }
+
+    [Test]
+    public async Task Ae_Returns_501_When_Driver_Lacks_Archive_Decompress()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("a.zip", new byte[] { 0x50, 0x4B, 0x03, 0x04 });
+            var sign = await SignAsync(client, "/test/a.zip");
+            client.DefaultRequestHeaders.Authorization = null;
+
+            var resp = await client.GetAsync($"/ae/test/a.zip?sign={sign}");
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
+            var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(501);
+        }
+    }
+
+    [Test]
+    public async Task Ap_Streams_Archive_File_With_Valid_Signature()
+    {
+        // /ap/ streams the archive file itself (same as /d/), so it should succeed
+        // regardless of whether the driver implements archive interfaces.
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            var content = new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x01, 0x02 };
+            await factory.WriteFileAsync("a.zip", content);
+            var sign = await SignAsync(client, "/test/a.zip");
+            client.DefaultRequestHeaders.Authorization = null;
+
+            var resp = await client.GetAsync($"/ap/test/a.zip?sign={sign}");
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
+            var bytes = await resp.Content.ReadAsByteArrayAsync();
+            await Assert.That(bytes.Length).IsEqualTo(content.Length);
+        }
+    }
+}
