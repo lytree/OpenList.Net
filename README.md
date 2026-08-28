@@ -297,6 +297,8 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 - [x] `POST /admin/index/{build,update,stop,clear}` + `GET /admin/index/progress`
 - [x] 启动时恢复索引状态（镜像 Go `bootstrap.InitIndex`）— `SearchService.InitIndexAsync` 载入持久化进度、把崩溃遗留的 `running` 状态复位为 `idle`，使增量更新在重启后保持启用。不做全量自动重建（与 Go 一致）
 - [x] 文件操作时增量索引 — `auto_update_index` 设置 + `IObjsUpdateHooks`（发布/订阅）解耦 `FileSystemService` 写操作与 `SearchService` 增量更新（增/删/改路径局部重建）
+- [x] 搜索结果访问控制（镜像 Go `search.go` SearchFiltered）— `SearchAsync(req, user)` 按用户 `BasePath`（`IsSubPath`）与最近 `Meta`（隐藏正则 / 读用户 / 密码，`User` 权限位 `CanSeeHides`/`CanAccessWithoutPassword`）过滤结果
+- [x] 增量更新按父目录串行化（镜像 Go `internal/search/update_lock.go`）— 静态 `Dictionary<parent, UpdateLock>`（信号量+引用计数）排队同一父目录的差集更新，不同父目录可并行，避免并发写表冲突
 
 ## Phase 14 — Archive Support ✅
 
@@ -353,3 +355,4 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 | 2026-08-16 | API 对齐 P0+P1+P2 | 对照 Go main/前端 v4.2.5: Multipart 分片上传 5 端点、消息 send 体形兼容、归档驱动 (SharpCompress, LocalDriver)、MCP 端点 (`/mcp`, Streamable HTTP)、Go Any 方法兼容 (GET+POST)、`/fs/regex_rename`、`/fs/link` admin-only、`/api/admin/task/*` 别名、`/debug/*`、`set_guangyapan`。前端修复为 `Openlist-Frontend` v4.2.5 git submodule。详见 `docs/alignment-plan.md`。 |
 | 2026-08-28 | Implementation Plan 状态同步 | 按源码核对勾选状态：Phase 4 (SignEndpoints)、5 (Sharing)、14 (Archive)、15 (2FA/WebAuthn/SSO)、17 (前端对齐) 全部完成；Phase 13 标记 database 后端完成（bleve/自动重建/增量未实现）；Phase 16 明确限流/Serilog/错误处理/Mapster/Scalar/配置校验仍未实现。 |
 | 2026-08-28 | Phase 13 + Phase 16 | Phase 13：增量索引钩子（`auto_update_index` 设置 + `IObjsUpdateHooks` 发布/订阅 + `FileSystemService` 写操作触发局部重建/删除清理）+ 启动时 `InitIndexAsync` 恢复进度（镜像 Go `bootstrap.InitIndex`）。Phase 16：字节级令牌桶限流（`RateLimiter`/`RateLimitManager`/`RateLimitMiddleware`/`MaxAllowedMiddleware`）、Serilog 请求日志（`RequestLogMiddleware` CIDR/路径/方法过滤 + 文件滚动）、`ErrorHandlingMiddleware`（`Resp<T>` 错误封装）、`AppConfiguration.Validate()` 启动校验、Scalar API 文档。Mapster 仍未接入。新增 `MiddlewareTests`（限流/日志过滤/异常处理/并发闸门/配置校验）。206/207 测试通过（1 skip 为已知 WebDAV 挂起）。 |
+| 2026-08-28 | 搜索访问控制 + multipart gating/GC | 按 Go 参考同步：① 搜索访问控制过滤（`SearchAsync(req,user)` 按 BasePath + Meta 隐藏/读用户/密码过滤，镜像 `search.go` SearchFiltered）；② 增量更新按父目录串行化（镜像 `update_lock.go`，静态 per-parent 锁）；③ multipart 设置门控（`multipart_enabled` 403 / `multipart_chunk_size` 上限 + 1 MB 下限）与 chunk 请求体有界排空；④ multipart 会话 GC（滑动 TTL 30min + 启动孤儿临时目录清扫，`Program.cs` `StartGc`）；⑤ `move_task_threads_num` 默认设置。新增 `MultipartUploadServiceTests`，扩展 `SearchServiceTests`/`SettingServiceTests`。222/223 测试通过（1 skip 为已知 WebDAV 挂起）。 |

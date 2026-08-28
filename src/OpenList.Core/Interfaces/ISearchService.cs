@@ -20,8 +20,9 @@ public interface ISearchService
     Task<Resp> InitIndexAsync(CancellationToken ct = default);
     /// <summary>获取索引进度。</summary>
     Task<Resp<IndexProgress>> GetProgressAsync(CancellationToken ct = default);
-    /// <summary>执行搜索。</summary>
-    Task<Resp<SearchResp>> SearchAsync(SearchReq req, CancellationToken ct = default);
+    /// <summary>执行搜索。按 <c>search_index</c> 设置路由到索引后端或实时文件系统，
+    /// 并依据 <paramref name="user"/> 的 BasePath 与元数据权限过滤结果（镜像 Go 的 search.go）。</summary>
+    Task<Resp<SearchResp>> SearchAsync(SearchReq req, User user, CancellationToken ct = default);
 }
 
 /// <summary>

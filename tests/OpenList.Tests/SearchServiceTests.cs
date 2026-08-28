@@ -7,6 +7,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
 using OpenList.Infrastructure.Services;
+using TUnit.Core;
 using Zio;
 using Zio.FileSystems;
 
@@ -15,7 +16,9 @@ namespace OpenList.Tests;
 /// <summary>
 /// Phase 13 — 搜索索引增量更新：ObjsUpdateHooks 发布/订阅、SearchService 增量索引、
 /// 设置门控（search_index/auto_update_index）、启动恢复（InitIndexAsync）。
+/// 串行化执行：parent-lock 依赖跨测试共享的静态字典，需避免同类内并行干扰。
 /// </summary>
+[NotInParallel("SearchService")]
 public class SearchServiceTests
 {
     // ---------------- ObjsUpdateHooks ----------------
@@ -302,6 +305,115 @@ public class SearchServiceTests
         await Assert.That(snapshot[0]).IsEqualTo("/test:1");
     }
 
+    // ---------------- 搜索访问控制过滤（镜像 Go SearchFiltered） ----------------
+
+    [Test]
+    public async Task SearchDatabaseAsync_Filters_By_User_BasePath()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetDatabaseBackend();
+        await fixture.AddIndexEntry("/docs", "a.txt");
+        await fixture.AddIndexEntry("/docs2", "b.txt");
+
+        var user = new User { Id = 1, Username = "u", Role = UserRole.General, BasePath = "/docs" };
+        var r = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, user);
+
+        await Assert.That(r.Code).IsEqualTo(200);
+        await Assert.That(r.Data!.Total).IsEqualTo(1);
+        await Assert.That(r.Data.Content[0].Path).IsEqualTo("/docs/a.txt");
+    }
+
+    [Test]
+    public async Task SearchDatabaseAsync_Hides_Meta_Hidden_Files_From_Non_Privileged_User()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetDatabaseBackend();
+        await fixture.AddIndexEntry("/docs", "visible.txt");
+        await fixture.AddIndexEntry("/docs", "secret.txt");
+        await fixture.AddMeta("/docs", hide: "secret\\.txt", hideSub: true);
+
+        // 无隐藏权限的普通用户看不到 secret.txt。
+        var plain = new User { Id = 1, Username = "u", Role = UserRole.General };
+        var r1 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, plain);
+        await Assert.That(r1.Data!.Total).IsEqualTo(1);
+        await Assert.That(r1.Data.Content[0].Name).IsEqualTo("visible.txt");
+
+        // 可查看隐藏的用户（权限位 0）能看到全部。
+        var privileged = new User { Id = 2, Username = "p", Role = UserRole.General, Permission = 1 };
+        var r2 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, privileged);
+        await Assert.That(r2.Data!.Total).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task SearchDatabaseAsync_Respects_Read_Users_Meta()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetDatabaseBackend();
+        await fixture.AddIndexEntry("/docs", "a.txt");
+        await fixture.AddMeta("/docs", readUsers: [42], readUsersSub: true);
+
+        var outsider = new User { Id = 1, Username = "u", Role = UserRole.General };
+        var r1 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, outsider);
+        await Assert.That(r1.Data!.Total).IsEqualTo(0);
+
+        var insider = new User { Id = 42, Username = "v", Role = UserRole.General };
+        var r2 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, insider);
+        await Assert.That(r2.Data!.Total).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task SearchDatabaseAsync_Enforces_Meta_Password()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetDatabaseBackend();
+        await fixture.AddIndexEntry("/docs", "a.txt");
+        await fixture.AddMeta("/docs", password: "s3cret", pSub: true);
+
+        var user = new User { Id = 1, Username = "u", Role = UserRole.General };
+        // 无密码或密码错误 → 排除。
+        var denied = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, user);
+        await Assert.That(denied.Data!.Total).IsEqualTo(0);
+
+        var allowed = await fixture.Search.SearchAsync(
+            new SearchReq { Keywords = "txt", Recursive = true, Password = "s3cret" }, user);
+        await Assert.That(allowed.Data!.Total).IsEqualTo(1);
+
+        // 免密用户（权限位 1）无需密码。
+        var bypass = new User { Id = 2, Username = "p", Role = UserRole.General, Permission = 2 };
+        var free = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, bypass);
+        await Assert.That(free.Data!.Total).IsEqualTo(1);
+    }
+
+    // ---------------- 增量更新按父目录串行化（parent lock） ----------------
+
+    [Test]
+    public async Task Concurrent_Updates_To_Same_Parent_Are_Serialized()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetDatabaseBackend();
+
+        // 相同父目录的两次并发更新：若无 parent lock，两个上下文都会读到 existing=[]，
+        // 各自插入同一条目并因唯一路径约束在 SaveChanges 抛错；锁应保证串行、无重复。
+        var t1 = fixture.Hooks.PublishDirectoryUpdateAsync("/docs", new List<Obj> { new() { Name = "a.txt" } });
+        var t2 = fixture.Hooks.PublishDirectoryUpdateAsync("/docs", new List<Obj> { new() { Name = "a.txt" } });
+        await Task.WhenAll(t1, t2);
+
+        await Assert.That(await fixture.Db().SearchIndex.CountAsync()).IsEqualTo(1);
+        await Assert.That(SearchService.UpdateLockCount).IsEqualTo(0); // 锁不泄漏
+    }
+
+    [Test]
+    public async Task Update_Releases_Parent_Lock_Even_With_Empty_Diff()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetDatabaseBackend();
+
+        // 空条目列表触发 diff 但无写入；锁在任何路径下都应被释放。
+        await fixture.Hooks.PublishDirectoryUpdateAsync("/docs", new List<Obj>());
+        await Assert.That(await fixture.Db().SearchIndex.CountAsync()).IsEqualTo(0);
+        await Assert.That(SearchService.UpdateLockCount).IsEqualTo(0);
+    }
+
     /// <summary>共享测试装置：内存 SQLite + DI 容器（scoped DbContext / SettingService + singleton hooks / FileSystemService）。</summary>
     private sealed class Fixture : IAsyncDisposable
     {
@@ -390,6 +502,42 @@ public class SearchServiceTests
         {
             var scope = _provider.CreateScope();
             return scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+        }
+
+        /// <summary>直接插入一条搜索索引条目（供访问控制过滤测试用）。</summary>
+        public Task AddIndexEntry(string parent, string name, bool isDir = false, long size = 0)
+        {
+            var db = Db();
+            db.SearchIndex.Add(new SearchIndexEntry
+            {
+                Parent = parent,
+                Name = name,
+                IsDir = isDir,
+                Size = size,
+                Path = parent == "/" ? "/" + name : parent + "/" + name,
+                Type = 0,
+            });
+            return db.SaveChangesAsync();
+        }
+
+        /// <summary>直接插入一条路径元数据（可选隐藏/读用户/密码，供访问控制过滤测试用）。</summary>
+        public Task AddMeta(string path, string? password = null, bool pSub = false,
+            string? hide = null, bool hideSub = false, List<long>? readUsers = null, bool readUsersSub = false)
+        {
+            var db = Db();
+            var meta = new Meta
+            {
+                Path = path,
+                Password = password,
+                PSub = pSub,
+                Hide = hide,
+                HideSub = hideSub,
+                ReadUsers = readUsers ?? [],
+                ReadUsersSub = readUsersSub,
+            };
+            meta.SyncJson();
+            db.Metas.Add(meta);
+            return db.SaveChangesAsync();
         }
 
         public ValueTask DisposeAsync()

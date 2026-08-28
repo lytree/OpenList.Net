@@ -11,8 +11,13 @@ namespace OpenList.Core.Interfaces;
 /// </summary>
 public interface IMultipartUploadService
 {
-    /// <summary>为给定路径+大小创建（或续传）一个分片上传会话。</summary>
-    Task<Resp<MultipartInitResp>> InitAsync(MultipartInitRequest req, User user, CancellationToken ct = default);
+    /// <summary>
+    /// 为给定路径+大小创建（或续传）一个分片上传会话。
+    /// <paramref name="chunkSizeCeilingBytes"/> 为管理员设置 <c>multipart_chunk_size</c>（MB）换算的
+    /// 字节上限：客户端可请求更小分片，但永远不允许更大（镜像 Go multipartChunkSize）。
+    /// 传 null 时使用默认 10 MB。
+    /// </summary>
+    Task<Resp<MultipartInitResp>> InitAsync(MultipartInitRequest req, User user, long? chunkSizeCeilingBytes = null, CancellationToken ct = default);
 
     /// <summary>接收会话的单个分片。流控：窗口已满时返回 code 429。</summary>
     Task<Resp<MultipartSnapshot>> UploadChunkAsync(string uploadId, int chunkIndex, Stream body, CancellationToken ct = default);

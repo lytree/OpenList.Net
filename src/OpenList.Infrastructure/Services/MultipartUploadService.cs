@@ -9,41 +9,115 @@ namespace OpenList.Infrastructure.Services;
 /// （<c>Path.GetTempPath()/openlist-multipart/{upload_id}</c>），再按顺序经
 /// <see cref="IFileSystemService.PutStreamAsync"/> 冲刷到目标存储。
 /// 以与前端分片上传客户端兼容的层级对应 Go 的 <c>internal/multipart</c>
-/// （8 分片缓冲窗口、断点续传、可重试失败）。
+/// （8 分片缓冲窗口、断点续传、可重试失败、滑动 TTL 会话回收）。
 /// </summary>
-public sealed class MultipartUploadService : IMultipartUploadService
+public sealed class MultipartUploadService : IMultipartUploadService, IDisposable
 {
     public const int MinChunkSize = 1024 * 1024;          // 1 MB 最小分片
-    public const int MaxChunkSize = 100 * 1024 * 1024;    // 100 MB 最大分片
-    public const int DefaultChunkSize = 10 * 1024 * 1024; // 10 MB 默认分片
+    public const int DefaultChunkSize = 10 * 1024 * 1024; // 10 MB 默认分片上限（multipart_chunk_size 缺省值）
     public const int WindowSize = 8;                      // 缓冲分片的流控窗口
 
+    /// <summary>会话滑动不活动超时（镜像 Go defaultSessionTTL）。</summary>
+    public static readonly TimeSpan DefaultSessionTtl = TimeSpan.FromMinutes(30);
+    /// <summary>过期会话回收扫描间隔（镜像 Go gcInterval）。</summary>
+    public static readonly TimeSpan DefaultGcInterval = TimeSpan.FromMinutes(1);
+
+    /// <summary>临时文件根目录（测试可重定向）。</summary>
+    internal static string TempRoot = Path.Combine(Path.GetTempPath(), "openlist-multipart");
+
+    /// <summary>会话不活动超时；仅测试用，默认 <see cref="DefaultSessionTtl"/>。</summary>
+    internal TimeSpan SessionTtl { get; set; } = DefaultSessionTtl;
+    /// <summary>GC 扫描间隔；仅测试用，默认 <see cref="DefaultGcInterval"/>。</summary>
+    internal TimeSpan GcInterval { get; set; } = DefaultGcInterval;
+
     private readonly IFileSystemService _fs;
+    private readonly TimeProvider _time;
     private readonly ConcurrentDictionary<string, MultipartSession> _sessions = new();
+    private readonly object _gcGate = new();
+    private bool _gcStarted;
+    private ITimer? _gcTimer;
+    private bool _disposed;
 
     /// <summary>
     /// 创建分片上传服务实例。
     /// </summary>
     /// <param name="fs">文件系统服务，用于最终写入分片。</param>
-    public MultipartUploadService(IFileSystemService fs) => _fs = fs;
+    /// <param name="time">时间源（可选，默认系统时区；用于会话活动时间与 GC 判定）。</param>
+    public MultipartUploadService(IFileSystemService fs, TimeProvider? time = null)
+    {
+        _fs = fs;
+        _time = time ?? TimeProvider.System;
+    }
+
+    /// <summary>
+    /// 启动会话 GC：清扫上次运行遗留的临时目录并启动周期回收。
+    /// 与 <see cref="InitAsync"/> 内部触发的惰性启动共用一次性门闩，可被多次安全调用
+    /// （镜像 Go <c>internal/multipart/session.go</c> 的 StartGC/ensureGC）。
+    /// </summary>
+    public void StartGc() => EnsureGc();
+
+    /// <summary>一次性启动 GC：清扫上次运行遗留的临时目录并启动周期回收（镜像 Go ensureGC）。</summary>
+    private void EnsureGc()
+    {
+        lock (_gcGate)
+        {
+            if (_gcStarted) return;
+            _gcStarted = true;
+            // 清扫上次进程运行遗留的孤儿分片目录（Go StartGC 里的 os.RemoveAll(m.dir())）。
+            try { if (Directory.Exists(TempRoot)) Directory.Delete(TempRoot, recursive: true); } catch { /* 尽力而为 */ }
+            _gcTimer = _time.CreateTimer(
+                _ => { try { Gc(); } catch { /* GC 失败不影响上传 */ } },
+                null, GcInterval, GcInterval);
+        }
+    }
+
+    /// <summary>
+    /// 回收超时会话（镜像 Go gc）：把最后活跃时间早于 now - SessionTtl 的会话移除并清理临时目录。
+    /// 仅测试用直接调用；生产路径由定时器触发。
+    /// </summary>
+    internal void Gc()
+    {
+        var deadline = _time.GetUtcNow() - SessionTtl;
+        foreach (var kv in _sessions)
+        {
+            if (kv.Value.LastActive < deadline && _sessions.TryRemove(kv.Key, out var s))
+            {
+                lock (s.Sync) { s.State = "aborted"; }
+                TryCleanup(s);
+            }
+        }
+    }
+
+    /// <summary>当前活跃会话数（仅测试用）。</summary>
+    internal int SessionCount => _sessions.Count;
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _gcTimer?.Dispose();
+    }
 
     /// <summary>
     /// 初始化分片上传会话。若存在相同路径/大小且未完成、未中止的会话，则复用（断点续传）。
     /// </summary>
     /// <param name="req">分片上传初始化参数（路径、总大小、分片大小）。</param>
     /// <param name="user">发起上传的用户。</param>
+    /// <param name="chunkSizeCeilingBytes">分片大小上限（字节）；缺省用默认 10 MB，镜像 Go multipartChunkSize。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>包含上传会话信息的 <c>MultipartInitResp</c>。</returns>
-    public Task<Resp<MultipartInitResp>> InitAsync(MultipartInitRequest req, User user, CancellationToken ct = default)
+    public Task<Resp<MultipartInitResp>> InitAsync(MultipartInitRequest req, User user, long? chunkSizeCeilingBytes = null, CancellationToken ct = default)
     {
+        // 惰性启动 GC（镜像 Go Manager.Init 里的 m.ensureGC()）。
+        EnsureGc();
+
         if (string.IsNullOrWhiteSpace(req.Path))
             return Task.FromResult(Resp<MultipartInitResp>.Fail("path is required", RespCodes.BadRequest));
         if (req.Size < 0)
             return Task.FromResult(Resp<MultipartInitResp>.Fail("invalid size", RespCodes.BadRequest));
 
-        var chunkSize = req.ChunkSize <= 0
-            ? DefaultChunkSize
-            : Math.Clamp(req.ChunkSize, MinChunkSize, MaxChunkSize);
+        // 生效分片大小：管理员设置是上限，客户端可请求更小但不得超过（镜像 Go multipartChunkSize）。
+        var chunkSize = ResolveChunkSize(req.ChunkSize, chunkSizeCeilingBytes);
         var totalChunks = req.Size == 0 ? 1 : (int)Math.Max(1, (req.Size + chunkSize - 1) / chunkSize);
 
         // 断点续传：路径+大小相同、且未完成/未中止的会话 → 复用已缓冲的分片。
@@ -61,6 +135,7 @@ public sealed class MultipartUploadService : IMultipartUploadService
                     existing.Error = null;
                 }
                 existing.StorageProgress = 0;
+                existing.LastActive = _time.GetUtcNow();
             }
             return Task.FromResult(Resp<MultipartInitResp>.Ok(ToInitResp(existing, resumed: true)));
         }
@@ -74,10 +149,27 @@ public sealed class MultipartUploadService : IMultipartUploadService
             TotalChunks = totalChunks,
             Attempt = 1,
             State = "receiving",
-            TempDir = Path.Combine(Path.GetTempPath(), "openlist-multipart", Guid.NewGuid().ToString("N")),
+            LastActive = _time.GetUtcNow(),
+            TempDir = Path.Combine(TempRoot, Guid.NewGuid().ToString("N")),
         };
         _sessions[session.UploadId] = session;
         return Task.FromResult(Resp<MultipartInitResp>.Ok(ToInitResp(session, resumed: false)));
+    }
+
+    /// <summary>
+    /// 解析生效的分片大小。镜像 Go <c>server/handles/multipart.go</c> 的 multipartChunkSize：
+    /// 管理员设置的 <c>multipart_chunk_size</c>（MB，此处已换算为字节）为上界，且不低于 1 MB；
+    /// 客户端可请求更小分片，但永远不允许更大 —— 服务端每会话缓冲一个分片窗口，
+    /// 无上限的客户端建议会直接转化为服务端磁盘占用。
+    /// </summary>
+    public static long ResolveChunkSize(long requested, long? ceilingBytes)
+    {
+        var ceiling = ceilingBytes ?? DefaultChunkSize;
+        if (ceiling < MinChunkSize) ceiling = MinChunkSize;
+        var size = ceiling;
+        if (requested > 0 && requested < ceiling)
+            size = Math.Max(requested, MinChunkSize);
+        return size;
     }
 
     /// <summary>
@@ -119,6 +211,7 @@ public sealed class MultipartUploadService : IMultipartUploadService
                 session.RecomputeFrontier();
             }
             session.Error = null;
+            session.LastActive = _time.GetUtcNow();
             return Task.FromResult(Resp<MultipartSnapshot>.Ok(ToSnapshot(session)));
         }
     }
@@ -132,6 +225,7 @@ public sealed class MultipartUploadService : IMultipartUploadService
             return Task.FromResult(Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound));
         lock (session.Sync)
         {
+            session.LastActive = _time.GetUtcNow();
             return Task.FromResult(Resp<MultipartSnapshot>.Ok(ToSnapshot(session)));
         }
     }
@@ -162,6 +256,7 @@ public sealed class MultipartUploadService : IMultipartUploadService
             session.State = "backending";
             session.StorageProgress = 0;
             session.Error = null;
+            session.LastActive = _time.GetUtcNow();
         }
 
         // 在锁外按顺序冲刷分片（涉及网络/存储 IO）。
@@ -298,6 +393,7 @@ public sealed class MultipartUploadService : IMultipartUploadService
         public int Frontier { get; set; }
         public int StorageProgress { get; set; }
         public string? Error { get; set; }
+        public DateTimeOffset LastActive { get; set; }
 
         /// <summary>重算连续前沿（从 0 开始第一个缺失的分片编号）。</summary>
         public void RecomputeFrontier()

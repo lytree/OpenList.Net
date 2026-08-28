@@ -20,6 +20,26 @@ public enum UserRole : int
 /// </summary>
 public sealed class User
 {
+    // 权限位掩码的位定义（镜像 Go model/user.go 的 Permission 位注释）：
+    //   0: 可查看隐藏文件
+    //   1: 可免密访问
+    //   2: 可添加离线下载任务
+    //   3: 可建目录/上传
+    //   4: 可重命名
+    //   5: 可移动
+    //   6: 可复制
+    //   7: 可删除
+    //   ...（其余位为 WebDAV / FTP / 归档 / 分享等）
+
+    /// <summary>是否为管理员角色。</summary>
+    public bool IsAdmin() => Role == UserRole.Admin;
+
+    /// <summary>是否可查看隐藏文件（权限位 0）。</summary>
+    public bool CanSeeHides() => (Permission & 1) == 1;
+
+    /// <summary>是否可免密访问（权限位 1）。</summary>
+    public bool CanAccessWithoutPassword() => ((Permission >> 1) & 1) == 1;
+
     /// <summary>用户主键。</summary>
     public long Id { get; set; }
     /// <summary>用户名。</summary>

@@ -22,6 +22,9 @@
     <PackageReference Include="Fido2" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="OpenList.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
   </ItemGroup>
 </Project>

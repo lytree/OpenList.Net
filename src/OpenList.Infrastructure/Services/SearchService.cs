@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpenList.Core.Interfaces;
@@ -27,6 +28,11 @@ public sealed class SearchService : ISearchService
     private IndexProgress _progress = new();
     private CancellationTokenSource? _cts;
     private DateTimeOffset? _lastDoneTime;
+
+    // 增量更新按父目录串行化（镜像 Go internal/search/update_lock.go）：
+    // 同一父目录的更新排队执行，不同父目录可并行，避免并发差集写入冲突。
+    private static readonly object UpdateLocksGate = new();
+    private static readonly Dictionary<string, UpdateLock> UpdateLocks = new();
 
     /// <summary>
     /// 创建搜索索引服务实例，并向 <see cref="IObjsUpdateHooks"/> 注册增量更新订阅，
@@ -177,24 +183,27 @@ public sealed class SearchService : ISearchService
 
     /// <summary>
     /// 按 <c>search_index</c> 设置分发搜索：数据库后端查询索引表，否则委托给实时文件系统。
+    /// 两种路径均依据用户的 BasePath 与元数据权限过滤结果。
     /// </summary>
-    public async Task<Resp<SearchResp>> SearchAsync(SearchReq req, CancellationToken ct = default)
+    public async Task<Resp<SearchResp>> SearchAsync(SearchReq req, User user, CancellationToken ct = default)
     {
         // 根据 search_index 设置决定后端。
         var backend = await GetSettingAsync("search_index", "none");
         if (!string.Equals(backend, "database", StringComparison.OrdinalIgnoreCase))
         {
             // none / bleve（未实现）→ 实时文件系统搜索。
-            return await _fs.SearchAsync(req, new User { Id = 0, Username = "search", Role = UserRole.Admin }, ct);
+            return await _fs.SearchAsync(req, user, ct);
         }
 
-        return await SearchDatabaseAsync(req, ct);
+        return await SearchDatabaseAsync(req, user, ct);
     }
 
     /// <summary>
-    /// 在持久化索引中搜索：按名称 LIKE 过滤，支持递归/非递归范围与分页。
+    /// 在持久化索引中搜索：按名称 LIKE 过滤，支持递归/非递归范围、访问控制过滤与分页。
+    /// 访问控制镜像 Go <c>server/handles/search.go</c> 的 SearchFiltered：
+    /// 仅保留位于用户 BasePath 之下、且通过元数据权限（隐藏/读用户/密码）校验的条目。
     /// </summary>
-    private async Task<Resp<SearchResp>> SearchDatabaseAsync(SearchReq req, CancellationToken ct)
+    private async Task<Resp<SearchResp>> SearchDatabaseAsync(SearchReq req, User user, CancellationToken ct)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
@@ -209,11 +218,7 @@ public sealed class SearchService : ISearchService
         else
             q = q.Where(e => e.Parent == parent);
 
-        var total = await q.CountAsync(ct);
-        var page = Math.Max(1, req.Page);
-        var perPage = req.PerPage < 1 ? int.MaxValue : req.PerPage;
         var rows = await q.OrderByDescending(e => e.Id)
-            .Skip((page - 1) * perPage).Take(perPage)
             .Select(e => new SearchNode
             {
                 Parent = e.Parent,
@@ -225,7 +230,152 @@ public sealed class SearchService : ISearchService
             })
             .ToListAsync(ct);
 
-        return Resp<SearchResp>.Ok(new SearchResp { Content = rows, Total = total });
+        // 一次加载全部 Meta 到内存，供逐条做最近 Meta + 权限校验（避免逐节点 N+1 查询）。
+        var metas = await db.Metas.AsNoTracking().ToListAsync(ct);
+        foreach (var m in metas) m.Hydrate();
+        var metasByPath = metas.ToDictionary(m => NormalizeParent(m.Path), StringComparer.Ordinal);
+
+        // 过滤后重新计算总数与分页（对齐 Go 的 SearchFiltered 分页语义）。
+        var filtered = rows.Where(node => CanAccessNode(node, req, user, metasByPath)).ToList();
+        var total = filtered.Count;
+        var page = Math.Max(1, req.Page);
+        var perPage = req.PerPage < 1 ? int.MaxValue : req.PerPage;
+        var paged = filtered.Skip((page - 1) * perPage).Take(perPage).ToList();
+
+        return Resp<SearchResp>.Ok(new SearchResp { Content = paged, Total = total });
+    }
+
+    /// <summary>
+    /// 判断搜索结果节点对当前用户是否可访问。镜像 Go <c>server/handles/search.go</c>
+    /// SearchFiltered 的过滤谓词：先校验 <paramref name="node"/> 位于用户 BasePath 之下，
+    /// 再用最近 Meta 做隐藏/读用户/密码校验。
+    /// </summary>
+    private static bool CanAccessNode(SearchNode node, SearchReq req, User user, Dictionary<string, Meta> metasByPath)
+    {
+        if (!IsSubPath(user.BasePath, node.Parent))
+            return false;
+        var meta = GetNearestMeta(node.Parent, metasByPath);
+        return CanAccess(user, meta, JoinPath(node.Parent, node.Name), req.Password);
+    }
+
+    /// <summary>
+    /// 综合权限判断（隐藏文件/读用户/免密/密码），镜像 Go <c>server/common/check.go</c> CanAccess。
+    /// </summary>
+    private static bool CanAccess(User user, Meta? meta, string reqPath, string? password)
+    {
+        // 隐藏文件：meta 的 hide 规则适用于 reqPath 的父目录且用户不可见隐藏 → 按正则匹配名称拦截。
+        if (meta is not null && !user.CanSeeHides() && !string.IsNullOrEmpty(meta.Hide)
+            && MetaCoversPath(meta.Path, ParentPath(reqPath), meta.HideSub))
+        {
+            var baseName = NamePath(reqPath);
+            foreach (var line in meta.Hide.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                try
+                {
+                    if (Regex.IsMatch(baseName, line))
+                        return false;
+                }
+                catch { /* 非法正则按不匹配处理 */ }
+            }
+        }
+        if (!CanRead(user, meta, reqPath))
+            return false;
+        // 可免密访问的用户直接放行。
+        if (user.CanAccessWithoutPassword())
+            return true;
+        // 无 meta 或未设密码 → 可访问。
+        if (meta is null || string.IsNullOrEmpty(meta.Password))
+            return true;
+        // 密码不适用于子目录 → 可访问。
+        if (!MetaCoversPath(meta.Path, reqPath, meta.PSub))
+            return true;
+        // 校验密码。
+        return meta.Password == password;
+    }
+
+    /// <summary>读用户限制校验，镜像 Go <c>server/common/check.go</c> CanRead。</summary>
+    private static bool CanRead(User user, Meta? meta, string path)
+    {
+        if (meta is not null && meta.ReadUsers.Count > 0
+            && !meta.ReadUsers.Contains(user.Id)
+            && MetaCoversPath(meta.Path, path, meta.ReadUsersSub))
+            return false;
+        return true;
+    }
+
+    /// <summary>判断 meta 是否覆盖给定路径（路径相等或为子路径且开启子目录生效），镜像 Go MetaCoversPath。</summary>
+    private static bool MetaCoversPath(string metaPath, string reqPath, bool applyToSubFolder)
+    {
+        if (PathEqual(metaPath, reqPath)) return true;
+        return IsSubPath(metaPath, reqPath) && applyToSubFolder;
+    }
+
+    /// <summary>
+    /// 从路径向上找到最近的 Meta（含自身），找不到返回 null。镜像 Go <c>internal/op/meta.go</c> GetNearestMeta。
+    /// </summary>
+    private static Meta? GetNearestMeta(string path, Dictionary<string, Meta> metasByPath)
+    {
+        var current = NormalizeParent(path);
+        while (true)
+        {
+            if (metasByPath.TryGetValue(current, out var meta))
+                return meta;
+            if (current == "/") return null;
+            current = ParentPath(current);
+        }
+    }
+
+    /// <summary>判断 <paramref name="subPath"/> 是否位于 <paramref name="path"/> 之下（含相等），镜像 Go utils.IsSubPath。</summary>
+    private static bool IsSubPath(string? path, string subPath)
+    {
+        var p = FixAndCleanPath(path ?? "/");
+        var s = FixAndCleanPath(subPath);
+        return p == s || s.StartsWith(AddTrailingSlash(p), StringComparison.Ordinal);
+    }
+
+    /// <summary>规范化并比较两个路径是否相等，镜像 Go utils.PathEqual。</summary>
+    private static bool PathEqual(string p1, string p2)
+        => FixAndCleanPath(p1) == FixAndCleanPath(p2);
+
+    /// <summary>把路径规整为以 / 开头、无 ./.. 与重复斜杠的标准形式（空视为根目录），镜像 Go utils.FixAndCleanPath。</summary>
+    private static string FixAndCleanPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "/";
+        path = path.Replace('\\', '/');
+        if (!path.StartsWith('/')) path = "/" + path;
+        var parts = new List<string>();
+        foreach (var seg in path.Split('/'))
+        {
+            if (seg.Length == 0 || seg == ".") continue;
+            if (seg == "..")
+            {
+                if (parts.Count > 0) parts.RemoveAt(parts.Count - 1);
+                continue;
+            }
+            parts.Add(seg);
+        }
+        return parts.Count == 0 ? "/" : "/" + string.Join('/', parts);
+    }
+
+    /// <summary>确保路径以 / 结尾，镜像 Go utils.PathAddSeparatorSuffix。</summary>
+    private static string AddTrailingSlash(string path)
+        => path.EndsWith('/') ? path : path + "/";
+
+    /// <summary>返回路径的父目录（根目录的父目录仍为根）。</summary>
+    private static string ParentPath(string path)
+    {
+        var cleaned = FixAndCleanPath(path);
+        if (cleaned == "/") return "/";
+        var idx = cleaned.LastIndexOf('/');
+        return idx <= 0 ? "/" : cleaned[..idx];
+    }
+
+    /// <summary>返回路径的末段名称（根目录返回空串）。</summary>
+    private static string NamePath(string path)
+    {
+        var cleaned = FixAndCleanPath(path);
+        if (cleaned == "/") return string.Empty;
+        return cleaned[(cleaned.LastIndexOf('/') + 1)..];
     }
 
     /// <summary>
@@ -244,6 +394,10 @@ public sealed class SearchService : ISearchService
         if (!await ShouldAutoUpdateAsync(parent, ct)) return;
 
         var normalized = NormalizeParent(parent);
+        // 同一父目录的更新串行执行；等待期间可能开始全量构建，故在锁内复查门控。
+        using var updateLock = await AcquireUpdateLockAsync(normalized, ct);
+        if (!await ShouldAutoUpdateAsync(normalized, ct)) return;
+
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
 
@@ -276,6 +430,78 @@ public sealed class SearchService : ISearchService
 
         if (stale.Count > 0 || toAdd.Count > 0)
             await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// 为给定父目录获取串行化更新锁（返回 <see cref="IDisposable"/>，释放时解锁并在无
+    /// 等待者时清理字典项）。镜像 Go <c>internal/search/update_lock.go</c> 的 lockUpdate。
+    /// </summary>
+    private async Task<IDisposable> AcquireUpdateLockAsync(string parent, CancellationToken ct)
+    {
+        UpdateLock l;
+        lock (UpdateLocksGate)
+        {
+            if (!UpdateLocks.TryGetValue(parent, out l!))
+            {
+                l = new UpdateLock();
+                UpdateLocks[parent] = l;
+            }
+            l.Refs++;
+        }
+        try
+        {
+            await l.Semaphore.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // 等待被取消：撤销引用计数，避免字典项泄漏。
+            lock (UpdateLocksGate)
+            {
+                l.Refs--;
+                if (l.Refs == 0) UpdateLocks.Remove(parent);
+            }
+            throw;
+        }
+        return new UpdateLockReleaser(l, parent);
+    }
+
+    /// <summary>当前持有的父目录锁数量（仅测试用）。</summary>
+    internal static int UpdateLockCount
+    {
+        get { lock (UpdateLocksGate) { return UpdateLocks.Count; } }
+    }
+
+    /// <summary>单个父目录的更新锁：信号量 + 引用计数。</summary>
+    private sealed class UpdateLock
+    {
+        public readonly SemaphoreSlim Semaphore = new(1, 1);
+        public int Refs;
+    }
+
+    /// <summary>锁释放句柄：解锁并把引用计数归零的锁项从字典移除。</summary>
+    private sealed class UpdateLockReleaser : IDisposable
+    {
+        private readonly UpdateLock _lock;
+        private readonly string _parent;
+        private int _disposed;
+
+        public UpdateLockReleaser(UpdateLock l, string parent)
+        {
+            _lock = l;
+            _parent = parent;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            _lock.Semaphore.Release();
+            lock (UpdateLocksGate)
+            {
+                _lock.Refs--;
+                if (_lock.Refs == 0)
+                    UpdateLocks.Remove(_parent);
+            }
+        }
     }
 
     /// <summary>

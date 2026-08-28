@@ -111,6 +111,23 @@ public class SettingServiceTests
         await Assert.That(r.Data!).IsEmpty();
     }
 
+    [Test]
+    public async Task DefaultSettings_Seeds_Multipart_And_Move_Task_Settings()
+    {
+        // 镜像 Go 的 settings 默认值：multipart_enabled / multipart_chunk_size / move_task_threads_num。
+        var byKey = DbInitializer.DefaultSettings.ToDictionary(d => d.Key, StringComparer.Ordinal);
+
+        await Assert.That(byKey).ContainsKey("multipart_enabled");
+        await Assert.That(byKey["multipart_enabled"].Value).IsEqualTo("true");
+        await Assert.That(byKey["multipart_enabled"].Type).IsEqualTo(SettingValueType.Bool);
+
+        await Assert.That(byKey).ContainsKey("multipart_chunk_size");
+        await Assert.That(byKey["multipart_chunk_size"].Value).IsEqualTo("10"); // MB
+
+        await Assert.That(byKey).ContainsKey("move_task_threads_num");
+        await Assert.That(byKey["move_task_threads_num"].Value).IsEqualTo("5");
+    }
+
     private static OpenListDbContext BuildContext()
     {
         var conn = new SqliteConnection("DataSource=:memory:");

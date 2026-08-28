@@ -510,6 +510,10 @@ public static class DbInitializer
         ("max_client_upload_speed", "-1", SettingValueType.Number, SettingFlag.Public, 11, null),
         ("max_server_download_speed", "-1", SettingValueType.Number, SettingFlag.Private, 11, null),
         ("max_server_upload_speed", "-1", SettingValueType.Number, SettingFlag.Private, 11, null),
+        // Multipart 分片上传：multipart_chunk_size 单位为 MB；move_task_threads_num 对齐 Go 的 move_task_threads_num。
+        ("multipart_enabled", "true", SettingValueType.Bool, SettingFlag.Public, 11, null),
+        ("multipart_chunk_size", "10", SettingValueType.Number, SettingFlag.Public, 11, null),
+        ("move_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
     };
 
     /// <summary>

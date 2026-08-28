@@ -362,6 +362,11 @@ using (var scope = app.Services.CreateScope())
     // incremental updates after restart and recovers a stale "running" state.
     var searchSvc = scope.ServiceProvider.GetRequiredService<ISearchService>();
     await searchSvc.InitIndexAsync();
+
+    // Start multipart session GC (Go multipart.DefaultManager.StartGC): sweep orphaned
+    // temp chunks from a previous run and begin periodic expiry of idle sessions.
+    if (scope.ServiceProvider.GetRequiredService<IMultipartUploadService>() is MultipartUploadService mp)
+        mp.StartGc();
 }
 
 app.Run();
