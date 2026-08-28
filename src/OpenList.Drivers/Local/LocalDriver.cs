@@ -1,21 +1,56 @@
 using System.Text.Json.Serialization;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
+using OpenList.Drivers.Archive;
 using Zio;
 using Zio.FileSystems;
 
 namespace OpenList.Drivers.Local;
 
 /// <summary>
-/// Local filesystem driver. Mounts a directory on the server's filesystem.
-/// Mirrors OpenList Go <c>drivers/local</c>.
+/// 本地文件系统驱动，挂载服务器文件系统上的某个目录。
+/// 对应 OpenList Go 的 <c>drivers/local</c>。通过 <see cref="SharpCompressArchiveSupport"/>
+/// 实现归档读取/解压接口（zip/rar/7z/tar/gz）。
 /// </summary>
-public sealed class LocalDriver : ZioDriverBase
+public sealed class LocalDriver : ZioDriverBase, IFileSystemArchiveReader, IFileSystemArchiveDecompress
 {
+    /// <summary>驱动名称。</summary>
     public override string DriverName => "Local";
+    /// <summary>本地驱动支持写入，非只读。</summary>
     public override bool ReadOnly => false;
+    /// <summary>本地驱动不属于云存储驱动器。</summary>
     public override bool IsCloudDriver => false;
 
+    /// <summary>
+    /// 列出压缩包内的归档条目。
+    /// </summary>
+    /// <param name="path">压缩包在挂载文件系统中的路径。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>归档条目列表。</returns>
+    /// <exception cref="InvalidOperationException">驱动尚未初始化时抛出。</exception>
+    public Task<IReadOnlyList<ArchiveEntry>> ListArchiveEntriesAsync(string path, CancellationToken ct = default)
+    {
+        if (System is null) throw new InvalidOperationException("driver not initialized");
+        return Task.FromResult(SharpCompressArchiveSupport.ListEntries(System, path));
+    }
+
+    /// <summary>
+    /// 将压缩包解压到目标目录。
+    /// </summary>
+    /// <param name="archivePath">压缩包在挂载文件系统中的路径。</param>
+    /// <param name="destPath">解压目标目录。</param>
+    /// <param name="password">可选的加密压缩包密码。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>表示解压完成的任务。</returns>
+    /// <exception cref="InvalidOperationException">驱动尚未初始化，或归档条目含不安全路径时抛出。</exception>
+    public Task DecompressAsync(string archivePath, string destPath, string? password = null, CancellationToken ct = default)
+    {
+        if (System is null) throw new InvalidOperationException("driver not initialized");
+        SharpCompressArchiveSupport.Decompress(System, archivePath, destPath, password);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>该驱动暴露给管理端配置的字段枚举。</summary>
     public override IEnumerable<DriverItemAttributes> ConfigItems => ConfigSchema;
 
     internal static readonly DriverItemAttributes[] ConfigSchema =
@@ -42,8 +77,17 @@ public sealed class LocalDriver : ZioDriverBase
         },
     ];
 
+    /// <summary>本地驱动专用配置项（通过 <see cref="InitAsync"/> 解析填充）。</summary>
     public LocalAddition Addition { get; private set; } = new();
 
+    /// <summary>
+    /// 初始化本地驱动：校验根目录、转换为 Zio 物理文件系统。
+    /// </summary>
+    /// <param name="config">包含本地路径等字段的驱动配置。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>表示初始化完成的任务。</returns>
+    /// <exception cref="InvalidOperationException">未配置 <c>root_folder_path</c> 时抛出。</exception>
+    /// <exception cref="DirectoryNotFoundException">根目录不存在时抛出。</exception>
     public override Task InitAsync(DriverConfig config, CancellationToken ct = default)
     {
         Addition = config.GetAddition<LocalAddition>();
@@ -55,22 +99,26 @@ public sealed class LocalDriver : ZioDriverBase
             throw new DirectoryNotFoundException($"root folder not found: {root}");
 
         var physical = new PhysicalFileSystem();
-        // PhysicalFileSystem uses its own OS-specific root; convert the absolute
-        // filesystem path to a Zio absolute path under the physical fs.
+        // PhysicalFileSystem 使用其操作系统相关的根路径；这里将磁盘上的绝对路径
+        // 转换为该物理文件系统下的 Zio 绝对路径，再以其为根挂载子文件系统，从而把访问限制在根目录内。
         var zioRoot = physical.ConvertPathFromInternal(root);
         System = new SubFileSystem(physical, zioRoot);
         return Task.CompletedTask;
     }
 }
 
+/// <summary>本地驱动的配置项模型，映射 <c>root_folder_path</c> 等 JSON 输入字段。</summary>
 public sealed class LocalAddition
 {
+    /// <summary>服务器文件系统上的根目录路径。</summary>
     [JsonPropertyName("root_folder_path")]
     public string RootFolderPath { get; set; } = string.Empty;
 
+    /// <summary>是否启用缩略图生成。</summary>
     [JsonPropertyName("thumbnail")]
     public bool Thumbnail { get; set; }
 
+    /// <summary>缩略图缓存目录。</summary>
     [JsonPropertyName("thumb_cache_folder")]
     public string? ThumbCacheFolder { get; set; }
 }

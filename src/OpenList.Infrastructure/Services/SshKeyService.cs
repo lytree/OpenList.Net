@@ -8,20 +8,28 @@ using OpenList.Infrastructure.Data;
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// SSH public-key CRUD. Computes the standard <c>SHA256:base64</c> fingerprint
-/// from the key blob. Mirrors Go <c>internal/op/sshkey.go</c>.
+/// SSH 公钥的增删查服务。从公钥数据中计算标准的 <c>SHA256:base64</c> 指纹。
+/// 对应 Go <c>internal/op/sshkey.go</c>。
 /// </summary>
 public sealed class SshKeyService : ISshKeyService
 {
     private readonly OpenListDbContext _db;
     private readonly TimeProvider _time;
 
+    /// <summary>
+    /// 创建 SSH 公钥服务实例。
+    /// </summary>
+    /// <param name="db">EF Core 数据库上下文。</param>
+    /// <param name="time">时间源（可选，默认系统时区）。</param>
     public SshKeyService(OpenListDbContext db, TimeProvider? time = null)
     {
         _db = db;
         _time = time ?? TimeProvider.System;
     }
 
+    /// <summary>
+    /// 列出指定用户的公钥，按 Id 倒序返回。
+    /// </summary>
     public async Task<Resp<List<SshKeyInfo>>> ListAsync(long userId, CancellationToken ct = default)
     {
         var keys = await _db.SshKeys.AsNoTracking()
@@ -31,6 +39,14 @@ public sealed class SshKeyService : ISshKeyService
         return Resp<List<SshKeyInfo>>.Ok(keys.Select(ToInfo).ToList());
     }
 
+    /// <summary>
+    /// 为用户添加一条公钥：校验标题与密钥合法性、计算指纹后入库。
+    /// </summary>
+    /// <param name="userId">用户 Id。</param>
+    /// <param name="title">密钥标题。</param>
+    /// <param name="key">OpenSSH 公钥文本。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>成功返回公钥信息；无效标题/密钥返回 400。</returns>
     public async Task<Resp<SshKeyInfo>> AddAsync(long userId, string title, string key, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(title))
@@ -57,12 +73,20 @@ public sealed class SshKeyService : ISshKeyService
         return Resp<SshKeyInfo>.Ok(ToInfo(entity));
     }
 
+    /// <summary>
+    /// 删除公钥并返回受影响用户的剩余密钥列表（供前端更新）。
+    /// 非管理员只能删除自己的密钥，管理员可删除任意用户的密钥。
+    /// </summary>
+    /// <param name="userId">请求用户 Id。</param>
+    /// <param name="keyId">待删除的密钥 Id。</param>
+    /// <param name="isAdmin">是否为管理员。</param>
+    /// <param name="ct">取消令牌。</param>
     public async Task<Resp<List<SshKeyInfo>>> DeleteAsync(long userId, long keyId, bool isAdmin, CancellationToken ct = default)
     {
         var entity = await _db.SshKeys.FirstOrDefaultAsync(k => k.Id == keyId, ct);
         if (entity is null)
             return Resp<List<SshKeyInfo>>.Fail("ssh key not found", RespCodes.NotFound);
-        // Non-admins can only delete their own keys; admins can delete any user's key.
+        // 非管理员仅能删除自己的密钥；管理员可删除任意用户的密钥。
         if (!isAdmin && entity.UserId != userId)
             return Resp<List<SshKeyInfo>>.Fail("permission denied", RespCodes.Forbidden);
 
@@ -70,7 +94,7 @@ public sealed class SshKeyService : ISshKeyService
         _db.SshKeys.Remove(entity);
         await _db.SaveChangesAsync(ct);
 
-        // Return the remaining keys for the affected user (frontend updates its list).
+        // 返回受影响用户的剩余密钥（前端据此更新列表）。
         var remaining = await _db.SshKeys.AsNoTracking()
             .Where(k => k.UserId == targetUserId)
             .OrderByDescending(k => k.Id)
@@ -78,6 +102,9 @@ public sealed class SshKeyService : ISshKeyService
         return Resp<List<SshKeyInfo>>.Ok(remaining.Select(ToInfo).ToList());
     }
 
+    /// <summary>
+    /// 将实体转换为对外信息 DTO（Id 转为字符串并格式化时间）。
+    /// </summary>
     private static SshKeyInfo ToInfo(SshKey k) => new()
     {
         Id = k.Id.ToString(),
@@ -88,16 +115,16 @@ public sealed class SshKeyService : ISshKeyService
     };
 
     /// <summary>
-    /// Computes the SSH public key fingerprint as <c>SHA256:&lt;base64&gt;</c>.
-    /// Accepts the standard OpenSSH format: <c>ssh-rsa AAAA... [comment]</c> or
-    /// just the base64 blob. Returns null if the key cannot be parsed.
+    /// 计算 SSH 公钥指纹，格式为 <c>SHA256:&lt;base64&gt;</c>。
+    /// 接受标准 OpenSSH 格式：<c>ssh-rsa AAAA... [comment]</c> 或仅 base64 数据。
+    /// 无法解析时返回 null。
     /// </summary>
     private static string? ComputeFingerprint(string key)
     {
         var parts = key.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 2) return null;
 
-        // parts[0] = key type (ssh-rsa, ssh-ed25519, ecdsa-...), parts[1] = base64 blob
+        // parts[0] = 密钥类型（ssh-rsa、ssh-ed25519、ecdsa-...），parts[1] = base64 数据
         var blobBase64 = parts[1];
         byte[] blob;
         try { blob = Convert.FromBase64String(blobBase64); }

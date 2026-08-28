@@ -7,15 +7,32 @@ using OpenList.Server.Models;
 namespace OpenList.Server.Endpoints;
 
 /// <summary>
-/// Task management endpoints. Routes use the frontend's <c>/task/{type}/...</c>
-/// pattern (type in the URL path, not query string). Mirrors OpenList Go
-/// <c>server/handles/task.go</c>. All endpoints require authentication.
+/// 任务管理端点。路由采用前端 <c>/task/{type}/...</c> 形态（类型放 URL 路径而非查询串）。
+/// 对应 OpenList Go <c>server/handles/task.go</c>。所有端点需登录鉴权。
+/// 支持 list / info / cancel / delete / retry / clear_done / clear_succeeded /
+/// retry_failed / cancel_some / delete_some / retry_some 等操作。
 /// </summary>
 public static class TaskEndpoints
 {
+    /// <summary>
+    /// 注册 <c>/api/task</c> 任务路由（需登录）。具体动作统一由
+    /// <see cref="MapTaskRoutes"/> 在一个子组上注册。
+    /// </summary>
     public static IEndpointRouteBuilder MapTaskApi(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/task").WithTags("Task").RequireAuthorization();
+        g.MapTaskRoutes();
+        return app;
+    }
+
+    /// <summary>
+    /// 在任意组上注册任务路由面。<see cref="MapTaskApi"/>（/api/task）与管理员别名
+    /// /api/admin/task（Go 为兼容旧自动化而保留）都会使用它。
+    /// 提供 list/info/{cancel,delete,retry,clear_done,clear_succeeded,retry_failed,
+    /// cancel_some,delete_some,retry_some} 等端点，均需登录。
+    /// </summary>
+    public static void MapTaskRoutes(this IEndpointRouteBuilder g)
+    {
 
         // GET /api/task/{type}/{done} — list tasks. {done} is "done" or "undone".
         g.MapGet("/{type}/{done}", async (string type, string done, ITaskService tasks, HttpContext ctx) =>
@@ -126,13 +143,11 @@ public static class TaskEndpoints
                 return Results.Ok(Resp.Fail($"unknown task type: {type}", RespCodes.BadRequest));
             return Results.Ok(await tasks.RetrySomeAsync(taskType, tids, ctx.RequestAborted));
         });
-
-        return app;
     }
 
-    // Frontend sends task types as snake_case strings (e.g. "offline_download",
-    // "decompress_upload", "aria2_down"). The C# enum uses PascalCase names, so
-    // Enum.TryParse won't match the snake_case forms — map them explicitly.
+    // 前端以 snake_case 字符串发送任务类型（如 "offline_download"、"decompress_upload"、
+    // "aria2_down"）。C# 枚举名是 PascalCase，Enum.TryParse 无法匹配下划线形式，
+    // 因此显式建立别名映射。
     private static readonly Dictionary<string, TaskType> TypeAliases = new(StringComparer.Ordinal)
     {
         ["copy"] = TaskType.Copy,

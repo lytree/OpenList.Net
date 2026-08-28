@@ -1,27 +1,27 @@
 namespace OpenList.Core.Interfaces;
 
 /// <summary>
-/// In-memory WebDAV lock store. Mirrors Go's <c>webdav.NewMemLS()</c> behaviour:
-/// per-path exclusive locks with opaque tokens, used by WebDAV LOCK/UNLOCK methods.
-/// Singleton lifetime — locks are lost on process restart (acceptable for single-instance
-/// deployments, same as Go). Multi-instance deployments would need a distributed store.
+/// 内存版 WebDAV 锁存储。与 Go 的 <c>webdav.NewMemLS()</c> 行为对应：
+/// 按路径维护带不透明 token 的独占锁，供 WebDAV 的 LOCK/UNLOCK 方法使用。
+/// 采用单例生命周期——进程重启后锁会丢失（对单实例部署可接受，与 Go 一致）。
+/// 多实例部署需要改用分布式存储。
 /// </summary>
 public interface IWebDavLockStore
 {
-    /// <summary>Get the lock for a path, or null if unlocked (or expired).</summary>
+    /// <summary>获取某路径的锁；未加锁或已过期时返回 null。</summary>
     Task<WebDavLock?> GetAsync(string path, CancellationToken ct = default);
 
-    /// <summary>Set (replace) the lock for a path. Overwrites any existing lock.</summary>
+    /// <summary>设置（替换）某路径的锁，会覆盖已有的锁。</summary>
     Task SetAsync(string path, WebDavLock @lock, CancellationToken ct = default);
 
-    /// <summary>Remove the lock for a path if the token matches. Returns false if not found or token mismatch.</summary>
+    /// <summary>token 匹配时移除某路径的锁；未找到或 token 不匹配时返回 false。</summary>
     Task<bool> RemoveAsync(string path, string token, CancellationToken ct = default);
 }
 
-/// <summary>A WebDAV lock entry.</summary>
+/// <summary>一条 WebDAV 锁记录。</summary>
 public sealed record WebDavLock(
-    string Token,
-    string Scope,          // "exclusive" (the only scope we issue)
-    string Depth,          // "0", "1", or "infinity"
-    int TimeoutSeconds,     // 3600 by default
-    DateTimeOffset CreatedAt);
+    string Token,       // 锁的 token
+    string Scope,       // "exclusive"（唯一发放的作用域）
+    string Depth,       // "0"、"1" 或 "infinity"
+    int TimeoutSeconds, // 默认 3600
+    DateTimeOffset CreatedAt); // 创建时间

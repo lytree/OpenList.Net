@@ -3,25 +3,27 @@ using OpenList.Core.Models;
 namespace OpenList.Core.Interfaces;
 
 /// <summary>
-/// In-memory admin broadcast messaging. Mirrors OpenList Go
-/// <c>server/handles/message.go</c> SendAdminMessage / GetAdminMessage.
-/// Admin posts a message; connected users poll <see cref="GetAsync"/> to receive it.
-/// Not persisted — messages live only in memory for the broadcast window.
+/// 内存版管理员广播消息。与 OpenList Go 的
+/// <c>server/handles/message.go</c> SendAdminMessage / GetAdminMessage 对应。
+/// 管理员发布一条消息；已连接的用户轮询 <see cref="GetAsync"/> 接收。
+/// 不持久化——消息仅在广播窗口期内存于内存。
 /// </summary>
 public interface IBroadcastService
 {
-    /// <summary>Admin broadcasts a message. The body is a free-form { type, content } payload.</summary>
+    /// <summary>管理员广播一条消息。正文是一个自由形式的 { type, content } 载荷。</summary>
     Task<Resp> SendAsync(BroadcastMessage message, CancellationToken ct = default);
-    /// <summary>Returns the latest broadcast message, or an empty 200 if none has been sent.</summary>
+    /// <summary>返回最新的一条广播消息；若从未发送则返回空的 200 响应。</summary>
     Task<Resp<BroadcastMessage?>> GetAsync(CancellationToken ct = default);
 }
 
 /// <summary>
-/// Broadcast payload. <c>Type</c> is a renderer hint consumed by the frontend
-/// (e.g. "string", "image"); <c>Content</c> is the raw message body.
+/// 广播载荷。<c>Type</c> 是供前端消费的渲染提示（如 "string"、"image"）；
+/// <c>Content</c> 是原始消息正文。
 /// </summary>
 public sealed class BroadcastMessage
 {
+    /// <summary>类型提示，默认 "string"。</summary>
     public string Type { get; set; } = "string";
+    /// <summary>消息正文。</summary>
     public object? Content { get; set; }
 }

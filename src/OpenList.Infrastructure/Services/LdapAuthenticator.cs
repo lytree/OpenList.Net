@@ -5,23 +5,37 @@ using OpenList.Core.Interfaces;
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// LDAP authenticator using <c>Novell.Directory.Ldap.NETStandard</c> (cross-platform).
-/// Supports two bind modes:
+/// LDAP 认证器，基于 <c>Novell.Directory.Ldap.NETStandard</c>（跨平台）。
+/// 支持两种绑定模式：
 /// <list type="bullet">
-/// <item><c>BindDn</c> contains <c>%s</c> — direct bind with a templated DN (no search).</item>
-/// <item><c>BindDn</c> has no placeholder — search for the user DN under <c>UserBase</c> first.</item>
+/// <item><c>BindDn</c> 包含 <c>%s</c> — 使用模板化 DN 直接绑定（无需搜索）。</item>
+/// <item><c>BindDn</c> 无占位符 — 先在 <c>UserBase</c> 下搜索用户 DN 再绑定。</item>
 /// </list>
-/// The underlying Novell client is synchronous; we offload to the thread pool so the
-/// ASP.NET request thread is not blocked. Mirrors OpenList Go <c>internal/op/auth.go</c>.
+/// 底层 Novell 客户端是同步的；这里将其卸载到线程池执行，避免阻塞 ASP.NET 请求线程。
+/// 对应 Go 参考实现 <c>internal/op/auth.go</c>。
 /// </summary>
 public sealed class LdapAuthenticator : ILdapAuthenticator
 {
     private readonly LdapConfig _cfg;
 
+    /// <summary>
+    /// 创建 LDAP 认证器实例。
+    /// </summary>
+    /// <param name="config">应用配置，取其中 <c>Ldap</c> 段（无则使用空配置）。</param>
     public LdapAuthenticator(AppConfiguration config) => _cfg = config.Ldap ?? new();
 
+    /// <summary>
+    /// 指示 LDAP 是否已启用（配置了 Url 即为启用）。
+    /// </summary>
     public bool Enabled => !string.IsNullOrWhiteSpace(_cfg.Url);
 
+    /// <summary>
+    /// 校验指定用户名与密码是否能通过 LDAP 认证。
+    /// </summary>
+    /// <param name="username">待认证的用户名。</param>
+    /// <param name="password">待认证的密码。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>认证成功返回 <c>true</c>；未启用、无效输入、凭证错误或目录异常均返回 <c>false</c>。</returns>
     public Task<bool> AuthenticateAsync(string username, string password, CancellationToken ct = default)
         => Task.Run(() =>
         {
@@ -38,20 +52,19 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
                     conn.SecureSocketLayer = true;
                     if (_cfg.SkipVerify)
                     {
-                        // Bypass cert errors for self-signed dev servers.
+                        // 跳过自签名证书校验，便于连接开发环境。
                         conn.UserDefinedServerCertValidationDelegate += (_, _, _, _) => true;
                     }
                 }
                 conn.Connect(host, port);
 
-                // STARTTLS on a plain ldap:// URL is rarely combined with LDAPSSO setups;
-                // users wanting TLS should switch to ldaps://. The Novell 3.6 API renames
-                // the STARTTLS entry point across versions, so we skip it here for portability.
+                // 起步 TLS（STARTTLS）很少与 LDAPS 搭建组合使用；需要 TLS 的用户应改用 ldaps://。
+                // Novell 3.6 各版本的 STARTTLS 入口名称不一致，为保持可移植性这里跳过。
 
                 var dn = ResolveDn(username);
                 if (dn is null)
                 {
-                    // Search mode: bind anonymously (or as a service account) first to locate the user DN.
+                    // 搜索模式：先以匿名（或服务账号）绑定以定位用户 DN。
                     dn = SearchUserDn(conn, username);
                     if (dn is null) return false;
                 }
@@ -61,7 +74,7 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
             }
             catch (LdapException)
             {
-                // Bad credentials / connection refused — surface as auth failure, not crash.
+                // 凭证错误或连接被拒 —— 以认证失败返回，而非抛异常。
                 return false;
             }
             catch (OperationCanceledException)
@@ -74,14 +87,16 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
             }
             finally
             {
-                try { if (conn.Connected) conn.Disconnect(); } catch { /* ignore */ }
+                try { if (conn.Connected) conn.Disconnect(); } catch { /* 忽略 */ }
             }
         }, ct);
 
     /// <summary>
-    /// If <see cref="LdapConfig.BindDn"/> contains <c>%s</c>, substitute the username.
-    /// Otherwise return null to signal "search mode".
+    /// 若 <see cref="LdapConfig.BindDn"/> 包含 <c>%s</c>，则用用户名替换占位符得到 DN；
+    /// 否则返回 null，表示进入搜索模式。
     /// </summary>
+    /// <param name="username">要替换进 DN 模板的用户名。</param>
+    /// <returns>模板化 DN，或 null（表示需要搜索用户 DN）。</returns>
     private string? ResolveDn(string username)
     {
         var tpl = _cfg.BindDn ?? "";
@@ -89,11 +104,16 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
         return null;
     }
 
+    /// <summary>
+    /// 在 <c>UserBase</c> 下按用户过滤器搜索用户 DN。
+    /// </summary>
+    /// <param name="conn">已连接的 LDAP 连接。</param>
+    /// <param name="username">要定位的用户名。</param>
+    /// <returns>匹配的首个用户 DN，未找到返回 null。</returns>
     private string? SearchUserDn(LdapConnection conn, string username)
     {
-        // Try an anonymous bind first; if the directory forbids it the search will
-        // simply throw and we return null (no leak of valid usernames).
-        try { conn.Bind(LdapConnection.LdapV3, "", ""); } catch { /* anonymous may be rejected */ }
+        // 先尝试匿名绑定；若目录禁止匿名，搜索会直接抛异常并返回 null（不泄露有效用户名）。
+        try { conn.Bind(LdapConnection.LdapV3, "", ""); } catch { /* 匿名可能被拒绝 */ }
         if (!conn.Bound) return null;
 
         var filter = $"({_cfg.UserFilter}={EscapeLdapFilter(username)})";
@@ -103,22 +123,27 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
             filter,
             new[] { _cfg.UserFilter },
             typesOnly: false);
-        // Take the first matching entry's DN.
+        // 取首个匹配条目的 DN。
         while (results.HasMore())
         {
             try { return results.Next().Dn; }
-            catch (LdapException) { /* skip problematic entry */ }
+            catch (LdapException) { /* 跳过异常条目 */ }
         }
         return null;
     }
 
+    /// <summary>
+    /// 解析 LDAP URL 为主机、端口与是否使用 SSL。
+    /// </summary>
+    /// <param name="url">形如 <c>ldap://host:port</c> 或 <c>ldaps://host:port</c> 的地址。</param>
+    /// <returns>主机、端口与 SSL 标志组成的元组。</returns>
     private static (string Host, int Port, bool Ssl) ParseUrl(string url)
     {
         var u = url.Trim();
         var ssl = u.StartsWith("ldaps://", StringComparison.OrdinalIgnoreCase);
         var scheme = ssl ? "ldaps://" : "ldap://";
         if (u.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)) u = u[scheme.Length..];
-        // Strip any trailing path.
+        // 去掉尾部多余路径。
         var slash = u.IndexOf('/');
         if (slash >= 0) u = u[..slash];
         var colon = u.IndexOf(':');
@@ -127,13 +152,13 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
         return (u, ssl ? 636 : 389, ssl);
     }
 
-    // RFC 4514 DN escaping: escape the special characters when substituting into a DN.
+    // RFC 4514 DN 转义：替换替换进 DN 时必须转义的特殊字符。
     private static string EscapeLdapDN(string s)
         => s.Replace("\\", "\\\\").Replace(",", "\\,").Replace("+", "\\+")
             .Replace("\"", "\\\"").Replace("<", "\\<").Replace(">", "\\>")
             .Replace(";", "\\;").Replace("=", "\\=");
 
-    // RFC 4515 filter escaping: parens, asterisks, backslash and NUL.
+    // RFC 4515 过滤器转义：括号、星号、反斜杠与 NUL。
     private static string EscapeLdapFilter(string s)
         => s.Replace("\\", "\\5c").Replace("(", "\\28").Replace(")", "\\29")
             .Replace("*", "\\2a").Replace("\0", "\\00");

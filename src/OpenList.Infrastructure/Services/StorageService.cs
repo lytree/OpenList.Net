@@ -7,8 +7,8 @@ using OpenList.Infrastructure.Data;
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// Storage CRUD + driver loading. Mirrors OpenList Go <c>internal/op/storage.go</c>.
-/// Driver instantiation is delegated to <see cref="ZioMountService"/>.
+/// 存储（存储驱动实例）增删改查 + 驱动加载。驱动实例化委托给 <see cref="ZioMountService"/>。
+/// 对应 Go 参考实现 <c>internal/op/storage.go</c>。
 /// </summary>
 public sealed class StorageService : IStorageService
 {
@@ -16,6 +16,12 @@ public sealed class StorageService : IStorageService
     private readonly ZioMountService _mount;
     private readonly TimeProvider _time;
 
+    /// <summary>
+    /// 创建存储服务实例。
+    /// </summary>
+    /// <param name="db">EF Core 数据库上下文。</param>
+    /// <param name="mount">挂载服务（负责驱动的加载/卸载与查询）。</param>
+    /// <param name="time">时间源（可选，默认系统时区）。</param>
     public StorageService(OpenListDbContext db, ZioMountService mount, TimeProvider? time = null)
     {
         _db = db;
@@ -23,6 +29,9 @@ public sealed class StorageService : IStorageService
         _time = time ?? TimeProvider.System;
     }
 
+    /// <summary>
+    /// 列出全部存储（含驱动名称），按 Order 后按 Id 排序。
+    /// </summary>
     public async Task<Resp<PageResp<StorageWithDriver>>> ListAsync(CancellationToken ct = default)
     {
         var list = await _db.Storages.AsNoTracking()
@@ -53,6 +62,9 @@ public sealed class StorageService : IStorageService
         return Resp<PageResp<StorageWithDriver>>.Ok(page);
     }
 
+    /// <summary>
+    /// 按 Id 获取单个存储（含驱动名称）。
+    /// </summary>
     public async Task<Resp<StorageWithDriver>> GetAsync(long id, CancellationToken ct = default)
     {
         var s = await _db.Storages.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -80,6 +92,12 @@ public sealed class StorageService : IStorageService
         });
     }
 
+    /// <summary>
+    /// 创建存储：校验参数与挂载路径唯一性后入库，若启用则立即加载驱动。
+    /// </summary>
+    /// <param name="req">创建存储请求。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>成功返回新存储；挂载路径重复返回 409。</returns>
     public async Task<Resp<Storage>> CreateAsync(CreateStorageReq req, CancellationToken ct = default)
     {
         var v = Validate(req);
@@ -114,6 +132,9 @@ public sealed class StorageService : IStorageService
         return Resp<Storage>.Ok(s);
     }
 
+    /// <summary>
+    /// 更新存储：先卸载旧驱动、更新字段，若仍启用则重新加载驱动。
+    /// </summary>
     public async Task<Resp> UpdateAsync(long id, CreateStorageReq req, CancellationToken ct = default)
     {
         var v = Validate(req);
@@ -146,6 +167,9 @@ public sealed class StorageService : IStorageService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 删除存储：先卸载驱动再删除记录。
+    /// </summary>
     public async Task<Resp> DeleteAsync(long id, CancellationToken ct = default)
     {
         var s = await _db.Storages.FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -156,6 +180,9 @@ public sealed class StorageService : IStorageService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 启用存储：取消禁用标记并加载驱动。
+    /// </summary>
     public async Task<Resp> EnableAsync(long id, CancellationToken ct = default)
     {
         var s = await _db.Storages.FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -167,6 +194,9 @@ public sealed class StorageService : IStorageService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 禁用存储：卸载驱动并置禁用标记。
+    /// </summary>
     public async Task<Resp> DisableAsync(long id, CancellationToken ct = default)
     {
         var s = await _db.Storages.FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -178,6 +208,9 @@ public sealed class StorageService : IStorageService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 加载全部未禁用的存储驱动（启动时调用）。
+    /// </summary>
     public async Task<Resp> LoadAllAsync(CancellationToken ct = default)
     {
         var storages = await _db.Storages.AsNoTracking().Where(s => !s.Disabled).ToListAsync(ct);
@@ -185,6 +218,9 @@ public sealed class StorageService : IStorageService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 列出所有可用驱动的信息（驱动名 → 详细信息）。
+    /// </summary>
     public Task<Resp<Dictionary<string, DriverInfo>>> ListDriversAsync(CancellationToken ct = default)
     {
         var map = new Dictionary<string, DriverInfo>(StringComparer.Ordinal);
@@ -195,12 +231,18 @@ public sealed class StorageService : IStorageService
         return Task.FromResult(Resp<Dictionary<string, DriverInfo>>.Ok(map));
     }
 
+    /// <summary>
+    /// 列出所有可用驱动的名称。
+    /// </summary>
     public Task<Resp<List<string>>> ListDriverNamesAsync(CancellationToken ct = default)
     {
         var names = EnumerateDrivers().Select(d => d.DriverName).ToList();
         return Task.FromResult(Resp<List<string>>.Ok(names));
     }
 
+    /// <summary>
+    /// 按名称获取单个驱动的详细信息（名称不区分大小写）。
+    /// </summary>
     public Task<Resp<DriverInfo>> GetDriverInfoAsync(string driverName, CancellationToken ct = default)
     {
         var d = EnumerateDrivers().FirstOrDefault(x => x.DriverName.Equals(driverName, StringComparison.OrdinalIgnoreCase));
@@ -208,14 +250,18 @@ public sealed class StorageService : IStorageService
         return Task.FromResult(Resp<DriverInfo>.Ok(BuildDriverInfo(d)));
     }
 
+    /// <summary>
+    /// 枚举所有可用的驱动实例（通过反射实例化 <see cref="ZioMountService.DiscoverDriverTypes"/>
+    /// 发现的驱动类型）。
+    /// </summary>
     private IEnumerable<ZioDriverBase> EnumerateDrivers() => _mount.DiscoverDriverTypes()
         .Select(t => Activator.CreateInstance(t) as ZioDriverBase)
         .Where(d => d is not null)
         .Select(d => d!)!;
 
     /// <summary>
-    /// Builds the <see cref="DriverInfo"/> (common + additional + config) for a driver.
-    /// Mirrors OpenList Go <c>op.getMainItems</c> + <c>op.getAdditionalItems</c>.
+    /// 构建驱动的 <see cref="DriverInfo"/>（通用项 + 扩展项 + 配置）。
+    /// 对应 Go 的 <c>op.getMainItems</c> 与 <c>op.getAdditionalItems</c>。
     /// </summary>
     private static DriverInfo BuildDriverInfo(ZioDriverBase d)
     {
@@ -239,6 +285,9 @@ public sealed class StorageService : IStorageService
         };
     }
 
+    /// <summary>
+    /// 构建驱动的通用配置项（挂载路径、排序、缓存、代理、排序策略等）。
+    /// </summary>
     private static List<DriverInfoItem> BuildCommonItems(ZioDriverBase d)
     {
         var items = new List<DriverInfoItem>
@@ -292,6 +341,9 @@ public sealed class StorageService : IStorageService
         return items;
     }
 
+    /// <summary>
+    /// 构建驱动的扩展配置项（根据驱动的 ConfigItems 生成），并对根目录类字段应用默认值。
+    /// </summary>
     private static List<DriverInfoItem> BuildAdditionalItems(ZioDriverBase d)
     {
         var items = new List<DriverInfoItem>();
@@ -306,7 +358,7 @@ public sealed class StorageService : IStorageService
                 Required = c.Required,
                 Help = c.Help,
             };
-            // root_folder_* defaults to DefaultRoot and becomes required when a default exists.
+            // root_folder_* 默认取 DefaultRoot，存在默认值时变为必填。
             if ((item.Name == "root_folder_id" || item.Name == "root_folder_path") && string.IsNullOrEmpty(item.Default))
             {
                 item.Default = d.DefaultRoot;
@@ -317,7 +369,7 @@ public sealed class StorageService : IStorageService
         return items;
     }
 
-    /// <summary>Maps a CLR <see cref="Type"/> to the OpenList frontend type string.</summary>
+    /// <summary>将 CLR <see cref="Type"/> 映射为 OpenList 前端使用的类型字符串。</summary>
     private static string MapTypeName(Type t, string? options)
     {
         if (!string.IsNullOrEmpty(options)) return "select";
@@ -331,6 +383,9 @@ public sealed class StorageService : IStorageService
         };
     }
 
+    /// <summary>
+    /// 校验创建/更新存储请求：挂载路径与驱动必填，挂载路径必须以 '/' 开头。
+    /// </summary>
     private static string? Validate(CreateStorageReq req)
     {
         if (string.IsNullOrWhiteSpace(req.MountPath)) return "mount path required";

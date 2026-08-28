@@ -7,18 +7,19 @@ using OpenList.Server.Models;
 namespace OpenList.Server.Endpoints;
 
 /// <summary>
-/// Current-user endpoints: profile update, 2FA management, sessions.
-/// Mirrors OpenList Go <c>server/handles/me.go</c>.
+/// 当前用户管理端点：个人资料更新、2FA、会话、SSH 公钥、站内信。
+/// 对应 OpenList Go <c>server/handles/me.go</c>。全部需要登录鉴权。
 /// </summary>
 public static class MeEndpoints
 {
+    /// <summary>
+    /// 注册 <c>/api/me</c> 当前用户路由组，整体 <c>RequireAuthorization</c>（需登录）。
+    /// </summary>
     public static IEndpointRouteBuilder MapMeApi(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/me").WithTags("Me").RequireAuthorization();
 
-        // GET /api/me — current user profile (frontend expects camelCase fields
-        // matching the Go reference: id, username, password, base_path, role,
-        // disabled, permission, sso_id, otp, allow_ldap).
+        // GET /api/me — 当前用户资料（前端期望与 Go 一致的 camelCase 字段）
         g.MapGet("/", async (ClaimsPrincipal user, IUserService users) =>
         {
             var id = user.UserId();
@@ -54,6 +55,7 @@ public static class MeEndpoints
             return Results.Ok(r);
         });
 
+        // POST /api/me/2fa — 为当前用户开启（重新生成）两步验证密钥
         g.MapPost("/2fa", async (ClaimsPrincipal user, IAuthService auth) =>
         {
             var id = user.UserId();
@@ -103,7 +105,8 @@ public static class MeEndpoints
             return Results.Ok(await svc.DeleteAsync(id.Value, keyId, isAdmin: false));
         });
 
-        // --- Messages ---
+        // --- 站内信 ---
+        // GET /api/me/message/unread — 未读消息数量
         g.MapGet("/message/unread", async (ClaimsPrincipal user, IMessageService msgs) =>
         {
             var id = user.UserId();
@@ -130,8 +133,10 @@ public static class MeEndpoints
     }
 }
 
+/// <summary>标记站内信为已读的请求体（<c>POST /api/me/message/read</c>，字段为消息 Id）。</summary>
 public sealed class ReadMessageReq { public long Id { get; set; } }
 
+/// <summary>添加 SSH 公钥的请求体（<c>POST /api/me/sshkey/add</c>）。</summary>
 public sealed class SshKeyAddReq
 {
     public string Title { get; set; } = string.Empty;

@@ -4,14 +4,17 @@ using OpenList.Core.Interfaces;
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// Singleton in-memory <see cref="IWebDavLockStore"/> backed by a <see cref="ConcurrentDictionary{TKey, TValue}"/>.
-/// Expired locks are cleaned up lazily on access (no background sweep). Mirrors Go's
-/// <c>webdav.NewMemLS()</c> for single-instance deployments.
+/// 基于 <see cref="ConcurrentDictionary{TKey, TValue}"/> 的单例内存版
+/// <see cref="IWebDavLockStore"/>。过期的锁在访问时惰性清理（无后台清理线程）。
+/// 对应 Go 的 <c>webdav.NewMemLS()</c>，适用于单实例部署。
 /// </summary>
 public sealed class InMemoryWebDavLockStore : IWebDavLockStore
 {
     private readonly ConcurrentDictionary<string, WebDavLock> _locks = new();
 
+    /// <summary>
+    /// 获取指定路径的锁；若锁已过期则删除并返回 null。
+    /// </summary>
     public Task<WebDavLock?> GetAsync(string path, CancellationToken ct = default)
     {
         if (_locks.TryGetValue(path, out var @lock))
@@ -26,12 +29,18 @@ public sealed class InMemoryWebDavLockStore : IWebDavLockStore
         return Task.FromResult<WebDavLock?>(null);
     }
 
+    /// <summary>
+    /// 为指定路径写入/覆盖一个锁。
+    /// </summary>
     public Task SetAsync(string path, WebDavLock @lock, CancellationToken ct = default)
     {
         _locks[path] = @lock;
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// 移除指定路径的锁：仅当锁存在、未过期且 Token 匹配时删除成功。
+    /// </summary>
     public Task<bool> RemoveAsync(string path, string token, CancellationToken ct = default)
     {
         if (_locks.TryGetValue(path, out var existing))

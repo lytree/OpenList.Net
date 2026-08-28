@@ -11,21 +11,27 @@ using Zio;
 namespace OpenList.Server.Endpoints;
 
 /// <summary>
-/// WebDAV server endpoints under <c>/dav</c>.
-/// Implements the subset of WebDAV (RFC 4918) needed for file management:
-/// OPTIONS, PROPFIND, GET, HEAD, PUT, MKCOL, DELETE, MOVE, COPY, LOCK, UNLOCK.
-/// Maps the WebDAV root to the Zio <see cref="MountFileSystem"/> root.
-/// Auth: HTTP Basic auth → OpenList user, or JWT passthrough.
-/// Mirrors OpenList Go <c>server/webdav</c>.
+/// WebDAV 服务端点，路由位于 <c>/dav</c>。
+/// 实现文件管理所需的 WebDAV（RFC 4918）子集：OPTIONS、PROPFIND、GET、HEAD、PUT、
+/// MKCOL、DELETE、MOVE、COPY、LOCK、UNLOCK。
+/// 将 WebDAV 根映射到 Zio <see cref="MountFileSystem"/> 根。
+/// 鉴权：既支持 HTTP Basic → OpenList 用户，也支持 JWT 透传。
+/// 对应 OpenList Go <c>server/webdav</c>。
 /// </summary>
 public static class WebDavEndpoints
 {
     private static readonly XmlSerializer MultistatusSerializer = new(typeof(DavMultistatus));
 
+    /// <summary>
+    /// 注册 <c>/dav</c> 路由组（DisableAntiforgery）。根路径 "/" 与任意 <c>/{**path}</c>
+    /// 均注册上述 WebDAV 方法；认证交由 handler 内部的 <see cref="ResolveUserAsync"/>
+    /// 处理（Basic 或 JWT）。
+    /// </summary>
     public static IEndpointRouteBuilder MapWebDavApi(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/dav").WithTags("WebDAV").DisableAntiforgery();
 
+        // 具名方法的任意路径路由（*path 捕获剩余路径）
         g.MapMethods("/{*path}", ["OPTIONS"], OptionsAsync);
         g.MapMethods("/{*path}", ["PROPFIND"], PropfindAsync);
         g.MapMethods("/{*path}", ["PROPPATCH"], ProppatchAsync);
@@ -39,7 +45,7 @@ public static class WebDavEndpoints
         g.MapMethods("/{*path}", ["LOCK"], LockAsync);
         g.MapMethods("/{*path}", ["UNLOCK"], UnlockAsync);
 
-        // Root without path parameter
+        // 不带路径参数的根路径路由
         g.MapMethods("/", ["OPTIONS"], (HttpContext ctx, ZioMountService m, IStorageService s) => OptionsAsync("", ctx, m, s));
         g.MapMethods("/", ["PROPFIND"], (HttpContext ctx, ZioMountService m, IStorageService s) => PropfindAsync("", ctx, m, s));
         g.MapGet("/", (HttpContext ctx, ZioMountService m, IStorageService s) => GetAsync("", ctx, m, s));
@@ -49,8 +55,9 @@ public static class WebDavEndpoints
         return app;
     }
 
-    // --- OPTIONS: report DAV capabilities ---
+    // --- OPTIONS：通告 DAV 能力 ---
 
+    /// <summary>OPTIONS — 返回 DAV 能力与允许的方法列表。</summary>
     private static Task<IResult> OptionsAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
     {
         ctx.Response.Headers["DAV"] = "1, 2";
@@ -59,7 +66,7 @@ public static class WebDavEndpoints
         return Task.FromResult<IResult>(Results.Ok());
     }
 
-    // --- PROPFIND: list directory or get resource properties ---
+    // --- PROPFIND：列目录或取资源属性 ---
 
     private static async Task<IResult> PropfindAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
     {
@@ -109,7 +116,7 @@ public static class WebDavEndpoints
         return MultistatusResult(multistatus);
     }
 
-    // --- PROPPATCH: not fully implemented, return success ---
+    // --- PROPPATCH：未完整实现，返回成功 ---
 
     private static Task<IResult> ProppatchAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
     {
@@ -122,7 +129,7 @@ public static class WebDavEndpoints
         return Task.FromResult(MultistatusResult(new DavMultistatus { Responses = [response] }));
     }
 
-    // --- GET: download file or list directory (HTML) ---
+    // --- GET：下载文件或返回目录的 HTML 列表 ---
 
     private static async Task<IResult> GetAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
     {
@@ -131,6 +138,7 @@ public static class WebDavEndpoints
 
         var upath = NormalizePath(path);
 
+        // 文件：直接返回字节流
         if (mount.Root.FileExists(upath))
         {
             var entry = mount.Root.GetFileEntry(upath);
@@ -139,11 +147,11 @@ public static class WebDavEndpoints
             return Results.Stream(stream, "application/octet-stream");
         }
 
-        if (mount.Root.DirectoryExists(upath))
-        {
-            // Return a simple HTML directory listing
-            var sb = new StringBuilder();
-            sb.AppendLine("<html><head><title>Index of /" + path + "</title></head><body>");
+        // 目录：返回简单的 HTML 目录列表
+            if (mount.Root.DirectoryExists(upath))
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("<html><head><title>Index of /" + path + "</title></head><body>");
             sb.AppendLine($"<h1>Index of /{path}</h1><hr><ul>");
             if (upath != UPath.Root)
             {
@@ -163,7 +171,7 @@ public static class WebDavEndpoints
         return Results.NotFound();
     }
 
-    // --- HEAD: metadata only ---
+    // --- HEAD：仅返回元数据 ---
 
     private static async Task<IResult> HeadAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
     {
@@ -172,6 +180,7 @@ public static class WebDavEndpoints
 
         var upath = NormalizePath(path);
 
+        // 文件：填充大小等响应头返回，不写响应体
         if (mount.Root.FileExists(upath))
         {
             var entry = mount.Root.GetFileEntry(upath);
@@ -187,7 +196,7 @@ public static class WebDavEndpoints
         return Results.NotFound();
     }
 
-    // --- PUT: upload file ---
+    // --- PUT：上传文件 ---
 
     private static async Task<IResult> PutAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
@@ -202,7 +211,7 @@ public static class WebDavEndpoints
         return Results.Ok();
     }
 
-    // --- MKCOL: create directory ---
+    // --- MKCOL：创建目录 ---
 
     private static async Task<IResult> MkcolAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
@@ -216,7 +225,7 @@ public static class WebDavEndpoints
         return Results.Ok();
     }
 
-    // --- DELETE: delete file or directory ---
+    // --- DELETE：删除文件或目录 ---
 
     private static async Task<IResult> DeleteAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
@@ -230,7 +239,7 @@ public static class WebDavEndpoints
         return Results.NoContent();
     }
 
-    // --- MOVE: move/rename ---
+    // --- MOVE：移动/重命名 ---
 
     private static async Task<IResult> MoveAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
@@ -238,6 +247,7 @@ public static class WebDavEndpoints
         if (user is null) return Results.Unauthorized();
         if (user.Disabled) return Results.Forbid();
 
+        // 目标取自 Destination 请求头
         var destUrl = ctx.Request.Headers["Destination"].ToString();
         if (string.IsNullOrEmpty(destUrl)) return Results.BadRequest("Destination header required");
 
@@ -250,7 +260,7 @@ public static class WebDavEndpoints
         return Results.Ok();
     }
 
-    // --- COPY: copy file/directory ---
+    // --- COPY：复制文件/目录 ---
 
     private static async Task<IResult> CopyAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
@@ -265,15 +275,16 @@ public static class WebDavEndpoints
         if (destPath is null) return Results.BadRequest("invalid Destination");
 
         var srcPath = "/" + path.TrimStart('/');
+        // 复制的目标目录即目标完整路径的父目录
         var destDir = destPath[..destPath.LastIndexOf('/')];
         var resp = await fs.CopyAsync([srcPath], destDir, user, ctx.RequestAborted);
         if (resp.Code != 200) return Results.BadRequest(resp.Message);
         return Results.Ok();
     }
 
-    // --- LOCK: issue and persist an exclusive in-memory lock token ---
-    // Mirrors Go's webdav.NewMemLS(): per-path exclusive locks with opaque tokens.
-    // If the path is already locked by another (non-expired) token, return 423 Locked.
+    // --- LOCK：发放并持久化一个独占的内存锁令牌 ---
+    // 对应 Go 的 webdav.NewMemLS()：按路径发放带不透明令牌的独占锁。
+    // 若路径已被其他未过期令牌锁定，则返回 423 Locked。
 
     private static async Task<IResult> LockAsync(
         string path,
@@ -321,7 +332,7 @@ public static class WebDavEndpoints
         return MultistatusResult(new DavMultistatus { Responses = [response] });
     }
 
-    // --- UNLOCK: validate the Lock-Token header and remove the in-memory lock ---
+    // --- UNLOCK：校验 Lock-Token 头并移除内存锁 ---
 
     private static async Task<IResult> UnlockAsync(
         string path,
@@ -335,7 +346,7 @@ public static class WebDavEndpoints
 
         var fullPath = "/" + path.TrimStart('/');
 
-        // Lock-Token header is wrapped in <...> per RFC 4918.
+        // 按 RFC 4918，Lock-Token 头以 <...> 包裹，先剥掉尖括号
         var rawToken = ctx.Request.Headers["Lock-Token"].ToString().Trim();
         if (rawToken.StartsWith('<') && rawToken.EndsWith('>'))
             rawToken = rawToken[1..^1];
@@ -343,24 +354,27 @@ public static class WebDavEndpoints
         if (string.IsNullOrEmpty(rawToken))
             return Results.BadRequest("Lock-Token header required");
 
+        // 只有令牌匹配才解除锁：未匹配返回 409 Conflict
         var removed = await lockStore.RemoveAsync(fullPath, rawToken, ctx.RequestAborted);
         return removed ? Results.NoContent() : Results.Conflict();
     }
 
+    /// <summary>解析 WebDAV Timeout 请求头（"Second-3600"、"Infinite, Second-3600" 等），
+    /// 结果上限为 86400 秒（24 小时），缺省 3600。</summary>
     private static int ParseTimeout(string? header)
     {
-        // WebDAV Timeout header: "Second-3600", "Infinite, Second-3600", etc.
+        // WebDAV Timeout 头：如 "Second-3600"、"Infinite, Second-3600" 等
         if (string.IsNullOrEmpty(header)) return 3600;
         foreach (var part in header.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (part.StartsWith("Second-", StringComparison.OrdinalIgnoreCase) &&
                 int.TryParse(part[7..], out var secs) && secs > 0)
-                return Math.Min(secs, 86400); // cap at 24h
+                return Math.Min(secs, 86400); // 上限 24 小时
         }
         return 3600;
     }
 
-    // --- Helpers ---
+    // --- 辅助方法 ---
 
     private static UPath NormalizePath(string path)
     {
@@ -427,32 +441,38 @@ public static class WebDavEndpoints
 
     private static string? ExtractPathFromUrl(string url, HttpContext ctx)
     {
-        // Destination may be a full URL (http://host/dav/path) or absolute path (/dav/path)
+        // Destination 可能是完整 URL（http://host/dav/path）或绝对路径（/dav/path），
+        // 统一剥掉 /dav 前缀得到存储内路径
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
             var p = uri.AbsolutePath;
-            if (p.StartsWith("/dav/", StringComparison.OrdinalIgnoreCase)) return p[4..]; // strip /dav prefix
+            if (p.StartsWith("/dav/", StringComparison.OrdinalIgnoreCase)) return p[4..]; // 去掉 /dav 前缀
             return p;
         }
         if (url.StartsWith("/dav/", StringComparison.OrdinalIgnoreCase)) return url[4..];
         return url;
     }
 
+    /// <summary>
+    /// 解析 WebDAV 请求的用户：优先采用 JWT 中间件已认证身份；否则解析 HTTP Basic
+    /// 头、通过 IUserService 加载用户并校验密码与禁用状态。
+    /// </summary>
     private static async Task<User?> ResolveUserAsync(HttpContext ctx, IStorageService storageSvc)
     {
-        // If authenticated via JWT middleware, use that.
+        // 若已通过 JWT 中间件完成认证，直接复用
         if (ctx.User.Identity?.IsAuthenticated == true)
         {
             return ctx.User.ToUser();
         }
 
-        // HTTP Basic auth → OpenList user
+        // HTTP Basic 认证 → 映射为 OpenList 用户
         var auth = ctx.Request.Headers.Authorization.ToString();
         if (string.IsNullOrEmpty(auth) || !auth.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
             return null;
 
         try
         {
+            // Basic 头为 base64(username:password)，解码后按首个 ':' 切分
             var encoded = auth[6..].Trim();
             var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
             var idx = decoded.IndexOf(':');
@@ -460,7 +480,7 @@ public static class WebDavEndpoints
             var username = decoded[..idx];
             var password = decoded[(idx + 1)..];
 
-            // Look up user and verify password
+            // 加载用户并校验密码、禁用状态
             using var scope = ctx.RequestServices.CreateScope();
             var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
             var resp = await userService.GetByNameAsync(username, ctx.RequestAborted);
@@ -484,8 +504,9 @@ public static class WebDavEndpoints
     }
 }
 
-// --- WebDAV XML models (RFC 4918) ---
+// --- WebDAV XML 模型（RFC 4918） ---
 
+/// <summary>multistatus 响应的根元素（含多个 response）。</summary>
 [XmlRoot("multistatus", Namespace = "DAV:")]
 public class DavMultistatus
 {
@@ -493,6 +514,7 @@ public class DavMultistatus
     public List<DavResponse> Responses { get; set; } = [];
 }
 
+/// <summary>单个资源的响应（href + 属性集 propstat）。</summary>
 public class DavResponse
 {
     public string Href { get; set; } = "";
@@ -500,12 +522,14 @@ public class DavResponse
     public List<DavPropstat> Propstat { get; set; } = [];
 }
 
+/// <summary>属性集及其状态。</summary>
 public class DavPropstat
 {
     public DavProp Prop { get; set; } = new();
     public string Status { get; set; } = "HTTP/1.1 200 OK";
 }
 
+/// <summary>资源的属性（displayname、contentlength 等）。</summary>
 public class DavProp
 {
     [XmlElement("displayname")]
@@ -524,18 +548,21 @@ public class DavProp
     public DavLockDiscovery? LockDiscovery { get; set; }
 }
 
+/// <summary>资源类型（含 collection 元素表示目录）。</summary>
 public class DavResourceType
 {
     [XmlElement("collection")]
     public object? Collection { get; set; }
 }
 
+/// <summary>锁发现（lockdiscovery）容器。</summary>
 public class DavLockDiscovery
 {
     [XmlElement("activelock")]
     public DavActiveLock ActiveLock { get; set; } = new();
 }
 
+/// <summary>一个处于生效状态的锁。</summary>
 public class DavActiveLock
 {
     public DavLockType Type { get; set; } = new();
@@ -545,18 +572,21 @@ public class DavActiveLock
     public DavLockToken Token { get; set; } = new();
 }
 
+/// <summary>锁类型（write）。</summary>
 public class DavLockType
 {
     [XmlElement("write")]
     public object? Write { get; set; }
 }
 
+/// <summary>锁作用域（exclusive 独占）。</summary>
 public class DavLockScope
 {
     [XmlElement("exclusive")]
     public object? Exclusive { get; set; }
 }
 
+/// <summary>锁令牌（href）。</summary>
 public class DavLockToken
 {
     [XmlElement("href")]

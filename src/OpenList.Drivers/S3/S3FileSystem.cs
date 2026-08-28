@@ -6,8 +6,8 @@ using Zio;
 namespace OpenList.Drivers.S3;
 
 /// <summary>
-/// Zio <see cref="FileSystem"/> backed by an S3-compatible bucket (Minio, AWS S3, etc.).
-/// S3 is object storage: "directories" are key prefixes, "files" are objects.
+/// 基于 S3 兼容存储桶（Minio、AWS S3 等）的 Zio <see cref="FileSystem"/>。
+/// S3 是对象存储：所谓"目录"其实是对象键的前缀，"文件"即对象本身。
 /// </summary>
 internal sealed class S3FileSystem : NetworkFileSystemBase
 {
@@ -15,6 +15,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
     private readonly string _bucket;
     private readonly string _rootPrefix;
 
+    /// <summary>构造并绑定到指定存储桶，rootPrefix 归一化为以 "/" 结尾的根前缀。</summary>
     public S3FileSystem(MinioClient client, string bucket, string rootPrefix = "")
     {
         _client = client;
@@ -23,14 +24,16 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
             (rootPrefix.EndsWith('/') ? rootPrefix : rootPrefix + "/");
     }
 
-    // --- Path helpers ---
+    // --- 路径辅助 ---
 
+    /// <summary>把 Zio 路径转换为 S3 对象键（拼接根前缀）。</summary>
     private string ToKey(UPath path)
     {
         var relative = path.FullName.TrimStart('/');
         return string.IsNullOrEmpty(relative) ? _rootPrefix : _rootPrefix + relative;
     }
 
+    /// <summary>把 S3 对象键去掉根前缀，转换回 Zio 路径。</summary>
     private UPath FromKey(string key)
     {
         var relative = key.StartsWith(_rootPrefix, StringComparison.Ordinal)
@@ -39,15 +42,18 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
         return UPath.Root / relative;
     }
 
-    // --- Core overrides ---
+    // --- 核心覆写 ---
 
+    /// <summary>目录存在性 = 该前缀下至少有对象（S3 无真实目录）。</summary>
     protected override bool DirectoryExistsImpl(UPath path)
     {
+        // 根路径恒视为存在；其余目录通过"前缀下是否有对象"判定。
         if (path == UPath.Root) return true;
         var prefix = ToKey(path).TrimEnd('/') + "/";
         return ListObjectsSync(prefix, recursive: false).Any();
     }
 
+    /// <summary>文件存在性 = 执行 StatObject 成功。</summary>
     protected override bool FileExistsImpl(UPath path)
     {
         try
@@ -60,6 +66,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
         catch { return false; }
     }
 
+    /// <summary>文件长度 = 对象统计信息中的 Size。</summary>
     protected override long GetFileLengthImpl(UPath path)
     {
         var stat = _client.StatObjectAsync(new StatObjectArgs()
@@ -68,6 +75,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
         return stat.Size;
     }
 
+    /// <summary>最后写入时间 = 对象的 LastModified。</summary>
     protected override DateTime GetLastWriteTimeImpl(UPath path)
     {
         try
@@ -85,17 +93,24 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
     protected override void SetLastWriteTimeImpl(UPath path, DateTime time) { }
     protected override void SetCreationTimeImpl(UPath path, DateTime time) { }
 
+    /// <summary>
+    /// 枚举路径：按前缀列出对象并映射回 Zio 路径，按搜索目标/通配符过滤。
+    /// </summary>
     protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
     {
+        // 目录路径需以 "/" 结尾才能作为前缀过滤出该目录下的子项。
         var prefix = ToKey(path);
         if (!prefix.EndsWith('/') && path != UPath.Root) prefix += "/";
 
+        // 递归搜索时使用 recursive：true 一次取回整棵子树。
         var items = ListObjectsSync(prefix, recursive: searchOption == SearchOption.AllDirectories);
         foreach (var item in items)
         {
             var itemPath = FromKey(item.Key);
+            // 跳过"目录本身"（其对象键正是当前前缀）。
             if (itemPath == path) continue;
 
+            // S3 目录是键以 "/" 结尾的占位对象，据此区分目录/文件。
             var isDir = item.Key.EndsWith('/');
             if (searchTarget == SearchTarget.File && isDir) continue;
             if (searchTarget == SearchTarget.Directory && !isDir) continue;
@@ -106,6 +121,9 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
         }
     }
 
+    /// <summary>
+    /// 打开文件：读模式从 S3 拉取到内存流；写模式使用释放时上传的 <see cref="S3WriteStream"/>。
+    /// </summary>
     protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
     {
         var key = ToKey(path);
@@ -115,6 +133,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
             if (mode == FileMode.Create || mode == FileMode.CreateNew || mode == FileMode.Truncate)
                 return new S3WriteStream(_client, _bucket, key);
 
+            // 读取现有对象到内存流并定位到起点。
             var ms = new MemoryStream();
             _client.GetObjectAsync(new GetObjectArgs()
                 .WithBucket(_bucket)
@@ -128,6 +147,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
         return new S3WriteStream(_client, _bucket, key);
     }
 
+    /// <summary>S3 无真实目录，创建目录 = 写入一个键以 "/" 结尾的空占位对象。</summary>
     protected override void CreateDirectoryImpl(UPath path)
     {
         if (path == UPath.Root) return;
@@ -140,6 +160,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
             .GetAwaiter().GetResult();
     }
 
+    /// <summary>删除文件 = 删除对应对象。</summary>
     protected override void DeleteFileImpl(UPath path)
     {
         _client.RemoveObjectAsync(new RemoveObjectArgs()
@@ -148,11 +169,15 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
             .GetAwaiter().GetResult();
     }
 
+    /// <summary>
+    /// 递归删除目录下所有子对象；非递归则只删除目录占位对象。
+    /// </summary>
     protected override void DeleteDirectoryImpl(UPath path, bool isRecursive)
     {
         var prefix = ToKey(path).TrimEnd('/') + "/";
         if (isRecursive)
         {
+            // 先枚举前缀下的全部子对象，再逐个删除。
             foreach (var item in ListObjectsSync(prefix, recursive: true))
             {
                 _client.RemoveObjectAsync(new RemoveObjectArgs()
@@ -170,11 +195,13 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
         }
     }
 
+    /// <summary>移动文件 = 服务器端复制对象后删除源对象。</summary>
     protected override void MoveFileImpl(UPath srcPath, UPath destPath)
     {
         var srcKey = ToKey(srcPath);
         var destKey = ToKey(destPath);
 
+        // 服务器端 Copy 后删除源，避免数据经本地中转。
         _client.CopyObjectAsync(new CopyObjectArgs()
             .WithBucket(_bucket)
             .WithObject(destKey)
@@ -189,6 +216,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
             .GetAwaiter().GetResult();
     }
 
+    /// <summary>移动目录：递归复制前缀下所有对象到目标前缀，再删除源对象。</summary>
     protected override void MoveDirectoryImpl(UPath srcPath, UPath destPath)
     {
         var srcPrefix = ToKey(srcPath).TrimEnd('/') + "/";
@@ -196,6 +224,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
 
         foreach (var item in ListObjectsSync(srcPrefix, recursive: true))
         {
+            // 保持相对路径，逐对象复制前缀映射。
             var destKey = destPrefix + item.Key[srcPrefix.Length..];
             _client.CopyObjectAsync(new CopyObjectArgs()
                 .WithBucket(_bucket)
@@ -212,8 +241,9 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
         }
     }
 
-    // --- S3-optimized CopyFile (server-side copy) ---
+    // --- S3 优化的复制（服务器端复制） ---
 
+    /// <summary>复制文件 = 服务器端 CopyObject（避免经过本地中转整个对象）。</summary>
     protected override void CopyFileImpl(UPath srcPath, UPath destPath, bool overwrite)
     {
         if (!overwrite && FileExists(destPath))
@@ -228,8 +258,9 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
             .GetAwaiter().GetResult();
     }
 
-    // --- Helpers ---
+    // --- 辅助 ---
 
+    /// <summary>同步方式枚举指定前缀下的对象列表（内部用异步枚举器阻塞等待）。</summary>
     private IEnumerable<Item> ListObjectsSync(string prefix, bool recursive)
     {
         var args = new ListObjectsArgs()
@@ -237,6 +268,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
             .WithPrefix(prefix)
             .WithRecursive(recursive);
 
+        // Minio 返回异步枚举器，这里同步遍历以适配 Zio 的同步 API。
         var asyncEnum = _client.ListObjectsEnumAsync(args);
         var enumerator = asyncEnum.GetAsyncEnumerator();
         try
@@ -261,7 +293,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
     }
 }
 
-/// <summary>Write-only stream that uploads to S3 on dispose.</summary>
+/// <summary>仅写流：写入内容缓存在内存，Dispose 时一次性上传到 S3。</summary>
 internal sealed class S3WriteStream : MemoryStream
 {
     private readonly MinioClient _client;
@@ -276,12 +308,14 @@ internal sealed class S3WriteStream : MemoryStream
         _key = key;
     }
 
+    /// <summary>释放时把缓冲内容作为对象上传到 S3（仅执行一次）。</summary>
     protected override void Dispose(bool disposing)
     {
         if (disposing && !_uploaded)
         {
             _uploaded = true;
             Position = 0;
+            // 将整段缓冲作为对象内容上传。
             _client.PutObjectAsync(new PutObjectArgs()
                 .WithBucket(_bucket)
                 .WithObject(_key)

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
@@ -11,16 +12,20 @@ using OpenList.Server.Models;
 namespace OpenList.Server.Endpoints;
 
 /// <summary>
-/// Admin endpoints: storage CRUD, driver listing, user management, settings, meta, messages, scan.
-/// All require admin role. Mirrors OpenList Go <c>server/handles/admin</c>.
+/// 管理端点：存储 CRUD、驱动列表、用户管理、设置、元数据、站内信、扫描、搜索索引。
+/// 对应 OpenList Go <c>server/handles/admin</c>。所有端点均要求 admin 角色。
+/// 路由位于 <c>/api/admin</c> 下，整体 <c>RequireAuthorization("admin")</c>。
 /// </summary>
 public static class AdminEndpoints
 {
+    /// <summary>
+    /// 注册 <c>/api/admin</c> 管理路由组，全部需要 admin 角色（含 /admin/task 兼容别名）。
+    /// </summary>
     public static IEndpointRouteBuilder MapAdminApi(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/admin").WithTags("Admin").RequireAuthorization("admin");
 
-        // --- Storage management ---
+        // --- 存储管理 ---
         // GET /admin/storage/list -> Resp<PageResp<StorageWithDriver>> = { content, total }
         g.MapGet("/storage/list", async (IStorageService svc) =>
             Results.Ok(await svc.ListAsync()));
@@ -56,7 +61,7 @@ public static class AdminEndpoints
         g.MapGet("/driver/info", async (string driver, IStorageService svc) =>
             Results.Ok(await svc.GetDriverInfoAsync(driver)));
 
-        // --- User management ---
+        // --- 用户管理 ---
         // GET /admin/user/list -> { content, total } (frontend Users.tsx reads data.content)
         g.MapGet("/user/list", async (IUserService users) =>
         {
@@ -232,6 +237,12 @@ public static class AdminEndpoints
                 new() { Key = "thunder_browser_temp_dir", Value = req.TempDir ?? "" },
             ])));
 
+        // Mirrors Go router.go: POST /admin/setting/set_guangyapan (body { temp_dir }).
+        g.MapPost("/setting/set_guangyapan", async (SetTempDirReq req, ISettingService svc) =>
+            Results.Ok(await svc.SaveAsync([
+                new() { Key = "guangyapan_temp_dir", Value = req.TempDir ?? "" },
+            ])));
+
         // --- Meta management ---
         // Mirrors the frontend's Metas.tsx / AddOrEdit.tsx:
         //   GET    /admin/meta/list              -> { content, total }
@@ -277,9 +288,22 @@ public static class AdminEndpoints
             Results.Ok(await svc.SendAsync(req.UserId, req.Title, req.Content)));
 
         // Alias: frontend Messenger uses /admin/message/send with { message } body for
-        // admin broadcast (in-memory). Kept alongside /message/create for API compat.
+        // admin broadcast (in-memory). The frontend sends a plain string
+        // (r.post("/admin/message/send", { message: toSend() })) so wrap it into a
+        // BroadcastMessage { type: "string", content: <str> } — mirroring Go's
+        // message.SendHandle which accepts Req{Message string}.
         g.MapPost("/message/send", async (SendBroadcastReq? req, IBroadcastService svc) =>
-            Results.Ok(await svc.SendAsync(req?.Message ?? new BroadcastMessage())));
+        {
+            var msg = req?.Message switch
+            {
+                null => new BroadcastMessage(),
+                string s => new BroadcastMessage { Type = "string", Content = s },
+                JsonElement e when e.ValueKind == JsonValueKind.String => new BroadcastMessage { Type = "string", Content = e.GetString() },
+                BroadcastMessage bm => bm,
+                _ => new BroadcastMessage { Type = "string", Content = req!.Message },
+            };
+            return Results.Ok(await svc.SendAsync(msg));
+        });
 
         g.MapPost("/message/update", async (long id, IMessageService svc) =>
             Results.Ok(await svc.MarkReadAsync(id)));
@@ -352,14 +376,23 @@ public static class AdminEndpoints
             }));
         });
 
+        // retain /admin/task API to ensure compatibility with legacy automation
+        // scripts (mirrors Go router.go: _task(g.Group("/task")) under the admin group).
+        g.MapGroup("/task").MapTaskRoutes();
+
         return app;
     }
 }
 
+/// <summary>设置用户密码的请求体（<c>POST /admin/user/set_password</c>）。</summary>
 public sealed class SetPasswordReq { public long Id { get; set; } public string Password { get; set; } = ""; }
+/// <summary>创建站内信的请求体（<c>POST /admin/message/create</c>）。</summary>
 public sealed class CreateMessageReq { public long UserId { get; set; } public string Title { get; set; } = ""; public string Content { get; set; } = ""; }
-public sealed class SendBroadcastReq { public BroadcastMessage? Message { get; set; } }
+/// <summary>广播消息请求体（<c>POST /admin/message/send</c>）；Message 兼容字符串或结构化对象。</summary>
+public sealed class SendBroadcastReq { public object? Message { get; set; } }
+/// <summary>启动扫描的请求体（<c>POST /admin/scan/start</c>）；Limit 为限速（文件/秒，0=不限）。</summary>
 public sealed class ScanStartReq { public string? Path { get; set; } public double Limit { get; set; } }
+/// <summary>构建/更新搜索索引的请求体（<c>POST /admin/index/build</c> 或 <c>/admin/index/update</c>）。</summary>
 public sealed class IndexBuildReq
 {
     public List<string>? Paths { get; set; }
@@ -367,9 +400,14 @@ public sealed class IndexBuildReq
     public int MaxDepth { get; set; } = -1;
 }
 
-// --- Offline-download-tool config request DTOs (frontend Other.tsx) ---
+// --- 离线下载工具配置请求 DTO（对应前端 Other.tsx） ---
+/// <summary>aria2 配置体（<c>POST /admin/setting/set_aria2</c>）。</summary>
 public sealed class SetAria2Req { public string? Uri { get; set; } public string? Secret { get; set; } }
+/// <summary>qBittorrent 配置体（<c>POST /admin/setting/set_qbit</c>）。</summary>
 public sealed class SetQbitReq { public string? Url { get; set; } public string? Seedtime { get; set; } }
+/// <summary>Transmission 配置体（<c>POST /admin/setting/set_transmission</c>）。</summary>
 public sealed class SetTransmissionReq { public string? Uri { get; set; } public string? Seedtime { get; set; } }
+/// <summary>临时目录配置体（多个 set_xxx 共用）。</summary>
 public sealed class SetTempDirReq { public string? TempDir { get; set; } }
+/// <summary>123 云盘（开放平台）配置体（<c>POST /admin/setting/set_123_open</c>）。</summary>
 public sealed class Set123OpenReq { public string? TempDir { get; set; } public string? CallbackUrl { get; set; } }

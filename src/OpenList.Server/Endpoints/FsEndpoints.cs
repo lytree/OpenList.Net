@@ -8,32 +8,52 @@ using OpenList.Server.Models;
 namespace OpenList.Server.Endpoints;
 
 /// <summary>
-/// Filesystem endpoints: list, get, mkdir, rename, move, copy, remove, upload, dirs, search.
-/// Mirrors OpenList Go <c>server/handles/fsread.go</c> + <c>fsmanage.go</c>.
-/// All endpoints require authentication.
+/// 文件系统端点：list、get、mkdir、rename、move、copy、remove、upload、dirs、search 等。
+/// 对应 OpenList Go <c>server/handles/fsread.go</c> + <c>fsmanage.go</c>。
+/// 大多数端点需登录鉴权；部分只读端点（list/get/dirs/search）与 /fs/other 匿名可访问
+/// （用于公开分享浏览），/fs/link 仅管理员。部分读接口兼容 GET+POST。
 /// </summary>
 public static class FsEndpoints
 {
+    /// <summary>
+    /// 注册 <c>/api/fs</c> 文件系统路由组。整体 <c>RequireAuthorization</c>，
+    /// 个别只读端点使用 <c>AllowAnonymous</c>，/link 升级为 <c>admin</c>。
+    /// </summary>
     public static IEndpointRouteBuilder MapFsApi(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/fs").WithTags("Fs").RequireAuthorization();
 
-        // --- Read ---
+        // --- 读取 ---
         // Go's fsAndShare group allows guest access (Auth(true)) for these read endpoints.
         // AllowAnonymous here lets unauthenticated visitors browse public shares; JWT, if
         // present, is still parsed by JwtBearer so ClaimsPrincipal.ToUser() yields the real
         // user (or a guest User with Id=0/Role=Guest when anonymous).
-        g.MapPost("/list", async (FsListReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.ListAsync(req, user.ToUser()))).AllowAnonymous();
+        // Go registers these via g.Any(...) — accept GET or POST for third-party
+        // clients that follow the Go convention (the frontend itself uses POST).
+        // POST binds the JSON body; GET binds the DTO from query params.
+        g.MapMethods("/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        {
+            var req = await RequestBinder.BodyOrQueryAsync<FsListReq>(ctx, ctx.RequestAborted);
+            return Results.Ok(await svc.ListAsync(req, user.ToUser()));
+        }).AllowAnonymous();
 
-        g.MapPost("/get", async (FsGetReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.GetAsync(req, user.ToUser()))).AllowAnonymous();
+        g.MapMethods("/get", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        {
+            var req = await RequestBinder.BodyOrQueryAsync<FsGetReq>(ctx, ctx.RequestAborted);
+            return Results.Ok(await svc.GetAsync(req, user.ToUser()));
+        }).AllowAnonymous();
 
-        g.MapPost("/dirs", async (DirsReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.DirsAsync(req.Path, user.ToUser()))).AllowAnonymous(); // password/force_root accepted but ignored (no driver uses them yet)
+        g.MapMethods("/dirs", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        {
+            var req = await RequestBinder.BodyOrQueryAsync<DirsReq>(ctx, ctx.RequestAborted);
+            return Results.Ok(await svc.DirsAsync(req.Path, user.ToUser()));
+        }).AllowAnonymous(); // password/force_root accepted but ignored (no driver uses them yet)
 
-        g.MapPost("/search", async (SearchReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.SearchAsync(req, user.ToUser()))).AllowAnonymous();
+        g.MapMethods("/search", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        {
+            var req = await RequestBinder.BodyOrQueryAsync<SearchReq>(ctx, ctx.RequestAborted);
+            return Results.Ok(await svc.SearchAsync(req, user.ToUser()));
+        }).AllowAnonymous();
 
         // --- Manage ---
         g.MapPost("/mkdir", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
@@ -64,6 +84,12 @@ public static class FsEndpoints
             }).ToList();
             return Results.Ok(await svc.BatchRenameAsync(items, user.ToUser()));
         });
+
+        // POST /fs/regex_rename — Go API completeness (the frontend computes new
+        // names client-side and uses /batch_rename instead). Body: { src_dir,
+        // src_name_regex, new_name_regex }. Delegates to IFileSystemService.RegexRenameAsync.
+        g.MapPost("/regex_rename", async (RegexRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+            Results.Ok(await svc.RegexRenameAsync(req.SrcDir, req.SrcNameRegex, req.NewNameRegex, user.ToUser())));
 
         // POST /fs/move — body: { src_dir, dst_dir, names, overwrite, skip_existing }.
         // srcPaths = names.Select(n => src_dir/n).
@@ -117,14 +143,19 @@ public static class FsEndpoints
             Results.Ok(await svc.RecursiveMoveAsync(req.SrcDir, req.DstDir, user.ToUser())));
 
         // --- Link / Archive ---
+        // Go: g.POST("/link", middlewares.AuthAdmin, handles.Link) — link generation
+        // is admin-only because it can expose storage credentials/direct URLs.
         g.MapPost("/link", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.LinkAsync(req.Path, user.ToUser())));
+            Results.Ok(await svc.LinkAsync(req.Path, user.ToUser()))).RequireAuthorization("admin");
 
-        g.MapGet("/archive/meta", async (IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapMethods("/archive/meta", ["GET", "POST"], async (IFileSystemService svc, ClaimsPrincipal user) =>
             Results.Ok(await svc.ArchiveMetaAsync("/", user.ToUser())));
 
-        g.MapPost("/archive/list", async (ArchiveListReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.ArchiveListAsync(req.Path, req.ArchivePass ?? req.Password, user.ToUser())));
+        g.MapMethods("/archive/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        {
+            var req = await RequestBinder.BodyOrQueryAsync<ArchiveListReq>(ctx, ctx.RequestAborted);
+            return Results.Ok(await svc.ArchiveListAsync(req.Path, req.ArchivePass ?? req.Password, user.ToUser()));
+        });
 
         // POST /fs/archive/decompress — body: { src_dir, dst_dir, name, archive_pass, ... }.
         // archivePath = src_dir + name[0]; destPath = dst_dir (+ name folder if put_into_new_dir).
@@ -156,8 +187,12 @@ public static class FsEndpoints
         // Body: { path, password, method, ... }. Delegates to
         // IFileSystemService.OtherAsync(path, method); drivers that don't override
         // it return 501 so the frontend shows "unsupported" cleanly.
-        g.MapPost("/other", async (FsOtherReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.OtherAsync(req.Path, req.Method ?? "", user.ToUser())));
+        // Go: handles.FsOther via g.Any(...).
+        g.MapMethods("/other", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        {
+            var req = await RequestBinder.BodyOrQueryAsync<FsOtherReq>(ctx, ctx.RequestAborted);
+            return Results.Ok(await svc.OtherAsync(req.Path, req.Method ?? "", user.ToUser()));
+        });
 
         // --- Torrent endpoints (Phase 6 — not yet implemented, return 501) ---
         // Route names match the Go reference + frontend api.ts:
@@ -202,11 +237,13 @@ public static class FsEndpoints
     }
 }
 
-// --- Request DTOs ---
-// Field names use snake_case via [JsonPropertyName] to match the frontend's api.ts payloads.
+// --- 请求 DTO ---
+// 字段名通过 [JsonPropertyName] 使用 snake_case 以匹配前端 api.ts 的请求体。
 
+/// <summary>通用路径请求体（/mkdir、/remove_empty_directory、/link 等）。</summary>
 public sealed class PathReq { public string Path { get; set; } = "/"; }
 
+/// <summary>目录列取请求体（<c>/dirs</c>）。</summary>
 public sealed class DirsReq
 {
     public string Path { get; set; } = "/";
@@ -215,6 +252,7 @@ public sealed class DirsReq
     public bool ForceRoot { get; set; }
 }
 
+/// <summary>重命名请求体（<c>/fs/rename</c>）。</summary>
 public sealed class RenameReq
 {
     public string Path { get; set; } = "";
@@ -222,8 +260,10 @@ public sealed class RenameReq
     public bool Overwrite { get; set; }
 }
 
+/// <summary>批量重命名请求体（旧版 <c>/fs/rename_batch</c>，Items 为完整路径）。</summary>
 public sealed class BatchRenameReq { public List<BatchRenameItem> Items { get; set; } = []; }
 
+/// <summary>前端版批量重命名请求体（<c>/fs/batch_rename</c>，仅文件名 + src_dir）。</summary>
 public sealed class FsBatchRenameReq
 {
     [JsonPropertyName("src_dir")]
@@ -231,6 +271,18 @@ public sealed class FsBatchRenameReq
     [JsonPropertyName("rename_objects")]
     public List<RenameObjDto> RenameObjects { get; set; } = [];
 }
+
+/// <summary>正则批量重命名请求体（<c>POST /fs/regex_rename</c>，对应 Go RegexRenameReq）。</summary>
+public sealed class RegexRenameReq
+{
+    [JsonPropertyName("src_dir")]
+    public string SrcDir { get; set; } = "";
+    [JsonPropertyName("src_name_regex")]
+    public string SrcNameRegex { get; set; } = "";
+    [JsonPropertyName("new_name_regex")]
+    public string NewNameRegex { get; set; } = "";
+}
+/// <summary>批量重命名单项：旧名 → 新名。</summary>
 public sealed class RenameObjDto
 {
     [JsonPropertyName("src_name")]
@@ -239,7 +291,7 @@ public sealed class RenameObjDto
     public string NewName { get; set; } = "";
 }
 
-/// <summary>Shared body for /fs/move and /fs/copy. Frontend sends src_dir + names.</summary>
+/// <summary>/fs/move 与 /fs/copy 共用的请求体；前端发送 src_dir + names。</summary>
 public sealed class MoveReq
 {
     [JsonPropertyName("src_dir")]
@@ -253,12 +305,14 @@ public sealed class MoveReq
     public bool Merge { get; set; }
 }
 
+/// <summary>删除请求体（<c>/fs/remove</c>）。</summary>
 public sealed class RemoveReq
 {
     public string Dir { get; set; } = "";
     public List<string> Names { get; set; } = [];
 }
 
+/// <summary>归档列表请求体（<c>/fs/archive/list</c>）。</summary>
 public sealed class ArchiveListReq
 {
     public string Path { get; set; } = "";
@@ -273,6 +327,7 @@ public sealed class ArchiveListReq
     public bool Refresh { get; set; }
 }
 
+/// <summary>归档解压请求体（<c>/fs/archive/decompress</c>）。</summary>
 public sealed class ArchiveDecompressReq
 {
     [JsonPropertyName("src_dir")]
@@ -291,8 +346,10 @@ public sealed class ArchiveDecompressReq
     public bool Overwrite { get; set; }
 }
 
+/// <summary>获取直传（预签 URL）信息的请求体（<c>/fs/get_direct_upload_info</c>）。</summary>
 public sealed class DirectUploadInfoReq { public string Path { get; set; } = ""; public string? FileName { get; set; } public long FileSize { get; set; } public string? Tool { get; set; } }
 
+/// <summary>递归移动请求体（<c>/fs/recursive_move</c>）。</summary>
 public sealed class RecursiveMoveReq
 {
     [JsonPropertyName("src_dir")]
@@ -303,4 +360,5 @@ public sealed class RecursiveMoveReq
     public int ConflictPolicy { get; set; }
 }
 
+/// <summary>驱动特有操作请求体（<c>/fs/other</c>，如 aliyun video_preview）。</summary>
 public sealed class FsOtherReq { public string Path { get; set; } = "/"; public string? Password { get; set; } public string? Method { get; set; } }

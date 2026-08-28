@@ -5,28 +5,46 @@ using OpenList.Core.Models;
 namespace OpenList.Infrastructure.Data;
 
 /// <summary>
-/// EF Core DbContext. Table prefix: <c>x_</c>. Supports SQLite (default) and PostgreSQL.
-/// Mirrors OpenList Go <c>internal/db</c>.
+/// EF Core 数据库上下文。表名前缀为 <c>x_</c>，支持 SQLite（默认）与 PostgreSQL。
+/// 对应 Go 参考实现 <c>internal/db</c>。
 /// </summary>
 public sealed class OpenListDbContext : DbContext
 {
     private readonly DatabaseConfig _config;
 
+    /// <summary>
+    /// 创建数据库上下文实例。
+    /// </summary>
+    /// <param name="options">EF Core 选项（含数据库提供程序配置）。</param>
+    /// <param name="config">数据库配置，用于读取表前缀等。</param>
     public OpenListDbContext(DbContextOptions<OpenListDbContext> options, DatabaseConfig config) : base(options)
     {
         _config = config;
     }
 
+    /// <summary>用户表。</summary>
     public DbSet<User> Users => Set<User>();
+    /// <summary>存储（存储驱动实例）表。</summary>
     public DbSet<Storage> Storages => Set<Storage>();
+    /// <summary>路径元数据表。</summary>
     public DbSet<Meta> Metas => Set<Meta>();
+    /// <summary>分享记录表。</summary>
     public DbSet<Sharing> Sharings => Set<Sharing>();
+    /// <summary>设置键值对表。</summary>
     public DbSet<SettingItem> Settings => Set<SettingItem>();
+    /// <summary>SSH 公钥表。</summary>
     public DbSet<SshKey> SshKeys => Set<SshKey>();
+    /// <summary>消息表（站内消息/广播）。</summary>
     public DbSet<Message> Messages => Set<Message>();
+    /// <summary>搜索索引条目表。</summary>
     public DbSet<SearchIndexEntry> SearchIndex => Set<SearchIndexEntry>();
+    /// <summary>WebAuthn 凭据表。</summary>
     public DbSet<WebAuthnCredential> AuthnCredentials => Set<WebAuthnCredential>();
 
+    /// <summary>
+    /// 配置实体到数据表的映射关系（表名、主键、唯一索引等）。
+    /// 整个模型采用的是传统 TPH 之外的独立表映射，无导航属性。
+    /// </summary>
     protected override void OnModelCreating(ModelBuilder b)
     {
         var prefix = _config.TablePrefix;

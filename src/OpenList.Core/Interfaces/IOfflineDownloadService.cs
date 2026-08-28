@@ -3,23 +3,25 @@ using OpenList.Core.Models;
 namespace OpenList.Core.Interfaces;
 
 /// <summary>
-/// Orchestrates offline downloads through aria2 / qBittorrent / Transmission.
-/// Validates the destination path, picks the requested tool, creates a tracking
-/// task via <see cref="ITaskService"/>, and polls the tool until the download
-/// completes (or fails / is cancelled). Mirrors OpenList Go
-/// <c>pkg/task/offline_download</c>.
+/// 通过 aria2 / qBittorrent / Transmission 编排离线下载。
+/// 校验目标路径、选择请求的工具、通过 <see cref="ITaskService"/> 创建跟踪任务，
+/// 并不断轮询工具状态直至下载完成（或失败/被取消）。与 OpenList Go 的
+/// <c>pkg/task/offline_download</c> 对应。
 /// </summary>
 public interface IOfflineDownloadService
 {
     /// <summary>
-    /// Add URLs to the requested offline-download tool and start tracking them.
-    /// Returns the new task id(s).
+    /// 将 URL 添加到请求的离线下载工具并开始跟踪。
+    /// 返回新建的任务 id 列表。
     /// </summary>
     Task<Resp<OfflineDownloadResp>> AddAsync(OfflineDownloadReq req, User user, CancellationToken ct = default);
 }
 
+/// <summary>
+/// 离线下载添加结果。
+/// </summary>
 public sealed class OfflineDownloadResp
 {
-    /// <summary>Created task ids (one per URL).</summary>
+    /// <summary>创建的任务 id 列表（每个 URL 对应一个）。</summary>
     public List<string> Tasks { get; set; } = [];
 }

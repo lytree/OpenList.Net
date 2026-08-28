@@ -8,8 +8,8 @@ using OpenList.Infrastructure.Data;
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// User CRUD + 2FA cache management. Passwords hashed with SHA256 (with domain suffix).
-/// Mirrors OpenList Go <c>internal/op/user.go</c>.
+/// 用户增删改查 + 双因子缓存管理。密码使用 SHA256 加盐哈希（带固定后缀）。
+/// 对应 Go 参考实现 <c>internal/op/user.go</c>。
 /// </summary>
 public sealed class UserService : IUserService
 {
@@ -17,6 +17,12 @@ public sealed class UserService : IUserService
     private readonly TimeProvider _time;
     private readonly AppConfiguration _config;
 
+    /// <summary>
+    /// 创建用户服务实例。
+    /// </summary>
+    /// <param name="db">EF Core 数据库上下文。</param>
+    /// <param name="config">应用配置（读取超级管理员用户名）。</param>
+    /// <param name="time">时间源（可选，默认系统时区）。</param>
     public UserService(OpenListDbContext db, AppConfiguration config, TimeProvider? time = null)
     {
         _db = db;
@@ -25,28 +31,36 @@ public sealed class UserService : IUserService
     }
 
     /// <summary>
-    /// The config-defined super administrator username. This user is synced from
-    /// configuration on every startup and cannot be demoted, deleted, or renamed
-    /// through the API.
+    /// 配置文件中定义的超级管理员用户名。该用户每次启动时从配置同步，
+    /// 不能通过 API 被降权、删除或改名。
     /// </summary>
     public string SuperAdminUsername => _config.AdminUsername;
 
-    /// <summary>Whether the given user is the config-defined super administrator.</summary>
+    /// <summary>判断给定用户是否为配置中定义的超级管理员。</summary>
     public bool IsSuperAdmin(User u) =>
         u.Role == UserRole.Admin && string.Equals(u.Username, _config.AdminUsername, StringComparison.Ordinal);
 
+    /// <summary>
+    /// 按 Id 获取用户。
+    /// </summary>
     public async Task<Resp<User>> GetAsync(long id, CancellationToken ct = default)
     {
         var u = await _db.Users.FindAsync([id], ct);
         return u is null ? Resp<User>.Fail("user not found", RespCodes.NotFound) : Resp<User>.Ok(u);
     }
 
+    /// <summary>
+    /// 按用户名获取用户。
+    /// </summary>
     public async Task<Resp<User>> GetByNameAsync(string username, CancellationToken ct = default)
     {
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Username == username, ct);
         return u is null ? Resp<User>.Fail("user not found", RespCodes.NotFound) : Resp<User>.Ok(u);
     }
 
+    /// <summary>
+    /// 按 SSO Id 获取用户。
+    /// </summary>
     public async Task<Resp<User>> GetBySsoIdAsync(string ssoId, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(ssoId)) return Resp<User>.Fail("sso id required", RespCodes.BadRequest);
@@ -54,12 +68,18 @@ public sealed class UserService : IUserService
         return u is null ? Resp<User>.Fail("user not found", RespCodes.NotFound) : Resp<User>.Ok(u);
     }
 
+    /// <summary>
+    /// 获取当前用户对外可见的信息（脱敏 DTO）。
+    /// </summary>
     public async Task<Resp<UserPublic>> GetCurrentAsync(long userId, CancellationToken ct = default)
     {
         var u = await _db.Users.FindAsync([userId], ct);
         return u is null ? Resp<UserPublic>.Fail("user not found", RespCodes.NotFound) : Resp<UserPublic>.Ok(ToPublic(u));
     }
 
+    /// <summary>
+    /// 更新当前用户自己的信息（用户名、密码、禁用状态、SSO Id 等）。
+    /// </summary>
     public async Task<Resp> UpdateCurrentAsync(long userId, UpdateUserReq req, CancellationToken ct = default)
     {
         var u = await _db.Users.FindAsync([userId], ct);
@@ -74,6 +94,9 @@ public sealed class UserService : IUserService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 分页列出所有用户的对外信息，按 Id 升序。
+    /// </summary>
     public async Task<Resp<List<UserPublic>>> ListAsync(CancellationToken ct = default)
     {
         var list = await _db.Users.AsNoTracking()
@@ -94,6 +117,12 @@ public sealed class UserService : IUserService
         return Resp<List<UserPublic>>.Ok(list);
     }
 
+    /// <summary>
+    /// 创建用户：校验用户名/密码非空、用户名唯一后入库。
+    /// </summary>
+    /// <param name="req">创建用户请求。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>成功返回新用户的对外信息；用户名重复返回 409。</returns>
     public async Task<Resp<UserPublic>> CreateAsync(CreateUserReq req, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(req.Username) || string.IsNullOrWhiteSpace(req.Password))
@@ -120,13 +149,15 @@ public sealed class UserService : IUserService
         return Resp<UserPublic>.Ok(ToPublic(u));
     }
 
+    /// <summary>
+    /// 更新指定用户的信息；对配置中定义的超级管理员限制降权、改名与禁用。
+    /// </summary>
     public async Task<Resp> UpdateAsync(long id, UpdateUserReq req, CancellationToken ct = default)
     {
         var u = await _db.Users.FindAsync([id], ct);
         if (u is null) return Resp.Fail("user not found", RespCodes.NotFound);
 
-        // The config-defined super admin cannot be demoted, renamed, or disabled
-        // — its credentials are owned by configuration.
+        // 配置定义的超级管理员不能被降权、改名或禁用——其凭据归属配置管理。
         if (IsSuperAdmin(u))
         {
             if (req.Role.HasValue && req.Role.Value != UserRole.Admin)
@@ -152,6 +183,9 @@ public sealed class UserService : IUserService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 删除用户（超级管理员与管理 API 调用外的管理员用户不可删除）。
+    /// </summary>
     public async Task<Resp> DeleteAsync(long id, CancellationToken ct = default)
     {
         var u = await _db.Users.FindAsync([id], ct);
@@ -165,6 +199,9 @@ public sealed class UserService : IUserService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 关闭指定用户的双因子并清空其双因子密钥。
+    /// </summary>
     public async Task<Resp> Cancel2FaAsync(long id, CancellationToken ct = default)
     {
         var u = await _db.Users.FindAsync([id], ct);
@@ -176,6 +213,9 @@ public sealed class UserService : IUserService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 持久化指定用户的双因子密钥。
+    /// </summary>
     public async Task<Resp> SetTwoFactorSecretAsync(long id, string secret, CancellationToken ct = default)
     {
         var u = await _db.Users.FindAsync([id], ct);
@@ -186,12 +226,18 @@ public sealed class UserService : IUserService
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 清理指定用户缓存。当前尚无缓存层（Phase 16），为未来缓存失效预留的占位实现。
+    /// </summary>
     public Task<Resp> DelCacheAsync(long id, CancellationToken ct = default)
     {
-        // No cache layer yet (Phase 16); placeholder for future user cache invalidation.
+        // 尚未实现缓存层（Phase 16），此处为用户缓存失效预留占位。
         return Task.FromResult(Resp.Ok());
     }
 
+    /// <summary>
+    /// 列出指定用户的 SSH 公钥，按 Id 倒序。
+    /// </summary>
     public async Task<Resp<List<SshKey>>> ListSshKeysAsync(long userId, CancellationToken ct = default)
     {
         var list = await _db.SshKeys.AsNoTracking()
@@ -201,6 +247,9 @@ public sealed class UserService : IUserService
         return Resp<List<SshKey>>.Ok(list);
     }
 
+    /// <summary>
+    /// 删除指定 SSH 公钥。
+    /// </summary>
     public async Task<Resp> DeleteSshKeyAsync(long keyId, CancellationToken ct = default)
     {
         var k = await _db.SshKeys.FindAsync([keyId], ct);
@@ -211,9 +260,8 @@ public sealed class UserService : IUserService
     }
 
     /// <summary>
-    /// SHA256 hash of <c>password + "-https://github.com/alist-org/alist"</c>, returned as
-    /// lowercase hex. Matches the OpenList Go reference so the frontend's client-side
-    /// hash can be verified directly by <see cref="LoginHashAsync"/>.
+    /// 计算 <c>password + "-https://github.com/alist-org/alist"</c> 的 SHA256 哈希，返回小写十六进制串。
+    /// 与 Go 参考实现一致，使前端客户端哈希可直接由 <see cref="LoginHashAsync"/> 校验。
     /// </summary>
     public static string HashPassword(string password)
     {
@@ -222,6 +270,9 @@ public sealed class UserService : IUserService
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    /// <summary>
+    /// 常量时间校验给定明文密码是否与存储的哈希匹配。
+    /// </summary>
     public static bool VerifyPassword(string password, string storedHash)
     {
         if (string.IsNullOrEmpty(storedHash)) return false;
@@ -231,9 +282,12 @@ public sealed class UserService : IUserService
             System.Text.Encoding.UTF8.GetBytes(storedHash));
     }
 
-    /// <summary>Suffix appended to passwords before hashing, matching the Go reference.</summary>
+    /// <summary>哈希密码前追加的后缀，与 Go 参考实现保持一致。</summary>
     public const string PasswordHashSuffix = "-https://github.com/alist-org/alist";
 
+    /// <summary>
+    /// 将用户实体映射为对外可见的信息 DTO。
+    /// </summary>
     private static UserPublic ToPublic(User u) => new()
     {
         Id = u.Id,

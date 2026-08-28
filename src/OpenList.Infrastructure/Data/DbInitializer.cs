@@ -7,11 +7,20 @@ using OpenList.Infrastructure.Services;
 namespace OpenList.Infrastructure.Data;
 
 /// <summary>
-/// Database initializer: migrate (or EnsureCreated fallback) + seed admin user on first run.
-/// Mirrors OpenList Go <c>internal/db/init.go</c>.
+/// 数据库初始化器：负责执行数据库迁移（或回退到 EnsureCreated），
+/// 并在首次运行时填充管理员用户与默认设置。对应 Go 参考实现 <c>internal/db/init.go</c>。
 /// </summary>
 public static class DbInitializer
 {
+    /// <summary>
+    /// 初始化数据库结构并写入种子数据。顺序为：先尝试 EF Core 迁移（有挂起迁移时执行
+    /// <see cref="DatabaseFacade.MigrateAsync"/>），迁移失败（无迁移程序集或旧版 EnsureCreated
+    /// 库表冲突）则回退到 EnsureCreated + 追加式补列，最后写入管理员账号与默认设置。
+    /// </summary>
+    /// <param name="db">EF Core 数据库上下文。</param>
+    /// <param name="config">应用配置，用于读取数据库类型、管理员账号与密码等。</param>
+    /// <param name="ct">取消令牌（可选）。</param>
+    /// <exception cref="Exception">任意数据库操作失败时抛出（由调用方决定是否放行）。</exception>
     public static async Task InitializeAsync(OpenListDbContext db, AppConfiguration config, CancellationToken ct = default)
     {
         var isPostgres = IsPostgres(config.Database.Type);
@@ -64,12 +73,13 @@ public static class DbInitializer
     }
 
     /// <summary>
-    /// Lightweight additive schema migration for databases created by
-    /// <see cref="DatabaseFacade.EnsureCreatedAsync"/>. Adds columns that were
-    /// introduced after the initial schema without requiring EF migrations.
-    /// ALTER TABLE ADD COLUMN is non-destructive and idempotent when guarded
-    /// by a column-existence check. Both SQLite and PostgreSQL are supported.
+    /// 针对由 <see cref="DatabaseFacade.EnsureCreatedAsync"/> 创建的数据库执行轻量级的追加式
+    /// 结构迁移：为初始表补充后续引入的列（ALTER TABLE ADD COLUMN 非破坏性、通过“列存在性”检查
+    /// 实现幂等），并确保新增的表存在。同时支持 SQLite 与 PostgreSQL。
     /// </summary>
+    /// <param name="db">EF Core 数据库上下文。</param>
+    /// <param name="isPostgres">是否使用 PostgreSQL（否则按 SQLite 处理）。</param>
+    /// <param name="ct">取消令牌。</param>
     private static async Task MigrateSchemaAsync(OpenListDbContext db, bool isPostgres, CancellationToken ct)
     {
         // Columns to add: (table, column, sqlite declaration, postgres declaration).
@@ -202,6 +212,14 @@ public static class DbInitializer
         }
     }
 
+    /// <summary>
+    /// 确保指定表存在：表不存在时执行给定的建表 DDL（含索引）。
+    /// </summary>
+    /// <param name="db">EF Core 数据库上下文。</param>
+    /// <param name="table">表名。</param>
+    /// <param name="isPostgres">是否使用 PostgreSQL（用于选择存在性查询）。</param>
+    /// <param name="ddl">建表 SQL 语句。</param>
+    /// <param name="ct">取消令牌。</param>
     private static async Task EnsureTableAsync(
         OpenListDbContext db, string table, bool isPostgres, string ddl, CancellationToken ct)
     {
@@ -210,6 +228,9 @@ public static class DbInitializer
         catch { /* race or already exists — ignore */ }
     }
 
+    /// <summary>
+    /// 判断指定表是否存在。SQLite 查询 sqlite_master，PostgreSQL 查询 information_schema.tables。
+    /// </summary>
     private static async Task<bool> TableExistsAsync(
         OpenListDbContext db, string table, bool isPostgres, CancellationToken ct)
     {
@@ -232,6 +253,10 @@ public static class DbInitializer
         finally { if (conn.State == System.Data.ConnectionState.Open) await conn.CloseAsync(); }
     }
 
+    /// <summary>
+    /// 判断指定列是否已存在。PostgreSQL 查询 information_schema.columns；SQLite 使用
+    /// PRAGMA table_info 读取列名。
+    /// </summary>
     private static async Task<bool> ColumnExistsAsync(
         OpenListDbContext db, string table, string column, bool isPostgres, CancellationToken ct)
     {
@@ -276,10 +301,18 @@ public static class DbInitializer
         finally { if (conn.State == System.Data.ConnectionState.Open) await conn.CloseAsync(); }
     }
 
+    /// <summary>
+    /// 判断配置中的数据库类型是否为 PostgreSQL（同时识别 <c>postgres</c> 与 <c>postgresql</c>）。
+    /// </summary>
     private static bool IsPostgres(string type)
         => type.Equals("postgres", StringComparison.OrdinalIgnoreCase) ||
            type.Equals("postgresql", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// 首次运行时创建或校对超级管理员账号：依据配置的 AdminUsername 定位管理员，
+    /// 不存在则创建，存在则同步用户名/角色/权限（密码仅在配置提供非空值时覆盖）。
+    /// 管理员权限位全部置 1（共 16 位），使其拥有全部前端权限分项。
+    /// </summary>
     private static async Task SeedAdminAsync(OpenListDbContext db, AppConfiguration config, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
@@ -335,11 +368,10 @@ public static class DbInitializer
     }
 
     /// <summary>
-    /// Default settings keyed by group. Used both for initial seeding and for
-    /// <c>POST /admin/setting/default?group=</c> (restore group to defaults).
-    /// Group values are the frontend's Group enum (int):
+    /// 按分组组织的默认设置表：既用于首次装填，也用于 <c>POST /admin/setting/default?group=</c>
+    /// 恢复某分组为默认值。Group 取值为前端 Group 枚举（int）：
     /// 0=SINGLE, 1=SITE, 2=STYLE, 3=PREVIEW, 4=GLOBAL, 5=ARIA2, 6=INDEX,
-    /// 7=SSO, 8=LDAP, 9=S3, 10=FTP, 11=TRAFFIC. See frontend src/types/setting.ts.
+    /// 7=SSO, 8=LDAP, 9=S3, 10=FTP, 11=TRAFFIC。参见前端 src/types/setting.ts。
     /// </summary>
     public static readonly (string Key, string Value, SettingValueType Type, SettingFlag Flag, int Group, string? Options)[] DefaultSettings =
     {
@@ -480,15 +512,13 @@ public static class DbInitializer
     };
 
     /// <summary>
-    /// Seeds the default public settings expected by the frontend. The SolidJS SPA
-    /// reads these via <c>GET /api/public/settings</c> and calls methods like
-    /// <c>.split('\n')</c> on the values, so every key must exist with at least an
-    /// empty string to avoid <c>Cannot read properties of undefined</c> errors.
+    /// 装填前端所需的默认公开设置。SolidJS 前端通过 <c>GET /api/public/settings</c> 读取这些值，
+    /// 并会调用类似 <c>.split('\n')</c> 的方法，因此每个键都必须存在（至少为空字符串），
+    /// 否则会触发 <c>Cannot read properties of undefined</c> 错误。
     /// </summary>
     private static async Task SeedDefaultSettingsAsync(OpenListDbContext db, CancellationToken ct)
     {
-        // Migrate legacy group="ui" to the frontend's numeric group values,
-        // and correct any type mismatches (e.g. announcement String → Text).
+        // 迁移旧版 group="ui" 到前端使用的数字分组，并纠正类型不匹配（如 announcement 由 String→Text）。
         var defaultsByKey = DefaultSettings.ToDictionary(d => d.Key, StringComparer.Ordinal);
         var allSettings = await db.Settings.ToListAsync(ct);
         foreach (var s in allSettings)

@@ -11,14 +11,13 @@ using OpenList.Infrastructure.Data;
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// WebAuthn (passkey) registration + login backed by Fido2NetLib and the
-/// <c>x_authn_credentials</c> table. Mirrors OpenList Go
-/// <c>server/handles/webauthn.go</c> + <c>internal/authn</c>.
-///
-/// One <see cref="IFido2"/> instance is built per request because the relying
-/// party's origin comes from the inbound HTTP request (the user's browser URL).
-/// Sessions (challenge + user handle) are JSON blobs returned to the client and
-/// echoed back in the <c>Session</c> header — same pattern as the Go server.
+/// WebAuthn（通行密钥）注册与登录服务，基于 Fido2NetLib 与 <c>x_authn_credentials</c> 数据表。
+/// 对应 Go 参考实现 <c>server/handles/webauthn.go</c> + <c>internal/authn</c>。
+/// <para>
+/// 每次请求都会构建一个 <see cref="IFido2"/> 实例，因为依赖方（relying party）的
+/// origin 来自入站 HTTP 请求（用户浏览器的 URL）。会话（challenge + user handle）以
+/// JSON 形式返回给客户端，并在后续请求中通过 <c>Session</c> 头原样回传 —— 与 Go 服务一致。
+/// </para>
 /// </summary>
 public sealed class WebAuthnService : IWebAuthnService
 {
@@ -27,6 +26,13 @@ public sealed class WebAuthnService : IWebAuthnService
     private readonly ISettingService _settings;
     private readonly IHttpContextAccessor _httpContextAccessor;
 
+    /// <summary>
+    /// 创建 WebAuthn 服务实例。
+    /// </summary>
+    /// <param name="db">EF Core 数据库上下文。</param>
+    /// <param name="auth">认证服务，用于签发 JWT。</param>
+    /// <param name="settings">设置服务，用于读取 WebAuthn 开关。</param>
+    /// <param name="httpContextAccessor">HTTP 上下文访问器，用于解析当前请求的 origin。</param>
     public WebAuthnService(OpenListDbContext db, IAuthService auth, ISettingService settings, IHttpContextAccessor httpContextAccessor)
     {
         _db = db;
@@ -35,12 +41,21 @@ public sealed class WebAuthnService : IWebAuthnService
         _httpContextAccessor = httpContextAccessor;
     }
 
+    /// <summary>
+    /// 判断 WebAuthn 是否启用（读取 <c>webauthn_login_enabled</c> 设置）。
+    /// </summary>
     public async Task<bool> IsEnabledAsync(CancellationToken ct = default)
     {
         var r = await _settings.GetAsync("webauthn_login_enabled", ct);
         return r.Code == RespCodes.Ok && string.Equals(r.Data?.Value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// 开始登录流程：生成断言选项（assertion options），可指定用户名限制只允许该用户的凭证。
+    /// </summary>
+    /// <param name="username">用户名（可选）。提供时只能使用该用户已注册的凭证登录。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>包含断言选项与会话数据的 <c>WebAuthnBeginResult</c>；未启用或用户不存在时返回错误。</returns>
     public async Task<Resp<WebAuthnBeginResult>> BeginLoginAsync(string? username, CancellationToken ct = default)
     {
         if (!await IsEnabledAsync(ct))
@@ -50,7 +65,7 @@ public sealed class WebAuthnService : IWebAuthnService
         List<PublicKeyCredentialDescriptor> allowed;
         if (!string.IsNullOrEmpty(username))
         {
-            // Username-based login: restrict the assertion to that user's credentials.
+            // 基于用户名的登录：把断言限定到该用户的凭证上。
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == username, ct);
             if (user is null)
                 return Resp<WebAuthnBeginResult>.Fail("user not found", RespCodes.NotFound);
@@ -61,7 +76,7 @@ public sealed class WebAuthnService : IWebAuthnService
         }
         else
         {
-            // Discoverable login — no allowList, the authenticator picks the credential.
+            // 可发现式登录（discoverable login）—— 不提供 allowList，由认证器自行选择凭证。
             allowed = new();
         }
 
@@ -73,13 +88,21 @@ public sealed class WebAuthnService : IWebAuthnService
         var session = SerializeSession(options);
         return Resp<WebAuthnBeginResult>.Ok(new WebAuthnBeginResult
         {
-            // Frontend reads data.options.publicKey — wrap to match the
-            // PublicKeyCredentialRequestOptionsJSON shape (Go protocol.CredentialAssertion).
+            // 前端读取 data.options.publicKey —— 包装以匹配
+            // PublicKeyCredentialRequestOptionsJSON 的形状（Go 的 protocol.CredentialAssertion）。
             Options = WrapPublicKey(options),
             Session = session,
         });
     }
 
+    /// <summary>
+    /// 完成登录流程：校验断言响应，查找对应凭证，验证签名并递增签名计数器，最后签发 JWT。
+    /// </summary>
+    /// <param name="username">期望的用户名（可选，用于校验凭证归属）。</param>
+    /// <param name="session">登录开始时返回的会话数据（base64 编码）。</param>
+    /// <param name="assertionJson">认证器返回的断言响应 JSON。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>登录成功时返回签发的 JWT；验证失败返回对应错误。</returns>
     public async Task<Resp<string>> FinishLoginAsync(string? username, string session, JsonElement assertionJson, CancellationToken ct = default)
     {
         if (!await IsEnabledAsync(ct))
@@ -91,9 +114,9 @@ public sealed class WebAuthnService : IWebAuthnService
         AssertionOptions options;
         try
         {
-            // Session is base64(UTF8 JSON) — same encoding as the Go server
-            // (base64.StdEncoding.EncodeToString(json.Marshal(sessionData)))
-            // so the frontend can echo the header verbatim.
+            // 会话为 base64(UTF8 JSON) —— 与 Go 服务编码一致
+            // （base64.StdEncoding.EncodeToString(json.Marshal(sessionData))），
+            // 这样前端可以原样回传该头。
             var sessionBytes = Convert.FromBase64String(session);
             options = JsonSerializer.Deserialize<AssertionOptions>(sessionBytes)!;
         }
@@ -105,8 +128,7 @@ public sealed class WebAuthnService : IWebAuthnService
         var response = JsonSerializer.Deserialize<AuthenticatorAssertionRawResponse>(assertionJson.GetRawText())
             ?? new AuthenticatorAssertionRawResponse();
 
-        // Look up the stored credential by the id returned by the authenticator.
-        // The response id is a base64url string — we store it the same way.
+        // 按认证器返回的 id 查找已存凭证。该 id 是 base64url 字符串，存库时也采用相同编码。
         var credentialId = response.Id ?? "";
         var stored = await _db.AuthnCredentials.FirstOrDefaultAsync(c => c.CredentialId == credentialId, ct);
         if (stored is null)
@@ -118,7 +140,7 @@ public sealed class WebAuthnService : IWebAuthnService
         if (user.Disabled)
             return Resp<string>.Fail("user disabled", RespCodes.Forbidden);
 
-        // If a username was provided, ensure it matches the credential's owner.
+        // 若提供了用户名，确保其与该凭证的主人一致。
         if (!string.IsNullOrEmpty(username) && !string.Equals(user.Username, username, StringComparison.OrdinalIgnoreCase))
             return Resp<string>.Fail("credential does not belong to this user", RespCodes.Unauthorized);
 
@@ -140,7 +162,7 @@ public sealed class WebAuthnService : IWebAuthnService
             return Resp<string>.Fail("webauthn verification failed: " + ex.Message, RespCodes.Unauthorized);
         }
 
-        // Bump the sign count (clone-detection counter).
+        // 更新签名计数器（用于克隆检测）。
         stored.SignCount = result.SignCount;
         await _db.SaveChangesAsync(ct);
 
@@ -148,6 +170,12 @@ public sealed class WebAuthnService : IWebAuthnService
         return Resp<string>.Ok(token);
     }
 
+    /// <summary>
+    /// 开始注册流程：为指定用户生成新凭证（create credential）选项，绑定为常驻密钥。
+    /// </summary>
+    /// <param name="userId">要注册凭证的用户主键。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>包含创建选项与会话数据的 <c>WebAuthnBeginResult</c>。</returns>
     public async Task<Resp<WebAuthnBeginResult>> BeginRegistrationAsync(long userId, CancellationToken ct = default)
     {
         if (!await IsEnabledAsync(ct))
@@ -158,7 +186,7 @@ public sealed class WebAuthnService : IWebAuthnService
             return Resp<WebAuthnBeginResult>.Fail("user not found", RespCodes.NotFound);
 
         var fido = BuildFido2();
-        // Use the user's primary key (as a UTF-8 string) as the WebAuthn user handle.
+        // 用用户主键（转 UTF-8 字符串）作为 WebAuthn 用户句柄。
         var userHandle = System.Text.Encoding.UTF8.GetBytes(user.Id.ToString());
         var existingCreds = await _db.AuthnCredentials.Where(c => c.UserId == user.Id).ToListAsync(ct);
         var exclude = existingCreds.Select(ToDescriptor).ToList();
@@ -182,13 +210,21 @@ public sealed class WebAuthnService : IWebAuthnService
         var session = SerializeSession(options);
         return Resp<WebAuthnBeginResult>.Ok(new WebAuthnBeginResult
         {
-            // Frontend reads data.options.publicKey — wrap to match the
-            // PublicKeyCredentialCreationOptionsJSON shape (Go protocol.CredentialCreation).
+            // 前端读取 data.options.publicKey —— 包装以匹配
+            // PublicKeyCredentialCreationOptionsJSON 的形状（Go 的 protocol.CredentialCreation）。
             Options = WrapPublicKey(options),
             Session = session,
         });
     }
 
+    /// <summary>
+    /// 完成注册流程：校验认证器响应，创建或更新凭证记录。
+    /// </summary>
+    /// <param name="userId">注册凭证的用户主键。</param>
+    /// <param name="session">注册开始时返回的会话数据。</param>
+    /// <param name="attestationJson">认证器返回的注册响应 JSON。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>注册成功返回空成功响应；验证失败返回对应错误。</returns>
     public async Task<Resp> FinishRegistrationAsync(long userId, string session, JsonElement attestationJson, CancellationToken ct = default)
     {
         if (!await IsEnabledAsync(ct))
@@ -234,7 +270,7 @@ public sealed class WebAuthnService : IWebAuthnService
             return Resp.Fail("webauthn verification failed: " + ex.Message, RespCodes.BadRequest);
         }
 
-        // Replace any existing credential with the same id (re-registering a key).
+        // 用同 id 覆盖既有凭证（重新注册同一把密钥）。
         var newId = Base64UrlTextEncoder.Encode(credential.Id);
         var existing = await _db.AuthnCredentials.FirstOrDefaultAsync(c => c.UserId == user.Id && c.CredentialId == newId, ct);
         if (existing is null)
@@ -254,18 +290,24 @@ public sealed class WebAuthnService : IWebAuthnService
         existing.Transports = credential.Transports is null
             ? ""
             : string.Join(",", credential.Transports.Select(t => t.ToString()));
-        existing.Discoverable = true; // we required resident keys above
+        existing.Discoverable = true; // 上面已强制要求常驻密钥
         await _db.SaveChangesAsync(ct);
 
         return Resp.Ok();
     }
 
+    /// <summary>
+    /// 列出指定用户已注册的所有 WebAuthn 凭证。
+    /// </summary>
     public async Task<Resp<List<WebAuthnCredential>>> ListCredentialsAsync(long userId, CancellationToken ct = default)
     {
         var list = await _db.AuthnCredentials.Where(c => c.UserId == userId).ToListAsync(ct);
         return Resp<List<WebAuthnCredential>>.Ok(list);
     }
 
+    /// <summary>
+    /// 删除指定用户的某条 WebAuthn 凭证。
+    /// </summary>
     public async Task<Resp> DeleteCredentialAsync(long userId, string credentialId, CancellationToken ct = default)
     {
         var entity = await _db.AuthnCredentials.FirstOrDefaultAsync(c => c.UserId == userId && c.CredentialId == credentialId, ct);
@@ -276,8 +318,11 @@ public sealed class WebAuthnService : IWebAuthnService
         return Resp.Ok();
     }
 
-    // ---- helpers ----
+    // ---- 辅助方法 ----
 
+    /// <summary>
+    /// 依据当前请求的 scheme、host 构建 Fido2 实例（每次请求新建，因 origin 来自请求）。
+    /// </summary>
     private IFido2 BuildFido2()
     {
         var ctx = _httpContextAccessor.HttpContext;
@@ -292,6 +337,9 @@ public sealed class WebAuthnService : IWebAuthnService
         });
     }
 
+    /// <summary>
+    /// 把数据库中的凭证记录转换为 Fido2NetLib 使用的描述符（含传输方式解析）。
+    /// </summary>
     private static PublicKeyCredentialDescriptor ToDescriptor(WebAuthnCredential c)
     {
         var transports = c.Transports?.Split(',', StringSplitOptions.RemoveEmptyEntries)
@@ -302,17 +350,16 @@ public sealed class WebAuthnService : IWebAuthnService
             transports);
     }
 
-    // Wrap the flat Fido2NetLib options object under a "publicKey" key so the
-    // JSON matches the WebAuthn standard shape consumed by
+    // 把扁平的 Fido2NetLib options 对象包到 "publicKey" 键下，使 JSON 符合前端
     // PublicKeyCredential.parseCreationOptionsFromJSON /
-    // parseRequestOptionsFromJSON on the frontend. Go's go-webauthn
-    // protocol.CredentialCreation / CredentialAssertion types already nest
-    // their fields under json:"publicKey", so we mirror that here.
+    // parseRequestOptionsFromJSON 使用的 WebAuthn 标准形状。Go 的 go-webauthn
+    // protocol.CredentialCreation / CredentialAssertion 类型已把字段嵌套在
+    // json:"publicKey" 下，这里保持一致。
     private static JsonElement WrapPublicKey<T>(T options) =>
         JsonSerializer.SerializeToElement(new { publicKey = options });
 
-    // Session blob = base64(UTF8 JSON). Using standard base64 (not url-safe)
-    // matches the Go server so frontend session headers are interchangeable.
+    // 会话 = base64(UTF8 JSON)。使用标准 base64（非 url 安全）以与 Go 服务一致，
+    // 保证前端会话头可互通。
     private static string SerializeSession<T>(T options) =>
         Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(options));
 }

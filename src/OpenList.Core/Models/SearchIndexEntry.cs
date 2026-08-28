@@ -4,23 +4,25 @@ using System.Text.Json.Serialization;
 namespace OpenList.Core.Models;
 
 /// <summary>
-/// A single persisted search-index row. Mirrors OpenList Go's database search
-/// index (internal/search). Rows are produced by <c>SearchService</c> during a
-/// build/update walk and queried by <c>SearchAsync</c> when the
-/// <c>search_index</c> setting is <c>"database"</c>.
+/// 持久化搜索索引中的单行记录。与 OpenList Go 的数据库搜索索引（internal/search）对应。
+/// 由 <c>SearchService</c> 在构建/更新索引的过程中写入，当 <c>search_index</c> 设置为
+/// <c>"database"</c> 时由 <c>SearchAsync</c> 查询使用。
 /// </summary>
 public sealed class SearchIndexEntry
 {
+    /// <summary>索引记录主键。</summary>
     public long Id { get; set; }
-    /// <summary>Parent directory (normalized absolute path, e.g. "/docs").</summary>
+    /// <summary>父目录（标准化绝对路径，例如 "/docs"）。</summary>
     public string Parent { get; set; } = string.Empty;
-    /// <summary>Entry name (file or directory).</summary>
+    /// <summary>条目名称（文件或目录）。</summary>
     public string Name { get; set; } = string.Empty;
+    /// <summary>是否为目录。</summary>
     [JsonPropertyName("is_dir")]
     public bool IsDir { get; set; }
+    /// <summary>文件大小（字节）。</summary>
     public long Size { get; set; }
-    /// <summary>Full path = Parent + "/" + Name. Indexed for exact lookups.</summary>
+    /// <summary>完整路径 = Parent + "/" + Name。用于精确查找。</summary>
     public string Path { get; set; } = string.Empty;
-    /// <summary>File type code (UNKNOWN=0, FOLDER=1, VIDEO=2, AUDIO=3, TEXT=4, IMAGE=5).</summary>
+    /// <summary>文件类型编码（未知=0、文件夹=1、视频=2、音频=3、文本=4、图片=5）。</summary>
     public int Type { get; set; }
 }

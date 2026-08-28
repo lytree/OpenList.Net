@@ -6,20 +6,26 @@ using OpenList.Core.Interfaces;
 namespace OpenList.Server.Endpoints;
 
 /// <summary>
-/// Misc public endpoints: Plist (iOS IPA manifest), manifest.json, favicon, robots.txt.
-/// Mirrors OpenList Go <c>server/handles/helper.go::Plist</c> and the static asset
-/// routes registered in <c>server/server.go</c>.
+/// 杂项公开端点：/i/{linkName}（iOS 安装用 Plist manifest）、/manifest.json（PWA 清单）、
+/// /favicon.ico、/robots.txt。
+/// 对应 OpenList Go <c>server/handles/helper.go::Plist</c> 以及
+/// <c>server/server.go</c> 中注册的静态资源路由。
 /// </summary>
 public static class MiscEndpoints
 {
+    /// <summary>
+    /// 注册 /i、/manifest.json、/robots.txt、/favicon.ico 等公开路由。
+    /// /i 解析 base64 编码的链接并生成 Apple plist（用于在线安装 IPA）；
+    /// 其余为 PWA 相关静态资源，均匿名可访问。
+    /// </summary>
     public static IEndpointRouteBuilder MapMiscApi(this IEndpointRouteBuilder app)
     {
-        // GET /i/{linkName} — iOS Plist manifest for IPA install.
+        // GET /i/{linkName} — 生成 iOS 安装 IPA 所需的 Plist manifest。
         // linkName = base64( urlEncoded(rawUrl) + "/" + urlEncoded(fileName) ) + ".plist"
         app.MapGet("/i/{linkName}", (string linkName) => BuildPlist(linkName));
 
-        // GET /manifest.json — PWA web app manifest. Reads site_title from settings
-        // (falls back to "OpenList"). The frontend's index.html references this.
+        // GET /manifest.json — PWA Web 应用清单。从设置读取 site_title
+        // （未配置时回退为 "OpenList"）。前端的 index.html 会引用此文件。
         app.MapGet("/manifest.json", async (ISettingService settings) =>
         {
             var pub = await settings.GetPublicAsync();
@@ -38,15 +44,14 @@ public static class MiscEndpoints
             return Results.Json(manifest);
         }).AllowAnonymous();
 
-        // GET /robots.txt — allow all crawlers. Go returns a static string.
+        // GET /robots.txt — 允许所有爬虫。Go 端返回固定字符串。
         app.MapGet("/robots.txt", () =>
             Results.Text("User-agent: *\nAllow: /\n", "text/plain", Encoding.UTF8))
           .AllowAnonymous();
 
-        // GET /favicon.ico — redirect to the configured logo (or a default).
-        // Mirrors Go which serves the logo from settings; here we 302 to the
-        // public logo setting value if set, otherwise a data URI is avoided in
-        // favor of a 404 (browsers handle gracefully).
+        // GET /favicon.ico — 302 跳转到配置的 logo 地址（或返回 404）。
+        // 对齐 Go：从设置取 logo；此处若设置了 public logo 则 302 跳转，
+        // 否则返回 404（浏览器可优雅处理），避免内联 data URI。
         app.MapGet("/favicon.ico", async (ISettingService settings) =>
         {
             var pub = await settings.GetPublicAsync();
@@ -59,9 +64,14 @@ public static class MiscEndpoints
         return app;
     }
 
+    /// <summary>
+    /// 将 base64 编码的链接解码并构建 Apple plist XML。
+    /// 链接格式为 <c>urlEncoded(rawUrl)/urlEncoded(fullName)</c>（可带
+    /// <c>@identifier</c> 后缀）；解出的内容会被 XML/HTML 转义以防注入。
+    /// </summary>
     private static IResult BuildPlist(string linkName)
     {
-        // Strip optional ".plist" suffix.
+        // 去掉可选的 ".plist" 后缀。
         var b64 = linkName.EndsWith(".plist", StringComparison.OrdinalIgnoreCase)
             ? linkName[..^".plist".Length]
             : linkName;
@@ -70,15 +80,16 @@ public static class MiscEndpoints
         try { decoded = Encoding.UTF8.GetString(Convert.FromBase64String(b64)); }
         catch { return Results.BadRequest("invalid base64 link name"); }
 
+        // 分隔符 "/" 将解码串拆为 rawUrl 与 fullName 两部分。
         var parts = decoded.Split('/');
         if (parts.Length != 2)
             return Results.BadRequest("malformed link");
 
-        // parts[0] = urlEncoded(rawUrl); parts[1] = urlEncoded(fullName)
+        // parts[0] = urlEncoded(rawUrl)；parts[1] = urlEncoded(fullName)。
         var rawUrl = HttpUtility.UrlDecode(parts[0]);
         var fullName = HttpUtility.UrlDecode(parts[1]);
 
-        // fullName may contain "@identifier" suffix — split on "@".
+        // fullName 可能带有 "@identifier" 后缀 —— 按 "@" 拆出应用名与包标识。
         var name = fullName;
         var identifier = $"org.opolist.{fullName}";
         var atIdx = fullName.LastIndexOf('@');
@@ -88,7 +99,7 @@ public static class MiscEndpoints
             identifier = fullName[(atIdx + 1)..];
         }
 
-        // Escape for XML.
+        // 转义用于 XML 输出的特殊字符。
         var url = rawUrl.Replace("<", "&lt;").Replace(">", "&gt;");
         name = HttpUtility.HtmlEncode(name);
         identifier = HttpUtility.HtmlEncode(identifier);

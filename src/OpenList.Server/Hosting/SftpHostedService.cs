@@ -27,6 +27,7 @@ public sealed class SftpHostedService : IHostedService
         _logger = logger;
     }
 
+    /// <summary>启动 SFTP 服务；未启用时仅记录日志，启用时由于缺少服务端库仅给出警告。</summary>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         if (!_config.Enable)
@@ -35,9 +36,9 @@ public sealed class SftpHostedService : IHostedService
             return Task.CompletedTask;
         }
 
-        // SSH.NET is a client library — no server implementation is available in this build.
-        // To enable SFTP, integrate a server-side SSH library (e.g. Rebex File Server)
-        // and bridge authentication via OpenListFtpMembershipProvider-equivalent for SFTP.
+        // SSH.NET 是客户端库 —— 本构建无可用服务端实现。
+        // 如需启用 SFTP，接入服务端 SSH 库（如 Rebex File Server），
+        // 并将鉴权桥接到与 OpenListFtpMembershipProvider 等价的 SFTP 实现。
         _logger.LogWarning(
             "SFTP server enabled on {Listen} but no SSH server library is wired up. " +
             "SFTP functionality is not available in this build.",
@@ -46,6 +47,7 @@ public sealed class SftpHostedService : IHostedService
         return Task.CompletedTask;
     }
 
+    /// <summary>停止 SFTP 服务（仅当启用时记录日志）。</summary>
     public Task StopAsync(CancellationToken cancellationToken)
     {
         if (_config.Enable)

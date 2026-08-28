@@ -15,6 +15,17 @@ using OpenList.Infrastructure.Services;
 using OpenList.Server.Endpoints;
 using OpenList.Server.Hosting;
 
+// =====================================================================
+// OpenList.Server 程序入口（ASP.NET Core Minimal Hosting）
+// ---------------------------------------------------------------------
+// 这是一个"基于项目"的 ASP.NET Core 应用，使用顶层语句(Program.cs)完成：
+//   1. 配置加载（OpenList__ 前缀的环境变量覆盖 appsettings.json）；
+//   2. 依赖注入注册（数据库 EF Core / ZioMountService / 各业务服务 /
+//      JWT 鉴权 / CORS / FTP·SFTP 宿主服务 / Swagger）；
+//   3. 中间件管道搭建（静态文件 → CORS → 认证/授权 → 各 API 路由 → SPA 回退）；
+//   4. 数据库初始化、种子管理员与加载全部存储后启动服务。
+// 路由均以 Extension 方式写在 Endpoints/ 目录的各个静态类中（见 MapXxxApi）。
+// =====================================================================
 var builder = WebApplication.CreateBuilder(args);
 
 // Add environment variables with OpenList__ prefix (overrides appsettings.json)
@@ -103,9 +114,14 @@ builder.Services.AddSingleton<ISignService, SignService>();
 builder.Services.AddHttpClient("offline_download_aria2");
 builder.Services.AddHttpClient("offline_download_qbit");
 builder.Services.AddHttpClient("offline_download_transmission");
+// Provide a lazy IFileSystemService factory for OfflineDownloadService. This breaks
+// the construction-time cycle between IFileSystemService (resolves IOfflineDownloadService
+// in its singleton factory below) and IOfflineDownloadService (depends on IFileSystemService).
+// The Func only captures sp, so building OfflineDownloadService never resolves IFileSystemService.
+builder.Services.AddSingleton<Func<IFileSystemService>>(sp => () => sp.GetRequiredService<IFileSystemService>());
 // IOfflineDownloadService is a singleton because it only depends on singletons
-// (ITaskService, IFileSystemService, IHttpClientFactory) + IServiceScopeFactory for
-// the scoped ISettingService lookups.
+// (ITaskService, IHttpClientFactory) + IServiceScopeFactory for the scoped ISettingService lookups,
+// plus the lazy Func<IFileSystemService>. Resolving it never triggers IFileSystemService construction.
 builder.Services.AddSingleton<IOfflineDownloadService, OfflineDownloadService>();
 // FileSystemService is a singleton; the new 3-arg constructor wires in ISignService
 // and IOfflineDownloadService (both singletons) so AddOfflineDownloadAsync can delegate.
@@ -114,6 +130,10 @@ builder.Services.AddSingleton<IFileSystemService>(sp =>
         sp.GetRequiredService<ZioMountService>(),
         sp.GetService<ISignService>(),
         sp.GetService<IOfflineDownloadService>()));
+// Multipart (chunked) upload sessions — singleton; depends only on IFileSystemService.
+builder.Services.AddSingleton<IMultipartUploadService, MultipartUploadService>();
+// MCP server (Streamable HTTP) — singleton; depends on IFileSystemService + AppConfiguration.
+builder.Services.AddSingleton<IMcpServerService, McpServerService>();
 // WebDAV in-memory lock store — singleton so LOCK/UNLOCK state persists across
 // requests in the same process (mirrors Go's webdav.NewMemLS()).
 builder.Services.AddSingleton<IWebDavLockStore, InMemoryWebDavLockStore>();
@@ -235,6 +255,15 @@ app.MapMiscApi();
 app.MapShareApi();
 // Sharing signed download (/sd/{sid}[/*path]) — public, share-verified
 app.MapSharingDownloadApi();
+// Multipart (chunked) upload — auth'd
+app.MapMultipartApi();
+// MCP (Model Context Protocol) server — admin, gated by MCP.Enable
+app.MapMcpApi();
+// Debug endpoints (/debug/*) — Development only (mirrors Go flags.Debug || flags.Dev)
+if (app.Environment.IsDevelopment())
+{
+    app.MapDebugApi();
+}
 // SPA fallback — matches ALL unmatched paths (including those with file extensions),
 // mirroring Go's NoRoute catch-all. The default MapFallback uses {*path:nonfile}
 // which excludes paths with extensions (e.g. /somefile.txt) and returns 404.
@@ -269,5 +298,8 @@ using (var scope = app.Services.CreateScope())
 
 app.Run();
 
-// Exposed for WebApplicationFactory in integration tests.
+/// <summary>
+/// 程序入口 Program 类（partial，仅用于类型公开以支持集成测试中的
+/// WebApplicationFactory<Program> 引用）。
+/// </summary>
 public partial class Program { }

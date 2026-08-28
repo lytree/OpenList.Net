@@ -3,40 +3,44 @@ using System.Text.Json.Serialization;
 namespace OpenList.Core.Models;
 
 /// <summary>
-/// A registered WebAuthn credential for a user. Mirrors the Go
-/// <c>model.UserAuthn</c> / <c>Credential</c> shape. Stored in the
-/// <c>x_authn_credentials</c> table.
+/// 用户已注册的 WebAuthn 凭据。与 Go <c>model.UserAuthn</c> / <c>Credential</c> 结构对应，
+/// 存储在 <c>x_authn_credentials</c> 表中。
 /// </summary>
 public sealed class WebAuthnCredential
 {
+    /// <summary>凭据主键。</summary>
     public long Id { get; set; }
+    /// <summary>所属用户主键。</summary>
     public long UserId { get; set; }
 
-    /// <summary>Base64url-encoded credential id (the raw id returned by the authenticator).</summary>
+    /// <summary>Base64url 编码的凭据 id（认证器返回的原始 id）。</summary>
     public string CredentialId { get; set; } = string.Empty;
 
-    /// <summary>Base64url-encoded user handle (the user's WebAuthn id — we use the user's primary key).</summary>
+    /// <summary>Base64url 编码的用户句柄（用户的 WebAuthn id——此处使用用户主键）。</summary>
     public string UserHandle { get; set; } = string.Empty;
 
-    /// <summary>Base64url-encoded public key (COSE format).</summary>
+    /// <summary>Base64url 编码的公钥（COSE 格式）。</summary>
     public string PublicKey { get; set; } = string.Empty;
 
-    /// <summary>Authenticator sign count (for clone detection).</summary>
+    /// <summary>认证器签名计数（用于克隆检测）。</summary>
     public uint SignCount { get; set; }
 
-    /// <summary>Base64url-encoded AAGUID of the authenticator (used as a fingerprint for display).</summary>
+    /// <summary>认证器的 Base64url 编码 AAGUID（作为展示用指纹）。</summary>
     public string Aaguid { get; set; } = string.Empty;
 
-    /// <summary>Transports the authenticator declared at registration time.</summary>
+    /// <summary>认证器在注册时声明的传输方式。</summary>
     public string Transports { get; set; } = string.Empty;
 
-    /// <summary>True for discoverable credentials (resident keys).</summary>
+    /// <summary>是否为可发现凭据（常驻密钥）。</summary>
     public bool Discoverable { get; set; }
 
+    /// <summary>创建时间。</summary>
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>对外展示的指纹（即 AAGUID）。</summary>
     [JsonPropertyName("fingerprint")]
     public string Fingerprint => Aaguid;
+    /// <summary>对外展示的凭据 id（即 CredentialId）。</summary>
     [JsonPropertyName("id")]
     public string DisplayId => CredentialId;
 }

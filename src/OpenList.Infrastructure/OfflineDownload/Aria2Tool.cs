@@ -7,13 +7,14 @@ using OpenList.Core.Models;
 namespace OpenList.Infrastructure.OfflineDownload;
 
 /// <summary>
-/// aria2 offline-download adapter. Talks to aria2's JSON-RPC 2.0 endpoint
-/// (default http://host:6800/jsonrpc). Mirrors OpenList Go
-/// <c>pkg/task/offline_download/aria2.go</c>.
+/// aria2 离线下载适配器：通过 aria2 的 JSON-RPC 2.0 接口（默认 http://host:6800/jsonrpc）
+/// 完成任务的添加、取消与状态查询。对应 Go 参考实现 <c>pkg/task/offline_download/aria2.go</c>。
 /// </summary>
 public sealed class Aria2Tool : IOfflineDownloadTool
 {
+    /// <inheritdoc/>
     public string Name => "aria2";
+    /// <inheritdoc/>
     public bool Enabled => _enabled;
 
     private readonly HttpClient _http;
@@ -22,6 +23,12 @@ public sealed class Aria2Tool : IOfflineDownloadTool
     private readonly string _secret;
     private int _id;
 
+    /// <summary>
+    /// 创建 aria2 适配器实例。
+    /// </summary>
+    /// <param name="http">共享的 <see cref="HttpClient"/> 实例。</param>
+    /// <param name="uri">aria2 JSON-RPC 地址（为空则表示禁用）。</param>
+    /// <param name="secret">RPC 密钥（可选，非空时以 <c>token:</c> 前缀随请求发送）。</param>
     public Aria2Tool(HttpClient http, string uri, string secret)
     {
         _http = http;
@@ -30,9 +37,16 @@ public sealed class Aria2Tool : IOfflineDownloadTool
         _secret = secret ?? "";
     }
 
+    /// <summary>
+    /// 通过 aria2.addUri 添加下载任务。
+    /// </summary>
+    /// <param name="url">待下载的链接。</param>
+    /// <param name="destPath">保存目录。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>成功时返回 aria2 分配的 GID；失败返回错误信息。</returns>
     public async Task<Resp<string>> AddDownloadAsync(string url, string destPath, CancellationToken ct = default)
     {
-        // aria2.addUri params: [secret, [url], {dir: ...}]
+        // aria2.addUri 参数：[secret, [url], {dir: ...}]
         var args = new List<object>();
         if (!string.IsNullOrEmpty(_secret)) args.Add("token:" + _secret);
         args.Add(new[] { url });
@@ -43,6 +57,11 @@ public sealed class Aria2Tool : IOfflineDownloadTool
         return Resp<string>.Ok(result.ToString()!);
     }
 
+    /// <summary>
+    /// 通过 aria2.remove 按 GID 取消下载任务。
+    /// </summary>
+    /// <param name="taskId">aria2 的 GID（添加任务时的返回值）。</param>
+    /// <param name="ct">取消令牌。</param>
     public async Task<Resp> CancelAsync(string taskId, CancellationToken ct = default)
     {
         var args = new List<object>();
@@ -52,6 +71,12 @@ public sealed class Aria2Tool : IOfflineDownloadTool
         return ok ? Resp.Ok() : Resp.Fail(err ?? "aria2 error", RespCodes.InternalError);
     }
 
+    /// <summary>
+    /// 通过 aria2.tellStatus 查询任务状态，并将 aria2 的状态码映射为统一模型。
+    /// </summary>
+    /// <param name="taskId">aria2 的 GID。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>归档后的下载状态（含已下载/总量/错误信息）。</returns>
     public async Task<Resp<OfflineDownloadStatus>> GetStatusAsync(string taskId, CancellationToken ct = default)
     {
         var args = new List<object>();
@@ -89,6 +114,9 @@ public sealed class Aria2Tool : IOfflineDownloadTool
         return Resp<OfflineDownloadStatus>.Ok(st);
     }
 
+    /// <summary>
+    /// 把 aria2 的状态字符串映射为统一状态模型（running/paused/complete/canceled/error/pending）。
+    /// </summary>
     private static string MapState(string s) => s switch
     {
         "active" or "waiting" => "running",
@@ -99,6 +127,13 @@ public sealed class Aria2Tool : IOfflineDownloadTool
         _ => "pending",
     };
 
+    /// <summary>
+    /// 发送一条 aria2 JSON-RPC 2.0 请求并解析响应，统一处理网络异常、HTTP 错误码与 RPC 错误。
+    /// </summary>
+    /// <param name="method">RPC 方法名（如 aria2.addUri）。</param>
+    /// <param name="args">RPC 参数列表。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>成功标记、result 元素与错误信息三元组（失败时 Result 为 default）。</returns>
     private async Task<(bool Ok, JsonElement Result, string? Error)> CallAsync(
         string method, IReadOnlyList<object> args, CancellationToken ct)
     {

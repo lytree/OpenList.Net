@@ -10,17 +10,17 @@ using OpenList.Infrastructure.Data;
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// SSO orchestration using OAuth2 authorization-code flow. Reads all configuration
-/// from the settings store (group 7 — see <c>DbInitializer</c>) so admins can tune
-/// it from the frontend without restarting. Mirrors OpenList Go
-/// <c>server/handles/ssologin.go</c>.
-///
-/// Supported platforms:
+/// SSO 编排服务，使用 OAuth2 授权码流程。所有配置都从设置存储读取
+/// （第 7 组 —— 见 <c>DbInitializer</c>），因此管理员无需重启即可从前端调整。
+/// 对应 Go 参考实现 <c>server/handles/ssologin.go</c>。
+/// <para>
+/// 支持的平台：
 /// <list type="bullet">
-/// <item><c>Casdoor</c> — self-hosted IdP at <c>SSOEndpointName</c>.</item>
-/// <item><c>OIDC</c> — generic OpenID Connect (discovery via <c>.well-known/openid-configuration</c>).</item>
-/// <item><c>Github</c>, <c>Google</c>, <c>Microsoft</c>, <c>Dingtalk</c> — stubbed (return 501).</item>
+/// <item><c>Casdoor</c> — 自托管的身份提供者（位于 <c>SSOEndpointName</c>）。</item>
+/// <item><c>OIDC</c> — 通用 OpenID Connect（通过 <c>.well-known/openid-configuration</c> 发现）。</item>
+/// <item><c>Github</c>、<c>Google</c>、<c>Microsoft</c>、<c>Dingtalk</c> — 已实现对接。</item>
 /// </list>
+/// </para>
 /// </summary>
 public sealed class SsoService : ISsoService
 {
@@ -29,6 +29,13 @@ public sealed class SsoService : ISsoService
     private readonly IUserService _users;
     private readonly IAuthService _auth;
 
+    /// <summary>
+    /// 创建 SSO 服务实例。
+    /// </summary>
+    /// <param name="db">EF Core 数据库上下文。</param>
+    /// <param name="http">HTTP 客户端工厂，用于访问身份提供者。</param>
+    /// <param name="users">用户服务，用于查找或自动注册 SSO 用户。</param>
+    /// <param name="auth">认证服务，用于签发 JWT。</param>
     public SsoService(OpenListDbContext db, IHttpClientFactory http, IUserService users, IAuthService auth)
     {
         _db = db;
@@ -37,12 +44,22 @@ public sealed class SsoService : ISsoService
         _auth = auth;
     }
 
+    /// <summary>
+    /// 判断 SSO 是否启用（需开启开关且配置了 client_id）。
+    /// </summary>
     public async Task<bool> IsEnabledAsync(CancellationToken ct = default)
     {
         var s = await GetSettingsAsync(ct);
         return s.Enabled && !string.IsNullOrWhiteSpace(s.ClientId);
     }
 
+    /// <summary>
+    /// 构建 SSO 授权 URL，供前端跳转到身份提供者完成登录。
+    /// </summary>
+    /// <param name="method">登录方式，应为 <c>get_sso_id</c> 或 <c>sso_get_token</c>。</param>
+    /// <param name="redirectUri">回调地址（由调用方完整构造）。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>授权跳转 URL；未启用或平台不支持时返回错误。</returns>
     public async Task<Resp<string>> GetAuthorizeUrlAsync(string method, string redirectUri, CancellationToken ct = default)
     {
         var s = await GetSettingsAsync(ct);
@@ -51,8 +68,8 @@ public sealed class SsoService : ISsoService
         if (method is not ("get_sso_id" or "sso_get_token"))
             return Resp<string>.Fail("invalid method", RespCodes.BadRequest);
 
-        // For non-compatibility mode the callback is always /api/auth/sso_callback?method=...
-        // The caller passes the fully-built redirectUri so we don't need to know the host.
+        // 非兼容模式下回调始终为 /api/auth/sso_callback?method=...
+        // 调用方会传入完整构造的 redirectUri，故这里无需知道主机名。
         var scope = s.Platform switch
         {
             "Github" => "read:user",
@@ -89,6 +106,15 @@ public sealed class SsoService : ISsoService
         return Resp<string>.Ok(ub.Uri.AbsoluteUri);
     }
 
+    /// <summary>
+    /// 处理 SSO 回调：按平台换取令牌并获取用户资料，随后返回 SSO 编号或（可选）自动注册并签发 JWT。
+    /// </summary>
+    /// <param name="method">登录方式，<c>get_sso_id</c> 仅返回编号，<c>sso_get_token</c> 返回 JWT。</param>
+    /// <param name="code">身份提供者返回的授权码。</param>
+    /// <param name="state">回调附带的 state（此处未深入校验，仅透传）。</param>
+    /// <param name="redirectUri">与授权时一致的回调地址。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>包含 SSO 编号或 JWT 的 <c>SsoCallbackResult</c>。</returns>
     public async Task<Resp<SsoCallbackResult>> HandleCallbackAsync(string method, string code, string? state, string redirectUri, CancellationToken ct = default)
     {
         var s = await GetSettingsAsync(ct);
@@ -117,7 +143,7 @@ public sealed class SsoService : ISsoService
         if (method == "get_sso_id")
             return Resp<SsoCallbackResult>.Ok(new SsoCallbackResult { SsoId = userId });
 
-        // sso_get_token: look up the local user, auto-register if allowed, issue JWT.
+        // sso_get_token：查找本地用户，允许时自动注册，然后签发 JWT。
         var lookup = await _users.GetBySsoIdAsync(userId, ct);
         User u;
         if (lookup.IsSuccess())
@@ -139,7 +165,7 @@ public sealed class SsoService : ISsoService
             }, ct);
             if (!create.IsSuccess())
             {
-                // Username collision — disambiguate with the SSO id suffix (matches Go behaviour).
+                // 用户名冲突 —— 追加 SSO id 后缀以消歧（与 Go 行为一致）。
                 create = await _users.CreateAsync(new CreateUserReq
                 {
                     Username = username + "_" + userId,
@@ -157,7 +183,7 @@ public sealed class SsoService : ISsoService
                 if (!fetched.IsSuccess()) return Resp<SsoCallbackResult>.Fail("sso user provisioning failed", RespCodes.InternalError);
             }
             u = fetched.Data!;
-            // Stamp the SSO id onto the freshly-created account.
+            // 给新创建的账号打上 SSO 编号。
             await _users.UpdateAsync(u.Id, new UpdateUserReq { Id = u.Id, SsoID = userId }, ct);
         }
 
@@ -166,8 +192,9 @@ public sealed class SsoService : ISsoService
         return Resp<SsoCallbackResult>.Ok(new SsoCallbackResult { Token = token });
     }
 
-    // --- per-platform token exchange + userinfo fetch ---
+    // --- 各平台的令牌换取与用户信息获取 ---
 
+    /// <summary>Casdoor 令牌换取 + 用户信息获取。</summary>
     private async Task<Resp<SsoUserProfile>> ExchangeCasdoorAsync(SsoSettings s, string code, string redirectUri, CancellationToken ct)
     {
         var tokenUrl = s.Endpoint.TrimEnd('/') + "/api/login/oauth/access_token";
@@ -175,11 +202,13 @@ public sealed class SsoService : ISsoService
         return await ExchangeOAuth2Async(tokenUrl, userUrl, s.ClientId, s.ClientSecret, code, redirectUri, "sub", "preferred_username", "profile", ct);
     }
 
+    /// <summary>
+    /// OIDC 令牌换取：发现端点、换取 id_token，并从 JWT 载荷中提取配置的用户名字段。
+    /// </summary>
     private async Task<Resp<SsoUserProfile>> ExchangeOidcAsync(SsoSettings s, string code, string redirectUri, CancellationToken ct)
     {
-        // For OIDC we discover endpoints, exchange for an id_token, and extract the
-        // configured username key from the JWT payload (no signature verification —
-        // the IdP is already trusted via TLS, matching Go's lenient parseJWT).
+        // 对 OIDC 我们通过发现机制获得端点、换取 id_token，并从 JWT 载荷中裁取配置的
+        // 用户名字段（不做签名校验 —— 身份提供者已通过 TLS 信任，对应 Go 宽松的 parseJWT）。
         var cfg = await DiscoverOidcConfigAsync(s.Endpoint, ct);
         if (cfg is null) return Resp<SsoUserProfile>.Fail("oidc discovery failed", RespCodes.BadRequest);
 
@@ -198,7 +227,7 @@ public sealed class SsoService : ISsoService
         if (string.IsNullOrEmpty(idToken))
             return Resp<SsoUserProfile>.Fail("no id_token in oidc response", RespCodes.BadRequest);
 
-        // Decode the JWT payload (no verification — see comment above).
+        // 解码 JWT 载荷（不做校验 —— 见上方注释）。
         var parts = idToken.Split('.');
         if (parts.Length < 2) return Resp<SsoUserProfile>.Fail("malformed id_token", RespCodes.BadRequest);
         var payload = Base64UrlDecode(parts[1]);
@@ -210,6 +239,7 @@ public sealed class SsoService : ISsoService
         return Resp<SsoUserProfile>.Ok(new SsoUserProfile { Id = sub, Username = name ?? sub });
     }
 
+    /// <summary>GitHub 令牌换取 + 用户信息获取。</summary>
     private async Task<Resp<SsoUserProfile>> ExchangeGithubAsync(SsoSettings s, string code, string redirectUri, CancellationToken ct)
     {
         var r = await ExchangeOAuth2Async("https://github.com/login/oauth/access_token", "https://api.github.com/user",
@@ -217,19 +247,24 @@ public sealed class SsoService : ISsoService
         return r;
     }
 
+    /// <summary>Google 令牌换取 + 用户信息获取。</summary>
     private Task<Resp<SsoUserProfile>> ExchangeGoogleAsync(SsoSettings s, string code, string redirectUri, CancellationToken ct)
         => ExchangeOAuth2Async("https://oauth2.googleapis.com/token", "https://www.googleapis.com/oauth2/v1/userinfo",
             s.ClientId, s.ClientSecret, code, redirectUri, "id", "name", "https://www.googleapis.com/auth/userinfo.profile", ct,
             extraForm: new Dictionary<string, string?> { ["grant_type"] = "authorization_code" });
 
+    /// <summary>Microsoft 令牌换取 + 用户信息获取。</summary>
     private Task<Resp<SsoUserProfile>> ExchangeMicrosoftAsync(SsoSettings s, string code, string redirectUri, CancellationToken ct)
         => ExchangeOAuth2Async("https://login.microsoftonline.com/common/oauth2/v2.0/token", "https://graph.microsoft.com/v1.0/me",
             s.ClientId, s.ClientSecret, code, redirectUri, "id", "displayName", "user.read", ct,
             extraForm: new Dictionary<string, string?> { ["grant_type"] = "authorization_code" });
 
+    /// <summary>
+    /// 钉钉令牌换取 + 用户信息获取（钉钉使用 JSON 请求体换令牌，userinfo 用专用头传令牌）。
+    /// </summary>
     private async Task<Resp<SsoUserProfile>> ExchangeDingtalkAsync(SsoSettings s, string code, string redirectUri, CancellationToken ct)
     {
-        // Dingtalk uses a JSON body for the token exchange and a different auth header for userinfo.
+        // 钉钉换令牌用 JSON 请求体，获取 userinfo 时需要不同的认证头。
         var http = _http.CreateClient("sso");
         var body = JsonSerializer.Serialize(new
         {
@@ -260,9 +295,21 @@ public sealed class SsoService : ISsoService
     }
 
     /// <summary>
-    /// Generic OAuth2 authorization-code → access_token → userinfo flow shared by
-    /// Casdoor, Github, Google and Microsoft (they only differ in URLs + field names).
+    /// 通用 OAuth2 授权码 → access_token → userinfo 流程，Casdoor/GitHub/Google/Microsoft 共用
+    /// （它们仅在 URL 与字段名上不同）。
     /// </summary>
+    /// <param name="tokenUrl">换取 access_token 的令牌端点。</param>
+    /// <param name="userUrl">获取用户信息的端点。</param>
+    /// <param name="clientId">客户端 ID。</param>
+    /// <param name="clientSecret">客户端密钥。</param>
+    /// <param name="code">授权码。</param>
+    /// <param name="redirectUri">回调地址。</param>
+    /// <param name="idField">用户信息中表示唯一标识的字段名。</param>
+    /// <param name="usernameField">用户信息中表示用户名的字段名。</param>
+    /// <param name="scope">请求的 scope。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <param name="extraForm">需要追加到令牌请求表单的额外字段。</param>
+    /// <returns>解析出的用户资料。</returns>
     private async Task<Resp<SsoUserProfile>> ExchangeOAuth2Async(
         string tokenUrl, string userUrl,
         string clientId, string clientSecret,
@@ -305,8 +352,9 @@ public sealed class SsoService : ISsoService
         return Resp<SsoUserProfile>.Ok(new SsoUserProfile { Id = id, Username = name });
     }
 
-    // --- helpers ---
+    // --- 辅助方法 ---
 
+    /// <summary>以表单方式 POST 到令牌端点，并把 JSON 响应解析为字符串字典。</summary>
     private async Task<Resp<Dictionary<string, string>>> PostFormAsync(string url, IReadOnlyDictionary<string, string?> form, CancellationToken ct)
     {
         var http = _http.CreateClient("sso");
@@ -328,12 +376,14 @@ public sealed class SsoService : ISsoService
         }
     }
 
+    /// <summary>通过 OIDC 发现机制解析授权端点。</summary>
     private async Task<string?> DiscoverAuthorizeEndpointAsync(string endpoint, CancellationToken ct)
     {
         var cfg = await DiscoverOidcConfigAsync(endpoint, ct);
         return cfg?.AuthorizationEndpoint;
     }
 
+    /// <summary>拉取 OIDC 发现文档，解析授权端点与令牌端点。</summary>
     private async Task<OidcConfig?> DiscoverOidcConfigAsync(string endpoint, CancellationToken ct)
     {
         var http = _http.CreateClient("sso");
@@ -352,6 +402,7 @@ public sealed class SsoService : ISsoService
         catch { return null; }
     }
 
+    /// <summary>把键值对拼装为 application/x-www-form-urlencoded 查询字符串。</summary>
     private static string BuildQueryString(IEnumerable<KeyValuePair<string, string?>> pairs)
     {
         var sb = new StringBuilder();
@@ -366,6 +417,7 @@ public sealed class SsoService : ISsoService
         return sb.ToString();
     }
 
+    /// <summary>base64url 解码并还原为 UTF-8 字符串。</summary>
     private static string Base64UrlDecode(string s)
     {
         s = s.Replace('-', '+').Replace('_', '/');
@@ -373,9 +425,10 @@ public sealed class SsoService : ISsoService
         return Encoding.UTF8.GetString(Convert.FromBase64String(s));
     }
 
+    /// <summary>每次请求从设置存储读取并组装 SSO 配置（廉价，且管理员可能随时修改）。</summary>
     private async Task<SsoSettings> GetSettingsAsync(CancellationToken ct)
     {
-        // Settings are read fresh each call — they're cheap and admins may change them.
+        // 每次调用都重新读取设置 —— 开销小且管理员可能修改。
         var rows = await _db.Settings.AsNoTracking().ToListAsync(ct);
         string Get(string key) => rows.FirstOrDefault(r => r.Key == key)?.Value ?? "";
         bool GetBool(string key) => string.Equals(Get(key), "true", StringComparison.OrdinalIgnoreCase);
@@ -396,12 +449,14 @@ public sealed class SsoService : ISsoService
         };
     }
 
+    /// <summary>OIDC 发现的配置结果。</summary>
     private sealed record OidcConfig
     {
         public required string AuthorizationEndpoint { get; init; }
         public required string TokenEndpoint { get; init; }
     }
 
+    /// <summary>内部使用的 SSO 配置视图。</summary>
     private sealed class SsoSettings
     {
         public bool Enabled { get; init; }
@@ -417,6 +472,7 @@ public sealed class SsoService : ISsoService
         public string OidcUsernameKey { get; init; } = "";
     }
 
+    /// <summary>内部使用的 SSO 用户资料视图。</summary>
     private sealed class SsoUserProfile
     {
         public string Id { get; set; } = "";
