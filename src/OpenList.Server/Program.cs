@@ -14,6 +14,9 @@ using OpenList.Infrastructure.Data;
 using OpenList.Infrastructure.Services;
 using OpenList.Server.Endpoints;
 using OpenList.Server.Hosting;
+using OpenList.Server.Middleware;
+using Scalar.AspNetCore;
+using Serilog;
 
 // =====================================================================
 // OpenList.Server 程序入口（ASP.NET Core Minimal Hosting）
@@ -21,11 +24,17 @@ using OpenList.Server.Hosting;
 // 这是一个"基于项目"的 ASP.NET Core 应用，使用顶层语句(Program.cs)完成：
 //   1. 配置加载（OpenList__ 前缀的环境变量覆盖 appsettings.json）；
 //   2. 依赖注入注册（数据库 EF Core / ZioMountService / 各业务服务 /
-//      JWT 鉴权 / CORS / FTP·SFTP 宿主服务 / Swagger）；
-//   3. 中间件管道搭建（静态文件 → CORS → 认证/授权 → 各 API 路由 → SPA 回退）；
+//      JWT 鉴权 / CORS / FTP·SFTP 宿主服务 / Swagger·Scalar / Serilog）；
+//   3. 中间件管道搭建（异常处理 → 请求日志 → 静态文件 → CORS → 认证/授权
+//      → 限流 → 各 API 路由 → SPA 回退）；
 //   4. 数据库初始化、种子管理员与加载全部存储后启动服务。
 // 路由均以 Extension 方式写在 Endpoints/ 目录的各个静态类中（见 MapXxxApi）。
 // =====================================================================
+// Bootstrap logger — captures startup failures before the host is built.
+Log.Logger = new LoggerConfiguration().WriteTo.Console().CreateBootstrapLogger();
+try
+{
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add environment variables with OpenList__ prefix (overrides appsettings.json)
@@ -34,6 +43,29 @@ builder.Configuration.AddEnvironmentVariables("OpenList__");
 // Bind configuration (OpenList__ prefix env vars override)
 builder.Services.Configure<AppConfiguration>(builder.Configuration);
 var appConfig = builder.Configuration.Get<AppConfiguration>() ?? new AppConfiguration();
+
+// Phase 16: fail fast on invalid critical config (mirrors Go bootstrap checks).
+appConfig.Validate();
+
+// Phase 16: Serilog — console sink always on; file sink (with Go-style
+// rotation settings MaxSize/MaxBackups/MaxAge) when Log.Enable. ILogger<T>
+// used across the app (incl. RequestLogMiddleware) flows to both sinks.
+builder.Host.UseSerilog((_, _, lc) =>
+{
+    lc.WriteTo.Console();
+    if (appConfig.Log.Enable && !string.IsNullOrWhiteSpace(appConfig.Log.Name))
+    {
+        var logPath = Path.GetFullPath(appConfig.Log.Name);
+        var logDir = Path.GetDirectoryName(logPath);
+        if (!string.IsNullOrEmpty(logDir)) Directory.CreateDirectory(logDir);
+        lc.WriteTo.File(logPath,
+            rollingInterval: RollingInterval.Day,
+            fileSizeLimitBytes: appConfig.Log.MaxSize * 1024L * 1024L,
+            rollOnFileSizeLimit: true,
+            retainedFileCountLimit: appConfig.Log.MaxBackups,
+            retainedFileTimeLimit: TimeSpan.FromDays(appConfig.Log.MaxAge));
+    }
+});
 
 // JSON: camelCase, case-insensitive
 builder.Services.Configure<JsonOptions>(o =>
@@ -123,13 +155,22 @@ builder.Services.AddSingleton<Func<IFileSystemService>>(sp => () => sp.GetRequir
 // (ITaskService, IHttpClientFactory) + IServiceScopeFactory for the scoped ISettingService lookups,
 // plus the lazy Func<IFileSystemService>. Resolving it never triggers IFileSystemService construction.
 builder.Services.AddSingleton<IOfflineDownloadService, OfflineDownloadService>();
-// FileSystemService is a singleton; the new 3-arg constructor wires in ISignService
-// and IOfflineDownloadService (both singletons) so AddOfflineDownloadAsync can delegate.
+// ObjsUpdateHooks is a singleton publish/subscribe registry that decouples
+// IFileSystemService (publisher) from ISearchService (subscriber) so incremental
+// search-index updates don't create a construction-time dependency cycle.
+builder.Services.AddSingleton<IObjsUpdateHooks, ObjsUpdateHooks>();
+// Rate limiters — singleton manager holding the 4 byte-token-bucket limiters
+// (client/server × download/upload), refreshed from the settings table.
+builder.Services.AddSingleton<RateLimitManager>();
+// FileSystemService is a singleton; the 4-arg constructor wires in ISignService,
+// IOfflineDownloadService (both singletons) and the IObjsUpdateHooks registry so
+// AddOfflineDownloadAsync and incremental index publishing can delegate.
 builder.Services.AddSingleton<IFileSystemService>(sp =>
     ActivatorUtilities.CreateInstance<FileSystemService>(sp,
         sp.GetRequiredService<ZioMountService>(),
         sp.GetService<ISignService>(),
-        sp.GetService<IOfflineDownloadService>()));
+        sp.GetService<IOfflineDownloadService>(),
+        sp.GetService<IObjsUpdateHooks>()));
 // Multipart (chunked) upload sessions — singleton; depends only on IFileSystemService.
 builder.Services.AddSingleton<IMultipartUploadService, MultipartUploadService>();
 // MCP server (Streamable HTTP) — singleton; depends on IFileSystemService + AppConfiguration.
@@ -205,6 +246,12 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+// Phase 16: global error handling (outermost — swallows exceptions into a
+// Resp JSON, mirrors gin.Recovery) then request access log (mirrors
+// FilteredLogger). Both wrap static files + API + SPA fallback.
+app.UseMiddleware<ErrorHandlingMiddleware>();
+app.UseMiddleware<RequestLogMiddleware>(appConfig.Log.Filter);
+
 // Serve static files BEFORE routing so that asset requests (e.g. /assets/*.js)
 // are handled here and never reach the SPA fallback catch-all ({*path}).
 var distFullPath = Path.GetFullPath(appConfig.DistDir);
@@ -222,10 +269,26 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Phase 16 middleware: MaxAllowed concurrent-request gate (mirrors Go's
+// middlewares.MaxAllowed, wired when MaxConnections > 0), then download/upload
+// rate-limit stream wrapping (mirrors middlewares.Download/UploadRateLimiter).
+if (appConfig.MaxConnections > 0)
+    app.UseMiddleware<MaxAllowedMiddleware>(appConfig.MaxConnections);
+app.UseMiddleware<RateLimitMiddleware>(RateLimitDirection.Download);
+app.UseMiddleware<RateLimitMiddleware>(RateLimitDirection.Upload);
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+    // Phase 16: Scalar API reference at /scalar — points at Swashbuckle's
+    // swagger.json so it reuses the existing OpenAPI document.
+    app.MapScalarApiReference(options =>
+    {
+        options.WithTitle("OpenList API");
+        options.WithDefaultHttpClient(ScalarTarget.CSharp, ScalarClient.HttpClient);
+        options.WithOpenApiRoutePattern("/swagger/v1/swagger.json");
+    });
 }
 
 // Health check
@@ -294,9 +357,25 @@ using (var scope = app.Services.CreateScope())
     // Load all enabled storages into the mount filesystem.
     var storageSvc = scope.ServiceProvider.GetRequiredService<IStorageService>();
     await storageSvc.LoadAllAsync();
+
+    // Restore persisted search-index progress (Go bootstrap.InitIndex): re-enables
+    // incremental updates after restart and recovers a stale "running" state.
+    var searchSvc = scope.ServiceProvider.GetRequiredService<ISearchService>();
+    await searchSvc.InitIndexAsync();
 }
 
 app.Run();
+
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "OpenList server terminated unexpectedly");
+    throw;
+}
+finally
+{
+    await Log.CloseAndFlushAsync();
+}
 
 /// <summary>
 /// 程序入口 Program 类（partial，仅用于类型公开以支持集成测试中的

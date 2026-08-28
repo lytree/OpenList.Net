@@ -16,6 +16,8 @@ public interface ISearchService
     Task<Resp> StopIndexAsync(CancellationToken ct = default);
     /// <summary>清空搜索索引。</summary>
     Task<Resp> ClearIndexAsync(CancellationToken ct = default);
+    /// <summary>启动时恢复持久化的索引进度（镜像 Go 的 <c>bootstrap.InitIndex</c>）。</summary>
+    Task<Resp> InitIndexAsync(CancellationToken ct = default);
     /// <summary>获取索引进度。</summary>
     Task<Resp<IndexProgress>> GetProgressAsync(CancellationToken ct = default);
     /// <summary>执行搜索。</summary>

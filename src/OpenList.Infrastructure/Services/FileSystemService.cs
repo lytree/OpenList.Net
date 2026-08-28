@@ -19,6 +19,7 @@ public sealed class FileSystemService : IFileSystemService
     private readonly ZioMountService _mount;
     private readonly ISignService? _signs;
     private readonly IOfflineDownloadService? _offline;
+    private readonly IObjsUpdateHooks? _hooks;
 
     /// <summary>创建文件系统服务实例。</summary>
     public FileSystemService(ZioMountService mount) => _mount = mount;
@@ -41,10 +42,23 @@ public sealed class FileSystemService : IFileSystemService
     /// <param name="signs">签名服务（可选）。</param>
     /// <param name="offline">离线下载服务（可选）。</param>
     public FileSystemService(ZioMountService mount, ISignService? signs, IOfflineDownloadService? offline)
+        : this(mount, signs, offline, null)
+    {
+    }
+
+    /// <summary>
+    /// 创建文件系统服务实例（带离线下载编排与对象更新钩子发布）。
+    /// </summary>
+    /// <param name="mount">挂载服务。</param>
+    /// <param name="signs">签名服务（可选）。</param>
+    /// <param name="offline">离线下载服务（可选）。</param>
+    /// <param name="hooks">对象更新钩子注册表（可选，用于增量索引等）。</param>
+    public FileSystemService(ZioMountService mount, ISignService? signs, IOfflineDownloadService? offline, IObjsUpdateHooks? hooks)
     {
         _mount = mount;
         _signs = signs;
         _offline = offline;
+        _hooks = hooks;
     }
 
     /// <summary>
@@ -64,6 +78,10 @@ public sealed class FileSystemService : IFileSystemService
             .OrderBy(e => !e.IsDir)
             .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        // 发布该目录最新条目列表，让订阅者（增量索引）在此刻与真实文件系统对齐。
+        if (_hooks is not null)
+            _ = _hooks.PublishDirectoryUpdateAsync(path.ToString(), entries, CancellationToken.None);
 
         var total = entries.Count;
         // 镜像 Go 的 PageReq.Validate()：page<1 → 1；per_page<1 → int.MaxValue（返回全部）。
@@ -143,6 +161,7 @@ public sealed class FileSystemService : IFileSystemService
         try
         {
             _mount.Root.CreateDirectory(upath);
+            PublishDir(upath.GetDirectory().ToString());
             return Task.FromResult(Resp.Ok());
         }
         catch (Exception ex) { return Task.FromResult(Resp.Fail(ex.Message, RespCodes.InternalError)); }
@@ -157,10 +176,15 @@ public sealed class FileSystemService : IFileSystemService
             return Task.FromResult(Resp.Fail("source not found", RespCodes.NotFound));
         try
         {
+            var isDir = _mount.Root.DirectoryExists(src);
             if (_mount.Root.FileExists(src))
                 _mount.Root.MoveFile(src, dst);
             else
                 _mount.Root.MoveDirectory(src, dst);
+            // 目录重命名时旧路径整棵子树在索引中过期，先清理再刷新两侧父目录。
+            if (isDir) PublishRemoved(src.ToString());
+            PublishDir(src.GetDirectory().ToString());
+            PublishDir(dst.GetDirectory().ToString());
             return Task.FromResult(Resp.Ok());
         }
         catch (Exception ex) { return Task.FromResult(Resp.Fail(ex.Message, RespCodes.InternalError)); }
@@ -537,6 +561,41 @@ public sealed class FileSystemService : IFileSystemService
     /// <summary>目录恒为 TypeFolder，文件类型按扩展名推断。</summary>
     private static int GetObjType(string name, bool isDir)
         => isDir ? TypeFolder : GetFileType(name);
+
+    // --- 对象更新钩子（增量索引等） ---
+
+    /// <summary>
+    /// 发布某目录的最新条目列表到 <see cref="IObjsUpdateHooks"/>（fire-and-forget，不阻塞请求）。
+    /// 目录已不存在时发布空列表，让订阅者清理该父目录下的过期索引。
+    /// </summary>
+    private void PublishDir(string path)
+    {
+        if (_hooks is null) return;
+        try
+        {
+            var upath = Normalize(path);
+            if (!_mount.Root.DirectoryExists(upath))
+            {
+                _ = _hooks.PublishDirectoryUpdateAsync(upath.ToString(), Array.Empty<Obj>(), CancellationToken.None);
+                return;
+            }
+            var entries = _mount.Root.EnumeratePaths(upath)
+                .Select(p => _mount.Root.FileExists(p)
+                    ? (FileSystemEntry)_mount.Root.GetFileEntry(p)
+                    : _mount.Root.GetDirectoryEntry(p))
+                .Select(ToObj)
+                .ToList();
+            _ = _hooks.PublishDirectoryUpdateAsync(upath.ToString(), entries, CancellationToken.None);
+        }
+        catch { /* fire-and-forget：钩子失败不影响请求 */ }
+    }
+
+    /// <summary>发布路径被删除（含子树）事件到 <see cref="IObjsUpdateHooks"/>。</summary>
+    private void PublishRemoved(string path)
+    {
+        if (_hooks is null) return;
+        _ = _hooks.PublishPathRemovedAsync(Normalize(path).ToString(), CancellationToken.None);
+    }
 
     /// <summary>递归收集目录（受最大深度限制）。</summary>
     private void CollectDirs(UPath path, List<string> dirs, int maxDepth)

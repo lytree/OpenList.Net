@@ -505,10 +505,11 @@ public static class DbInitializer
         ("sftp_disable_password_login", "false", SettingValueType.Bool, SettingFlag.Private, 10, null),
 
         // --- Group 11: TRAFFIC ---
-        ("max_client_download_speed", "0", SettingValueType.Number, SettingFlag.Public, 11, null),
-        ("max_client_upload_speed", "0", SettingValueType.Number, SettingFlag.Public, 11, null),
-        ("max_server_download_speed", "0", SettingValueType.Number, SettingFlag.Private, 11, null),
-        ("max_server_upload_speed", "0", SettingValueType.Number, SettingFlag.Private, 11, null),
+        // 速率单位为 KiB/s；<= 0 表示不限速（对齐 Go 的 streamFilterNegative：-1 为无限）。
+        ("max_client_download_speed", "-1", SettingValueType.Number, SettingFlag.Public, 11, null),
+        ("max_client_upload_speed", "-1", SettingValueType.Number, SettingFlag.Public, 11, null),
+        ("max_server_download_speed", "-1", SettingValueType.Number, SettingFlag.Private, 11, null),
+        ("max_server_upload_speed", "-1", SettingValueType.Number, SettingFlag.Private, 11, null),
     };
 
     /// <summary>

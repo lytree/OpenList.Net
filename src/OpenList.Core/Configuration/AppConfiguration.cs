@@ -31,10 +31,89 @@ public sealed class AppConfiguration
     public SftpConfig SFTP { get; set; } = new();
     /// <summary>搜索索引后端，默认 "database"。</summary>
     public string SearchIndex { get; set; } = "database";
+    /// <summary>最大并发请求数，0 表示不限制（镜像 Go 的 conf.MaxConnections）。</summary>
+    public int MaxConnections { get; set; }
+    /// <summary>日志配置（镜像 Go 的 conf.Log；Serilog 请求日志中间件读取 Filter 过滤规则）。</summary>
+    public LogConfig Log { get; set; } = new();
     /// <summary>LDAP 配置。</summary>
     public LdapConfig Ldap { get; set; } = new();
     /// <summary>MCP 服务器配置。</summary>
     public MCPConfig MCP { get; set; } = new();
+
+    /// <summary>
+    /// 启动期配置校验（对应 Go bootstrap 的配置检查）：不合法时抛出异常并中止启动。
+    /// </summary>
+    /// <exception cref="InvalidOperationException">任一关键配置非法时抛出，消息含具体原因。</exception>
+    public void Validate()
+    {
+        if (!Database.Type.Equals("sqlite", StringComparison.OrdinalIgnoreCase) &&
+            !Database.Type.Equals("postgres", StringComparison.OrdinalIgnoreCase) &&
+            !Database.Type.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Unknown database type '{Database.Type}' (expected 'sqlite' or 'postgres').");
+
+        if (Scheme.HttpPort is < -1 or > 65535)
+            throw new InvalidOperationException($"Invalid HTTP port {Scheme.HttpPort} (expected -1..65535).");
+        if (Scheme.HttpsPort is < 0 or > 65535)
+            throw new InvalidOperationException($"Invalid HTTPS port {Scheme.HttpsPort} (expected 0..65535).");
+
+        if (MaxConnections < 0)
+            throw new InvalidOperationException($"Invalid MaxConnections {MaxConnections} (expected >= 0).");
+
+        if (!SearchIndex.Equals("database", StringComparison.OrdinalIgnoreCase) &&
+            !SearchIndex.Equals("bleve", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Unknown search index backend '{SearchIndex}' (expected 'database' or 'bleve').");
+
+        if (Log.MaxSize < 1 || Log.MaxBackups < 1 || Log.MaxAge < 1)
+            throw new InvalidOperationException("Log.MaxSize/MaxBackups/MaxAge must be >= 1.");
+    }
+}
+
+/// <summary>
+/// 日志配置，镜像 Go 的 <c>internal/conf.LogConfig</c>：
+/// 控制 Serilog 文件日志（大小/保留策略）与请求日志的过滤规则。
+/// </summary>
+public sealed class LogConfig
+{
+    /// <summary>是否启用文件日志（对应 Go 的 Log.Enable）。</summary>
+    public bool Enable { get; set; } = true;
+    /// <summary>日志文件路径。</summary>
+    public string Name { get; set; } = "logs/openlist.log";
+    /// <summary>单个日志文件最大大小（MB，对应 Go 的 MaxSize）。</summary>
+    public int MaxSize { get; set; } = 50;
+    /// <summary>保留的日志文件最大数量（对应 Go 的 MaxBackups）。</summary>
+    public int MaxBackups { get; set; } = 30;
+    /// <summary>日志文件最大保留天数（对应 Go 的 MaxAge）。</summary>
+    public int MaxAge { get; set; } = 28;
+    /// <summary>是否压缩旧日志文件（对应 Go 的 Compress）。</summary>
+    public bool Compress { get; set; }
+    /// <summary>请求日志过滤配置。</summary>
+    public LogFilterConfig Filter { get; set; } = new();
+}
+
+/// <summary>
+/// 请求日志过滤配置，镜像 Go 的 <c>LogFilterConfig</c>。
+/// 启用后，命中任一过滤规则的请求将不被写入访问日志。
+/// </summary>
+public sealed class LogFilterConfig
+{
+    /// <summary>是否启用过滤。</summary>
+    public bool Enable { get; set; }
+    /// <summary>过滤规则列表（任一规则全部条件命中即跳过日志）。</summary>
+    public List<LogFilterItem> Filters { get; set; } = [];
+}
+
+/// <summary>
+/// 单条请求日志过滤规则，镜像 Go 的 <c>Filter</c>。规则内各条件为"与"关系，
+/// 规则之间为"或"关系。
+/// </summary>
+public sealed class LogFilterItem
+{
+    /// <summary>客户端 IP 网段（CIDR，如 <c>127.0.0.0/8</c>）。为空表示不限制。</summary>
+    public string CIDR { get; set; } = string.Empty;
+    /// <summary>路径过滤：以 <c>/</c> 开头按前缀匹配，否则按包含匹配。为空表示不限制。</summary>
+    public string Path { get; set; } = string.Empty;
+    /// <summary>请求方法过滤（如 <c>HEAD</c>）。为空表示不限制。</summary>
+    public string Method { get; set; } = string.Empty;
 }
 
 /// <summary>

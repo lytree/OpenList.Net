@@ -2,7 +2,7 @@
 
 A .NET port of [OpenList](https://github.com/OpenListTeam/OpenList) (originally Go), built on [Zio](https://github.com/xoofx/zio) for filesystem abstraction.
 
-> Status: **Phase 1 — skeleton**. APIs listed below are the implementation plan; each phase will check items off as they ship.
+> Status: **P0/P1/P2 API 对齐已完成**（对照 Go main / 前端 v4.2.5，2026-08-16）。剩余未实现项见下方「Not Yet Implemented」与 Implementation Plan 中的 `[ ]`（Cloud 驱动 / BitTorrent / 秒传 / Mapster 映射等）。
 
 ## Build & Run
 
@@ -161,33 +161,33 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
   - [x] `GET  /api/fs/archive/meta` — supported archive extensions
   - [x] `POST /api/fs/archive/list` — list archive entries (501 if unsupported)
   - [x] `POST /api/fs/archive/decompress` — extract archive (501 if unsupported)
-- [ ] `SignEndpoints.cs` — signed URL handlers (Phase 5+):
-  - [ ] `GET /d/*path` — signed download
-  - [ ] `GET /p/*path` — signed preview/proxy
-  - [ ] `GET /ad/*path` — signed archive download (501 for now)
-  - [ ] `GET /ap/*path` — signed archive proxy (501 for now)
-  - [ ] `GET /ae/*path` — signed archive extract (501 for now)
+- [x] `SignEndpoints.cs` — signed URL handlers:
+  - [x] `GET /d/*path` — signed download (GET + HEAD)
+  - [x] `GET /p/*path` — signed preview/proxy (GET + HEAD)
+  - [x] `GET /ad/*path` — signed archive list (501 until driver supports `IFileSystemArchiveReader`)
+  - [x] `GET /ap/*path` — signed archive proxy (GET + HEAD)
+  - [x] `GET /ae/*path` — signed archive extract (501 until driver supports `IFileSystemArchiveDecompress`)
 - [x] Tests: `FileSystemServiceTests` — 17/17 passing (list, get, mkdir, rename, move, copy, remove, put, dirs, search, archive meta, link)
 
-## Phase 5 — Sharing
+## Phase 5 — Sharing ✅
 
-- [ ] `IShareService` impl + `ShareService`
-- [ ] `ShareEndpoints.cs` — `/api/share/*`:
-  - [ ] `POST /api/share/list`
-  - [ ] `POST /api/share/create`
-  - [ ] `POST /api/share/get`
-  - [ ] `POST /api/share/update`
-  - [ ] `POST /api/share/delete`
-  - [ ] `POST /api/share/cancel`
-- [ ] `PublicEndpoints.cs` — `/api/public/*`:
-  - [ ] `GET  /api/public/settings`
-  - [ ] `GET  /api/public/files?path=&password=&page=&per_page=`
-  - [ ] `GET  /api/public/share/:id`
-  - [ ] `POST /api/public/share/:id` — submit password
-- [ ] `SharingDownloadEndpoints.cs`:
-  - [ ] `GET /sd/*` — sharing download (signed)
-  - [ ] `GET /sad/*` — sharing archive download (404 for now)
-- [ ] Tests: `ShareServiceTests`
+- [x] `ISharingService` impl + `SharingService`（按分享 code 查找，非 db 主键）
+- [x] `ShareEndpoints.cs` — `/api/share/*`:
+  - [x] `GET/POST /api/share/list`
+  - [x] `POST /api/share/create`
+  - [x] `GET  /api/share/get?id=`
+  - [x] `POST /api/share/update`
+  - [x] `POST /api/share/delete`
+  - [x] `POST /api/share/enable` / `disable`（对应 Go 的 cancel 语义）
+- [x] `PublicEndpoints.cs` — `/api/public/*`:
+  - [x] `GET/POST /api/public/settings`
+  - [x] `GET/POST /api/public/archive_extensions`
+  - [x] `GET/POST /api/public/offline_download_tools`
+  - > Go 的 `/api/public/files`、`/api/public/share/:id` 未移植——公开分享浏览走 `/api/fs/{list,get,dirs}` 匿名访问
+- [x] `SharingDownloadEndpoints.cs` (`/sd/`, `/sad/`):
+  - [x] `GET/HEAD /sd/:sid[/*path]` — sharing download（验签 + 可选 pwd + 过期/禁用/次数限制，Range 流式）
+  - [x] `GET/HEAD /sad/:sid[/*path]` — sharing archive extract（驱动实现归档时可用，否则 501）
+- [x] Tests: `ShareDownloadEndpointsTests`
 
 ## Phase 6 — Tasks & Offline Download
 
@@ -290,47 +290,51 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 - [x] Auth bridge to OpenList users (`IMembershipProvider` → `UserService`)
 - [x] Virtual filesystem via Zio (`ZioUnixFileSystem` adapts `MountFileSystem` to `IUnixFileSystem`)
 
-## Phase 13 — Search Index
+## Phase 13 — Search Index ✅
 
-- [ ] `ISearchService` + impl (Bleve-equivalent for .NET: Lucene.NET or database FTS)
-- [ ] `POST /api/fs/search` — full-text path search
-- [ ] Index rebuild on storage load
-- [ ] Incremental index on file ops
+- [x] `ISearchService` + impl — `database` 后端已持久化到 `x_search_index` 表；`bleve` 后端未实现（`search_index=bleve` 回退为文件系统搜索）
+- [x] `POST /api/fs/search` — 关键字路径搜索（数据库 LIKE / 实时文件系统）
+- [x] `POST /admin/index/{build,update,stop,clear}` + `GET /admin/index/progress`
+- [x] 启动时恢复索引状态（镜像 Go `bootstrap.InitIndex`）— `SearchService.InitIndexAsync` 载入持久化进度、把崩溃遗留的 `running` 状态复位为 `idle`，使增量更新在重启后保持启用。不做全量自动重建（与 Go 一致）
+- [x] 文件操作时增量索引 — `auto_update_index` 设置 + `IObjsUpdateHooks`（发布/订阅）解耦 `FileSystemService` 写操作与 `SearchService` 增量更新（增/删/改路径局部重建）
 
-## Phase 14 — Archive Support
+## Phase 14 — Archive Support ✅
 
-- [ ] `IFileSystemArchiveReader` impl (SharpCompress) — list/extract from zip/rar/7z/tar/gz
-- [ ] `IFileSystemArchiveDecompress` impl — extract to path
-- [ ] `/ad/`, `/ap/`, `/ae/` signed archive endpoints
-- [ ] `/sad/` sharing archive download
-- [ ] Tests: `ArchiveReaderTests`
+- [x] `IFileSystemArchiveReader` impl — `SharpCompressArchiveSupport` on `LocalDriver`（zip/rar/7z/tar/gz）
+- [x] `IFileSystemArchiveDecompress` impl — 解压到路径（ZipSlip 防护）
+- [x] `/ad/`, `/ap/`, `/ae/` signed archive endpoints
+- [x] `/sad/` sharing archive download
+- [x] Tests: `SignEndpointsTests` / `FsEndpointsTests` 覆盖归档路由
 
-## Phase 15 — 2FA, WebAuthn, SSO
+## Phase 15 — 2FA, WebAuthn, SSO ✅
 
-- [ ] TOTP 2FA (Otp.NET) — already stubbed in Phase 2
-- [ ] WebAuthn (`/api/authn/*`) via Fido2
-  - [ ] `POST /api/authn/register/begin`
-  - [ ] `POST /api/authn/register/finish`
-  - [ ] `POST /api/authn/login/begin`
-  - [ ] `POST /api/authn/login/finish`
-- [ ] SSO (`/api/auth/sso/*`) — OIDC/SAML providers
+- [x] TOTP 2FA (Otp.NET) — `/api/auth/login/2fa`、`/api/auth/2fa/*`（Phase 2 已实现）
+- [x] WebAuthn (`/api/authn/*`) via Fido2:
+  - [x] `GET  /api/authn/webauthn_begin_login`
+  - [x] `POST /api/authn/webauthn_finish_login`
+  - [x] `GET  /api/authn/webauthn_begin_registration`
+  - [x] `POST /api/authn/webauthn_finish_registration`
+  - [x] `GET  /api/authn/getcredentials` + `POST /api/authn/delete_authn`（凭据管理）
+- [x] SSO (`/api/auth/sso*`) — `ISsoService`（`/sso_callback`、`/get_sso_id`、`/sso_get_token`；禁用时 403）
+- [x] LDAP (`/api/auth/login/ldap`) — `JwtService.LoginLdapAsync`（未配置 LDAP 时 501）
 
-## Phase 16 — Rate Limiting, Middleware, Polish
+## Phase 16 — Rate Limiting, Middleware, Polish ✅
 
-- [ ] `RateLimitMiddleware` — general (100/min), download, upload
-- [ ] `CorsMiddleware` — OPTIONS preflight handler
-- [ ] `LoggingMiddleware` — Serilog request logging
-- [ ] `ErrorHandlingMiddleware` — uniform `Resp<T>` error envelope
-- [ ] Mapster `MappingConfig.Configure()`
-- [ ] Swagger + Scalar wired (Development only)
-- [ ] Config validation on startup
+- [x] `RateLimitMiddleware` — 字节级令牌桶限流（镜像 Go `rate.Limiter` + `stream`）：全局并发闸门 `MaxAllowedMiddleware`（`MaxConnections`）、下载/上传速率限制（`RateLimitMiddleware` + `RateLimitManager` 从设置表刷新 client/server × download/upload 四组限速）；值 `<=0` 表示不限速
+- [x] `CorsMiddleware` — 用内置 `UseCors`（AllowAnyOrigin/Method/Header + 暴露 Content-Range 等头）替代自定义中间件
+- [x] `LoggingMiddleware` — Serilog：console sink + 文件滚动（`MaxSize/MaxBackups/MaxAge` 对齐 Go lumberjack）；`RequestLogMiddleware` 支持 CIDR/路径/方法过滤（`Log.Filter`，镜像 Go `skiperDecider`）
+- [x] `ErrorHandlingMiddleware` — 全局异常 → `Resp<T>` JSON（500 internal server error；`BadHttpRequestException` → 400），镜像 Go `gin.Recovery`
+- [ ] Mapster `MappingConfig.Configure()` — 包已引用，但 **从未调用**（对象映射为手写 DTO 转换）
+- [x] Swagger 已接入（`/swagger`，Development only）
+- [x] Scalar（`/scalar`）— 已接入（指向 `/swagger/v1/swagger.json`，Development only）
+- [x] Config validation on startup — `AppConfiguration.Validate()`：数据库类型 / HTTP·HTTPS 端口 / MaxConnections / search_index 后端 / 日志参数非法即中止启动
 
-## Phase 17 — Frontend Contract Alignment
+## Phase 17 — Frontend Contract Alignment ✅
 
-- [ ] Verify all `/api/*` responses match frontend TypeScript types
-- [ ] Verify SPA fallback serves `frontend/dist`
-- [ ] Verify dev proxy (`pnpm dev` → `localhost:5244`)
-- [ ] End-to-end smoke: login → list → upload → share
+- [x] `/api/*` 响应与前端 TS 类型对齐（对照 `Openlist-Frontend` v4.2.5，git submodule `feae2d0`）
+- [x] SPA fallback 服务 `frontend/dist`（`MapFallback` + 静态文件）
+- [x] Dev proxy（`frontend/` `pnpm dev` → `localhost:5244`）
+- [x] End-to-end smoke：登录 → list → 上传 → 分享（2026-08-16 运行时冒烟验证）
 
 ---
 
@@ -347,3 +351,5 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 | 2026-06-24 | Phase 6 | Tasks & Offline Download: `TaskService` (in-memory task store with progress tracking, cancel/retry/delete/clear), `TaskEndpoints` (`/api/task/undone|done|info|cancel|delete|clear_done|retry`), `FsEndpoints` additions (`/api/fs/add_offline_download` + 4 `/api/fs/torrent/*` 501 stubs). 128/128 tests passing (12 new `TaskServiceTests`). |
 | 2026-07-16 | API 对齐基线 | P0/P1 对齐修复: `/auth/logout` GET+POST、guest 访问 `/fs/{list,get,dirs,search}`、`torrent/generate` stub、`/ad /ap /ae` 签名归档路由、`/sad` 共享归档下载、WebDAV LOCK/UNLOCK (`IWebDavLockStore`)。新增 `docs/api-diff.md` 差异分析。 |
 | 2026-08-16 | API 对齐 P0+P1+P2 | 对照 Go main/前端 v4.2.5: Multipart 分片上传 5 端点、消息 send 体形兼容、归档驱动 (SharpCompress, LocalDriver)、MCP 端点 (`/mcp`, Streamable HTTP)、Go Any 方法兼容 (GET+POST)、`/fs/regex_rename`、`/fs/link` admin-only、`/api/admin/task/*` 别名、`/debug/*`、`set_guangyapan`。前端修复为 `Openlist-Frontend` v4.2.5 git submodule。详见 `docs/alignment-plan.md`。 |
+| 2026-08-28 | Implementation Plan 状态同步 | 按源码核对勾选状态：Phase 4 (SignEndpoints)、5 (Sharing)、14 (Archive)、15 (2FA/WebAuthn/SSO)、17 (前端对齐) 全部完成；Phase 13 标记 database 后端完成（bleve/自动重建/增量未实现）；Phase 16 明确限流/Serilog/错误处理/Mapster/Scalar/配置校验仍未实现。 |
+| 2026-08-28 | Phase 13 + Phase 16 | Phase 13：增量索引钩子（`auto_update_index` 设置 + `IObjsUpdateHooks` 发布/订阅 + `FileSystemService` 写操作触发局部重建/删除清理）+ 启动时 `InitIndexAsync` 恢复进度（镜像 Go `bootstrap.InitIndex`）。Phase 16：字节级令牌桶限流（`RateLimiter`/`RateLimitManager`/`RateLimitMiddleware`/`MaxAllowedMiddleware`）、Serilog 请求日志（`RequestLogMiddleware` CIDR/路径/方法过滤 + 文件滚动）、`ErrorHandlingMiddleware`（`Resp<T>` 错误封装）、`AppConfiguration.Validate()` 启动校验、Scalar API 文档。Mapster 仍未接入。新增 `MiddlewareTests`（限流/日志过滤/异常处理/并发闸门/配置校验）。206/207 测试通过（1 skip 为已知 WebDAV 挂起）。 |

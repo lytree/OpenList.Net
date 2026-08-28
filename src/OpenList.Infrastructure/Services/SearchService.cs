@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpenList.Core.Interfaces;
@@ -21,22 +22,27 @@ public sealed class SearchService : ISearchService
     private readonly IFileSystemService _fs;
     private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _time;
+    private readonly IObjsUpdateHooks _hooks;
     private readonly object _lock = new();
     private IndexProgress _progress = new();
     private CancellationTokenSource? _cts;
     private DateTimeOffset? _lastDoneTime;
 
     /// <summary>
-    /// 创建搜索索引服务实例。
+    /// 创建搜索索引服务实例，并向 <see cref="IObjsUpdateHooks"/> 注册增量更新订阅，
+    /// 使文件系统写操作后索引自动保持新鲜（受 <c>auto_update_index</c> 设置控制）。
     /// </summary>
     /// <param name="fs">文件系统服务，用于遍历条目与实时搜索。</param>
     /// <param name="scopes">作用域工厂，用于按需创建数据库上下文。</param>
+    /// <param name="hooks">文件对象更新钩子注册表，用于订阅增量索引。</param>
     /// <param name="time">时间源（可选，默认系统时区）。</param>
-    public SearchService(IFileSystemService fs, IServiceScopeFactory scopes, TimeProvider? time = null)
+    public SearchService(IFileSystemService fs, IServiceScopeFactory scopes, IObjsUpdateHooks hooks, TimeProvider? time = null)
     {
         _fs = fs;
         _scopes = scopes;
+        _hooks = hooks;
         _time = time ?? TimeProvider.System;
+        _hooks.Subscribe(UpdateDirectoryAsync, RemovePathAsync);
     }
 
     /// <summary>
@@ -100,7 +106,52 @@ public sealed class SearchService : ISearchService
         var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
         // 一次往返删除所有行。
         await db.SearchIndex.ExecuteDeleteAsync(ct);
+        await WriteProgressAsync(ct);
         return Resp.Ok();
+    }
+
+    /// <summary>
+    /// 启动时恢复持久化的索引进度（镜像 Go 的 <c>bootstrap.InitIndex</c>）：
+    /// 把上次构建的完成时间载入内存，使增量索引在服务重启后仍被允许；
+    /// 若上次进程崩溃时留下 <c>running</c> 状态，则置为完成（<c>is_done=true</c>），
+    /// 避免索引永远卡在“构建中”而禁用增量更新。
+    /// </summary>
+    public async Task<Resp> InitIndexAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<ISettingService>();
+            var r = await svc.GetAsync("index_progress", ct);
+            if (r.Code == 200 && r.Data is not null && !string.IsNullOrWhiteSpace(r.Data.Value))
+            {
+                using var doc = JsonDocument.Parse(r.Data.Value);
+                var root = doc.RootElement;
+                DateTimeOffset? lastDone = null;
+                if (root.TryGetProperty("last_done_time", out var ldt)
+                    && ldt.ValueKind == JsonValueKind.String
+                    && DateTimeOffset.TryParse(ldt.GetString(), out var parsed))
+                {
+                    lastDone = parsed;
+                }
+                bool wasRunning = root.TryGetProperty("is_done", out var done)
+                    && done.ValueKind == JsonValueKind.False;
+                lock (_lock)
+                {
+                    if (lastDone is not null)
+                        _lastDoneTime = lastDone;
+                    // 崩溃遗留的 running 状态恢复为 idle，否则 ShouldAutoUpdateAsync 会因
+                    // State=="running" 永远拒绝增量更新。
+                    if (wasRunning && string.Equals(_progress.State, "running", StringComparison.Ordinal))
+                        _progress.State = "idle";
+                }
+            }
+            return Resp.Ok();
+        }
+        catch (Exception ex)
+        {
+            return Resp.Fail($"failed to load index progress: {ex.Message}", RespCodes.InternalError);
+        }
     }
 
     /// <summary>
@@ -178,6 +229,108 @@ public sealed class SearchService : ISearchService
     }
 
     /// <summary>
+    /// 增量更新单个目录的索引（由 <see cref="IObjsUpdateHooks"/> 触发）。镜像 Go 的
+    /// <c>search.Update</c>：把传入的最新条目列表与数据库中该父目录下的既有索引做差集，
+    /// 删除已不存在的条目、批量补入新条目。仅在满足以下条件时生效：
+    /// <list type="bullet">
+    /// <item><c>search_index</c> 后端为 <c>database</c>；</item>
+    /// <item><c>auto_update_index</c> 设置为开启；</item>
+    /// <item>没有正在进行的全量构建/更新；</item>
+    /// <item>索引至少成功构建过一次。</item>
+    /// </list>
+    /// </summary>
+    private async Task UpdateDirectoryAsync(string parent, IReadOnlyList<Obj> entries, CancellationToken ct)
+    {
+        if (!await ShouldAutoUpdateAsync(parent, ct)) return;
+
+        var normalized = NormalizeParent(parent);
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+
+        var existing = await db.SearchIndex.AsNoTracking()
+            .Where(e => e.Parent == normalized)
+            .ToListAsync(ct);
+        var nowNames = entries.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
+
+        // 删除索引中存在、但最新列表里已消失的条目。
+        var stale = existing.Where(e => !nowNames.Contains(e.Name)).ToList();
+        if (stale.Count > 0)
+            db.SearchIndex.RemoveRange(stale);
+
+        // 批量补入最新列表中有、但索引里还没有的条目。
+        var oldNames = existing.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
+        var toAdd = entries
+            .Where(e => !oldNames.Contains(e.Name))
+            .Select(e => new SearchIndexEntry
+            {
+                Parent = normalized,
+                Name = e.Name,
+                IsDir = e.IsDir,
+                Size = e.Size,
+                Path = JoinPath(normalized, e.Name),
+                Type = e.Type,
+            })
+            .ToList();
+        if (toAdd.Count > 0)
+            await db.SearchIndex.AddRangeAsync(toAdd, ct);
+
+        if (stale.Count > 0 || toAdd.Count > 0)
+            await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// 清理被删除路径的索引（由 <see cref="IObjsUpdateHooks"/> 触发）。删除该路径自身
+    /// 及其整棵子树的索引行，条件与 <see cref="UpdateDirectoryAsync"/> 相同。
+    /// </summary>
+    private async Task RemovePathAsync(string path, CancellationToken ct)
+    {
+        if (!await ShouldAutoUpdateAsync(path, ct)) return;
+
+        var normalized = NormalizeParent(path);
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+        await db.SearchIndex
+            .Where(e => e.Path == normalized || e.Parent == normalized || e.Parent.StartsWith(normalized + "/"))
+            .ExecuteDeleteAsync(ct);
+    }
+
+    /// <summary>增量更新/路径删除的通用前置条件检查。</summary>
+    private async Task<bool> ShouldAutoUpdateAsync(string path, CancellationToken ct)
+    {
+        // 后端必须为 database；auto_update_index 必须开启。
+        if (!string.Equals(await GetSettingAsync("search_index", "none"), "database", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!string.Equals(await GetSettingAsync("auto_update_index", "false"), "true", StringComparison.OrdinalIgnoreCase))
+            return false;
+        // 正在全量构建/更新时跳过，避免与后台任务并发写表。
+        lock (_lock)
+        {
+            if (_progress.State == "running") return false;
+            // 索引从未构建过则无从增量，返回 false。
+            if (_lastDoneTime is null) return false;
+        }
+        // 忽略路径内的更新。
+        if (await IsIgnorePathAsync(path, ct)) return false;
+        return true;
+    }
+
+    /// <summary>判断路径是否位于 <c>ignore_paths</c> 设置（按行分隔）的任意忽略前缀下。</summary>
+    private async Task<bool> IsIgnorePathAsync(string path, CancellationToken ct)
+    {
+        var ignorePaths = await GetSettingAsync("ignore_paths", "");
+        if (string.IsNullOrWhiteSpace(ignorePaths)) return false;
+        var normalized = NormalizeParent(path);
+        foreach (var line in ignorePaths.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (line.Length == 0) continue;
+            var prefix = NormalizeParent(line);
+            if (normalized == prefix || normalized.StartsWith(prefix + "/", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// 执行索引遍历（后台任务体）：清空或裁剪既有数据，然后递归写入新条目。
     /// </summary>
     private async Task IndexAsync(IReadOnlyList<string> paths, int maxDepth, bool isUpdate, CancellationToken ct)
@@ -217,6 +370,7 @@ public sealed class SearchService : ISearchService
                 _lastDoneTime = _progress.FinishedAt;
                 _progress.LastDoneTime = _lastDoneTime;
             }
+            await WriteProgressAsync(CancellationToken.None);
         }
         catch (OperationCanceledException)
         {
@@ -225,6 +379,7 @@ public sealed class SearchService : ISearchService
                 _progress.State = "cancelled";
                 _progress.FinishedAt = _time.GetUtcNow();
             }
+            await WriteProgressAsync(CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -234,6 +389,7 @@ public sealed class SearchService : ISearchService
                 _progress.FinishedAt = _time.GetUtcNow();
                 _progress.Error = ex.Message;
             }
+            await WriteProgressAsync(CancellationToken.None);
         }
     }
 
@@ -283,6 +439,45 @@ public sealed class SearchService : ISearchService
                 await WalkAsync(child, depth + 1, maxDepth, user, db, ct);
             }
         }
+    }
+
+    /// <summary>
+    /// 把当前进度快照持久化到 <c>index_progress</c> 设置（JSON 与 Go 的 IndexProgress 同构：
+    /// <c>{obj_count, is_done, last_done_time, error}</c>），使进度与“索引已构建”标记跨重启保留。
+    /// </summary>
+    private async Task WriteProgressAsync(CancellationToken ct)
+    {
+        try
+        {
+            IndexProgress snapshot;
+            lock (_lock)
+            {
+                snapshot = new IndexProgress
+                {
+                    State = _progress.State,
+                    Indexed = _progress.Indexed,
+                    Total = _progress.Total,
+                    StartedAt = _progress.StartedAt,
+                    FinishedAt = _progress.FinishedAt,
+                    LastDoneTime = _progress.LastDoneTime,
+                    Error = _progress.Error,
+                };
+            }
+            var json = JsonSerializer.Serialize(new
+            {
+                obj_count = snapshot.Indexed,
+                is_done = !string.Equals(snapshot.State, "running", StringComparison.Ordinal),
+                last_done_time = snapshot.LastDoneTime?.UtcDateTime.ToString("O") ?? "",
+                error = snapshot.Error ?? "",
+            });
+            using var scope = _scopes.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<ISettingService>();
+            await svc.SaveAsync(new List<SettingItem>
+            {
+                new() { Key = "index_progress", Value = json, Type = SettingValueType.String },
+            }, ct);
+        }
+        catch { /* 持久化失败不影响主流程 */ }
     }
 
     /// <summary>读取 <c>search_index</c> 设置，读取失败时回退到 <paramref name="fallback"/>。</summary>

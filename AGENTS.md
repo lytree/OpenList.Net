@@ -28,7 +28,7 @@
   ```json
   { "code": 200, "message": "success", "data": ... }
   ```
-- **Mapster** for object mapping (`MappingConfig.Configure()` called at startup)
+- Object mapping done manually (DTO ↔ entity). **Mapster is NOT actually used** — the package is referenced but `MappingConfig.Configure()` is never called / no `.Adapt<>` usage. Do not rely on it.
 - Health check: `GET /ping` → `"pong"`
 
 ## Endpoint Routes
@@ -36,7 +36,7 @@
 | File | Route Group | Auth |
 |---|---|---|
 | `AuthEndpoints.cs` | `/api/auth` | Mixed |
-| `AuthEndpoints.cs` (AuthnEndpoints) | `/api/authn` | Mixed (WebAuthn stubs) |
+| `AuthEndpoints.cs` (AuthnEndpoints) | `/api/authn` | Mixed (WebAuthn, implemented) |
 | `FsEndpoints.cs` | `/api/fs` | Auth'd |
 | `AdminEndpoints.cs` | `/api/admin` | Admin (`RequireRole("2")`) |
 | `TaskEndpoints.cs` | `/api/task` | Auth'd |
@@ -56,11 +56,14 @@
 
 - **Auth**: JWT Bearer with configurable secret; auto-generated as 32 hex chars (2×Guid) if empty in config. Frontend sends token without `"Bearer "` prefix (custom `OnMessageReceived` handler).
 - **Database**: defaults to `sqlite` (`data/data.db`); also supports `postgres`/`postgresql`. Table prefix: `x_`. Init: `MigrateAsync()` → falls back to `EnsureCreatedAsync()`. Add design-time migrations via `OpenListDbContextFactory` (uses SQLite).
-- **CORS**: `AllowAnyOrigin/Method/Header` + custom `CorsMiddleware` for OPTIONS preflight.
-- **Rate limiters**: general (100 req/min per IP), download rate limiter, upload rate limiter.
+- **CORS**: `AllowAnyOrigin/Method/Header` + expose `Content-Range`/`Content-Disposition` headers. Uses built-in `app.UseCors()` (NOT a custom middleware).
+- **Rate limiters**: byte-level token bucket (mirrors Go `rate.Limiter` + `stream`). `RateLimiter` (per-limiter, `<=0` = unlimited, initial bucket full, token debt allowed), `RateLimitManager` (singleton holding client/server × download/upload limiters, refreshed from settings table), `RateLimitMiddleware` (wraps download/upload routes' response/request streams), `MaxAllowedMiddleware` (global concurrency gate when `MaxConnections > 0`). Middleware order: ErrorHandling → RequestLog → static → CORS → auth → MaxAllowed → RateLimit(download) → RateLimit(upload).
+- **Request logging**: Serilog configured in `Program.cs` — console sink always on; file sink with `Log.MaxSize/MaxBackups/MaxAge` (Go lumberjack-style rotation) when `Log.Enable`. `RequestLogMiddleware` filters per `Log.Filter` (Enable + CIDR/path/method rules; path prefix when starts with `/`, else contains; all conditions ANDed).
+- **Error handling**: `ErrorHandlingMiddleware` (outermost) converts unhandled exceptions to `Resp<T>` JSON — 500 "internal server error", `BadHttpRequestException` → 400. Mirrors Go `gin.Recovery`.
+- **Config validation**: `AppConfiguration.Validate()` runs at startup and throws on invalid db type / HTTP·HTTPS port / MaxConnections / search_index backend / log params.
+- **Swagger**: at `/swagger` + Scalar at `/scalar` (both Development only; Scalar points at `/swagger/v1/swagger.json`).
 - **FTP/SFTP servers**: hosted services, disabled by default (`FTP.Enable`/`SFTP.Enable` in config).
 - **Kestrel body limit**: 10 GB (for WebDAV uploads).
-- **Swagger + Scalar**: at `/swagger` and `/scalar` (Development only).
 - **SPA fallback**: serves `index.html` from `DistDir` (`../../frontend/dist` by default).
 - **Environment variables**: use `OpenList__` prefix (e.g. `OpenList__Database__Type=postgres`).
 
@@ -91,7 +94,7 @@
 **Auth/Me routes**:
 - `/api/auth/login/ldap` — LDAP login
 - ~~`/api/me/sshkey/{list,add,delete}` — SSH public-key management~~ **Implemented** (`MeEndpoints` + `SshKeyService`): `GET /me/sshkey/list` returns paged `{content, total}`; `POST /me/sshkey/add` body `{title, key}` computes `SHA256:base64` fingerprint; `POST /me/sshkey/delete?id=` returns remaining keys. `SshKey` model gained `LastUsedTime` (migration via `ALTER TABLE x_sshkeys ADD COLUMN`).
-- `/api/authn/{delete_authn,getcredentials}` — WebAuthn credential delete/list
+- ~~`/api/authn/{delete_authn,getcredentials}` — WebAuthn credential delete/list~~ **Implemented** (`AuthEndpoints` AuthnEndpoints): `POST /delete_authn`, `GET /getcredentials` via `IWebAuthnService` (403 when WebAuthn disabled).
 
 **Fs routes**:
 - ~~`/api/fs/regex_rename` — regex batch rename~~ **Implemented** (`POST /fs/regex_rename`, body `{src_dir, src_name_regex, new_name_regex}` → `FileSystemService.RegexRenameAsync`). The frontend computes names client-side and uses `/batch_rename`, so this is Go-API completeness.
@@ -106,7 +109,7 @@
 - ~~`/api/admin/user/sshkey/{list,delete}` — admin SSH-key management~~ **Implemented** (`AdminEndpoints`): `GET /admin/user/sshkey/list?uid=` and `POST /admin/user/sshkey/delete?uid=&id=`; reuses `SshKeyService` with `isAdmin: true` so admins can manage any user's keys.
 - ~~`/api/admin/setting/delete`, `/setting/default`, `/setting/reset_token`~~ **Implemented** (`AdminEndpoints`): `delete` removes a key; `default?group=` restores `DbInitializer.DefaultSettings` for the group; `reset_token` rotates the JWT secret (updates singleton `AppConfiguration` + persists to `jwt_secret` file + updates bearer `TokenValidationParameters` via `IOptionsMonitor` so existing tokens are invalidated immediately).
 - ~~`/api/admin/setting/set_{aria2,qbit,transmission,115,115_open,123_pan,123_open,pikpak,thunder,thunderx,thunder_browser}` — 11 offline-download-tool config routes~~ **Implemented** — 12 routes incl. `set_guangyapan` (`guangyapan_temp_dir`).
-- ~~`/api/admin/index/{build,update,stop,clear,progress}` — search-index management (5 routes)~~ **Implemented** — `SearchService` (singleton) walks the filesystem via `IFileSystemService.ListAsync` in a fire-and-forget `Task.Run`, tracking progress in-memory. Routes: `POST /admin/index/{build,update,stop,clear}` (body `{paths, max_depth}` for build/update), `GET /admin/index/progress` returns `{obj_count, is_done, last_done_time, error}` matching the frontend `Progress` type. `ISearchService`/`IndexProgress` updated: `BuildIndexAsync`/`UpdateIndexAsync` now take `(IReadOnlyList<string> paths, int maxDepth)`; `IndexProgress` gained `LastDoneTime` + `Error`. Indexed entries are not yet persisted (progress/control surface only); `SearchAsync` delegates to `IFileSystemService.SearchAsync`.
+- ~~`/api/admin/index/{build,update,stop,clear,progress}` — search-index management (5 routes)~~ **Implemented** — `SearchService` (singleton) walks the filesystem via `IFileSystemService.ListAsync` in a fire-and-forget `Task.Run`, tracking progress in-memory. Routes: `POST /admin/index/{build,update,stop,clear}` (body `{paths, max_depth}` for build/update), `GET /admin/index/progress` returns `{obj_count, is_done, last_done_time, error}` matching the frontend `Progress` type. `ISearchService`/`IndexProgress` updated: `BuildIndexAsync`/`UpdateIndexAsync` now take `(IReadOnlyList<string> paths, int maxDepth)`; `IndexProgress` gained `LastDoneTime` + `Error`. Index entries ARE persisted when `search_index=database` (table `x_search_index`); `bleve` backend not implemented — `search_index=bleve` falls back to live filesystem `SearchAsync`. **Incremental indexing IS now implemented** (Phase 13): `auto_update_index` setting gates it; `FileSystemService` publishes list/delete events to `IObjsUpdateHooks` (singleton publish/subscribe registry), `SearchService` subscribes in its constructor and does localized `UpdateAsync`/remove-trees. Startup calls `ISearchService.InitIndexAsync()` (mirrors Go `bootstrap.InitIndex`) — restores persisted `last_done_time`, resets a crash-left `running` state to `idle`; no full auto-rebuild on storage load (same as Go).
 - ~~`/api/admin/scan/{stop,progress}` — only `/scan/{path}` (start) exists~~ **Implemented** — `POST /admin/scan/start` (body `{path, limit}`), `POST /admin/scan/stop`, `GET /admin/scan/progress` (returns `{obj_count, is_done}` matching frontend).
 
 **Task routes**:
