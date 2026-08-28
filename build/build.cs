@@ -1,15 +1,15 @@
 #!/usr/bin/env dotnet
 #:sdk Cake.Sdk@6.2.0
-// Cake build script for OpenList.Net.
+// Cake build script for OpenList.Net (project-based Cake.Sdk).
 //
 // Run a task:
-//   dotnet cake.cs --target=Test
-//   dotnet cake.cs --target=Format
-//   dotnet cake.cs --target=Version                              # compute & print GitVersion
-//   dotnet cake.cs --target=Package --rid=linux-x64 --archive=tar.gz
-//   dotnet cake.cs --target=CI                                   # framework-dependent bundle
-//   dotnet cake.cs --target=Bundle --frontend-dist=frontend      # use committed frontend, skip fetch
-//   dotnet cake.cs --target=Publish --semver=1.2.3               # publish with injected semver
+//   dotnet run --project build -- --target=Test
+//   dotnet run --project build -- --target=Format
+//   dotnet run --project build -- --target=Version                            # compute & print GitVersion
+//   dotnet run --project build -- --target=Package --rid=linux-x64 --archive=tar.gz
+//   dotnet run --project build -- --target=CI                                 # framework-dependent bundle
+//   dotnet run --project build -- --target=Bundle --frontend-dist=frontend    # use committed frontend, skip fetch
+//   dotnet run --project build -- --target=Publish --semver=1.2.3             # publish with injected semver
 //
 // Arguments:
 //   --configuration=Release    MSBuild configuration

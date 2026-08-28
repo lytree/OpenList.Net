@@ -47,19 +47,21 @@ public class ShareDownloadEndpointsTests
     }
 
     [Test]
-    public async Task Sad_Returns_501_When_Driver_Lacks_Archive_Decompress()
+    public async Task Sad_Decompresses_Archive_From_Share()
     {
+        // LocalDriver now implements IFileSystemArchiveDecompress (SharpCompress), so /sad/
+        // decompresses the shared archive instead of returning 501.
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
-            await factory.WriteFileAsync("a.zip", new byte[] { 0x50, 0x4B, 0x03, 0x04 });
+            await factory.WriteFileAsync("a.zip", TestWebAppFactory.CreateZipBytes());
             var code = await LoginAndCreateShareAsync(client, "/test/a.zip");
             client.DefaultRequestHeaders.Authorization = null;
 
             var resp = await client.GetAsync($"/sad/{code}");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
             var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(501);
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
         }
     }
 

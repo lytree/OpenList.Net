@@ -69,6 +69,24 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
         await File.WriteAllBytesAsync(fullPath, content);
     }
 
+    /// <summary>
+    /// Build a valid ZIP archive containing a single textual entry. The LocalDriver now
+    /// implements the archive interfaces (SharpCompress), so archive endpoints expect a
+    /// real archive rather than a bare magic-header stub.
+    /// </summary>
+    public static byte[] CreateZipBytes(string entryName = "hello.txt", string content = "hello")
+    {
+        using var ms = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true))
+        {
+            var entry = zip.CreateEntry(entryName);
+            using var entryStream = entry.Open();
+            using var writer = new StreamWriter(entryStream);
+            writer.Write(content);
+        }
+        return ms.ToArray();
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)

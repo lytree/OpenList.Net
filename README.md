@@ -70,13 +70,13 @@ dotnet format
 
 ## Not Yet Implemented (from Go reference)
 
-- `/api/fs/torrent/*` — 4 endpoints return 501
-- `/api/auth/sso/*` — SSO login
-- `/api/authn/*` — WebAuthn
-- `/ap/*path`, `/ae/*path` — signed archive proxy/extract (return 501)
-- `/sad/*` — sharing archive download (returns 404)
-- `IFileSystemArchiveDecompress` — interface defined, no implementation
-- `IFileSystemDirectUploader` — interface defined, stubbed
+- `/api/fs/torrent/*` — 8 stubs (parse/upload_parse/rapid_upload/generate + legacy list/info/add/cancel) return 501, no BitTorrent engine
+- `/api/fs/multipart/*` 底层秒传（rapid upload 哈希校验）—— 端点与分片上传已实现，`X-File-Md5` 哈希秒传未接入
+- `IFileSystemDirectUploader` / `IFileSystemWithDetails` — driver interfaces defined, no implementation
+- Cloud 驱动（Phase 9，13+ 个）—— 未实现
+- `/debug/pprof/*` — 无 .NET 对应（仅 gc/hide_privacy/path）
+
+> SSO（`/auth/sso*`）、WebAuthn（`/authn/webauthn_*`）、LDAP（`/auth/login/ldap`）、`/ad /ap /ae`、`/sad`、归档驱动（SharpCompress）均已实现。
 
 ---
 
@@ -345,3 +345,5 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 | 2026-06-23 | Phase 7 | Admin: `SettingService` (CRUD + public filter + archive exts), `MetaService` (path metadata CRUD), `MessageService` (admin↔user messaging), `ScanService` (background directory scan with progress). Extended `AdminEndpoints` (user/set_password, setting, meta, message, scan), `MeEndpoints` (message unread/list/read), `FsEndpoints` (/scan). Added `Message` model + DbSet. 76/76 tests passing. |
 | 2026-06-23 | Phase 10-12 | S3 Gateway (`S3Endpoints` — list buckets, get/put/head/delete objects, JWT passthrough auth), WebDAV Server (`WebDavEndpoints` — OPTIONS/PROPFIND/PROPPATCH/GET/HEAD/PUT/MKCOL/DELETE/MOVE/COPY/LOCK/UNLOCK, Basic auth via `UserService`), FTP hosted service (`FtpHostedService` + `OpenListFtpMembershipProvider` + `ZioUnixFileSystem` bridge via FubarDev.FtpServer), SFTP stub (`SftpHostedService` — SSH.NET has no server). Fixed `FileSystemService.PutStreamAsync` sync IO → async. `TestWebAppFactory` integration test infra with per-factory temp SQLite DB + Local storage mount. 116/116 tests passing. |
 | 2026-06-24 | Phase 6 | Tasks & Offline Download: `TaskService` (in-memory task store with progress tracking, cancel/retry/delete/clear), `TaskEndpoints` (`/api/task/undone|done|info|cancel|delete|clear_done|retry`), `FsEndpoints` additions (`/api/fs/add_offline_download` + 4 `/api/fs/torrent/*` 501 stubs). 128/128 tests passing (12 new `TaskServiceTests`). |
+| 2026-07-16 | API 对齐基线 | P0/P1 对齐修复: `/auth/logout` GET+POST、guest 访问 `/fs/{list,get,dirs,search}`、`torrent/generate` stub、`/ad /ap /ae` 签名归档路由、`/sad` 共享归档下载、WebDAV LOCK/UNLOCK (`IWebDavLockStore`)。新增 `docs/api-diff.md` 差异分析。 |
+| 2026-08-16 | API 对齐 P0+P1+P2 | 对照 Go main/前端 v4.2.5: Multipart 分片上传 5 端点、消息 send 体形兼容、归档驱动 (SharpCompress, LocalDriver)、MCP 端点 (`/mcp`, Streamable HTTP)、Go Any 方法兼容 (GET+POST)、`/fs/regex_rename`、`/fs/link` admin-only、`/api/admin/task/*` 别名、`/debug/*`、`set_guangyapan`。前端修复为 `Openlist-Frontend` v4.2.5 git submodule。详见 `docs/alignment-plan.md`。 |

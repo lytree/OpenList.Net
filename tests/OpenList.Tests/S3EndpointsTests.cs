@@ -1,5 +1,6 @@
 using System.Net;
-using System.Xml.Serialization;
+using System.Net.Http.Json;
+using System.Text.Json;
 using TUnit.Core;
 
 namespace OpenList.Tests;
@@ -7,7 +8,8 @@ namespace OpenList.Tests;
 /// <summary>
 /// Integration tests for S3-compatible gateway endpoints (/s3).
 /// Uses TestWebAppFactory with a Local storage mounted at /test.
-/// S3 auth: any Authorization header is accepted (guest admin user).
+/// S3 auth: token in the Authorization header is validated via IAuthService and
+/// resolved to the real backing user (no more guest-admin bypass).
 /// </summary>
 [NotInParallel("WebIntegration")]
 public class S3EndpointsTests
@@ -20,9 +22,14 @@ public class S3EndpointsTests
         return (factory, client);
     }
 
-    private static HttpClient AuthClient(HttpClient client)
+    /// <summary>Log in as admin and attach a real JWT Bearer token.</summary>
+    private static async Task<HttpClient> AuthClientAsync(HttpClient client)
     {
-        client.DefaultRequestHeaders.Authorization = new("AWS", "test-key:test-secret");
+        var login = await client.PostAsync("/api/auth/login",
+            JsonContent.Create(new { username = "admin", password = "admin" }));
+        var loginJson = await login.Content.ReadFromJsonAsync<JsonDocument>();
+        var token = loginJson!.RootElement.GetProperty("data").GetProperty("token").GetString()!;
+        client.DefaultRequestHeaders.Authorization = new("Bearer", token);
         return client;
     }
 
@@ -32,7 +39,7 @@ public class S3EndpointsTests
         var (factory, rawClient) = await SetupAsync();
         await using (factory)
         {
-            var client = AuthClient(rawClient);
+            var client = await AuthClientAsync(rawClient);
             var resp = await client.GetAsync("/s3/");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
             var xml = await resp.Content.ReadAsStringAsync();
@@ -58,7 +65,7 @@ public class S3EndpointsTests
         var (factory, rawClient) = await SetupAsync();
         await using (factory)
         {
-            var client = AuthClient(rawClient);
+            var client = await AuthClientAsync(rawClient);
             var req = new HttpRequestMessage(HttpMethod.Head, "/s3/test");
             var resp = await client.SendAsync(req);
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
@@ -71,7 +78,7 @@ public class S3EndpointsTests
         var (factory, rawClient) = await SetupAsync();
         await using (factory)
         {
-            var client = AuthClient(rawClient);
+            var client = await AuthClientAsync(rawClient);
             var req = new HttpRequestMessage(HttpMethod.Head, "/s3/nonexistent");
             var resp = await client.SendAsync(req);
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
@@ -86,7 +93,7 @@ public class S3EndpointsTests
         {
             await factory.WriteFileAsync("file1.txt", "hello"u8.ToArray());
             await factory.WriteFileAsync("file2.txt", "world"u8.ToArray());
-            var client = AuthClient(rawClient);
+            var client = await AuthClientAsync(rawClient);
             var resp = await client.GetAsync("/s3/test");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
             var xml = await resp.Content.ReadAsStringAsync();
@@ -102,7 +109,7 @@ public class S3EndpointsTests
         var (factory, rawClient) = await SetupAsync();
         await using (factory)
         {
-            var client = AuthClient(rawClient);
+            var client = await AuthClientAsync(rawClient);
             var resp = await client.GetAsync("/s3/nonexistent");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
         }
@@ -114,7 +121,7 @@ public class S3EndpointsTests
         var (factory, rawClient) = await SetupAsync();
         await using (factory)
         {
-            var client = AuthClient(rawClient);
+            var client = await AuthClientAsync(rawClient);
             var putContent = new ByteArrayContent("s3-upload"u8.ToArray());
             var putResp = await client.PutAsync("/s3/test/uploaded.txt", putContent);
             await Assert.That(putResp.StatusCode).IsEqualTo(HttpStatusCode.OK);
@@ -133,7 +140,7 @@ public class S3EndpointsTests
         await using (factory)
         {
             await factory.WriteFileAsync("meta.txt", "metadata"u8.ToArray());
-            var client = AuthClient(rawClient);
+            var client = await AuthClientAsync(rawClient);
             var req = new HttpRequestMessage(HttpMethod.Head, "/s3/test/meta.txt");
             var resp = await client.SendAsync(req);
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
@@ -147,7 +154,7 @@ public class S3EndpointsTests
         var (factory, rawClient) = await SetupAsync();
         await using (factory)
         {
-            var client = AuthClient(rawClient);
+            var client = await AuthClientAsync(rawClient);
             var resp = await client.GetAsync("/s3/test/nonexistent.txt");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
         }
@@ -160,13 +167,48 @@ public class S3EndpointsTests
         await using (factory)
         {
             await factory.WriteFileAsync("delete-me.txt", "bye"u8.ToArray());
-            var client = AuthClient(rawClient);
+            var client = await AuthClientAsync(rawClient);
 
             var delResp = await client.DeleteAsync("/s3/test/delete-me.txt");
             await Assert.That(delResp.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
 
             var getResp = await client.GetAsync("/s3/test/delete-me.txt");
             await Assert.That(getResp.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+        }
+    }
+
+    [Test]
+    public async Task GarbageToken_ReturnsUnauthorized()
+    {
+        // Auth hardening: a syntactically-present but invalid token must NOT be
+        // accepted as a guest admin (previous behavior). It is rejected at the gateway.
+        var (factory, rawClient) = await SetupAsync();
+        await using (factory)
+        {
+            rawClient.DefaultRequestHeaders.Authorization = new("Bearer", "not-a-real-jwt");
+            var resp = await rawClient.GetAsync("/s3/");
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+        }
+    }
+
+    [Test]
+    public async Task AwsSigv4StyleHeader_With_ValidToken_Works()
+    {
+        // The access key in a SigV4-style Authorization header is treated as the JWT token.
+        // A real token placed there must resolve to the backing user and succeed.
+        var (factory, rawClient) = await SetupAsync();
+        await using (factory)
+        {
+            var login = await rawClient.PostAsync("/api/auth/login",
+                JsonContent.Create(new { username = "admin", password = "admin" }));
+            var loginJson = await login.Content.ReadFromJsonAsync<JsonDocument>();
+            var token = loginJson!.RootElement.GetProperty("data").GetProperty("token").GetString()!;
+            rawClient.DefaultRequestHeaders.Authorization =
+                new("AWS4-HMAC-SHA256", $"Credential={token}/20260816/us-east-1/s3/aws4_request, " +
+                                        "SignedHeaders=x-amz-date, Signature=deadbeef");
+
+            var resp = await rawClient.GetAsync("/s3/");
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
         }
     }
 }

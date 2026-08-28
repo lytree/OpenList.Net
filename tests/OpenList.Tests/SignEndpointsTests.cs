@@ -48,21 +48,21 @@ public class SignEndpointsTests
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
-            await factory.WriteFileAsync("a.zip", new byte[] { 0x50, 0x4B, 0x03, 0x04 });
+            await factory.WriteFileAsync("a.zip", TestWebAppFactory.CreateZipBytes());
             var resp = await client.GetAsync("/ad/test/a.zip");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
         }
     }
 
     [Test]
-    public async Task Ad_Returns_501_When_Driver_Lacks_Archive_Reader()
+    public async Task Ad_Lists_Archive_Entries_With_Valid_Signature()
     {
-        // Signature is valid but LocalDriver does not implement IFileSystemArchiveReader,
-        // so the handler returns Resp code=501 (HTTP 200 with body code=501).
+        // LocalDriver now implements IFileSystemArchiveReader (SharpCompress), so /ad/
+        // returns the archive's entry list instead of 501.
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
-            await factory.WriteFileAsync("a.zip", new byte[] { 0x50, 0x4B, 0x03, 0x04 });
+            await factory.WriteFileAsync("a.zip", TestWebAppFactory.CreateZipBytes());
             var sign = await SignAsync(client, "/test/a.zip");
             // Clear auth header — /ad/ is anonymous (signature-only).
             client.DefaultRequestHeaders.Authorization = null;
@@ -70,24 +70,28 @@ public class SignEndpointsTests
             var resp = await client.GetAsync($"/ad/test/a.zip?sign={sign}");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
             var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(501);
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
+            var content = json.RootElement.GetProperty("data").GetProperty("content");
+            await Assert.That(content.GetArrayLength()).IsEqualTo(1);
         }
     }
 
     [Test]
-    public async Task Ae_Returns_501_When_Driver_Lacks_Archive_Decompress()
+    public async Task Ae_Decompresses_Archive_With_Valid_Signature()
     {
+        // LocalDriver now implements IFileSystemArchiveDecompress (SharpCompress), so /ae/
+        // decompresses the archive into its parent directory instead of returning 501.
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
-            await factory.WriteFileAsync("a.zip", new byte[] { 0x50, 0x4B, 0x03, 0x04 });
+            await factory.WriteFileAsync("a.zip", TestWebAppFactory.CreateZipBytes());
             var sign = await SignAsync(client, "/test/a.zip");
             client.DefaultRequestHeaders.Authorization = null;
 
             var resp = await client.GetAsync($"/ae/test/a.zip?sign={sign}");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
             var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(501);
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
         }
     }
 
