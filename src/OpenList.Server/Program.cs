@@ -15,6 +15,7 @@ using OpenList.Infrastructure.Services;
 using OpenList.Server.Endpoints;
 using OpenList.Server.Hosting;
 using OpenList.Server.Middleware;
+using OpenList.Server.Services;
 using Scalar.AspNetCore;
 using Serilog;
 
@@ -173,6 +174,14 @@ builder.Services.AddSingleton<IFileSystemService>(sp =>
         sp.GetService<IObjsUpdateHooks>()));
 // Multipart (chunked) upload sessions — singleton; depends only on IFileSystemService.
 builder.Services.AddSingleton<IMultipartUploadService, MultipartUploadService>();
+// S3 gateway multipart-upload sessions — singleton; parts staged on disk, TTL-reaped
+// (mirrors Go server/s3/multipart.go). TTL comes from S3.MultipartTTL.
+builder.Services.AddSingleton(sp =>
+{
+    var store = ActivatorUtilities.CreateInstance<S3MultipartStore>(sp);
+    store.Ttl = S3MultipartStore.ParseTtl(appConfig.S3.MultipartTTL);
+    return store;
+});
 // MCP server (Streamable HTTP) — singleton; depends on IFileSystemService + AppConfiguration.
 builder.Services.AddSingleton<IMcpServerService, McpServerService>();
 // WebDAV in-memory lock store — singleton so LOCK/UNLOCK state persists across
@@ -367,6 +376,10 @@ using (var scope = app.Services.CreateScope())
     // temp chunks from a previous run and begin periodic expiry of idle sessions.
     if (scope.ServiceProvider.GetRequiredService<IMultipartUploadService>() is MultipartUploadService mp)
         mp.StartGc();
+
+    // Start S3 multipart-upload GC (Go s3Backend.startReaper): sweep orphaned part dirs
+    // from a previous run and begin periodic TTL reaping of abandoned uploads.
+    scope.ServiceProvider.GetRequiredService<S3MultipartStore>().StartGc();
 }
 
 app.Run();

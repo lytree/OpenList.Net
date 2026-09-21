@@ -59,6 +59,19 @@ public sealed class UserService : IUserService
     }
 
     /// <summary>
+    /// 获取系统中的首个管理员账号（按 Id 升序）。供初始化向导判断系统是否已初始化。
+    /// 对应 Go <c>op.GetAdmin</c>：无管理员时返回 404（对应 gorm.ErrRecordNotFound）。
+    /// </summary>
+    public async Task<Resp<User>> GetAdminAsync(CancellationToken ct = default)
+    {
+        var u = await _db.Users.AsNoTracking()
+            .Where(x => x.Role == UserRole.Admin)
+            .OrderBy(x => x.Id)
+            .FirstOrDefaultAsync(ct);
+        return u is null ? Resp<User>.Fail("admin not found", RespCodes.NotFound) : Resp<User>.Ok(u);
+    }
+
+    /// <summary>
     /// 按 SSO Id 获取用户。
     /// </summary>
     public async Task<Resp<User>> GetBySsoIdAsync(string ssoId, CancellationToken ct = default)

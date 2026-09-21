@@ -210,6 +210,12 @@ public sealed class S3Config
     public bool Enable { get; set; }
     /// <summary>监听端口。</summary>
     public int Port { get; set; } = 5246;
+    /// <summary>
+    /// 分片上传（Multipart Upload）会话的最大空闲时长，Go duration 风格
+    /// （如 "24h"、"30m"、"10s"）。空或非法值回退为 24h。
+    /// 对齐 Go <c>conf.Conf.S3.MultipartTTL</c>。
+    /// </summary>
+    public string MultipartTTL { get; set; } = "";
 }
 
 /// <summary>

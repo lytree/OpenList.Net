@@ -120,6 +120,10 @@
 - ~~`/i/:link_name` — Plist (iOS video streaming)~~ **Implemented** (`MiscEndpoints.MapMiscApi`; decodes base64 `[url]/[name@identifier]`, emits Apple plist XML for IPA install)
 - ~~`/favicon.ico`, `/robots.txt`, `/manifest.json`~~ **Implemented** (`MiscEndpoints`): `/manifest.json` returns PWA manifest using `site_title` from settings; `/robots.txt` returns `User-agent: *\nAllow: /`; `/favicon.ico` 302-redirects to the `logo` setting (404 if unset).
 
+**初始化向导**（Go v4.2.6 `feat!(init)` #3041，`server/handles/setup.go`）：
+- ~~`GET|POST /api/public/init_status` — 系统是否已初始化（是否已存在管理员）~~ **Implemented** (`PublicEndpoints`) → `Resp<{initialized: bool}>`；判定复用了新增的 `IUserService.GetAdminAsync`（无管理员时 404，镜像 Go `op.GetAdmin` / `gorm.ErrRecordNotFound`）。
+- ~~`POST /api/public/init/setup` — 创建首个管理员 + 设置站点名~~ **Implemented**：body `{username, password, site_title}`；先校验必填，再拒绝"已初始化"（400 `system has already been initialized`），密码 `< 4` 返回 400，随后以 `Role=Admin / BasePath=/ / Permission=0x71FF` 建号并写入 `site_title` 设置项。前端安装向导据此实现。
+
 ### Driver extension interfaces (defined in `IFileSystemDriverExtensions.cs`)
 
 - ~~`IFileSystemArchiveReader` — `ListArchiveEntriesAsync`~~ **Implemented on `LocalDriver`** via `OpenList.Drivers.Archive.SharpCompressArchiveSupport` (zip/rar/7z/tar/gz, SharpCompress). Any Zio-backed driver can reuse the helper.
@@ -146,6 +150,17 @@ Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3), `IFileSystemUplo
 - **`set_guangyapan`**：`POST /admin/setting/set_guangyapan`（存 `guangyapan_temp_dir`）。
 
 **前端关联**：`frontend/` 已修复为指向 `OpenListTeam/Openlist-Frontend`（v4.2.5, commit `feae2d0`）的 git submodule（原为损坏的 gitlink 160000 + 旧 v4.2.2 dist）。`pnpm build` 产出 `frontend/dist`，后端 `DistDir=../../frontend/dist` 天然匹配。`src/Example.Tests` 残留工程已删除。
+
+## S3 网关增强（2026-09-21，对照 Go v4.2.6）
+
+`S3Endpoints` 在基础对象读写之上补齐了 S3 客户端实际依赖的能力：
+
+- **分片上传（Multipart Upload）**（Go `server/s3/multipart.go` #2813）：`POST /s3/{bucket}/{key}?uploads` 初始化；`PUT …?partNumber=N&uploadId=X` 上传分片；`POST …?uploadId=X` 完成（body 为 `CompleteMultipartUpload` XML）；`DELETE …?uploadId=X` 中止；`GET /s3/{bucket}?uploads` 列出进行中上传。新增 `S3MultipartStore`（singleton，`src/OpenList.Server/Services/S3MultipartStore.cs`）：分片流式落盘到 `%TEMP%/openlist-s3-multipart/{uploadId}/part-NNNNN`，支持乱序上传，Complete 时按 partNumber 升序用 `ConcatStream` 合并后走 `PutStreamAsync` 写入目标；校验 parts 升序、逐分片 ETag 匹配、`Content-Length` 不符则报 `IncompleteBody`；失败保留会话以便重试，成功/中止后清理临时目录。**TTL 回收**（镜像 Go `startReaper`）：默认 24h 空闲即回收，间隔 = TTL/4 夹在 [10s, 1h]，可由 `S3.MultipartTTL`（Go duration 字符串，如 `24h`/`30m`）配置；`Program.cs` 启动时清扫上次运行遗留的孤儿目录并启动周期回收。ETag 规则：part = `"md5hex"`，complete = `"hex(md5(concat(part md5 原始字节)))-N"`。
+- **ListObjectsV2**：`GET /s3/{bucket}?list-type=2` 返回 `KeyCount` / `ContinuationToken` / `NextContinuationToken` / `StartAfter`，对象先按 key 稳定排序再截断，支持 `continuation-token` / `start-after` 续传（V1 同步补 `marker` / `NextMarker` 与截断）。
+- **服务端复制 CopyObject**：`PUT /s3/{bucket}/{key}` 带 `x-amz-copy-source: /srcBucket/srcKey` 头 → 复制到目标并返回 `CopyObjectResult`。
+- **批量删除 DeleteObjects**：`POST /s3/{bucket}?delete`（XML `Delete/Object/Key` 列表）→ `DeleteResult`（逐条 `Deleted` 或 `Error`）。
+- **Range 请求**：`GET /s3/{bucket}/{key}` 支持 `Range`，返回 **206 + `Content-Range`**（对应 Go `server/s3/range.go`）；`HEAD` 返回 `Accept-Ranges: bytes`。
+- **实现注意**：解析请求体 XML 必须**异步**读取（`StreamReader.ReadToEndAsync` → `XmlDocument.LoadXml`）——ASP.NET Core 默认 `AllowSynchronousIO=false`，直接 `XmlDocument.Load(Request.Body)` 会抛 `InvalidOperationException` 并导致 Complete/DeleteObjects 静默失败（返回 400 / 空结果）。
 
 ## Known Issues
 

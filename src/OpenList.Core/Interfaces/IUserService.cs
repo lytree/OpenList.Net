@@ -12,6 +12,11 @@ public interface IUserService
     Task<Resp<User>> GetAsync(long id, CancellationToken ct = default);
     /// <summary>按用户名获取用户。</summary>
     Task<Resp<User>> GetByNameAsync(string username, CancellationToken ct = default);
+    /// <summary>
+    /// 获取系统中的首个管理员账号（按 Id 升序）。用于初始化向导判断系统是否已完成初始化。
+    /// 不存在时返回 <see cref="RespCodes.NotFound"/>。对应 Go <c>op.GetAdmin</c>。
+    /// </summary>
+    Task<Resp<User>> GetAdminAsync(CancellationToken ct = default);
     /// <summary>按其 SSO 提供方 id 查找用户。由 SSO 回调流程使用。</summary>
     Task<Resp<User>> GetBySsoIdAsync(string ssoId, CancellationToken ct = default);
     /// <summary>获取当前登录用户的公开信息。</summary>

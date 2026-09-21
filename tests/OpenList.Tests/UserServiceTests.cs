@@ -141,6 +141,31 @@ public class UserServiceTests
         await Assert.That(u.TwoFactorEnabled).IsFalse();
     }
 
+    [Test]
+    public async Task GetAdminAsync_Returns_404_When_No_Admin_Exists()
+    {
+        // Mirrors Go op.GetAdmin returning gorm.ErrRecordNotFound — the init wizard
+        // relies on this to decide whether the system still needs setup.
+        await using var ctx = BuildContext();
+        var svc = NewUserService(ctx);
+        await svc.CreateAsync(new CreateUserReq { Username = "plain", Password = "pw", Role = UserRole.General });
+        var r = await svc.GetAdminAsync();
+        await Assert.That(r.Code).IsEqualTo(404);
+    }
+
+    [Test]
+    public async Task GetAdminAsync_Returns_First_Admin_By_Id()
+    {
+        await using var ctx = BuildContext();
+        var svc = NewUserService(ctx);
+        await svc.CreateAsync(new CreateUserReq { Username = "first", Password = "pw", Role = UserRole.Admin, BasePath = "/", Permission = 0x71FF });
+        await svc.CreateAsync(new CreateUserReq { Username = "second", Password = "pw", Role = UserRole.Admin });
+        var r = await svc.GetAdminAsync();
+        await Assert.That(r.Code).IsEqualTo(200);
+        await Assert.That(r.Data!.Username).IsEqualTo("first");
+        await Assert.That(r.Data.Role).IsEqualTo(UserRole.Admin);
+    }
+
     private static OpenListDbContext BuildContext()
     {
         var conn = new SqliteConnection("DataSource=:memory:");
