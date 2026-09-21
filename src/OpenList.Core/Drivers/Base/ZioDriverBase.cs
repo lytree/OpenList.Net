@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Text.Json;
+using OpenList.Core.Drivers;
 using Zio;
 using Zio.FileSystems;
 
@@ -15,6 +17,63 @@ public abstract class ZioDriverBase : IDisposable, IAsyncDisposable
 {
     /// <summary>底层的 Zio 文件系统（由驱动在 <see cref="InitAsync"/> 中设置）。</summary>
     public IFileSystem? System { get; protected set; }
+
+    /// <summary>
+    /// 本驱动实例对应的挂载路径（即 <c>Storage.MountPath</c>）。
+    /// 由挂载服务在调用 <see cref="InitAsync"/> 前通过 <see cref="AttachRuntime"/> 注入；
+    /// 测试中直接构造的实例该值为空字符串。
+    /// </summary>
+    public string MountPath { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// Addition 回写通道。由挂载服务注入 —— 为空表示当前实例无法持久化配置变更
+    /// （例如单元测试里直接 <c>new</c> 出来的驱动）。
+    /// </summary>
+    public IStorageAdditionSink? AdditionSink { get; private set; }
+
+    /// <summary>
+    /// 由挂载服务在调用 <see cref="InitAsync"/> 之前注入运行时上下文。
+    /// 驱动无需自行调用；拆成独立方法是为了不破坏已有驱动对
+    /// <see cref="InitAsync"/> 的签名实现。
+    /// </summary>
+    /// <param name="mountPath">该驱动实例挂载到的存储路径。</param>
+    /// <param name="additionSink">Addition 回写通道，可为 null。</param>
+    public void AttachRuntime(string mountPath, IStorageAdditionSink? additionSink)
+    {
+        MountPath = mountPath ?? string.Empty;
+        AdditionSink = additionSink;
+    }
+
+    /// <summary>
+    /// 把 <paramref name="addition"/> 序列化后回写到所属存储的 <c>Addition</c> 字段，
+    /// 用于持久化 OAuth token 等运行时变更。对应 Go 的 <c>op.MustSaveDriverStorage</c>。
+    /// </summary>
+    /// <typeparam name="T">驱动附加配置类型。</typeparam>
+    /// <param name="addition">要持久化的附加配置对象。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>成功写入返回 <c>true</c>；无回写通道、未定位到存储或对象为空时返回 <c>false</c>。</returns>
+    /// <remarks>
+    /// 序列化按对象的**运行时类型**进行，因此基类以 <c>object</c> 静态类型持有引用时
+    /// （例如 <c>CloudDriverBase</c>）也能正确写出全部字段；属性名沿用驱动 Addition 上的
+    /// <c>[JsonPropertyName]</c> 标记，与 <see cref="DriverConfig.GetAddition{T}"/> 互为逆操作。
+    /// </remarks>
+    public Task<bool> SaveAdditionAsync<T>(T addition, CancellationToken ct = default)
+    {
+        if (addition is null) return Task.FromResult(false);
+        return SaveAdditionAsync(JsonSerializer.Serialize(addition, addition.GetType()), ct);
+    }
+
+    /// <summary>
+    /// 把已序列化的 JSON 回写到所属存储的 <c>Addition</c> 字段。
+    /// </summary>
+    /// <param name="additionJson">新的附加配置 JSON。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>成功写入返回 <c>true</c>；无回写通道或未定位到存储时返回 <c>false</c>。</returns>
+    public async Task<bool> SaveAdditionAsync(string additionJson, CancellationToken ct = default)
+    {
+        if (AdditionSink is null || string.IsNullOrWhiteSpace(MountPath)) return false;
+        return await AdditionSink.SaveAdditionAsync(MountPath, additionJson, ct);
+    }
 
     /// <summary>UI 中展示的驱动类型名（如 "Local"、"S3"）。</summary>
     public abstract string DriverName { get; }

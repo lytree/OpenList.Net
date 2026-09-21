@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using OpenList.Core.Configuration;
+using OpenList.Core.Drivers;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
@@ -111,6 +112,11 @@ builder.Services.AddDbContext<OpenListDbContext>(opts =>
 
 // Core services
 // DbContext-consuming services are Scoped to match the EF Core DbContext lifetime.
+// IStorageAdditionSink lets storage drivers persist runtime config changes (notably refreshed
+// OAuth tokens) back to x_storages. It's a singleton like ZioMountService and creates its own
+// DI scope per write to reach the scoped DbContext. Registered BEFORE ZioMountService so the
+// optional constructor parameter resolves.
+builder.Services.AddSingleton<IStorageAdditionSink, StorageAdditionSink>();
 builder.Services.AddSingleton<ZioMountService>();
 builder.Services.AddScoped<IUserService, UserService>();
 // ILdapAuthenticator is a singleton because it only depends on AppConfiguration.

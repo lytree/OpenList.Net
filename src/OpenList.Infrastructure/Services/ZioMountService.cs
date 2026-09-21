@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
@@ -19,6 +21,25 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
     private readonly ConcurrentDictionary<string, ZioDriverBase> _drivers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ZioDriverBase> _mounted = new(StringComparer.OrdinalIgnoreCase);
     private readonly MountFileSystem _root = new();
+    private readonly IStorageAdditionSink? _additionSink;
+    private readonly ILogger<ZioMountService> _logger;
+
+    /// <summary>
+    /// 构造挂载服务。
+    /// </summary>
+    /// <param name="additionSink">
+    /// 可选的 Addition 回写通道，用于让云驱动持久化刷新后的 token。
+    /// 为 null（如单元测试直接 <c>new ZioMountService()</c>）时驱动仍可正常工作，
+    /// 只是 <c>SaveAdditionAsync</c> 会静默返回 false。
+    /// </param>
+    /// <param name="logger">可选日志；为 null 时使用 <see cref="NullLogger{T}"/>。</param>
+    public ZioMountService(
+        IStorageAdditionSink? additionSink = null,
+        ILogger<ZioMountService>? logger = null)
+    {
+        _additionSink = additionSink;
+        _logger = logger ?? NullLogger<ZioMountService>.Instance;
+    }
 
     /// <summary>根挂载文件系统，按挂载路径暴露所有已启用的存储。</summary>
     public MountFileSystem Root => _root;
@@ -70,12 +91,28 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
         return driverType;
     }
 
-    /// <summary>从数据库加载所有已启用的存储。</summary>
+    /// <summary>
+    /// 从数据库加载所有已启用的存储。
+    /// <para>
+    /// 单个存储初始化失败（配置错误、凭据失效、网络不可达）**不会**中断其余存储的加载，
+    /// 只记录日志并跳过 —— 对齐 Go <c>op.initStorage</c> 的「记录失败状态但继续」语义。
+    /// 否则一个坏存储会让整个服务在启动阶段直接起不来。
+    /// </para>
+    /// </summary>
     public Task LoadAllAsync(IEnumerable<Storage> storages, CancellationToken ct = default)
     {
         foreach (var s in storages.Where(s => !s.Disabled).OrderBy(s => s.Order))
         {
-            LoadAsync(s, ct).GetAwaiter().GetResult();
+            try
+            {
+                LoadAsync(s, ct).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Failed to load storage '{MountPath}' (driver {Driver}); skipped.",
+                    s.MountPath, s.Driver);
+            }
         }
         return Task.CompletedTask;
     }
@@ -88,11 +125,28 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
         if (_mounted.ContainsKey(storage.MountPath)) await UnloadAsync(storage.MountPath, ct);
 
         var type = ResolveDriverType(storage.Driver);
-        if (type is null) return;
+        if (type is null)
+        {
+            _logger.LogWarning(
+                "Unknown driver '{Driver}' for storage '{MountPath}'; not mounted.",
+                storage.Driver, storage.MountPath);
+            return;
+        }
 
         var driver = (ZioDriverBase)Activator.CreateInstance(type)!;
+        // 注入运行时上下文：MountPath 用于 Addition 回写定位，AdditionSink 是回写通道。
+        // 必须在 InitAsync 之前调用 —— 云驱动的 InitAsync 里就可能需要刷新并持久化 token。
+        driver.AttachRuntime(storage.MountPath, _additionSink);
         await driver.InitAsync(DriverConfig.FromStorage(storage), ct);
-        if (driver.System is null) return;
+        if (driver.System is null)
+        {
+            // 驱动没有提供文件系统（例如尚未移植 API 的骨架驱动）：配置仍然保存成功，
+            // 但不注册挂载点。这里显式记一条日志，避免「存储看起来正常但浏览为空」的无头悬案。
+            _logger.LogWarning(
+                "Driver {Driver} for storage '{MountPath}' initialized without a filesystem; not mounted.",
+                storage.Driver, storage.MountPath);
+            return;
+        }
 
         var mountPath = NormalizeMountPath(storage.MountPath);
         _root.Mount(mountPath, driver.System);

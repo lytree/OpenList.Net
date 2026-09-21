@@ -14,7 +14,7 @@
 | Project | Purpose |
 |---|---|
 | `src/OpenList.Core` | Models, `ZioDriverBase`, driver extension interfaces, service interfaces. Depends only on Zio + ASP.NET abstractions |
-| `src/OpenList.Drivers` | Storage driver implementations (`Local/`, `S3/`, `WebDAV/`, `FtpSftpSmb/`, `Cloud/`, `Stubs/`) |
+| `src/OpenList.Drivers` | Storage driver implementations (`Local/`, `S3/`, `WebDAV/`, `FtpSftpSmb/`, `Cloud/`) |
 | `src/OpenList.Infrastructure` | EF Core `DbContext`, service impls, JWT auth, `ZioMountService`. References Core |
 | `src/OpenList.Server` | ASP.NET entrypoint (`Program.cs`), `Endpoints/` (Minimal APIs), `Middleware/`, `Models/` (DTOs + `Resp<T>`) |
 | `tests/OpenList.Tests` | TUnit tests for Core + Infrastructure services |
@@ -51,6 +51,15 @@
 
 - **Auto-discovery**: `ZioMountService` scans assemblies starting with `"OpenList"` for `ZioDriverBase` subclasses. Adding a driver = create a class in `OpenList.Drivers` — no manual registration.
 - **Zio-based**: All drivers extend Zio's `FileSystem`, mounted via `MountFileSystem`. Extension interfaces: `IFileSystemLinkProvider`, `IFileSystemUploader`, `IFileSystemWithDetails`, `IFileSystemArchiveReader`, `IFileSystemArchiveDecompress`, `IFileSystemDirectUploader`.
+- **Driver config schema is backend-driven**: drivers declare `DriverItemAttributes` via `ConfigItems`; `StorageService.BuildDriverInfo` splits them into `common` (generated) + `additional` (from `ConfigItems`) and the frontend renders the form from `GET /admin/driver/list`. Field names double as translation keys in `frontend/src/lang/en/drivers.json` — a mismatch shows raw untranslated keys in the UI.
+- **Runtime context injection**: `ZioMountService.LoadAsync` calls `driver.AttachRuntime(mountPath, additionSink)` **before** `InitAsync`, giving the driver a `MountPath` and an `IStorageAdditionSink`.
+- **Addition write-back** (`IStorageAdditionSink` / `StorageAdditionSink`): mirror of Go `op.MustSaveDriverStorage`. Drivers call `ZioDriverBase.SaveAdditionAsync(addition)` to persist runtime config changes (chiefly refreshed OAuth tokens) back to `x_storages.Addition`. Serialization uses the object's **runtime type** so `[JsonPropertyName]` snake_case keys round-trip with `DriverConfig.GetAddition<T>()`. The sink is a singleton that opens its own DI scope per write (scoped `OpenListDbContext`); it short-circuits when the JSON is unchanged to avoid write amplification.
+- **`LoadAsync` semantics**: a driver that returns successfully but leaves `System == null` is **not mounted** (config still saves) — that's how the AliyundriveOpen skeleton behaves. `LoadAllAsync` catches per-storage init failures and continues (mirrors Go `op.initStorage`); without this, one broken storage killed app startup.
+- **Cloud driver base** (`OpenList.Drivers/Cloud/`, mirrors Go `drivers/aliyundrive_open/{limiter,util}.go`):
+  - `CloudDriverBase` — sets `IsCloudDriver => true`, exposes a shared `HttpClient` (`CloudHttpClient.Shared`: auto-decompress, 30 s connect timeout, infinite overall timeout, 64 conns/host — a process-level singleton because drivers are created by `Activator.CreateInstance` with no DI), plus `ConfigureRateLimit(rps)` / `WaitRateLimitAsync`. Its `RefreshAndPersistTokensAsync` does refresh → apply → persist, in that order (so a DB write failure doesn't leave the live instance on a stale token).
+  - `RequestRateLimiter` — token bucket with capacity 1, matching Go `rate.NewLimiter(rate.Limit(rps), 1)`. `limit_rate` is a **float in requests/second** (`<= 0` = unlimited). Concurrent waits are serialized so bursts can't exceed the limit.
+  - `OAuthTokenRefresher` — retry loop mirroring Go's `refreshToken()` (1 initial + 3 retries = 4 default `MaxAttempts`), `ForJsonEndpoint(...)` helper for the common "POST JSON → `{access_token, refresh_token}`" shape. Treats **HTTP 200 with an empty `access_token` as a failure** (services do this when the refresh token is dead; writing that empty token would brick the storage), doesn't retry on caller cancellation, and includes the last error message in the thrown exception.
+  - `OAuthTokens` — `access_token` / `refresh_token` pair.
 
 ## Key Quirks
 
@@ -165,4 +174,8 @@ Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3), `IFileSystemUplo
 ## Known Issues
 
 - **WebDAV 集成测试挂起（基线遗留，非本次引入）**：`WebDavEndpointsTests.Delete_RemovesFile`（及同类的首个 WebDAV 请求）在测试进程内无限挂起，拖死整个 `dotnet test`。已用 `[Skip]` 临时跳过并注明原因；根因待查（疑似 WebDAV 首个请求在 Basic 认证或挂载层死锁）。真实服务器上的 `/dav` 写入路径需在修复后回归。
-- Cloud 驱动（Phase 9，13+ 个）未实现 —— 见 `docs/api-diff.md` §10 与 `docs/alignment-plan.md`。
+- Cloud 驱动（Phase 9，Go 侧 89 个驱动）**未实现** —— 仅完成公共基础设施 + 一个骨架驱动：
+  - ✅ 地基（已实现并有单测）：`IStorageAdditionSink`（token 回写）、`RequestRateLimiter`（每驱动限流）、`OAuthTokenRefresher`（OAuth 刷新）、`CloudDriverBase`（共享 HTTP + 三者串联）。
+  - ⚠️ **`AliyundriveOpen`（`src/OpenList.Drivers/Cloud/AliyundriveOpen/`）是骨架，未经真实服务验证，不可用于生产**：14 个配置字段已逐项对齐 Go `drivers/aliyundrive_open/meta.go`（前端表单可正常渲染），但 `InitAsync` 故意不设置 `System`（因此挂载点为空、不注册挂载），`RefreshTokenOnceAsync` / `GetLinkAsync` / `PutAsync` / `PutFormAsync` 一律抛 `NotImplementedException`。配置页通过 `Alert` 显示 warning banner 提示未实现。
+  - 待移植的其余云驱动（按 Go 体量由小到大可选）：`wopan`(294 行)、`mega`(387)、`weiyun`(507)、`teambition`(577)、`dropbox`(607)、`google_drive`(730)、`onedrive`(739)、`quark_open`(894)、`quark_uc`(941)、`aliyundrive_open`(1065)、`123_open`(1156)、`baidu_netdisk`(1266)、`189`(1339)、`lanzou`(1465)、`thunder`(1509)、`guangyapan`(1666)。
+  - 移植参考实现顺序建议：先补齐 `AliyundriveOpen` 的 token 刷新与列目录，再照此模板扩展。
