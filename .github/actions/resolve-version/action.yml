@@ -1,0 +1,111 @@
+name: Resolve version
+description: >-
+  Run GitVersion (pinned in .config/dotnet-tools.json) and expose the parsed
+  version fields as action outputs. Previously this ~40-line block was
+  copy-pasted verbatim into both ci.yml and release.yml.
+
+# The calling job MUST check out the repository with `fetch-depth: 0`, otherwise
+# GitVersion cannot see tags or history and silently computes a fallback version.
+
+outputs:
+  semver:
+    description: SemVer, e.g. `1.2.3` on a tag or `0.1.0-42` on a main commit
+    value: ${{ steps.gv.outputs.semver }}
+  fullSemVer:
+    description: FullSemVer (includes pre-release + build metadata)
+    value: ${{ steps.gv.outputs.fullSemVer }}
+  assemblyVer:
+    description: 4-part AssemblyVersion, e.g. `1.2.3.0`
+    value: ${{ steps.gv.outputs.assemblyVer }}
+  fileVer:
+    description: 4-part FileVersion
+    value: ${{ steps.gv.outputs.fileVer }}
+  infoVer:
+    description: InformationalVersion (SemVer + Sha)
+    value: ${{ steps.gv.outputs.infoVer }}
+  sha:
+    description: Full commit SHA the version was computed from
+    value: ${{ steps.gv.outputs.sha }}
+  shortSha:
+    description: First 7 characters of the commit SHA (docker-tag friendly)
+    value: ${{ steps.gv.outputs.shortSha }}
+  majorMinor:
+    description: '`MAJOR.MINOR`, e.g. `1.2` — for floating release tags'
+    value: ${{ steps.gv.outputs.majorMinor }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore local tools
+      shell: bash
+      run: dotnet tool restore
+
+    - name: Compute version
+      id: gv
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # jq ships with every GitHub-hosted runner; fail loudly rather than
+        # silently emitting an empty version if that ever stops being true.
+        command -v jq >/dev/null 2>&1 || { echo "::error::jq is required but not installed"; exit 1; }
+
+        JSON="$(dotnet gitversion -output json -nocache)"
+        get() { printf '%s' "$JSON" | jq -r --arg k "$1" '.[$k] // empty'; }
+
+        SEM="$(get SemVer)"
+        FULL="$(get FullSemVer)"
+        ASM="$(get AssemblySemVer)"
+        FILE="$(get AssemblySemFileVer)"
+        INFO="$(get InformationalVersion)"
+        SHA="$(get Sha)"
+
+        if [ -z "$SEM" ]; then
+          echo "::error::GitVersion returned no SemVer"
+          printf '%s\n' "$JSON"
+          exit 1
+        fi
+
+        # Derive a 4-part assembly version when GitVersion omits one:
+        #   0.1.0-42   -> 0.1.0.0
+        #   1.2.3+sha  -> 1.2.3.0
+        BASE="${SEM%%-*}"; BASE="${BASE%%+*}"
+        IFS='.' read -r MA MI PA _ <<<"$BASE"
+
+        [ -n "$ASM" ]  || ASM="${MA:-0}.${MI:-0}.${PA:-0}.0"
+        [ -n "$FILE" ] || FILE="$ASM"
+        [ -n "$INFO" ] || INFO="${FULL:-$SEM}"
+
+        SHORT_SHA="$(get ShortSha)"
+        [ -n "$SHORT_SHA" ] || SHORT_SHA="${SHA:0:7}"
+        MAJOR_MINOR="${MA:-0}.${MI:-0}"
+
+        {
+          echo "semver=$SEM"
+          echo "fullSemVer=$FULL"
+          echo "assemblyVer=$ASM"
+          echo "fileVer=$FILE"
+          echo "infoVer=$INFO"
+          echo "sha=$SHA"
+          echo "shortSha=$SHORT_SHA"
+          echo "majorMinor=$MAJOR_MINOR"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### Resolved version"
+          echo ""
+          echo "| field | value |"
+          echo "| --- | --- |"
+          echo "| SemVer | \`$SEM\` |"
+          echo "| FullSemVer | \`$FULL\` |"
+          echo "| AssemblyVersion | \`$ASM\` |"
+          echo "| InformationalVersion | \`$INFO\` |"
+          echo "| Sha | \`$SHA\` |"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        echo "Resolved version: $SEM (assembly=$ASM, sha=$SHORT_SHA)"
