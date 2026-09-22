@@ -32,13 +32,20 @@ COPY OpenList.slnx .
 COPY Directory.Build.props .
 COPY Directory.Packages.props .
 
-# Copy ALL csproj referenced by the solution (Drivers was previously missing,
-# which broke `dotnet restore` on the .slnx).
+# Copy every csproj the server depends on, so `dotnet restore` can resolve the
+# project graph before the sources are copied — this keeps the restore layer
+# cached across source-only edits.
+#
+# NOTE: OpenList.slnx also lists tests/OpenList.Tests. Restoring the *solution*
+# would require that csproj to be copied too (and would pull in test-only
+# packages), so restore targets the server project explicitly instead.
 COPY src/OpenList.Core/OpenList.Core.csproj src/OpenList.Core/
 COPY src/OpenList.Drivers/OpenList.Drivers.csproj src/OpenList.Drivers/
 COPY src/OpenList.Infrastructure/OpenList.Infrastructure.csproj src/OpenList.Infrastructure/
+COPY src/OpenList.Migrations.Sqlite/OpenList.Migrations.Sqlite.csproj src/OpenList.Migrations.Sqlite/
+COPY src/OpenList.Migrations.Postgres/OpenList.Migrations.Postgres.csproj src/OpenList.Migrations.Postgres/
 COPY src/OpenList.Server/OpenList.Server.csproj src/OpenList.Server/
-RUN dotnet restore
+RUN dotnet restore src/OpenList.Server/OpenList.Server.csproj
 
 # Copy source and publish. MSBuild version props are forwarded so the assemblies
 # carry the GitVersion-derived metadata (visible via file properties / dotnet --version).
