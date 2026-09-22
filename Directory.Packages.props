@@ -32,26 +32,27 @@
     <PackageVersion Include="Fido2.AspNet" Version="4.1.0" />
 
     <!-- Drivers -->
-    <PackageVersion Include="Zio" Version="0.23.0" />
-    <PackageVersion Include="FluentFTP" Version="53.0.1" />
-    <PackageVersion Include="SSH.NET" Version="2025.1.0" />
+    <PackageVersion Include="Zio" Version="0.24.0" />
+    <PackageVersion Include="FluentFTP" Version="55.0.0" />
+    <PackageVersion Include="SSH.NET" Version="2026.0.0" />
     <PackageVersion Include="SMBLibrary" Version="1.5.8.1" />
     <PackageVersion Include="WebDav.Client" Version="2.9.0" />
-    <PackageVersion Include="Minio" Version="6.0.4" />
+    <PackageVersion Include="Minio" Version="7.0.0" />
+    <!-- 4.0 移除了 LdapConnection 的同步 Connect/Bind/Search，需先适配 LdapAuthenticator 再升级 -->
     <PackageVersion Include="Novell.Directory.Ldap.NETStandard" Version="3.6.0" />
     <PackageVersion Include="SharpCompress" Version="0.50.4" />
     <PackageVersion Include="MonoTorrent" Version="3.0.2" />
-    <PackageVersion Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
-    <PackageVersion Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
 
     <!-- FTP/SFTP Server -->
     <PackageVersion Include="FubarDev.FtpServer" Version="3.1.2" />
     <PackageVersion Include="FubarDev.FtpServer.FileSystem.DotNet" Version="3.1.2" />
 
     <!-- Testing -->
-    <PackageVersion Include="TUnit" Version="0.19.74" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="TUnit" Version="1.68.17" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="coverlet.collector" Version="10.0.1" />
   </ItemGroup>
 </Project>

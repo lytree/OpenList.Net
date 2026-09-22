@@ -370,15 +370,17 @@ Task("Build")
 });
 
 Task("Test")
-    .Description("dotnet test")
+    .Description("dotnet test (MTP mode, opted in via global.json)")
     .IsDependentOn("Build")
     .Does(() =>
 {
-    DotNetTest(SolutionFile, new DotNetTestSettings
-    {
-        Configuration = configuration,
-        NoBuild = true,
-    });
+    // .NET 10 + Microsoft.Testing.Platform requires the new CLI shape — the test
+    // project is addressed with `--solution` rather than a positional argument.
+    // Cake's DotNetTest alias still emits the legacy VSTest form, so call the CLI
+    // directly (same approach as the Format target below).
+    var exit = StartProcess("dotnet", $"test --solution {SolutionFile} -c {configuration} --no-build");
+    if (exit != 0)
+        throw new InvalidOperationException($"dotnet test exited with {exit}");
 });
 
 Task("Frontend")

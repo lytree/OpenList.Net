@@ -62,8 +62,9 @@ public class CloudDriverInfraTests
         for (var i = 0; i < 5; i++) await limiter.WaitAsync();
         sw.Stop();
         await Assert.That(sw.ElapsedMilliseconds).IsGreaterThanOrEqualTo(70);
-        // 但也不该慢得离谱（避免实现里出现意外的长等待）。
-        await Assert.That(sw.ElapsedMilliseconds).IsLessThan(1000);
+        // 上限只用于捕捉数量级异常的长等待（理论值 80ms）。阈值放宽到 5s：
+        // 整个套件并行满载时 Task.Delay 的实际精度会显著劣化，1s 在 CI runner 上会偶发误报。
+        await Assert.That(sw.ElapsedMilliseconds).IsLessThan(5000);
     }
 
     [Test]

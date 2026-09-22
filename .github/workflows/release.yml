@@ -95,7 +95,9 @@ jobs:
             -p:InformationalVersion="${{ needs.resolve-version.outputs.infoVer }}" \
             -p:SourceRevisionId="${{ needs.resolve-version.outputs.sha }}"
       - name: Test
-        run: dotnet test OpenList.slnx -c "$CONFIGURATION" --no-build --logger "trx;LogFileName=tests.trx"
+        # MTP mode (opt-in via global.json) — `--logger` is a VSTest option and is
+        # rejected here; TRX output comes from `--report-trx` instead.
+        run: dotnet test --solution OpenList.slnx -c "$CONFIGURATION" --no-build --report-trx
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
