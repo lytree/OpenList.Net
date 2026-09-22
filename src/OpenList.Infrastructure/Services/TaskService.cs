@@ -229,7 +229,7 @@ public sealed class TaskService : ITaskService
     /// </summary>
     private async Task RunAsync(string tid, TaskRecord rec)
     {
-        var progress = new Progress<TaskProgress>(p =>
+        var progress = new SynchronousProgress<TaskProgress>(p =>
         {
             rec.Info.Progress = p.Current;
             rec.Info.Total = p.Total;
@@ -281,5 +281,24 @@ public sealed class TaskService : ITaskService
         public required TaskInfo Info { get; init; }
         public required Func<IProgress<TaskProgress>, CancellationToken, Task> Work { get; init; }
         public required CancellationTokenSource Cts { get; init; }
+    }
+
+    /// <summary>
+    /// 同步进度上报器：<see cref="IProgress{T}.Report"/> 返回时回调必已执行完毕。
+    /// </summary>
+    /// <remarks>
+    /// 此处不能使用 <see cref="Progress{T}"/>。它在构造时捕获 <c>SynchronizationContext</c>，
+    /// 服务端/测试场景没有该上下文，于是退回线程池投递，使 <c>Report</c> 变成即发即忘：
+    /// 任务体已返回而回调尚未执行，<see cref="RunAsync"/> 收尾时读到的 <c>Total</c> 仍为 0，
+    /// 成功任务的进度被记为 0。该竞态在 CPU 较少的 CI runner 上稳定复现
+    /// （见测试 <c>CreateAsync_Returns_TaskId_And_Runs_To_Completion</c>）。
+    /// </remarks>
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+
+        public SynchronousProgress(Action<T> handler) => _handler = handler;
+
+        public void Report(T value) => _handler(value);
     }
 }
