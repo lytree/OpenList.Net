@@ -92,7 +92,7 @@ public class MultipartUploadServiceTests
 
         // 会话临时目录已创建。
         var dirs = Directory.GetDirectories(t.Root);
-        await Assert.That(dirs).HasCount().EqualTo(1);
+        await Assert.That(dirs).Count().IsEqualTo(1);
         await Assert.That(svc.SessionCount).IsEqualTo(1);
 
         // 超过 30 分钟不活动 → GC 回收会话并清理临时目录。

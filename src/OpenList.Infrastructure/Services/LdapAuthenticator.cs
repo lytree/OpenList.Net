@@ -11,7 +11,8 @@ namespace OpenList.Infrastructure.Services;
 /// <item><c>BindDn</c> 包含 <c>%s</c> — 使用模板化 DN 直接绑定（无需搜索）。</item>
 /// <item><c>BindDn</c> 无占位符 — 先在 <c>UserBase</c> 下搜索用户 DN 再绑定。</item>
 /// </list>
-/// 底层 Novell 客户端是同步的；这里将其卸载到线程池执行，避免阻塞 ASP.NET 请求线程。
+/// 4.x 起 Novell 客户端整体异步化（<c>ConnectAsync</c> / <c>BindAsync</c> / <c>SearchAsync</c>），
+/// 因此这里直接 await，不再需要用 <c>Task.Run</c> 把同步调用卸载到线程池。
 /// 对应 Go 参考实现 <c>internal/op/auth.go</c>。
 /// </summary>
 public sealed class LdapAuthenticator : ILdapAuthenticator
@@ -36,60 +37,59 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
     /// <param name="password">待认证的密码。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>认证成功返回 <c>true</c>；未启用、无效输入、凭证错误或目录异常均返回 <c>false</c>。</returns>
-    public Task<bool> AuthenticateAsync(string username, string password, CancellationToken ct = default)
-        => Task.Run(() =>
+    public async Task<bool> AuthenticateAsync(string username, string password, CancellationToken ct = default)
+    {
+        if (!Enabled) return false;
+        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password)) return false;
+
+        var (host, port, ssl) = ParseUrl(_cfg.Url);
+        using var conn = new LdapConnection();
+        try
         {
-            if (!Enabled) return false;
-            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password)) return false;
-
-            var (host, port, ssl) = ParseUrl(_cfg.Url);
-            using var conn = new LdapConnection();
-            try
+            ct.ThrowIfCancellationRequested();
+            if (ssl)
             {
-                ct.ThrowIfCancellationRequested();
-                if (ssl)
+                conn.SecureSocketLayer = true;
+                if (_cfg.SkipVerify)
                 {
-                    conn.SecureSocketLayer = true;
-                    if (_cfg.SkipVerify)
-                    {
-                        // 跳过自签名证书校验，便于连接开发环境。
-                        conn.UserDefinedServerCertValidationDelegate += (_, _, _, _) => true;
-                    }
+                    // 跳过自签名证书校验，便于连接开发环境。
+                    conn.UserDefinedServerCertValidationDelegate += (_, _, _, _) => true;
                 }
-                conn.Connect(host, port);
+            }
+            await conn.ConnectAsync(host, port, ct);
 
-                // 起步 TLS（STARTTLS）很少与 LDAPS 搭建组合使用；需要 TLS 的用户应改用 ldaps://。
-                // Novell 3.6 各版本的 STARTTLS 入口名称不一致，为保持可移植性这里跳过。
+            // 起步 TLS（STARTTLS）很少与 LDAPS 搭建组合使用；需要 TLS 的用户应改用 ldaps://。
+            // 4.x 已提供 StartTlsAsync，但为保持与既有配置语义一致，此处仍不做隐式升级。
 
-                var dn = ResolveDn(username);
-                if (dn is null)
-                {
-                    // 搜索模式：先以匿名（或服务账号）绑定以定位用户 DN。
-                    dn = SearchUserDn(conn, username);
-                    if (dn is null) return false;
-                }
+            var dn = ResolveDn(username);
+            if (dn is null)
+            {
+                // 搜索模式：先以匿名（或服务账号）绑定以定位用户 DN。
+                dn = await SearchUserDnAsync(conn, username, ct);
+                if (dn is null) return false;
+            }
 
-                conn.Bind(LdapConnection.LdapV3, dn, password);
-                return conn.Bound;
-            }
-            catch (LdapException)
-            {
-                // 凭证错误或连接被拒 —— 以认证失败返回，而非抛异常。
-                return false;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                return false;
-            }
-            finally
-            {
-                try { if (conn.Connected) conn.Disconnect(); } catch { /* 忽略 */ }
-            }
-        }, ct);
+            await conn.BindAsync(LdapConnection.LdapV3, dn, password, ct);
+            return conn.Bound;
+        }
+        catch (LdapException)
+        {
+            // 凭证错误或连接被拒 —— 以认证失败返回，而非抛异常。
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try { if (conn.Connected) conn.Disconnect(); } catch { /* 忽略 */ }
+        }
+    }
 
     /// <summary>
     /// 若 <see cref="LdapConfig.BindDn"/> 包含 <c>%s</c>，则用用户名替换占位符得到 DN；
@@ -109,24 +109,26 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
     /// </summary>
     /// <param name="conn">已连接的 LDAP 连接。</param>
     /// <param name="username">要定位的用户名。</param>
+    /// <param name="ct">取消令牌。</param>
     /// <returns>匹配的首个用户 DN，未找到返回 null。</returns>
-    private string? SearchUserDn(LdapConnection conn, string username)
+    private async Task<string?> SearchUserDnAsync(LdapConnection conn, string username, CancellationToken ct)
     {
         // 先尝试匿名绑定；若目录禁止匿名，搜索会直接抛异常并返回 null（不泄露有效用户名）。
-        try { conn.Bind(LdapConnection.LdapV3, "", ""); } catch { /* 匿名可能被拒绝 */ }
+        try { await conn.BindAsync(LdapConnection.LdapV3, "", "", ct); } catch { /* 匿名可能被拒绝 */ }
         if (!conn.Bound) return null;
 
         var filter = $"({_cfg.UserFilter}={EscapeLdapFilter(username)})";
-        var results = conn.Search(
+        var results = await conn.SearchAsync(
             _cfg.UserBase,
             LdapConnection.ScopeSub,
             filter,
             new[] { _cfg.UserFilter },
-            typesOnly: false);
+            false,
+            ct);
         // 取首个匹配条目的 DN。
-        while (results.HasMore())
+        while (await results.HasMoreAsync(ct))
         {
-            try { return results.Next().Dn; }
+            try { return (await results.NextAsync(ct)).Dn; }
             catch (LdapException) { /* 跳过异常条目 */ }
         }
         return null;

@@ -125,7 +125,7 @@ public class CloudDriverInfraTests
         var tokens = await refresher.RefreshAsync();
         await Assert.That(tokens.AccessToken).IsEqualTo("ok");
         await Assert.That(calls).IsEqualTo(3);
-        await Assert.That(failures).HasCount().EqualTo(2);
+        await Assert.That(failures).Count().IsEqualTo(2);
     }
 
     [Test]

@@ -331,8 +331,8 @@ public sealed class WebAuthnService : IWebAuthnService
         var host = new Uri(origin).Host;
         return new Fido2(new Fido2Configuration
         {
-            ServerDomain = host,
-            ServerName = "OpenList",
+            RPID = host,
+            RPName = "OpenList",
             Origins = new HashSet<string> { origin },
         });
     }

@@ -66,10 +66,10 @@ public class FileSystemServiceTests
         var r = await svc.ListAsync(new FsListReq { Path = "/test", Page = 1, PerPage = 2 }, TestUser);
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!.Total).IsEqualTo(5);
-        await Assert.That(r.Data.Content).HasCount().EqualTo(2);
+        await Assert.That(r.Data.Content).Count().IsEqualTo(2);
 
         var r2 = await svc.ListAsync(new FsListReq { Path = "/test", Page = 3, PerPage = 2 }, TestUser);
-        await Assert.That(r2.Data!.Content).HasCount().EqualTo(1);
+        await Assert.That(r2.Data!.Content).Count().IsEqualTo(1);
     }
 
     [Test]

@@ -61,7 +61,7 @@ public class StorageServiceTests
         await svc.CreateAsync(new CreateStorageReq { MountPath = "/a", Driver = "Local", Order = 1, Disabled = true });
         var r = await svc.ListAsync();
         await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(r.Data!.Content).HasCount().EqualTo(2);
+        await Assert.That(r.Data!.Content).Count().IsEqualTo(2);
         await Assert.That(r.Data.Content[0].MountPath).IsEqualTo("/a");
     }
 
@@ -147,7 +147,7 @@ public class StorageServiceTests
         var svc = new StorageService(ctx, new ZioMountService());
         var r = await svc.GetDriverInfoAsync("Local");
         await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(r.Data!.Additional).HasCount().EqualTo(3);
+        await Assert.That(r.Data!.Additional).Count().IsEqualTo(3);
         await Assert.That(r.Data.Additional[0].Name).IsEqualTo("root_folder_path");
         await Assert.That(r.Data.Config.Name).IsEqualTo("Local");
     }

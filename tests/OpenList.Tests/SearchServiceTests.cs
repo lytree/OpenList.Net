@@ -36,7 +36,7 @@ public class SearchServiceTests
 
         await hooks.PublishDirectoryUpdateAsync("/docs", new List<Obj> { new() { Name = "a.txt" }, new() { Name = "b.txt" } });
 
-        await Assert.That(received).HasCount().EqualTo(1);
+        await Assert.That(received).Count().IsEqualTo(1);
         await Assert.That(received[0].Parent).IsEqualTo("/docs");
         await Assert.That(received[0].Count).IsEqualTo(2);
     }
@@ -54,7 +54,7 @@ public class SearchServiceTests
 
         await hooks.PublishPathRemovedAsync("/docs/old.txt");
 
-        await Assert.That(removed).HasCount().EqualTo(1);
+        await Assert.That(removed).Count().IsEqualTo(1);
         await Assert.That(removed[0]).IsEqualTo("/docs/old.txt");
     }
 
@@ -83,7 +83,7 @@ public class SearchServiceTests
         });
 
         var rows = await fixture.Db().SearchIndex.ToListAsync();
-        await Assert.That(rows).HasCount().EqualTo(2);
+        await Assert.That(rows).Count().IsEqualTo(2);
         await Assert.That(rows.Any(r => r.Parent == "/docs" && r.Name == "a.txt" && r.Size == 10)).IsTrue();
         await Assert.That(rows.Any(r => r.Parent == "/docs" && r.Name == "sub" && r.IsDir)).IsTrue();
         await Assert.That(rows.Any(r => r.Path == "/docs/a.txt")).IsTrue();
@@ -105,7 +105,7 @@ public class SearchServiceTests
         });
 
         var rows = await fixture.Db().SearchIndex.ToListAsync();
-        await Assert.That(rows).HasCount().EqualTo(1);
+        await Assert.That(rows).Count().IsEqualTo(1);
         await Assert.That(rows[0].Name).IsEqualTo("a.txt");
     }
 

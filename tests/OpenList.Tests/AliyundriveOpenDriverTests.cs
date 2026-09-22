@@ -50,7 +50,7 @@ public class AliyundriveOpenDriverTests
         var driver = new AliyundriveOpenDriver();
         // 前端按 '|' 切分 [级别]|[文案]，级别必须合法，否则 banner 不渲染。
         var parts = driver.Alert.Split('|');
-        await Assert.That(parts).HasCount().EqualTo(2);
+        await Assert.That(parts).Count().IsEqualTo(2);
         await Assert.That(parts[0]).IsEqualTo("warning");
         await Assert.That(parts[1]).Contains("尚未移植");
     }
@@ -62,7 +62,7 @@ public class AliyundriveOpenDriverTests
         var names = driver.ConfigItems.Select(c => c.Name).ToList();
 
         // 数量与逐个字段都要对上：多一个字段前端没有翻译，少一个则表单缺项。
-        await Assert.That(names).HasCount().EqualTo(ExpectedFields.Length);
+        await Assert.That(names).Count().IsEqualTo(ExpectedFields.Length);
         foreach (var expected in ExpectedFields)
             await Assert.That(names).Contains(expected);
     }
@@ -103,8 +103,10 @@ public class AliyundriveOpenDriverTests
         await Assert.That(driver.ConfigItems.First(c => c.Name == "alipan_type").Default).IsEqualTo("default");
         await Assert.That(driver.ConfigItems.First(c => c.Name == "livp_download_format").Default).IsEqualTo("jpeg");
         await Assert.That(driver.ConfigItems.First(c => c.Name == "root_folder_id").Default).IsEqualTo("root");
-        await Assert.That(driver.ConfigItems.First(c => c.Name == "use_online_api").Default)
-            .IsEqualTo(true);
+        // Default 的静态类型是 object，无法直接套用 IsTrue()；用 `is true` 保持
+        // 与 IsEqualTo(true) 等价的语义（TUnit 1.x 对后者会报 TUnitAssertions0015）。
+        await Assert.That(driver.ConfigItems.First(c => c.Name == "use_online_api").Default is true)
+            .IsTrue();
     }
 
     [Test]
