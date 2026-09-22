@@ -30,7 +30,7 @@ internal static class SharpCompressArchiveSupport
             Password = password ?? string.Empty,
             LeaveStreamOpen = false,
         };
-        using var reader = ReaderFactory.Open(stream, options);
+        using var reader = ReaderFactory.OpenReader(stream, options);
         var entries = new List<ArchiveEntry>();
         // 逐条读取归档项，归一化路径分隔符并去掉顶层空路径。
         while (reader.MoveToNextEntry())
@@ -69,7 +69,7 @@ internal static class SharpCompressArchiveSupport
             Password = password ?? string.Empty,
             LeaveStreamOpen = false,
         };
-        using var reader = ReaderFactory.Open(stream, options);
+        using var reader = ReaderFactory.OpenReader(stream, options);
         while (reader.MoveToNextEntry())
         {
             var entry = reader.Entry;
