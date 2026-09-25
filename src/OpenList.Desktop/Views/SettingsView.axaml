@@ -1,0 +1,269 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OpenList.Desktop.ViewModels"
+             x:Class="OpenList.Desktop.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel"
+             x:CompileBindings="False">
+
+  <UserControl.Styles>
+    <Style Selector="ListBox.tabs">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Padding" Value="4" />
+    </Style>
+    <Style Selector="ListBox.tabs > ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ListBox.tabs > ListBoxItem ContentPresenter">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ListBox.tabs > ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Brush.SegmentedBg}" />
+    </Style>
+    <Style Selector="ListBox.tabs > ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Brush.Accent}" />
+    </Style>
+    <Style Selector="ListBox.tabs > ListBoxItem TextBlock">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="TextAlignment" Value="Center" />
+      <Setter Property="Padding" Value="0,7" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+    </Style>
+    <Style Selector="ListBox.tabs > ListBoxItem:selected TextBlock">
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <!-- 设置项分组框 -->
+    <Style Selector="Border.field">
+      <Setter Property="Background" Value="{DynamicResource Brush.BgSecondary}" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="14" />
+    </Style>
+  </UserControl.Styles>
+
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+    <StackPanel Margin="24,20" Spacing="14" MaxWidth="980" HorizontalAlignment="Stretch">
+
+      <!-- ===== 头卡 ===== -->
+      <Border Classes="card" Padding="16,14">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+          <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+            <Border Classes="icon-chip" Width="34" Height="34">
+              <Path Classes="icon white" Data="{StaticResource I.Settings}" Width="18" Height="18" />
+            </Border>
+            <StackPanel Spacing="1">
+              <TextBlock Classes="h1" Text="设置" />
+              <TextBlock Classes="muted" Text="配置您的 OpenList 桌面应用程序" />
+            </StackPanel>
+          </StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Button Classes="btn btn-secondary" Command="{Binding ResetAllCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Path Classes="icon secondary" Data="{StaticResource I.RotateCcw}" Width="13" Height="13" />
+                <TextBlock Text="重置" />
+              </StackPanel>
+            </Button>
+            <Button Classes="btn btn-primary" Command="{Binding SaveCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Path Classes="icon white" Data="{StaticResource I.Save}" Width="13" Height="13" />
+                <TextBlock Text="保存更改" />
+              </StackPanel>
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- ===== 分段选择器 ===== -->
+      <Border Classes="card" Padding="6">
+        <ListBox Classes="tabs" SelectedIndex="{Binding SelectedTabIndex}">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate>
+              <!-- 注意：不能用 Grid 做 ItemsPanel——Grid.Column 附加属性对生成项无效，会全部叠在第 0 列 -->
+              <UniformGrid Rows="1" Columns="3" />
+            </ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBoxItem>
+            <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center">
+              <Path Classes="icon secondary" Data="{StaticResource I.Monitor}" Width="14" Height="14"
+                    VerticalAlignment="Center" Margin="0,7,0,0" />
+              <TextBlock Text="OpenList 服务" />
+            </StackPanel>
+          </ListBoxItem>
+          <ListBoxItem>
+            <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center">
+              <Path Classes="icon secondary" Data="{StaticResource I.HardDrive}" Width="14" Height="14"
+                    VerticalAlignment="Center" Margin="0,7,0,0" />
+              <TextBlock Text="Rclone 存储" />
+            </StackPanel>
+          </ListBoxItem>
+          <ListBoxItem>
+            <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center">
+              <Path Classes="icon secondary" Data="{StaticResource I.Settings}" Width="14" Height="14"
+                    VerticalAlignment="Center" Margin="0,7,0,0" />
+              <TextBlock Text="应用程序" />
+            </StackPanel>
+          </ListBoxItem>
+        </ListBox>
+      </Border>
+
+      <!-- ================= Tab 0：OpenList 服务 ================= -->
+      <StackPanel Spacing="14" IsVisible="{Binding Tab0Visible}">
+
+        <Border Classes="card" Padding="18">
+          <StackPanel Spacing="14">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Border Classes="icon-chip" Width="28" Height="28">
+                <Path Classes="icon white" Data="{StaticResource I.Globe}" Width="14" Height="14" />
+              </Border>
+              <TextBlock Classes="card-title" Text="网络配置" FontSize="15" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="14">
+              <StackPanel Spacing="14">
+                <Border Classes="field">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="监听端口" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Brush.TextMain}" />
+                    <TextBox Text="{Binding HttpPort}" />
+                  </StackPanel>
+                </Border>
+                <Border Classes="field">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="OpenList 二进制路径" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Brush.TextMain}" />
+                    <TextBox Text="{Binding CoreExePath}" PlaceholderText="可选。自定义 OpenList 可执行文件路径" />
+                    <Button Classes="btn btn-secondary" HorizontalAlignment="Left" Padding="8,4"
+                            Command="{Binding BrowseCoreCommand}">
+                      <Path Classes="icon secondary" Data="{StaticResource I.Folder}" Width="14" Height="14" />
+                    </Button>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <StackPanel Grid.Column="1" Spacing="14">
+                <Border Classes="field">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="数据目录" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Brush.TextMain}" />
+                    <TextBox Text="{Binding DataDir}" PlaceholderText="可选。自定义数据目录路径" />
+                    <Button Classes="btn btn-secondary" HorizontalAlignment="Left" Padding="8,4"
+                            Command="{Binding BrowseDataDirCommand}">
+                      <Path Classes="icon secondary" Data="{StaticResource I.Folder}" Width="14" Height="14" />
+                    </Button>
+                  </StackPanel>
+                </Border>
+                <Border Classes="field">
+                  <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <ToggleSwitch IsEnabled="False" IsChecked="False" VerticalAlignment="Center" />
+                    <TextBlock Text="启用 SSL/HTTPS" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
+                               Foreground="{DynamicResource Brush.TextMain}" />
+                    <TextBlock Text="即将支持" Classes="muted" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="card" Padding="18">
+          <StackPanel Spacing="14">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Border Classes="icon-chip" Width="28" Height="28">
+                <Path Classes="icon white" Data="{StaticResource I.Link}" Width="14" Height="14" />
+              </Border>
+              <TextBlock Classes="card-title" Text="常规设置" FontSize="15" VerticalAlignment="Center" />
+            </StackPanel>
+            <Border Classes="field">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <ToggleSwitch IsChecked="{Binding AutoStartCore}" VerticalAlignment="Center" />
+                <TextBlock Text="跟随软件启动，自动启动OpenList核心" FontSize="13" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
+              </StackPanel>
+            </Border>
+            <Border Classes="field">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <ToggleSwitch IsChecked="{Binding StartMinimized}" VerticalAlignment="Center" />
+                <TextBlock Text="启动时最小化到系统托盘" FontSize="13" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
+              </StackPanel>
+            </Border>
+            <Border Classes="field">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <ToggleSwitch IsChecked="{Binding CloseToTray}" VerticalAlignment="Center" />
+                <TextBlock Text="关闭窗口时驻留系统托盘（托盘菜单「退出」结束程序）" FontSize="13" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
+              </StackPanel>
+            </Border>
+            <Border Classes="field">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <ToggleSwitch IsChecked="{Binding AutoLogin}" VerticalAlignment="Center" />
+                <TextBlock Text="核心就绪后自动登录（记住的凭据）" FontSize="13" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <!-- ================= Tab 1：Rclone 存储 ================= -->
+      <StackPanel Spacing="14" IsVisible="{Binding Tab1Visible}">
+        <Border Classes="card" Padding="18">
+          <StackPanel Spacing="14">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Border Classes="icon-chip" Width="28" Height="28">
+                <Path Classes="icon white" Data="{StaticResource I.HardDrive}" Width="14" Height="14" />
+              </Border>
+              <TextBlock Classes="card-title" Text="Rclone 配置" FontSize="15" VerticalAlignment="Center" />
+            </StackPanel>
+            <Border Classes="field">
+              <StackPanel Spacing="8">
+                <TextBlock Text="Rclone 可执行文件路径" FontSize="12" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Brush.TextMain}" />
+                <TextBox Text="{Binding RclonePath}" PlaceholderText="默认使用 PATH 中的 rclone" />
+                <Button Classes="btn btn-secondary" HorizontalAlignment="Left" Padding="8,4"
+                        Command="{Binding BrowseRcloneCommand}">
+                  <Path Classes="icon secondary" Data="{StaticResource I.Folder}" Width="14" Height="14" />
+                </Button>
+              </StackPanel>
+            </Border>
+            <TextBlock Classes="muted" Text="远程配置与挂载点请在「挂载」页管理；路径变更保存后需重新挂载生效。" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <!-- ================= Tab 2：应用程序 ================= -->
+      <StackPanel Spacing="14" IsVisible="{Binding Tab2Visible}">
+        <Border Classes="card" Padding="18">
+          <StackPanel Spacing="14">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Border Classes="icon-chip" Width="28" Height="28">
+                <Path Classes="icon white" Data="{StaticResource I.Monitor}" Width="14" Height="14" />
+              </Border>
+              <TextBlock Classes="card-title" Text="应用程序" FontSize="15" VerticalAlignment="Center" />
+            </StackPanel>
+            <Border Classes="field">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <ToggleSwitch IsChecked="{Binding LaunchOnSystemStartup}" IsEnabled="{Binding AutostartOk}"
+                              VerticalAlignment="Center" />
+                <TextBlock Text="随系统自动启动" FontSize="13" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
+                <TextBlock Text="（Windows 注册表 Run 键）" Classes="muted" VerticalAlignment="Center" />
+              </StackPanel>
+            </Border>
+            <Border Classes="field">
+              <StackPanel Spacing="6">
+                <TextBlock Text="设置文件路径" FontSize="12" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Brush.TextMain}" />
+                <TextBlock Text="{Binding SettingsPathText}" Classes="muted" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <TextBlock Text="{Binding StatusText}" Classes="muted" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

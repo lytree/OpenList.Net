@@ -1,0 +1,101 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OpenList.Desktop.ViewModels"
+             x:Class="OpenList.Desktop.Views.LogsView"
+             x:DataType="vm:LogsViewModel"
+             x:CompileBindings="False">
+
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="24,20" RowSpacing="12" MaxWidth="1200">
+
+    <!-- ===== 工具条（上游 LogView toolbar） ===== -->
+    <Border Classes="card" Padding="12,10">
+      <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <Button Classes="btn-icon" Command="{Binding TogglePauseCommand}" ToolTip.Tip="暂停 / 恢复 (Space)">
+            <Panel>
+              <Path Classes="icon accent" Data="{StaticResource I.Pause}" Width="16" Height="16"
+                    IsVisible="{Binding !Paused}" />
+              <Path Classes="icon accent" Data="{StaticResource I.Play}" Width="16" Height="16"
+                    IsVisible="{Binding Paused}" />
+            </Panel>
+          </Button>
+          <Button Classes="btn-icon" Command="{Binding RefreshCommand}" ToolTip.Tip="刷新 (Ctrl+R)">
+            <Path Classes="icon accent" Data="{StaticResource I.RefreshCw}" Width="16" Height="16" />
+          </Button>
+          <Button Classes="btn-icon" ToolTip.Tip="显示筛选器">
+            <Path Classes="icon white" Data="{StaticResource I.Filter}" Width="16" Height="16" />
+          </Button>
+          <TextBox Text="{Binding SearchText}" PlaceholderText="搜索日志... (Ctrl+F)" MinWidth="260"
+                   VerticalAlignment="Center" Height="32" />
+        </StackPanel>
+
+        <TextBlock Grid.Column="1" Text="{Binding StatsText}" Classes="muted" VerticalAlignment="Center"
+                   HorizontalAlignment="Right" Margin="0,0,10,0" />
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <Button Classes="btn-icon" Command="{Binding CopyAllAsyncCommand}" ToolTip.Tip="复制到剪贴板 (Ctrl+C)">
+            <Path Classes="icon secondary" Data="{StaticResource I.Copy}" Width="15" Height="15" />
+          </Button>
+          <Button Classes="btn-icon" Command="{Binding ClearCommand}" ToolTip.Tip="清除日志 (Ctrl+Delete)">
+            <Path Classes="icon secondary" Data="{StaticResource I.Trash}" Width="15" Height="15" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- ===== 筛选行 ===== -->
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+      <ComboBox SelectedIndex="{Binding LevelIndex}" MinHeight="30" MinWidth="110" FontSize="12">
+        <ComboBoxItem Content="所有级别" />
+        <ComboBoxItem Content="信息" />
+        <ComboBoxItem Content="警告" />
+        <ComboBoxItem Content="错误" />
+      </ComboBox>
+      <ComboBox Grid.Column="1" SelectedIndex="{Binding SourceIndex}" MinHeight="30" MinWidth="110" FontSize="12">
+        <ComboBoxItem Content="所有来源" />
+        <ComboBoxItem Content="OpenList" />
+        <ComboBoxItem Content="Rclone" />
+        <ComboBoxItem Content="桌面" />
+      </ComboBox>
+      <CheckBox Grid.Column="3" Content="全选 (Ctrl+A)" IsEnabled="False" VerticalAlignment="Center" FontSize="12" />
+      <CheckBox Grid.Column="4" Content="清除选择 (Esc)" IsEnabled="False" VerticalAlignment="Center" FontSize="12" />
+      <CheckBox Grid.Column="5" Content="自动滚动" IsChecked="{Binding AutoScroll}" VerticalAlignment="Center"
+                FontSize="12" />
+    </Grid>
+
+    <!-- ===== 日志表格 ===== -->
+    <Border Classes="card" Grid.Row="2" Padding="4">
+      <DataGrid ItemsSource="{Binding Filtered}"
+                IsReadOnly="True"
+                CanUserResizeColumns="True"
+                CanUserSortColumns="False"
+                SelectionMode="Extended"
+                GridLinesVisibility="Horizontal"
+                HorizontalGridLinesBrush="{DynamicResource Brush.BorderSecondary}"
+                FontFamily="Consolas, Menlo, monospace" FontSize="12">
+        <DataGrid.Columns>
+          <DataGridTextColumn Header="时间" Width="110" Binding="{Binding Time}" />
+          <DataGridTemplateColumn Header="级别" Width="90">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate>
+                <Border CornerRadius="5" Padding="7,1" HorizontalAlignment="Left" Margin="6,2"
+                        VerticalAlignment="Center" Background="{Binding LevelBackground}">
+                  <TextBlock Text="{Binding LevelText}" FontSize="10" FontWeight="SemiBold"
+                             FontFamily="Segoe UI" Foreground="{Binding LevelForeground}" />
+                </Border>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+          <DataGridTextColumn Header="来源" Width="100" Binding="{Binding Source}" />
+          <DataGridTextColumn Header="消息" Width="7*" Binding="{Binding Message}" />
+        </DataGrid.Columns>
+      </DataGrid>
+    </Border>
+
+    <!-- ===== 底部状态条 ===== -->
+    <Grid Grid.Row="3" ColumnDefinitions="*,Auto">
+      <TextBlock Text="{Binding StatusText}" Classes="muted" />
+      <TextBlock Grid.Column="1" Text="{Binding StatsText, StringFormat='显示 {0} 条记录'}" Classes="muted" />
+    </Grid>
+  </Grid>
+</UserControl>

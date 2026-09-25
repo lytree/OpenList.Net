@@ -10,11 +10,15 @@
 //   dotnet run --project build -- --target=CI                                 # framework-dependent bundle
 //   dotnet run --project build -- --target=Bundle --frontend-dist=frontend    # use committed frontend, skip fetch
 //   dotnet run --project build -- --target=Publish --semver=1.2.3             # publish with injected semver
+//   dotnet run --project build -- --target=Package --app=desktop --rid=win-x64  # Desktop GUI + server bundle
 //
 // Arguments:
 //   --configuration=Release    MSBuild configuration
 //   --output=artifacts         Artifact root
-//   --rid=<rid>                Target runtime; empty = framework-dependent
+//   --app=server|desktop       What to publish (default: server). desktop = Avalonia GUI
+//                              (bundle root) + single-file server under server/ + frontend/dist;
+//                              requires --rid (GUI is always self-contained)
+//   --rid=<rid>                Target runtime; empty = framework-dependent (server only)
 //   --self-contained=true      Self-contained publish (only meaningful with --rid)
 //   --frontend-dist=<path>     Frontend dist source (skip upstream fetch if it exists)
 //   --frontend-version=<tag>   Pin upstream frontend tag (default: latest release)
@@ -29,6 +33,7 @@ using System.Text.Json;
 var target        = Argument("target", "Default");
 var configuration = Argument("configuration", "Release");
 var output        = Argument("output", "artifacts");
+var app           = Argument("app", "server");
 var rid           = Argument("rid", "");
 var selfContained = Argument<bool>("self-contained", false);
 var frontendDist  = Argument("frontend-dist", "");
@@ -38,9 +43,14 @@ var archive       = Argument("archive", "zip");
 // When empty, the Version task computes it locally via `dotnet gitversion`.
 var semverArg     = Argument("semver", "");
 
-const string SolutionFile  = "OpenList.slnx";
-const string ServerProject = "src/OpenList.Server/OpenList.Server.csproj";
-const string UpstreamRepo  = "OpenListTeam/OpenList-Frontend";
+const string SolutionFile    = "OpenList.slnx";
+const string ServerProject   = "src/OpenList.Server/OpenList.Server.csproj";
+const string DesktopProject  = "src/OpenList.Desktop/OpenList.Desktop.csproj";
+const string UpstreamRepo    = "OpenListTeam/OpenList-Frontend";
+
+// Desktop publish (Avalonia GUI managing the server as a child process) is always
+// self-contained single-file — there is no meaningful framework-dependent GUI bundle.
+bool IsDesktopApp() => app.Equals("desktop", StringComparison.OrdinalIgnoreCase);
 
 // When --frontend-dist is given, use it; otherwise stage the upstream fetch under <output>/frontend-dist.
 string FeDistDir() => string.IsNullOrEmpty(frontendDist) ? $"{output}/frontend-dist" : frontendDist;
@@ -57,9 +67,18 @@ string _commitDate = "";
 
 // Bundle name carries the semver when available (e.g. openlist-net-1.2.3-linux-x64).
 // Falls back to the non-versioned name when semver is not yet known (e.g. inside Setup).
-string BundleName() => string.IsNullOrEmpty(rid)
-    ? "openlist-net-framework-dependent"
-    : $"openlist-net-{rid}";
+// Bundle name carries the semver when available (e.g. openlist-net-1.2.3-linux-x64).
+// Falls back to the non-versioned name when semver is not yet known (e.g. inside Setup).
+string BundleName()
+{
+    if (IsDesktopApp())
+        return string.IsNullOrEmpty(rid)
+            ? "openlist-net-desktop" // unversioned placeholder; Bundle/Package guard on missing --rid
+            : $"openlist-net-desktop-{rid}";
+    return string.IsNullOrEmpty(rid)
+        ? "openlist-net-framework-dependent"
+        : $"openlist-net-{rid}";
+}
 
 string BundleNameVersioned()
 {
@@ -72,7 +91,7 @@ string BundleNameVersioned()
 //////////////////////////////////////////////////////////////////////
 Setup(_ =>
 {
-    Information($"Target={target} Configuration={configuration} Output={output}");
+    Information($"Target={target} Configuration={configuration} Output={output} App={app}");
     Information($"Rid={(string.IsNullOrEmpty(rid) ? "<framework-dependent>" : rid)} SelfContained={selfContained}");
     if (!string.IsNullOrEmpty(semverArg))
         Information($"Pre-injected semver={semverArg}");
@@ -298,6 +317,39 @@ void WriteReadme(string bundleRoot)
     });
 }
 
+// Desktop bundle README: the GUI is the entry point, the server is a managed child
+// process placed under server/ so OpenListCoreService.ResolveCorePath finds it.
+void WriteDesktopReadme(string bundleRoot)
+{
+    var name = BundleNameVersioned();
+    var isWindowsRid = rid.StartsWith("win", StringComparison.OrdinalIgnoreCase);
+    var exeName = isWindowsRid ? "OpenList.Desktop.exe" : "OpenList.Desktop";
+    var coreName = isWindowsRid ? "server/OpenList.Server.exe" : "server/OpenList.Server";
+    System.IO.File.WriteAllLines(System.IO.Path.Combine(bundleRoot, "README.txt"), new[]
+    {
+        $"{name}",
+        "================",
+        "",
+        "Layout:",
+        $"  {exeName,-14} Avalonia desktop control app (start this)",
+        $"  {coreName,-14} Self-contained single-file server (managed child process)",
+        "  frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)",
+        "  README.txt       This file",
+        "",
+        "Run:",
+        $"  Start {exeName} from a terminal or double-click it (Windows).",
+        "  The desktop app launches the server automatically (port configurable in settings),",
+        "  shows the tray icon and live log viewer. Data is stored under data/ next to the",
+        "  desktop executable by default (configurable in settings).",
+        "",
+        "The desktop app injects OpenList__DistDir to point the server at frontend/dist,",
+        "so the web UI is served on the same port as the API. Default port: 5244.",
+        "",
+        "Note (macOS/Linux): the desktop app is not wrapped in an .app/.desktop bundle —",
+        "run it directly from this directory.",
+    });
+}
+
 //////////////////////////////////////////////////////////////////////
 // TASKS
 //////////////////////////////////////////////////////////////////////
@@ -399,10 +451,8 @@ Task("Frontend")
     FetchFrontend(ver, FeDistDir());
 });
 
-Task("Publish")
-    .Description("dotnet publish — framework-dependent unless --rid is set")
-    .IsDependentOn("Version")
-    .Does(() =>
+// Server publish: single-file self-contained when --rid is set, framework-dependent otherwise.
+void PublishServer()
 {
     var msbuild = new DotNetMSBuildSettings();
     if (!string.IsNullOrEmpty(rid))
@@ -431,6 +481,40 @@ Task("Publish")
     // Drop a VERSION file alongside the assembly so deployments can surface build metadata
     // (matching the frontend's frontend/dist/VERSION convention).
     WriteVersionMetadata(publishDir);
+}
+
+// Desktop publish: Avalonia GUI, always self-contained single-file for the given RID.
+void PublishDesktop()
+{
+    if (string.IsNullOrEmpty(rid))
+        throw new InvalidOperationException(
+            "Desktop publish requires --rid=<rid> — the Avalonia GUI is always self-contained.");
+
+    var msbuild = new DotNetMSBuildSettings()
+        .WithProperty("PublishSingleFile", "true")
+        .WithProperty("SelfContained", "true")
+        .WithProperty("RuntimeIdentifier", rid)
+        .WithProperty("IncludeNativeLibrariesForSelfExtract", "true")
+        .WithProperty("EnableCompressionInSingleFile", "true");
+    WithVersionProps(msbuild);
+
+    var publishDir = $"{output}/publish-desktop";
+    DotNetPublish(DesktopProject, new DotNetPublishSettings
+    {
+        Configuration = configuration,
+        OutputDirectory = publishDir,
+        MSBuildSettings = msbuild,
+    });
+
+    WriteVersionMetadata(publishDir);
+}
+
+Task("Publish")
+    .Description("dotnet publish — server: framework-dependent unless --rid; desktop: requires --rid (self-contained single-file)")
+    .IsDependentOn("Version")
+    .Does(() =>
+{
+    if (IsDesktopApp()) PublishDesktop(); else PublishServer();
 });
 
 Task("Bundle")
@@ -442,14 +526,35 @@ Task("Bundle")
     var name = BundleNameVersioned();
     var bundleRoot = $"{output}/bundle/{name}";
     if (DirectoryExists(bundleRoot)) CleanDirectory(bundleRoot);
-    EnsureDirectoryExists($"{bundleRoot}/app");
-    EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
 
-    CopyTree($"{output}/publish", $"{bundleRoot}/app");
-    CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
+    if (IsDesktopApp())
+    {
+        // Desktop layout: GUI at the bundle root, single-file server under server/
+        // (OpenListCoreService.ResolveCorePath probes <base>/server/OpenList.Server[.exe]),
+        // SPA under frontend/dist. The desktop app injects OpenList__DistDir at launch.
+        if (string.IsNullOrEmpty(rid))
+            throw new InvalidOperationException("Desktop bundle requires --rid=<rid>.");
+        EnsureDirectoryExists(bundleRoot);
+        EnsureDirectoryExists($"{bundleRoot}/server");
+        EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
 
-    WriteRunScripts(bundleRoot);
-    WriteReadme(bundleRoot);
+        CopyTree($"{output}/publish-desktop", bundleRoot);
+        CopyTree($"{output}/publish", $"{bundleRoot}/server");
+        CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
+
+        WriteDesktopReadme(bundleRoot);
+    }
+    else
+    {
+        EnsureDirectoryExists($"{bundleRoot}/app");
+        EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
+
+        CopyTree($"{output}/publish", $"{bundleRoot}/app");
+        CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
+
+        WriteRunScripts(bundleRoot);
+        WriteReadme(bundleRoot);
+    }
     Information($"Bundle staged at {bundleRoot}");
 });
 

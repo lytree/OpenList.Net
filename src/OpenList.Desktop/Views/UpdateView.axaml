@@ -1,0 +1,89 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OpenList.Desktop.ViewModels"
+             x:Class="OpenList.Desktop.Views.UpdateView"
+             x:DataType="vm:UpdateViewModel"
+             x:CompileBindings="False">
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="24,20" RowSpacing="14">
+
+    <!-- 头卡 -->
+    <Border Classes="card" Padding="16,14">
+      <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+        <Path Classes="icon accent" Data="{StaticResource I.Settings}" Width="22" Height="22"
+              VerticalAlignment="Center" />
+        <StackPanel Spacing="1">
+          <TextBlock Classes="h1" Text="应用更新" />
+          <TextBlock Classes="muted" Text="保持应用程序最新，获取最新功能和安全改进" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- 应用更新卡 -->
+    <Border Classes="card" Grid.Row="1" Padding="20">
+      <StackPanel Spacing="16">
+        <StackPanel Orientation="Horizontal" Spacing="12">
+          <Border Classes="icon-chip" VerticalAlignment="Center">
+            <Path Classes="icon white" Data="{StaticResource I.RefreshCw}" Width="16" Height="16" />
+          </Border>
+          <TextBlock Classes="card-title" Text="应用更新" VerticalAlignment="Center" FontSize="16" />
+        </StackPanel>
+
+        <Grid ColumnDefinitions="1.2*,*" ColumnSpacing="14">
+
+          <!-- 当前版本 -->
+          <Border Classes="subcard" Padding="16">
+            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+              <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource Brush.Accent10}"
+                      VerticalAlignment="Center">
+                <Path Classes="icon accent" Data="{StaticResource I.RefreshCw}" Width="17" Height="17" />
+              </Border>
+              <StackPanel Spacing="4" VerticalAlignment="Center">
+                <TextBlock Text="当前版本" FontSize="13" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Brush.TextMain}" />
+                <Border Classes="tag" HorizontalAlignment="Left">
+                  <TextBlock Text="{Binding CurrentVersion}" FontSize="12" FontWeight="SemiBold"
+                             Foreground="{DynamicResource Brush.TextSecondary}" />
+                </Border>
+              </StackPanel>
+              <Button Classes="btn btn-secondary" Margin="24,0,0,0" VerticalAlignment="Center"
+                      Command="{Binding CheckCommand}" IsEnabled="{Binding !IsChecking}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Path Classes="icon secondary" Data="{StaticResource I.Search}" Width="14" Height="14" />
+                  <TextBlock Text="检查更新" />
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </Border>
+
+          <!-- 自动检查更新 -->
+          <Border Classes="subcard" Padding="16">
+            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+              <ToggleSwitch IsChecked="{Binding AutoCheckUpdate}" VerticalAlignment="Center" />
+              <TextBlock Text="自动检查更新" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
+                         Foreground="{DynamicResource Brush.TextMain}" />
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <!-- 版本列表 + 下载 -->
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="{Binding AvailableVersions.Count}">
+          <ComboBox ItemsSource="{Binding AvailableVersions}"
+                    SelectedItem="{Binding SelectedVersion}"
+                    DisplayMemberBinding="{Binding Tag}"
+                    MinWidth="220" VerticalAlignment="Center"
+                    PlaceholderText="选择版本" />
+          <Button Classes="btn btn-primary" Grid.Column="1" Command="{Binding DownloadAndInstallCommand}"
+                  VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Path Classes="icon white" Data="{StaticResource I.Download}" Width="14" Height="14" />
+              <TextBlock Text="下载并安装" />
+            </StackPanel>
+          </Button>
+        </Grid>
+
+        <TextBlock Text="{Binding StatusText}" Classes="muted" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

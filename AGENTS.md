@@ -6,7 +6,8 @@
 - **Run**: `dotnet run --project src/OpenList.Server` (listens `http://0.0.0.0:5244` by default)
 - **Test**: `dotnet test` — uses **TUnit** (not NUnit), async convention: `await Assert.That(actual).Is(expected)`
 - **Lint**: `dotnet format`
-- **Cake build** (project-based `Cake.Sdk`, `build/build.csproj`): `dotnet run --project build -- --target=<Task>` (e.g. `--target=CI`, `--target=Publish --semver=1.2.3`). `Cake.Sdk` is pinned via `global.json` → `msbuild-sdks`. See `build/build.cs` for all targets/args.
+- **Cake build** (file-based `Cake.Sdk` script, `build/build.cs`): `dotnet run build/build.cs -- --target=<Task>` (e.g. `--target=CI`, `--target=Publish --semver=1.2.3`). `Cake.Sdk` is pinned via `global.json` → `msbuild-sdks`. See `build/build.cs` for all targets/args.
+  - **Publish variants** via `--app=`: `server` (default — headless server; framework-dependent without `--rid`, self-contained single-file with it) and `desktop` (`--app=desktop --rid=<rid>` — Avalonia GUI at bundle root + single-file server under `server/` + `frontend/dist/`; always self-contained). Bundle names: `openlist-net[-desktop]-<rid>[-semver]`.
 - **Dev server** (with frontend proxy): `dotnet run` in server + `pnpm dev` in `frontend/`
 
 ## Project Layout
@@ -19,6 +20,7 @@
 | `src/OpenList.Server` | ASP.NET entrypoint (`Program.cs`), `Endpoints/` (Minimal APIs), `Middleware/`, `Models/` (DTOs + `Resp<T>`) |
 | `tests/OpenList.Tests` | TUnit tests for Core + Infrastructure services |
 | `frontend/` | SolidJS SPA (separate project, pnpm, proxies `/api` to `localhost:5244`) |
+| `src/OpenList.Desktop` | AvaloniaUI 12 desktop app (mirrors OpenList-Desktop): manages the OpenList core as a child process (`ASPNETCORE_URLS` overrides port), rclone WebDAV mounts, tray icon, live log viewer. No file-management UI (removed; fs API methods dropped from `OpenListApiClient`). Settings persisted to `%APPDATA%/OpenList.Desktop/settings.json` |
 
 ## API Patterns
 
@@ -60,6 +62,8 @@
   - `RequestRateLimiter` — token bucket with capacity 1, matching Go `rate.NewLimiter(rate.Limit(rps), 1)`. `limit_rate` is a **float in requests/second** (`<= 0` = unlimited). Concurrent waits are serialized so bursts can't exceed the limit.
   - `OAuthTokenRefresher` — retry loop mirroring Go's `refreshToken()` (1 initial + 3 retries = 4 default `MaxAttempts`), `ForJsonEndpoint(...)` helper for the common "POST JSON → `{access_token, refresh_token}`" shape. Treats **HTTP 200 with an empty `access_token` as a failure** (services do this when the refresh token is dead; writing that empty token would brick the storage), doesn't retry on caller cancellation, and includes the last error message in the thrown exception.
   - `OAuthTokens` — `access_token` / `refresh_token` pair.
+  - `CallbackLimiterRegistry` / `CallbackLimiterRegistration` / `CallbackPermit` (`CallbackConcurrencyLimiter.cs`, mirrors Go `drivers/aliyundrive_open/callback.go`) — process-level proxy-callback admission registry **shared by Aliyun user id**; effective limit is the min of live registrations (`<=0` normalized to 1). Permits are held for the **whole response-body lifetime**, not just headers; acquire waits up to 1 s then throws `CallbackCapacityException` (Go `errs.TemporaryCapacity`, maps to S3 SlowDown later). Registry entries are reclaimed once a user has no registrations and no active permits. AliyundriveOpen wires it via `AttachCallbackLimiter(userId)` (call site arrives with the API port; skeleton has no user id yet) and unregisters on Dispose.
+  - `CallbackRangeReader` (`CallbackRangeReader.cs`) — ranged reader over the Aliyun callback URL. Retries **only** verified capacity rejections (HTTP 403 + `RequestDeniedByCallback` + `ExceedMaxConcurrency`, see `IsCapacityRejection`), 3 attempts with exponential backoff + jitter, then `CallbackCapacityException`. Accepts 206 / full-range 200 / `Content-Range` start match; slices locally (`SkipLimitStream`) when the server ignores Range. Other errors fail immediately with the callback URL redacted from the message. Tests inject a fake `HttpMessageHandler`; `AcquireTimeout`/`RetryBaseDelay` are internal seams.
 
 ## Key Quirks
 

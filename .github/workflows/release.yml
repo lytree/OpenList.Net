@@ -263,9 +263,159 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Desktop control app (Avalonia GUI managing the server as a child process).
+  # One bundle per GUI-capable RID: desktop exe at the bundle root, single-file
+  # server under server/ (probed by OpenListCoreService.ResolveCorePath),
+  # frontend/dist alongside (injected as OpenList__DistDir at launch).
+  # No musl RIDs — the GUI targets glibc desktops.
+  binaries-desktop:
+    needs: [resolve-frontend, resolve-version, build-test]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            archive: tar.gz
+          - rid: linux-arm64
+            archive: tar.gz
+          - rid: win-x64
+            archive: zip
+          - rid: win-arm64
+            archive: zip
+          - rid: osx-x64
+            archive: tar.gz
+          - rid: osx-arm64
+            archive: tar.gz
+    env:
+      SEMVER: ${{ needs.resolve-version.outputs.semver }}
+      ASM_VER: ${{ needs.resolve-version.outputs.assemblyVer }}
+      FILE_VER: ${{ needs.resolve-version.outputs.fileVer }}
+      INFO_VER: ${{ needs.resolve-version.outputs.infoVer }}
+      SHA: ${{ needs.resolve-version.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish server core (self-contained single-file)
+        run: |
+          set -euo pipefail
+          BUNDLE="openlist-net-desktop-${SEMVER}-${{ matrix.rid }}"
+          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
+          dotnet publish src/OpenList.Server/OpenList.Server.csproj \
+            -c "$CONFIGURATION" \
+            -o "$BUNDLE/server" \
+            -r "${{ matrix.rid }}" \
+            -p:PublishSingleFile=true \
+            -p:SelfContained=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:Version="$SEMVER" \
+            -p:AssemblyVersion="$ASM_VER" \
+            -p:FileVersion="$FILE_VER" \
+            -p:InformationalVersion="$INFO_VER" \
+            -p:SourceRevisionId="$SHA"
+
+      - name: Publish desktop app (self-contained single-file)
+        run: |
+          set -euo pipefail
+          dotnet publish src/OpenList.Desktop/OpenList.Desktop.csproj \
+            -c "$CONFIGURATION" \
+            -o "$BUNDLE" \
+            -r "${{ matrix.rid }}" \
+            -p:PublishSingleFile=true \
+            -p:SelfContained=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:Version="$SEMVER" \
+            -p:AssemblyVersion="$ASM_VER" \
+            -p:FileVersion="$FILE_VER" \
+            -p:InformationalVersion="$INFO_VER" \
+            -p:SourceRevisionId="$SHA"
+          {
+            echo "semver=$SEMVER"
+            echo "assemblyVer=$ASM_VER"
+            echo "fileVer=$FILE_VER"
+            echo "informationalVer=$INFO_VER"
+            echo "sha=$SHA"
+          } > "$BUNDLE/VERSION"
+
+      - name: Download upstream frontend dist (non-lite)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p fe "$BUNDLE/frontend/dist"
+          gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
+            --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
+          tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" -C "$BUNDLE/frontend/dist"
+          printf '%s' "$FE_TAG" > "$BUNDLE/frontend/dist/VERSION"
+
+      - name: Write README
+        env:
+          BUNDLE_NAME: ${{ env.BUNDLE }}
+          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cat > "$BUNDLE/README.txt" <<EOF
+          $BUNDLE_NAME
+          =========================
+
+          Build: $SEMVER (sha $SHA)
+          Frontend: $FE_TAG
+
+          Self-contained single-file build — no .NET runtime required on the host.
+
+          Layout:
+            OpenList.Desktop[.exe]  Avalonia desktop control app (start this)
+            server/OpenList.Server  Self-contained single-file server (managed child process)
+            frontend/dist/          OpenList SPA (pre-built, upstream non-lite release)
+            README.txt              This file
+
+          Run:
+            Start OpenList.Desktop (double-click on Windows). The desktop app launches the
+            server automatically (port configurable in settings), shows a tray icon and a
+            live log viewer. Data is stored under data/ next to the desktop executable.
+
+          The desktop app injects OpenList__DistDir so the server serves frontend/dist on
+          the same port as the API. Default port: http://0.0.0.0:5244.
+
+          Note (macOS/Linux): the desktop app is not wrapped in an .app/.desktop bundle —
+          run it directly from this directory.
+          EOF
+
+      - name: Package bundle
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          set -euo pipefail
+          if [ "$ARCHIVE" = "zip" ]; then
+            zip -r "$BUNDLE.zip" "$BUNDLE"
+            FILE="$BUNDLE.zip"
+          else
+            tar -czf "$BUNDLE.tar.gz" "$BUNDLE"
+            FILE="$BUNDLE.tar.gz"
+          fi
+          sha256sum "$FILE" > "$FILE.sha256"
+          cat "$FILE.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BUNDLE }}
+          path: |
+            ${{ env.BUNDLE }}.${{ matrix.archive }}
+            ${{ env.BUNDLE }}.${{ matrix.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   # Attach every binary archive (plus checksums) to the GitHub Release.
   release:
-    needs: [resolve-frontend, resolve-version, binaries]
+    needs: [resolve-frontend, resolve-version, binaries, binaries-desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -304,8 +454,10 @@ jobs:
             (fetched from https://github.com/OpenListTeam/OpenList-Frontend/releases)
 
             ## Downloads
-            Self-contained single-file builds for Linux (glibc / musl), Windows and macOS
-            (amd64 + arm64) — no .NET runtime required. A `.sha256` checksum accompanies each asset.
+            Headless server, self-contained single-file builds for Linux (glibc / musl),
+            Windows and macOS (amd64 + arm64) — no .NET runtime required. Desktop control
+            app (Server + GUI) bundles for Linux (glibc), Windows and macOS (amd64 + arm64).
+            A `.sha256` checksum accompanies each asset.
 
             ## Docker
             ```

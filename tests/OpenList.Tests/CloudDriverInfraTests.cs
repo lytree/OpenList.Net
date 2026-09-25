@@ -375,7 +375,11 @@ public class CloudDriverInfraTests
             await db.Database.EnsureCreatedAsync();
             db.Storages.Add(new Storage
             {
-                MountPath = "/ali", Driver = "AliyundriveOpen", Addition = "{}", Modified = stamp, UpdatedAt = stamp,
+                MountPath = "/ali",
+                Driver = "AliyundriveOpen",
+                Addition = "{}",
+                Modified = stamp,
+                UpdatedAt = stamp,
             });
             await db.SaveChangesAsync();
         }

@@ -18,7 +18,15 @@ namespace OpenList.Drivers.Cloud.AliyundriveOpen;
 /// </summary>
 public sealed class AliyundriveOpenDriver : CloudDriverBase, IFileSystemLinkProvider, IFileSystemUploader
 {
-    /// <summary>驱动展示名，与 Go <c>driver.Config.Name</c> 一致（前端翻译键）。</summary>
+    /// <summary>
+    /// 回调准入注册句柄。Go 在 Init 拿到 user_id 后立即
+    /// <c>registerCallbackLimiter(userid, d.CallbackConcurrency)</c> 并在 Drop 时注销；
+    /// 本骨架尚未调用云盘 API、拿不到 user_id，因此在 API 移植后于取得 user_id 的位置
+    /// 调用 <see cref="AttachCallbackLimiter"/>。释放驱动时自动注销（见 Dispose 覆写）。
+    /// </summary>
+    private CallbackLimiterRegistration? _callback;
+
+    /// <summary>本驱动展示名，与 Go <c>driver.Config.Name</c> 一致（前端翻译键）。</summary>
     public override string DriverName => "AliyundriveOpen";
 
     /// <summary>默认根目录 id，对齐 Go <c>Config.DefaultRoot = "root"</c>。</summary>
@@ -54,6 +62,7 @@ public sealed class AliyundriveOpenDriver : CloudDriverBase, IFileSystemLinkProv
         new() { Name = "rapid_upload", Help = "If you enable this option, the file will be uploaded to the server first, so the progress will be incorrect", ValueType = typeof(bool) },
         new() { Name = "internal_upload", Help = "If you are using Aliyun ECS is located in Beijing, you can turn it on to boost the upload speed", ValueType = typeof(bool) },
         new() { Name = "livp_download_format", Help = "Download format for livp files", ValueType = typeof(string), Options = "jpeg,mov", Default = "jpeg" },
+        new() { Name = "callback_concurrency", Help = "Maximum active proxied downloads shared by Aliyun user", ValueType = typeof(int), Default = 1 },
     ];
 
     /// <summary>本驱动的附加配置（由 <see cref="InitAsync"/> 从存储的 Addition JSON 解析）。</summary>
@@ -86,6 +95,9 @@ public sealed class AliyundriveOpenDriver : CloudDriverBase, IFileSystemLinkProv
         if (string.IsNullOrEmpty(Addition.DriveType)) Addition.DriveType = "default";
         if (string.IsNullOrEmpty(Addition.LivpDownloadFormat)) Addition.LivpDownloadFormat = "jpeg";
 
+        // 对齐 Go Init 的 normalizeCallbackConcurrency：≤0 回落默认值 1。
+        Addition.CallbackConcurrency = CallbackLimiterRegistry.Normalize(Addition.CallbackConcurrency);
+
         if (string.IsNullOrWhiteSpace(Addition.RefreshToken))
             throw new InvalidOperationException("refresh_token is required");
 
@@ -115,6 +127,35 @@ public sealed class AliyundriveOpenDriver : CloudDriverBase, IFileSystemLinkProv
     private NotImplementedException NotImplemented(string operation)
         => new($"AliyundriveOpen skeleton: '{operation}' is not ported yet " +
                $"(Go reference: drivers/aliyundrive_open, API base {ApiUrl}).");
+
+    /// <summary>
+    /// 注册按阿里云用户共享的回调准入名额（对齐 Go Init 尾部的
+    /// <c>d.callback = registerCallbackLimiter(userid, d.CallbackConcurrency)</c>）。
+    /// 重复调用会先注销旧注册，保证每个驱动实例始终至多持有一个名额；
+    /// 驱动释放时自动注销。API 移植后在拿到 user_id 处调用。
+    /// </summary>
+    /// <param name="userId">云盘 API 返回的 user_id（共享配额的身份键）。</param>
+    internal void AttachCallbackLimiter(string userId)
+    {
+        _callback?.Dispose();
+        _callback = CallbackLimiterRegistry.Register(userId, Addition.CallbackConcurrency);
+    }
+
+    /// <inheritdoc />
+    public override void Dispose()
+    {
+        _callback?.Dispose();
+        _callback = null;
+        base.Dispose();
+    }
+
+    /// <inheritdoc />
+    public override ValueTask DisposeAsync()
+    {
+        _callback?.Dispose();
+        _callback = null;
+        return base.DisposeAsync();
+    }
 
     /// <summary>
     /// 执行一次令牌刷新（POST <c>/adrive/v1.0/user/getToken</c>，或走
@@ -234,6 +275,14 @@ public sealed class AliyundriveOpenAddition
     /// <summary>livp 文件的下载格式（jpeg/mov）。</summary>
     [JsonPropertyName("livp_download_format")]
     public string LivpDownloadFormat { get; set; } = "jpeg";
+
+    /// <summary>
+    /// 同一阿里云用户共享的代理下载回调并发上限。对齐 Go
+    /// <c>callback_concurrency</c>（<c>type:"number" default:"1"</c>）；
+    /// ≤0 归一化为默认值 1（见 <see cref="CallbackLimiterRegistry.Normalize"/>）。
+    /// </summary>
+    [JsonPropertyName("callback_concurrency")]
+    public int CallbackConcurrency { get; set; } = 1;
 
     /// <summary>
     /// 运行时访问令牌。<b>故意不带</b> <c>[JsonPropertyName]</c>：Go 的

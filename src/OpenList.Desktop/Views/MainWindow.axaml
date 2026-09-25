@@ -1,0 +1,135 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:OpenList.Desktop.ViewModels"
+        xmlns:views="using:OpenList.Desktop.Views"
+        x:Class="OpenList.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="OpenList Desktop"
+        Width="1150" Height="720"
+        MinWidth="900" MinHeight="600"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource Brush.BgSecondary}">
+
+  <Window.Styles>
+    <Style Selector="ListBox.nav">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Padding" Value="0,6" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="MinHeight" Value="44" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Brush.NavHover}" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Brush.NavSelected}" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource Brush.TextMain}" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontWeight" Value="Medium" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem:selected TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem:pointerover TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem Path.icon">
+      <Setter Property="Stroke" Value="{DynamicResource Brush.TextMain}" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem:selected Path.icon">
+      <Setter Property="Stroke" Value="{DynamicResource Brush.Accent}" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem:pointerover Path.icon">
+      <Setter Property="Stroke" Value="{DynamicResource Brush.Accent}" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem Rectangle.navbar">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="ListBox.nav > ListBoxItem:selected Rectangle.navbar">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+  </Window.Styles>
+
+  <Grid ColumnDefinitions="150,*">
+
+    <!-- ===== 侧边栏（上游 NavigationPage 复刻） ===== -->
+    <Border Background="{DynamicResource Brush.BgSecondary}"
+            BorderBrush="{DynamicResource Brush.SidebarBorder}" BorderThickness="0,0,1,0">
+      <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <TextBlock Text="OpenList" FontSize="16" FontWeight="Bold"
+                   Foreground="{DynamicResource Brush.TextMain}"
+                   HorizontalAlignment="Center" Margin="0,22,0,6" />
+
+        <!-- 主题切换（ThemeSwitcher） -->
+        <Button Grid.Row="1" Classes="btn btn-secondary" Padding="10,5" MinHeight="30"
+                HorizontalAlignment="Center" Margin="0,4,0,8"
+                Command="{Binding ToggleThemeCommand}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Panel>
+              <Path Classes="icon" Data="{StaticResource I.Sun}" Width="15" Height="15"
+                    IsVisible="{Binding !IsDarkTheme}" />
+              <Path Classes="icon" Data="{StaticResource I.Moon}" Width="15" Height="15"
+                    IsVisible="{Binding IsDarkTheme}" />
+            </Panel>
+            <TextBlock Text="浅色" FontSize="13" IsVisible="{Binding !IsDarkTheme}" />
+            <TextBlock Text="深色" FontSize="13" IsVisible="{Binding IsDarkTheme}" />
+          </StackPanel>
+        </Button>
+
+        <!-- 导航 -->
+        <ListBox Grid.Row="2" Classes="nav"
+                 ItemsSource="{Binding Pages}"
+                 SelectedItem="{Binding SelectedPage}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:NavItem">
+              <Grid>
+                <Rectangle Classes="navbar" Width="3" HorizontalAlignment="Left"
+                           Fill="{DynamicResource Brush.Accent}" />
+                <StackPanel Orientation="Horizontal" Spacing="10"
+                            HorizontalAlignment="Center" Margin="14,12">
+                  <Path Classes="icon" Data="{Binding Icon}" Width="17" Height="17"
+                        VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- 底部 GitHub 入口 -->
+        <Button Grid.Row="3" Classes="btn-icon" HorizontalAlignment="Center" Margin="0,6,0,10"
+                Click="OnGitHubClick" ToolTip.Tip="View on GitHub">
+          <Path Classes="icon secondary" Data="{StaticResource I.Github}" Width="18" Height="18" />
+        </Button>
+      </Grid>
+    </Border>
+
+    <!-- ===== 内容区 ===== -->
+    <ContentControl Grid.Column="1" Content="{Binding SelectedPage.Page}">
+      <ContentControl.DataTemplates>
+        <DataTemplate DataType="vm:DashboardViewModel">
+          <views:DashboardView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:MountsViewModel">
+          <views:MountsView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:LogsViewModel">
+          <views:LogsView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:SettingsViewModel">
+          <views:SettingsView />
+        </DataTemplate>
+        <DataTemplate DataType="vm:UpdateViewModel">
+          <views:UpdateView />
+        </DataTemplate>
+      </ContentControl.DataTemplates>
+    </ContentControl>
+  </Grid>
+</Window>

@@ -1,0 +1,225 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="OpenList.Desktop.App"
+             RequestedThemeVariant="Light">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://OpenList.Desktop/Assets/Icons.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+
+      <ResourceDictionary.ThemeDictionaries>
+
+        <!-- ===== 浅色：上游 OpenList-Desktop 设计 token（assets/css/index.css :root.light）===== -->
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="Brush.TextMain">#1D1D1F</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.TextSecondary">#6E6E73</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.TextTertiary">#86868B</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.BgPrimary">#FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.BgSecondary">#F5F5F7</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.BgTertiary">#FBFBFD</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Border">#1A000000</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.BorderSecondary">#0D000000</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Accent">#007AFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.AccentHover">#3B82F6</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Accent10">#1A007AFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.AccentBorder">#40007AFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Success">#34C759</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Warning">#F1930F</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Danger">#FF3B30</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Indigo">#6366F1</SolidColorBrush>
+          <!-- 主题相关语义 token -->
+          <SolidColorBrush x:Key="Brush.NavHover">#40FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.NavSelected">#FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.SidebarBorder">#80F0F0F2</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.SegmentedBg">#66F5F5F7</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.ChartGrid">#1A007AFF</SolidColorBrush>
+        </ResourceDictionary>
+
+        <!-- ===== 深色：Apple HIG 风格对应色 ===== -->
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="Brush.TextMain">#F5F5F7</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.TextSecondary">#A6A6AD</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.TextTertiary">#7C7C82</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.BgPrimary">#1C1C1E</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.BgSecondary">#111113</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.BgTertiary">#161618</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Border">#26FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.BorderSecondary">#14FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Accent">#0A84FF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.AccentHover">#409CFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Accent10">#330A84FF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.AccentBorder">#550A84FF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Success">#30D158</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Warning">#FF9F0A</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Danger">#FF453A</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.Indigo">#7D7AFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.NavHover">#0FFFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.NavSelected">#262628</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.SidebarBorder">#14FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.SegmentedBg">#1AFFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="Brush.ChartGrid">#2E0A84FF</SolidColorBrush>
+        </ResourceDictionary>
+
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+
+    <!-- ===== lucide 图标：stroke 线性风格 ===== -->
+    <Style Selector="Path.icon">
+      <Setter Property="Stretch" Value="Uniform" />
+      <Setter Property="Stroke" Value="{DynamicResource Brush.TextMain}" />
+      <Setter Property="StrokeThickness" Value="2" />
+      <Setter Property="StrokeJoin" Value="Round" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+    </Style>
+    <Style Selector="Path.icon.accent"><Setter Property="Stroke" Value="{DynamicResource Brush.Accent}" /></Style>
+    <Style Selector="Path.icon.secondary"><Setter Property="Stroke" Value="{DynamicResource Brush.TextSecondary}" /></Style>
+    <Style Selector="Path.icon.success"><Setter Property="Stroke" Value="{DynamicResource Brush.Success}" /></Style>
+    <Style Selector="Path.icon.danger"><Setter Property="Stroke" Value="{DynamicResource Brush.Danger}" /></Style>
+    <Style Selector="Path.icon.warning"><Setter Property="Stroke" Value="{DynamicResource Brush.Warning}" /></Style>
+    <Style Selector="Path.icon.white"><Setter Property="Stroke" Value="White" /></Style>
+
+    <!-- ===== 卡片 ===== -->
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource Brush.BgPrimary}" />
+      <Setter Property="CornerRadius" Value="16" />
+      <Setter Property="Padding" Value="18" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BoxShadow" Value="0 4 6 0 #0D000000, 0 2 4 0 #0F000000" />
+    </Style>
+    <Style Selector="Border.subcard">
+      <Setter Property="Background" Value="{DynamicResource Brush.BgSecondary}" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="12" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSecondary}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BoxShadow" Value="0 1 3 0 #0A000000" />
+    </Style>
+
+    <!-- ===== 文本 ===== -->
+    <Style Selector="TextBlock.h1">
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.TextMain}" />
+    </Style>
+    <Style Selector="TextBlock.h2">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.TextMain}" />
+    </Style>
+    <Style Selector="TextBlock.card-title">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.TextMain}" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+    </Style>
+    <Style Selector="TextBlock.tertiary">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.TextTertiary}" />
+    </Style>
+
+    <!-- ===== 按钮（CustomButton 复刻）===== -->
+    <Style Selector="Button.btn">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="12,6" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.btn-primary">
+      <Setter Property="Background" Value="{DynamicResource Brush.Accent}" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.btn-primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Brush.AccentHover}" />
+    </Style>
+    <Style Selector="Button.btn-secondary">
+      <Setter Property="Background" Value="{DynamicResource Brush.BgSecondary}" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.TextMain}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Button.btn-secondary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#4D007AFF" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.btn-success">
+      <Setter Property="Background" Value="#CC34C759" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.btn-success:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Brush.Success}" />
+    </Style>
+    <Style Selector="Button.btn-danger">
+      <Setter Property="Background" Value="#CCFF3B30" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.btn-danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Brush.Danger}" />
+    </Style>
+
+    <!-- 方形图标按钮（工具条用） -->
+    <Style Selector="Button.btn-icon">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Padding" Value="7" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.btn-icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Brush.BgSecondary}" />
+    </Style>
+
+    <!-- ===== 状态 pill / tag ===== -->
+    <Style Selector="Border.pill">
+      <Setter Property="CornerRadius" Value="999" />
+      <Setter Property="Padding" Value="10,2" />
+    </Style>
+    <Style Selector="Border.tag">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="6,2" />
+      <Setter Property="Background" Value="{DynamicResource Brush.Accent10}" />
+    </Style>
+
+    <!-- ===== 分区图标块（蓝色圆角小方块） ===== -->
+    <Style Selector="Border.icon-chip">
+      <Setter Property="Background" Value="{DynamicResource Brush.Accent}" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Padding" Value="7" />
+    </Style>
+
+    <!-- ===== 文本输入 ===== -->
+    <Style Selector="TextBox">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="Background" Value="{DynamicResource Brush.BgPrimary}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.TextMain}" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <!-- ===== DataGrid 微调 ===== -->
+    <Style Selector="DataGrid">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="RowBackground" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="HeadersVisibility" Value="Column" />
+      <Setter Property="GridLinesVisibility" Value="Horizontal" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+  </Application.Styles>
+</Application>

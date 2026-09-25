@@ -485,3 +485,7 @@ $RECYCLE.BIN/
 
 # Trae IDE workspace docs
 .trae/
+
+# SQLite runtime sidecar files (WAL/SHM are ephemeral — never commit)
+*.db-shm
+*.db-wal

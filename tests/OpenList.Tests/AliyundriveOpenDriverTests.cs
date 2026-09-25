@@ -27,8 +27,8 @@ public class AliyundriveOpenDriverTests
     /// </summary>
     private static readonly string[] ExpectedFields =
     [
-        "alipan_type", "api_url_address", "client_id", "client_secret", "drive_type",
-        "internal_upload", "livp_download_format", "order_by", "order_direction",
+        "alipan_type", "api_url_address", "callback_concurrency", "client_id", "client_secret",
+        "drive_type", "internal_upload", "livp_download_format", "order_by", "order_direction",
         "rapid_upload", "refresh_token", "remove_way", "root_folder_id", "use_online_api",
     ];
 

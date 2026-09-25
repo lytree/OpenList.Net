@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OpenList.Desktop.Views.InputDialog"
+        Title="输入"
+        Width="440" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource Brush.BgTertiary}"
+        ExtendClientAreaToDecorationsHint="False"
+        TransparencyLevelHint="None">
+  <Border Background="{DynamicResource Brush.BgPrimary}" BorderBrush="{DynamicResource Brush.Border}"
+          BorderThickness="1" CornerRadius="0" Padding="20" Margin="1">
+    <StackPanel Spacing="14">
+      <!-- 标题行：图标 + 文案 -->
+      <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <Border Classes="icon-chip" Width="30" Height="30">
+          <Path Classes="icon white" Data="{StaticResource I.Edit}" Width="15" Height="15" />
+        </Border>
+        <TextBlock x:Name="LabelText" Text="" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"
+                   Foreground="{DynamicResource Brush.TextMain}" VerticalAlignment="Center" />
+      </StackPanel>
+      <TextBox x:Name="ValueBox" MinHeight="36" />
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+        <!-- 左侧占位，按钮靠右 -->
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button Classes="btn btn-secondary" Content="取消" IsCancel="True" MinWidth="76" />
+          <Button Classes="btn btn-primary" Content="确定" IsDefault="True" Click="OnOk" MinWidth="76" />
+        </StackPanel>
+      </Grid>
+    </StackPanel>
+  </Border>
+</Window>

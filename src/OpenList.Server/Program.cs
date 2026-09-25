@@ -54,6 +54,9 @@ appConfig.Validate();
 // used across the app (incl. RequestLogMiddleware) flows to both sinks.
 builder.Host.UseSerilog((_, _, lc) =>
 {
+    // 框架噪音（EF 的 SQL 逐语句日志等）压到 Warning，应用自身日志不受影响
+    lc.MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning);
+    lc.MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning);
     lc.WriteTo.Console();
     if (appConfig.Log.Enable && !string.IsNullOrWhiteSpace(appConfig.Log.Name))
     {
