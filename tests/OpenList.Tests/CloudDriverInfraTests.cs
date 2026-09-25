@@ -81,9 +81,24 @@ public class CloudDriverInfraTests
     [Test]
     public async Task RateLimiter_Cancellation_Throws()
     {
-        var limiter = new RequestRateLimiter(1);
+        // 0.1 r/s → 10s 间隔：预消耗首个令牌后，下一次等待必然落在远超取消时限的未来。
+        // 不能用 1 r/s——CI 满载时第一次等待的续延可能被调度延迟超过整个 interval，
+        // 第二次等待算出 delay==0 直接放行，永远不会观察到取消令牌（已在 runner 上复现）。
+        var limiter = new RequestRateLimiter(0.1);
         await limiter.WaitAsync(); // 消耗掉首个令牌
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await limiter.WaitAsync(cts.Token));
+    }
+
+    [Test]
+    public async Task RateLimiter_PreCancelledToken_ThrowsImmediately()
+    {
+        // 已取消的令牌必须在进入等待前就抛出（对齐 Go limiter.Wait(ctx) 的语义），
+        // 而不是碰巧拿到空闲时隙后静默成功。
+        var limiter = new RequestRateLimiter(1);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
             await limiter.WaitAsync(cts.Token));
     }

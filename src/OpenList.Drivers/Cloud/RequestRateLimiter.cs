@@ -43,6 +43,10 @@ public sealed class RequestRateLimiter
     {
         if (IsUnlimited) return;
 
+        // 入口先检查取消：令牌已取消时立即抛出，而不是碰巧拿到空闲时隙后静默成功
+        //（对齐 Go limiter.Wait(ctx) 的语义）。
+        ct.ThrowIfCancellationRequested();
+
         TimeSpan delay;
         var interval = TimeSpan.FromSeconds(_intervalSeconds);
 
