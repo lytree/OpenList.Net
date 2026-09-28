@@ -296,32 +296,17 @@ public class CallbackConcurrencyTests
 
     // --- 驱动接线 ---
 
-    [Test]
-    public async Task InitAsync_NormalizesCallbackConcurrency()
-    {
-        using var _ = new FastTiming();
-        var driver = new AliyundriveOpenDriver();
-        await driver.InitAsync(new OpenList.Core.Drivers.DriverConfig
-        {
-            MountPath = "/ali",
-            Driver = "AliyundriveOpen",
-            Addition = """{"refresh_token":"ref-abc","callback_concurrency":0}""",
-        });
-
-        await Assert.That(driver.Addition.CallbackConcurrency).IsEqualTo(1);
-    }
+    // 注意：callback_concurrency 归一化的用例已移到 AliyundriveOpenApiTests
+    // （那里注入了 HTTP 桩）。这里不再直接调用 InitAsync —— 驱动移植后初始化会真实
+    // 访问云盘 API，放在本文件里会让整个套件依赖网络。
 
     [Test]
     public async Task AttachCallbackLimiter_RegistersAndDisposesRelease()
     {
         using var _ = new FastTiming();
+        // 不调用 InitAsync：那会真实访问云盘 API（getDriveInfo）。本用例只验证
+        // 回调配额的「注册 / 重复注册 / 释放」登记行为，与初始化流程无关。
         var driver = new AliyundriveOpenDriver();
-        await driver.InitAsync(new OpenList.Core.Drivers.DriverConfig
-        {
-            MountPath = "/ali",
-            Driver = "AliyundriveOpen",
-            Addition = """{"refresh_token":"ref-abc","callback_concurrency":2}""",
-        });
 
         driver.AttachCallbackLimiter("uid-123");
         await Assert.That(CallbackLimiterRegistry.HasUser("uid-123")).IsTrue();

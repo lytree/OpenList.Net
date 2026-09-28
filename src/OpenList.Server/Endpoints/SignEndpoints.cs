@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
+using OpenList.Core.Drivers;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
+using Zio;
 
 namespace OpenList.Server.Endpoints;
 
@@ -24,8 +26,8 @@ public static class SignEndpoints
     /// </summary>
     public static IEndpointRouteBuilder MapSignApi(this IEndpointRouteBuilder app)
     {
-        // /d/{path}?sign=... — 直接下载：当驱动实现了 IFileSystemLinkProvider 时 302 跳转到原始
-        // 文件 URL，否则回退为流式传输（与 /p/ 一致）。本地驱动始终走流式传输。
+        // /d/{path}?sign=... — 直接下载：当驱动实现了 IFileSystemLinkProvider 且能给出直链时
+        // 302 跳转到原始文件 URL，否则回退为流式传输（与 /p/ 一致）。本地驱动始终走流式传输。
         app.MapGet("/d/{**path}", async (
             string path,
             string? sign,
@@ -36,11 +38,13 @@ public static class SignEndpoints
         {
             var fullPath = NormalizePath(path);
             if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false);
         }).AllowAnonymous();
 
         // /p/{path}?sign=... — 代理下载：始终通过服务器流式传输文件
         // （用于驱动必须代理的场景，或需要 Range 支持的多媒体播放）。
+        // 驱动能提供区间读取器时（阿里云盘等有回调并发配额的服务）优先走驱动读端，
+        // 否则回退为通用 Zio 流式传输。
         app.MapGet("/p/{**path}", async (
             string path,
             string? sign,
@@ -51,12 +55,12 @@ public static class SignEndpoints
         {
             var fullPath = NormalizePath(path);
             if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true);
         }).AllowAnonymous();
 
         // HEAD /d/ 与 /p/ — Go 在 GET 之外同时注册了 HEAD。播放器与下载管理器
         // 常先发 HEAD 探测文件大小/Range 支持，再发起实际 GET。
-        // StreamFileAsync 会响应 Range 头并对部分内容返回 206。
+        // 两条路径均只写响应头不读内容（代理路径尤其重要：HEAD 不应消耗远端并发配额）。
         app.MapMethods("/d/{**path}", new[] { "HEAD" }, async (
             string path,
             string? sign,
@@ -66,7 +70,7 @@ public static class SignEndpoints
         {
             var fullPath = NormalizePath(path);
             if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false);
         }).AllowAnonymous();
         app.MapMethods("/p/{**path}", new[] { "HEAD" }, async (
             string path,
@@ -77,7 +81,7 @@ public static class SignEndpoints
         {
             var fullPath = NormalizePath(path);
             if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true);
         }).AllowAnonymous();
 
         // --- 归档签名路由（对齐 Go /ad/、/ap/、/ae/）---
@@ -153,6 +157,65 @@ public static class SignEndpoints
         }).AllowAnonymous();
 
         return app;
+    }
+
+    /// <summary>
+    /// 按驱动能力选择下载方式，是 <c>/d/</c> 与 <c>/p/</c>（含 HEAD）的共用决策逻辑：
+    /// </summary>
+    /// <list type="number">
+    /// <item><c>/d/</c>（<paramref name="preferProxy"/> = false）：驱动给出直链则 302 跳转，
+    /// 让客户端直连源站（省服务器带宽）。</item>
+    /// <item><c>/p/</c>（<paramref name="preferProxy"/> = true）：驱动提供区间读取器则由服务器
+    /// 按请求区间转发（阿里云盘等需要保配额/鉴权的场景）。</item>
+    /// <item>以上都不适用时回退到挂载文件系统的通用流式传输（本地驱动、普通网络驱动）。</item>
+    /// </list>
+    /// <para>
+    /// 传给驱动的是**相对挂载点**的路径 —— 驱动的 <c>System</c> 以其挂载点为根，
+    /// 与 <c>ZioMountService.ToDriverRelativePath</c> 的约定一致。
+    /// </para>
+    /// <param name="mount">挂载服务。</param>
+    /// <param name="fullPath">请求的完整挂载路径。</param>
+    /// <param name="ctx">当前 HTTP 上下文。</param>
+    /// <param name="preferProxy">true 走代理通道，false 优先直链。</param>
+    private static async Task<IResult> DownloadAsync(
+        ZioMountService mount, string fullPath, HttpContext ctx, bool preferProxy)
+    {
+        if (mount.FindDriverForPath(fullPath) is IFileSystemLinkProvider linkProvider)
+        {
+            var relative = mount.ToDriverRelativePath(fullPath);
+            FileLink? link;
+            try
+            {
+                link = await linkProvider.GetFileLinkAsync(relative, preferProxy, ctx.RequestAborted);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // 取链接失败（远端报错、token 失效等）不应把请求打死 —— 结构上仍可能通过
+                // Zio 层读到内容，因此退化为通用流式传输，由它给出最终错误。
+                link = null;
+            }
+
+            if (!preferProxy && link?.Url is { Length: > 0 } url)
+                return Results.Redirect(url, permanent: false);
+
+            if (preferProxy && link?.RangeReader is { } reader)
+            {
+                var upath = new UPath(fullPath);
+                if (mount.Root.FileExists(upath))
+                {
+                    var entry = mount.Root.GetFileEntry(upath);
+                    return await FileDownloadHelper.StreamViaProxyAsync(
+                        reader, entry.Length, entry.Name, new DateTimeOffset(entry.LastWriteTime), ctx);
+                }
+                // 挂载视图里查不到该文件（例如驱动尚未挂载）时同样回退，由通用路径返回 404。
+            }
+        }
+
+        return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
     }
 
     /// <summary>

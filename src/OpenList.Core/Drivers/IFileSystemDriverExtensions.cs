@@ -5,7 +5,65 @@ public interface IFileSystemLinkProvider
 {
     /// <summary>返回给定路径的直接链接 URL；不支持时返回 null。</summary>
     Task<Uri?> GetLinkAsync(string path, CancellationToken ct = default);
+
+    /// <summary>
+    /// 获取文件的访问通道，供下载端点区分「直链跳转」（<c>/d/</c>）与「服务端代理」（<c>/p/</c>）。
+    /// </summary>
+    /// <param name="path">
+    /// <b>相对挂载点</b>的驱动内路径（调用方经 <c>ZioMountService.ToDriverRelativePath</c> 转换），
+    /// 例如挂载于 <c>/ali</c> 的 <c>/ali/a.txt</c> 传入 <c>/a.txt</c>。
+    /// </param>
+    /// <param name="proxy">
+    /// <c>true</c> 表示调用方需要服务端代理流（<c>/p/</c>，用于必须由服务器转发或需要
+    /// 精确 Range 播放的场景）；<c>false</c> 表示优先直链（<c>/d/</c>）。
+    /// </param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>可用的通道；返回 null 表示驱动不参与本次下载，调用方回退为通用 Zio 流式传输。</returns>
+    /// <remarks>
+    /// 默认实现返回 null，即「本驱动不提供专用下载通道」。这是刻意保守的默认值：
+    /// <see cref="GetLinkAsync"/> 在 S3 / WebDAV 上返回的是**未签名**地址，直接 302 会让
+    /// 原本可用的下载变成 403；只有显式实现本方法的驱动（云盘驱动）才进入直链/代理下载链路。
+    /// </remarks>
+    Task<FileLink?> GetFileLinkAsync(string path, bool proxy, CancellationToken ct = default)
+        => Task.FromResult<FileLink?>(null);
 }
+
+/// <summary>
+/// 驱动为单个文件提供的访问通道：直链（可 302 跳转）或服务端代理流（按区间读取）。
+/// 对应 Go <c>model.Link</c> 的 <c>URL</c> / <c>RangeReader</c> / <c>Expiration</c> 三个字段。
+/// </summary>
+public sealed class FileLink
+{
+    /// <summary>
+    /// 可直接重定向给客户端的直链。代理模式下（或驱动只支持代理时）为空，
+    /// 此时由 <see cref="RangeReader"/> 承担内容传输。
+    /// </summary>
+    public string? Url { get; init; }
+
+    /// <summary>
+    /// 服务端代理模式下的区间读取器。直链足够用时为空 —— 两者至少提供一个才有意义。
+    /// </summary>
+    public ProxyRangeReader? RangeReader { get; init; }
+
+    /// <summary>直链/通道的过期时间，供调用方决定是否复用；未知时为 null。</summary>
+    public DateTimeOffset? Expiration { get; init; }
+
+    /// <summary>是否可用于直链跳转（<c>/d/</c> 是否应 302）。</summary>
+    public bool HasUrl => !string.IsNullOrEmpty(Url);
+}
+
+/// <summary>
+/// 代理区间读取器：按 <c>[start, start+length)</c> 打开一次内容流。
+/// <para>
+/// 语义对齐 Go <c>stream.RangeReaderFunc</c>：实现方在返回流的**整个生命周期**内持有必需资源
+/// （例如阿里云回调并发许可），调用方释放流即代表本次区间读取结束，实现方应据此归还资源。
+/// </para>
+/// </summary>
+/// <param name="start">起始字节偏移。</param>
+/// <param name="length">要读取的字节数；实现方负责收敛到文件末尾。</param>
+/// <param name="ct">取消令牌；取消应连带释放已打开的远端流。</param>
+/// <returns>指向该区间的只读流。</returns>
+public delegate Task<Stream> ProxyRangeReader(long start, long length, CancellationToken ct);
 
 /// <summary>驱动支持通过流或表单上传文件。</summary>
 public interface IFileSystemUploader

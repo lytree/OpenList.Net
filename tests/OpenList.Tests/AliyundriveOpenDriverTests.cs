@@ -12,10 +12,12 @@ using OpenList.Infrastructure.Services;
 namespace OpenList.Tests;
 
 /// <summary>
-/// 阿里云盘 Open 骨架驱动的测试：元数据、配置 schema（须与前端翻译键一致）、
-/// 自动发现、以及「初始化成功但不挂载」的骨架语义。
+/// 阿里云盘 Open 驱动的元数据、配置 schema、装配关系与挂载语义测试。
 /// <para>
-/// 注意：这些测试不访问任何真实云盘 API —— 驱动 API 尚未移植，这是预期状态。
+/// 涉及云盘 API 的用例（初始化、列目录、直链/代理、令牌刷新）在
+/// <see cref="AliyundriveOpenApiTests"/> 中，那些用例通过注入 HTTP 桩实现，同样不访问真实服务。
+/// 本文件里的失败路径用例（缺 refresh_token、非法 Addition）也在发出请求之前就失败，
+/// 因此整个测试套件不依赖网络。
 /// </para>
 /// </summary>
 public class AliyundriveOpenDriverTests
@@ -45,14 +47,16 @@ public class AliyundriveOpenDriverTests
     }
 
     [Test]
-    public async Task Alert_MarksDriverAsUnverifiedSkeleton()
+    public async Task Alert_IsInfoLevel_AndMentionsUnverifiedStatus()
     {
         var driver = new AliyundriveOpenDriver();
         // 前端按 '|' 切分 [级别]|[文案]，级别必须合法，否则 banner 不渲染。
         var parts = driver.Alert.Split('|');
         await Assert.That(parts).Count().IsEqualTo(2);
-        await Assert.That(parts[0]).IsEqualTo("warning");
-        await Assert.That(parts[1]).Contains("尚未移植");
+        // API 已移植，只是尚未在真实账号上验证 —— 必须是 info 级：
+        // 误用 warning/danger 会让用户以为驱动不可用。
+        await Assert.That(parts[0]).IsEqualTo("info");
+        await Assert.That(parts[1]).Contains("已移植");
     }
 
     [Test]
@@ -109,50 +113,26 @@ public class AliyundriveOpenDriverTests
             .IsTrue();
     }
 
-    [Test]
-    public async Task InitAsync_WithValidConfig_DoesNotMountFilesystem()
-    {
-        var driver = new AliyundriveOpenDriver();
-        await driver.InitAsync(new DriverConfig
-        {
-            MountPath = "/ali",
-            Driver = "AliyundriveOpen",
-            Addition = """{"refresh_token":"ref-abc"}""",
-        });
-
-        await Assert.That(driver.Addition.RefreshToken).IsEqualTo("ref-abc");
-        // 骨架阶段故意不提供文件系统：挂载空 FS 会让用户误以为云盘是空的。
-        await Assert.That(driver.System).IsNull();
-    }
+    // 注意：初始化成功路径（getDriveInfo → 挂载文件系统 → 限流槽位切换）需要拦截 HTTP，
+    // 相关用例集中在 AliyundriveOpenApiTests 里；这里只保留「配置不合法时不发请求」的语义。
 
     [Test]
-    public async Task InitAsync_AppliesDefaults_ForEmptyFields()
-    {
-        var driver = new AliyundriveOpenDriver();
-        await driver.InitAsync(new DriverConfig
-        {
-            Addition = """{"refresh_token":"r","drive_type":"","livp_download_format":""}""",
-        });
-
-        // 对齐 Go Init 的空值补默认行为。
-        await Assert.That(driver.Addition.DriveType).IsEqualTo("default");
-        await Assert.That(driver.Addition.LivpDownloadFormat).IsEqualTo("jpeg");
-    }
-
-    [Test]
-    public async Task InitAsync_RejectsMissingRefreshToken()
+    public async Task InitAsync_RejectsMissingRefreshToken_WithoutMounting()
     {
         var driver = new AliyundriveOpenDriver();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await driver.InitAsync(new DriverConfig { Addition = "{}" }));
         await Assert.That(ex.Message).Contains("refresh_token");
+        // 配置校验失败时不挂载：挂一个空文件系统会让用户误以为云盘是空的。
+        await Assert.That(driver.System).IsNull();
     }
 
     [Test]
     public async Task Addition_ParsesAllGoFields()
     {
-        var driver = new AliyundriveOpenDriver();
-        await driver.InitAsync(new DriverConfig
+        // 只验证 Addition 的反序列化契约，因此直接走 DriverConfig 的解析路径：
+        // 不再调用 InitAsync —— 那会真实访问云盘 API（本用例无需网络）。
+        var addition = new DriverConfig
         {
             Addition = """
             {
@@ -172,22 +152,21 @@ public class AliyundriveOpenDriverTests
               "livp_download_format": "mov"
             }
             """,
-        });
+        }.GetAddition<AliyundriveOpenAddition>();
 
-        var a = driver.Addition;
-        await Assert.That(a.DriveType).IsEqualTo("backup");
-        await Assert.That(a.RootFolderId).IsEqualTo("fld-123");
-        await Assert.That(a.OrderBy).IsEqualTo("size");
-        await Assert.That(a.OrderDirection).IsEqualTo("DESC");
-        await Assert.That(a.UseOnlineApi).IsFalse();
-        await Assert.That(a.AlipanType).IsEqualTo("alipanTV");
-        await Assert.That(a.ApiUrlAddress).IsEqualTo("https://example.com/renew");
-        await Assert.That(a.ClientId).IsEqualTo("cid");
-        await Assert.That(a.ClientSecret).IsEqualTo("csec");
-        await Assert.That(a.RemoveWay).IsEqualTo("trash");
-        await Assert.That(a.RapidUpload).IsTrue();
-        await Assert.That(a.InternalUpload).IsTrue();
-        await Assert.That(a.LivpDownloadFormat).IsEqualTo("mov");
+        await Assert.That(addition.DriveType).IsEqualTo("backup");
+        await Assert.That(addition.RootFolderId).IsEqualTo("fld-123");
+        await Assert.That(addition.OrderBy).IsEqualTo("size");
+        await Assert.That(addition.OrderDirection).IsEqualTo("DESC");
+        await Assert.That(addition.UseOnlineApi).IsFalse();
+        await Assert.That(addition.AlipanType).IsEqualTo("alipanTV");
+        await Assert.That(addition.ApiUrlAddress).IsEqualTo("https://example.com/renew");
+        await Assert.That(addition.ClientId).IsEqualTo("cid");
+        await Assert.That(addition.ClientSecret).IsEqualTo("csec");
+        await Assert.That(addition.RemoveWay).IsEqualTo("trash");
+        await Assert.That(addition.RapidUpload).IsTrue();
+        await Assert.That(addition.InternalUpload).IsTrue();
+        await Assert.That(addition.LivpDownloadFormat).IsEqualTo("mov");
     }
 
     [Test]
@@ -219,7 +198,7 @@ public class AliyundriveOpenDriverTests
     }
 
     [Test]
-    public async Task MountService_LoadAsync_SkeletonDriver_DoesNotThrowOrMount()
+    public async Task MountService_LoadAsync_InvalidConfig_PropagatesError()
     {
         using var mount = new ZioMountService();
         var storage = new Storage
@@ -227,11 +206,12 @@ public class AliyundriveOpenDriverTests
             Id = 1,
             MountPath = "/ali",
             Driver = "AliyundriveOpen",
-            Addition = """{"refresh_token":"ref"}""",
+            // 故意缺少 refresh_token：初始化在发出任何网络请求之前就失败，
+            // 因此本用例不依赖网络。单条加载会把错误抛给调用方（区别于 LoadAllAsync 的容错）。
+            Addition = "{}",
         };
 
-        // 关键：配置能保存、服务不抛异常，但不注册任何挂载点。
-        await mount.LoadAsync(storage);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await mount.LoadAsync(storage));
         await Assert.That(mount.Mounted.ContainsKey("/ali")).IsFalse();
     }
 
@@ -241,14 +221,16 @@ public class AliyundriveOpenDriverTests
         using var mount = new ZioMountService();
         var storages = new[]
         {
-            // 缺 refresh_token → InitAsync 抛 InvalidOperationException。
+            // 缺 refresh_token → InitAsync 在发请求之前抛 InvalidOperationException。
             new Storage { Id = 1, MountPath = "/broken", Driver = "AliyundriveOpen", Addition = "{}" },
-            new Storage { Id = 2, MountPath = "/fine", Driver = "AliyundriveOpen", Addition = """{"refresh_token":"r"}""" },
+            // Addition 不是合法 JSON → GetAddition 反序列化失败。
+            new Storage { Id = 2, MountPath = "/also-broken", Driver = "AliyundriveOpen", Addition = "{not-json" },
         };
 
         // 单个坏存储不得中断整体加载（否则启动直接失败）。
         await mount.LoadAllAsync(storages);
-        await Assert.That(mount.Mounted.ContainsKey("/fine")).IsFalse(); // 骨架不挂载，但流程走完
+        await Assert.That(mount.Mounted.ContainsKey("/broken")).IsFalse();
+        await Assert.That(mount.Mounted.ContainsKey("/also-broken")).IsFalse();
     }
 
     [Test]
@@ -276,16 +258,17 @@ public class AliyundriveOpenDriverTests
     }
 
     [Test]
-    public async Task UnportedOperations_ThrowNotImplemented()
+    public async Task UninitializedDriver_RejectsOperations_InsteadOfSilentlySucceeding()
     {
         var driver = new AliyundriveOpenDriver();
-        await driver.InitAsync(new DriverConfig { Addition = """{"refresh_token":"r"}""" });
 
-        await Assert.ThrowsAsync<NotImplementedException>(async () =>
-            await driver.GetLinkAsync("/file.txt"));
-        await Assert.ThrowsAsync<NotImplementedException>(async () =>
+        // 未初始化（无文件系统视图、无限流租约）时，任何云盘操作都必须明确失败：
+        // 静默返回空结果会让上层把「配置坏了」误判成「文件不存在」。
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await driver.GetFileLinkAsync("/file.txt", proxy: false));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await driver.PutAsync("/file.txt", new MemoryStream([1, 2, 3])));
-        await Assert.ThrowsAsync<NotImplementedException>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await driver.PutFormAsync("/file.txt", new MemoryStream([1]), "file.txt"));
     }
 

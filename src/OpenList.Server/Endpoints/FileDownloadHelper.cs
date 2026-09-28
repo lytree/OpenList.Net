@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.StaticFiles;
+using OpenList.Core.Drivers;
+using OpenList.Drivers.Cloud;
 using OpenList.Infrastructure.Services;
 using Zio;
 
@@ -59,6 +61,88 @@ internal static class FileDownloadHelper
             if (read <= 0) break;
             await ctx.Response.Body.WriteAsync(buffer.AsMemory(0, read), ctx.RequestAborted);
             remaining -= read;
+        }
+        return Results.Empty;
+    }
+
+    /// <summary>
+    /// 通过驱动的代理区间读取器输出文件（<c>/p/</c> 上的云盘下载路径）。
+    /// <para>
+    /// 与 <see cref="StreamFileAsync"/> 的区别：内容不来自 Zio 挂载（Zio 只能顺序读，
+    /// 且整份文件的每次读取都要重新打通远端），而是把客户端请求的 Range 直接交给驱动，
+    /// 由驱动按区间打开远端流（阿里云盘等还需要在整个响应体生命周期内持有回调并发许可）。
+    /// </para>
+    /// </summary>
+    /// <param name="reader">驱动提供的区间读取器。</param>
+    /// <param name="fileSize">远端文件总大小（用于解析 Range 与生成 Content-Range）。</param>
+    /// <param name="fileName">文件名（用于推断 Content-Type）。</param>
+    /// <param name="lastModified">最后修改时间；未知时传 <see cref="DateTimeOffset.MinValue"/> 以省略该头。</param>
+    /// <param name="ctx">当前 HTTP 上下文。</param>
+    /// <returns>空结果（响应体已直接写入 <see cref="HttpResponse.Body"/>）。</returns>
+    public static async Task<IResult> StreamViaProxyAsync(
+        ProxyRangeReader reader,
+        long fileSize,
+        string fileName,
+        DateTimeOffset lastModified,
+        HttpContext ctx)
+    {
+        var rangeHeader = ctx.Request.Headers.Range.ToString();
+        long start = 0, end = fileSize - 1;
+        var isPartial = false;
+
+        if (!string.IsNullOrEmpty(rangeHeader) && RangeHeader.TryParse(rangeHeader, fileSize, out var r))
+        {
+            (start, end) = r;
+            isPartial = true;
+        }
+
+        var length = Math.Max(0, end - start + 1);
+
+        ctx.Response.ContentType = GetContentType(fileName);
+        ctx.Response.Headers.AcceptRanges = "bytes";
+        if (lastModified > DateTimeOffset.MinValue)
+            ctx.Response.Headers.LastModified = lastModified.UtcDateTime.ToString("R");
+        if (isPartial)
+        {
+            ctx.Response.StatusCode = StatusCodes.Status206PartialContent;
+            ctx.Response.Headers.ContentRange = $"bytes {start}-{end}/{fileSize}";
+        }
+        else
+        {
+            ctx.Response.StatusCode = StatusCodes.Status200OK;
+        }
+        ctx.Response.ContentLength = length;
+
+        // HEAD 只探测响应头。此处必须提前返回：一旦调用 reader 就会向远端发起真实请求，
+        // 对阿里云盘来说等于白占一次回调并发配额（播放器普遍先 HEAD 再 GET）。
+        if (HttpMethods.IsHead(ctx.Request.Method)) return Results.Empty;
+
+        Stream stream;
+        try
+        {
+            stream = await reader(start, length, ctx.RequestAborted);
+        }
+        catch (CallbackCapacityException ex)
+        {
+            // 回调准入超时/重试用尽 —— 对齐 Go 映射出的 S3 SlowDown，提示客户端稍后重试。
+            ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            ctx.Response.Headers.RetryAfter = "1";
+            return Results.Text(ex.Message);
+        }
+
+        await using (stream)
+        {
+            var buffer = new byte[81920];
+            long remaining = length;
+            // 逐块扣减剩余量，避免写超 ContentLength（否则框架报 500 内容长度不匹配）。
+            while (remaining > 0)
+            {
+                var read = await stream.ReadAsync(
+                    buffer.AsMemory(0, (int)Math.Min(remaining, buffer.Length)), ctx.RequestAborted);
+                if (read <= 0) break;
+                await ctx.Response.Body.WriteAsync(buffer.AsMemory(0, read), ctx.RequestAborted);
+                remaining -= read;
+            }
         }
         return Results.Empty;
     }
