@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using OpenList.Desktop.Localization;
 
 namespace OpenList.Desktop.Services;
 
@@ -48,7 +49,7 @@ public sealed class OpenListApiClient : IDisposable
     private static async Task<T> UnwrapAsync<T>(HttpResponseMessage resp, CancellationToken ct)
     {
         var body = await resp.Content.ReadFromJsonAsync<RespDto<T>>(JsonOpts, ct);
-        if (body is null) throw new ApiException("响应解析失败");
+        if (body is null) throw new ApiException(Localizer.Get("api.parseFailed"));
         if (!body.Ok) throw new ApiException(body.Message);
         return body.Data!;
     }

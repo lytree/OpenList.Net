@@ -54,21 +54,21 @@
               <Path Classes="icon white" Data="{StaticResource I.Settings}" Width="18" Height="18" />
             </Border>
             <StackPanel Spacing="1">
-              <TextBlock Classes="h1" Text="设置" />
-              <TextBlock Classes="muted" Text="配置您的 OpenList 桌面应用程序" />
+              <TextBlock Classes="h1" Text="{DynamicResource L.set.title}" />
+              <TextBlock Classes="muted" Text="{DynamicResource L.set.subtitle}" />
             </StackPanel>
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
             <Button Classes="btn btn-secondary" Command="{Binding ResetAllCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Path Classes="icon secondary" Data="{StaticResource I.RotateCcw}" Width="13" Height="13" />
-                <TextBlock Text="重置" />
+                <TextBlock Text="{DynamicResource L.common.reset}" />
               </StackPanel>
             </Button>
             <Button Classes="btn btn-primary" Command="{Binding SaveCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Path Classes="icon white" Data="{StaticResource I.Save}" Width="13" Height="13" />
-                <TextBlock Text="保存更改" />
+                <TextBlock Text="{DynamicResource L.set.saveChanges}" />
               </StackPanel>
             </Button>
           </StackPanel>
@@ -88,21 +88,21 @@
             <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center">
               <Path Classes="icon secondary" Data="{StaticResource I.Monitor}" Width="14" Height="14"
                     VerticalAlignment="Center" Margin="0,7,0,0" />
-              <TextBlock Text="OpenList 服务" />
+              <TextBlock Text="{DynamicResource L.set.tabService}" />
             </StackPanel>
           </ListBoxItem>
           <ListBoxItem>
             <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center">
               <Path Classes="icon secondary" Data="{StaticResource I.HardDrive}" Width="14" Height="14"
                     VerticalAlignment="Center" Margin="0,7,0,0" />
-              <TextBlock Text="Rclone 存储" />
+              <TextBlock Text="{DynamicResource L.set.tabRclone}" />
             </StackPanel>
           </ListBoxItem>
           <ListBoxItem>
             <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center">
               <Path Classes="icon secondary" Data="{StaticResource I.Settings}" Width="14" Height="14"
                     VerticalAlignment="Center" Margin="0,7,0,0" />
-              <TextBlock Text="应用程序" />
+              <TextBlock Text="{DynamicResource L.set.appTitle}" />
             </StackPanel>
           </ListBoxItem>
         </ListBox>
@@ -117,23 +117,23 @@
               <Border Classes="icon-chip" Width="28" Height="28">
                 <Path Classes="icon white" Data="{StaticResource I.Globe}" Width="14" Height="14" />
               </Border>
-              <TextBlock Classes="card-title" Text="网络配置" FontSize="15" VerticalAlignment="Center" />
+              <TextBlock Classes="card-title" Text="{DynamicResource L.set.networkTitle}" FontSize="15" VerticalAlignment="Center" />
             </StackPanel>
 
             <Grid ColumnDefinitions="*,*" ColumnSpacing="14">
               <StackPanel Spacing="14">
                 <Border Classes="field">
                   <StackPanel Spacing="8">
-                    <TextBlock Text="监听端口" FontSize="12" FontWeight="SemiBold"
+                    <TextBlock Text="{DynamicResource L.set.httpPort}" FontSize="12" FontWeight="SemiBold"
                                Foreground="{DynamicResource Brush.TextMain}" />
                     <TextBox Text="{Binding HttpPort}" />
                   </StackPanel>
                 </Border>
                 <Border Classes="field">
                   <StackPanel Spacing="8">
-                    <TextBlock Text="OpenList 二进制路径" FontSize="12" FontWeight="SemiBold"
+                    <TextBlock Text="{DynamicResource L.set.coreExePath}" FontSize="12" FontWeight="SemiBold"
                                Foreground="{DynamicResource Brush.TextMain}" />
-                    <TextBox Text="{Binding CoreExePath}" PlaceholderText="可选。自定义 OpenList 可执行文件路径" />
+                    <TextBox Text="{Binding CoreExePath}" PlaceholderText="{DynamicResource L.set.coreExePlaceholder}" />
                     <Button Classes="btn btn-secondary" HorizontalAlignment="Left" Padding="8,4"
                             Command="{Binding BrowseCoreCommand}">
                       <Path Classes="icon secondary" Data="{StaticResource I.Folder}" Width="14" Height="14" />
@@ -145,9 +145,9 @@
               <StackPanel Grid.Column="1" Spacing="14">
                 <Border Classes="field">
                   <StackPanel Spacing="8">
-                    <TextBlock Text="数据目录" FontSize="12" FontWeight="SemiBold"
+                    <TextBlock Text="{DynamicResource L.set.dataDir}" FontSize="12" FontWeight="SemiBold"
                                Foreground="{DynamicResource Brush.TextMain}" />
-                    <TextBox Text="{Binding DataDir}" PlaceholderText="可选。自定义数据目录路径" />
+                    <TextBox Text="{Binding DataDir}" PlaceholderText="{DynamicResource L.set.dataDirPlaceholder}" />
                     <Button Classes="btn btn-secondary" HorizontalAlignment="Left" Padding="8,4"
                             Command="{Binding BrowseDataDirCommand}">
                       <Path Classes="icon secondary" Data="{StaticResource I.Folder}" Width="14" Height="14" />
@@ -157,9 +157,9 @@
                 <Border Classes="field">
                   <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                     <ToggleSwitch IsEnabled="False" IsChecked="False" VerticalAlignment="Center" />
-                    <TextBlock Text="启用 SSL/HTTPS" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
+                    <TextBlock Text="{DynamicResource L.set.ssl}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
                                Foreground="{DynamicResource Brush.TextMain}" />
-                    <TextBlock Text="即将支持" Classes="muted" VerticalAlignment="Center" />
+                    <TextBlock Text="{DynamicResource L.set.sslSoon}" Classes="muted" VerticalAlignment="Center" />
                   </StackPanel>
                 </Border>
               </StackPanel>
@@ -173,33 +173,40 @@
               <Border Classes="icon-chip" Width="28" Height="28">
                 <Path Classes="icon white" Data="{StaticResource I.Link}" Width="14" Height="14" />
               </Border>
-              <TextBlock Classes="card-title" Text="常规设置" FontSize="15" VerticalAlignment="Center" />
+              <TextBlock Classes="card-title" Text="{DynamicResource L.set.generalTitle}" FontSize="15" VerticalAlignment="Center" />
             </StackPanel>
             <Border Classes="field">
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <ToggleSwitch IsChecked="{Binding AutoStartCore}" VerticalAlignment="Center" />
-                <TextBlock Text="跟随软件启动，自动启动OpenList核心" FontSize="13" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource L.set.autoStartCore}" FontSize="13" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
+              </StackPanel>
+            </Border>
+            <Border Classes="field">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <ToggleSwitch IsChecked="{Binding AutoRestartCore}" VerticalAlignment="Center" />
+                <TextBlock Text="{DynamicResource L.set.autoRestartCore}" FontSize="13" FontWeight="SemiBold"
                            VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
               </StackPanel>
             </Border>
             <Border Classes="field">
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <ToggleSwitch IsChecked="{Binding StartMinimized}" VerticalAlignment="Center" />
-                <TextBlock Text="启动时最小化到系统托盘" FontSize="13" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource L.set.startMinimized}" FontSize="13" FontWeight="SemiBold"
                            VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
               </StackPanel>
             </Border>
             <Border Classes="field">
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <ToggleSwitch IsChecked="{Binding CloseToTray}" VerticalAlignment="Center" />
-                <TextBlock Text="关闭窗口时驻留系统托盘（托盘菜单「退出」结束程序）" FontSize="13" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource L.set.closeToTray}" FontSize="13" FontWeight="SemiBold"
                            VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
               </StackPanel>
             </Border>
             <Border Classes="field">
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <ToggleSwitch IsChecked="{Binding AutoLogin}" VerticalAlignment="Center" />
-                <TextBlock Text="核心就绪后自动登录（记住的凭据）" FontSize="13" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource L.set.autoLogin}" FontSize="13" FontWeight="SemiBold"
                            VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
               </StackPanel>
             </Border>
@@ -215,20 +222,20 @@
               <Border Classes="icon-chip" Width="28" Height="28">
                 <Path Classes="icon white" Data="{StaticResource I.HardDrive}" Width="14" Height="14" />
               </Border>
-              <TextBlock Classes="card-title" Text="Rclone 配置" FontSize="15" VerticalAlignment="Center" />
+              <TextBlock Classes="card-title" Text="{DynamicResource L.set.rcloneTitle}" FontSize="15" VerticalAlignment="Center" />
             </StackPanel>
             <Border Classes="field">
               <StackPanel Spacing="8">
-                <TextBlock Text="Rclone 可执行文件路径" FontSize="12" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource L.set.rclonePath}" FontSize="12" FontWeight="SemiBold"
                            Foreground="{DynamicResource Brush.TextMain}" />
-                <TextBox Text="{Binding RclonePath}" PlaceholderText="默认使用 PATH 中的 rclone" />
+                <TextBox Text="{Binding RclonePath}" PlaceholderText="{DynamicResource L.set.rclonePathPlaceholder}" />
                 <Button Classes="btn btn-secondary" HorizontalAlignment="Left" Padding="8,4"
                         Command="{Binding BrowseRcloneCommand}">
                   <Path Classes="icon secondary" Data="{StaticResource I.Folder}" Width="14" Height="14" />
                 </Button>
               </StackPanel>
             </Border>
-            <TextBlock Classes="muted" Text="远程配置与挂载点请在「挂载」页管理；路径变更保存后需重新挂载生效。" />
+            <TextBlock Classes="muted" Text="{DynamicResource L.set.rcloneNote}" />
           </StackPanel>
         </Border>
       </StackPanel>
@@ -241,20 +248,33 @@
               <Border Classes="icon-chip" Width="28" Height="28">
                 <Path Classes="icon white" Data="{StaticResource I.Monitor}" Width="14" Height="14" />
               </Border>
-              <TextBlock Classes="card-title" Text="应用程序" FontSize="15" VerticalAlignment="Center" />
+              <TextBlock Classes="card-title" Text="{DynamicResource L.set.appTitle}" FontSize="15" VerticalAlignment="Center" />
             </StackPanel>
+            <Border Classes="field">
+              <StackPanel Spacing="8">
+                <TextBlock Text="{DynamicResource L.set.language}" FontSize="12" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Brush.TextMain}" />
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <ComboBox ItemsSource="{Binding Languages}"
+                            SelectedItem="{Binding SelectedLanguage}"
+                            MinWidth="180" MinHeight="32" VerticalAlignment="Center" />
+                  <TextBlock Text="{DynamicResource L.set.languageNote}" Classes="muted"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
             <Border Classes="field">
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <ToggleSwitch IsChecked="{Binding LaunchOnSystemStartup}" IsEnabled="{Binding AutostartOk}"
                               VerticalAlignment="Center" />
-                <TextBlock Text="随系统自动启动" FontSize="13" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource L.set.launchOnStartup}" FontSize="13" FontWeight="SemiBold"
                            VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMain}" />
-                <TextBlock Text="（Windows 注册表 Run 键）" Classes="muted" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding AutostartNote}" Classes="muted" VerticalAlignment="Center" />
               </StackPanel>
             </Border>
             <Border Classes="field">
               <StackPanel Spacing="6">
-                <TextBlock Text="设置文件路径" FontSize="12" FontWeight="SemiBold"
+                <TextBlock Text="{DynamicResource L.set.settingsPath}" FontSize="12" FontWeight="SemiBold"
                            Foreground="{DynamicResource Brush.TextMain}" />
                 <TextBlock Text="{Binding SettingsPathText}" Classes="muted" TextWrapping="Wrap" />
               </StackPanel>

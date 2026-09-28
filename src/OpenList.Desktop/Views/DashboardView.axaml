@@ -14,7 +14,7 @@
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Path Classes="icon accent" Data="{StaticResource I.Settings}" Width="18" Height="18"
                   VerticalAlignment="Center" />
-            <TextBlock Classes="card-title" Text="核心管理" VerticalAlignment="Center" />
+            <TextBlock Classes="card-title" Text="{DynamicResource L.dash.coreTitle}" VerticalAlignment="Center" />
           </StackPanel>
 
           <Grid ColumnDefinitions="*,*" ColumnSpacing="14">
@@ -22,7 +22,7 @@
             <Border Classes="subcard">
               <StackPanel Spacing="10">
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <TextBlock Classes="card-title" Text="OpenList 核心" FontSize="13" VerticalAlignment="Center" />
+                  <TextBlock Classes="card-title" Text="{DynamicResource L.dash.core}" FontSize="13" VerticalAlignment="Center" />
                   <Border Classes="tag" VerticalAlignment="Center" IsVisible="{Binding HasCoreVersion}">
                     <TextBlock Text="{Binding CoreVersionText}" FontSize="11"
                                Foreground="{DynamicResource Brush.TextSecondary}" />
@@ -34,11 +34,11 @@
                     <Panel>
                       <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding !IsRunning}">
                         <Path Classes="icon white" Data="{StaticResource I.Play}" Width="13" Height="13" />
-                        <TextBlock Text="启动" />
+                        <TextBlock Text="{DynamicResource L.dash.start}" />
                       </StackPanel>
                       <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsRunning}">
                         <Path Classes="icon white" Data="{StaticResource I.Square}" Width="13" Height="13" />
-                        <TextBlock Text="停止" />
+                        <TextBlock Text="{DynamicResource L.dash.stop}" />
                       </StackPanel>
                     </Panel>
                   </Button>
@@ -46,22 +46,22 @@
                           IsEnabled="{Binding IsRunning}" Margin="0,0,8,6">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Path Classes="icon secondary" Data="{StaticResource I.Globe}" Width="13" Height="13" />
-                      <TextBlock Text="网页" />
+                      <TextBlock Text="{DynamicResource L.dash.web}" />
                     </StackPanel>
                   </Button>
                   <Button Classes="btn btn-secondary" Command="{Binding CopyAdminPasswordCommand}"
-                          ToolTip.Tip="复制管理员密码" Padding="9,6" Margin="0,0,8,6">
+                          ToolTip.Tip="{DynamicResource L.dash.copyPasswordTip}" Padding="9,6" Margin="0,0,8,6">
                     <Path Classes="icon secondary" Data="{StaticResource I.Key}" Width="14" Height="14" />
                   </Button>
                   <Button Classes="btn btn-secondary" Command="{Binding ResetAdminPasswordCommand}"
-                          ToolTip.Tip="重置管理员密码" Padding="9,6" Margin="0,0,8,6">
+                          ToolTip.Tip="{DynamicResource L.dash.resetPasswordTip}" Padding="9,6" Margin="0,0,8,6">
                     <Path Classes="icon secondary" Data="{StaticResource I.RotateCcw}" Width="14" Height="14" />
                   </Button>
                   <Button Classes="btn btn-success" Command="{Binding ToggleFirewallCommand}"
-                          IsEnabled="{Binding !FirewallBusy}" ToolTip.Tip="Windows 防火墙放行核心端口" Margin="0,0,0,6">
+                          IsEnabled="{Binding !FirewallBusy}" ToolTip.Tip="{DynamicResource L.dash.allowPortTip}" Margin="0,0,0,6">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Path Classes="icon white" Data="{StaticResource I.Shield}" Width="13" Height="13" />
-                      <TextBlock Text="放行端口" />
+                      <TextBlock Text="{DynamicResource L.dash.allowPort}" />
                     </StackPanel>
                   </Button>
                 </WrapPanel>
@@ -77,14 +77,14 @@
                           Command="{Binding OpenRcloneConfigCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Path Classes="icon secondary" Data="{StaticResource I.Settings}" Width="13" Height="13" />
-                      <TextBlock Text="配置 RClone" />
+                      <TextBlock Text="{DynamicResource L.dash.configureRclone}" />
                     </StackPanel>
                   </Button>
                   <Button Classes="btn btn-secondary" HorizontalAlignment="Stretch"
                           Command="{Binding ManageMountsCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Path Classes="icon secondary" Data="{StaticResource I.HardDrive}" Width="13" Height="13" />
-                      <TextBlock Text="管理挂载" />
+                      <TextBlock Text="{DynamicResource L.dash.manageMounts}" />
                     </StackPanel>
                   </Button>
                 </StackPanel>
@@ -103,12 +103,12 @@
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Path Classes="icon accent" Data="{StaticResource I.Eye}" Width="18" Height="18"
                     VerticalAlignment="Center" />
-              <TextBlock Classes="card-title" Text="核心监控" VerticalAlignment="Center" />
+              <TextBlock Classes="card-title" Text="{DynamicResource L.dash.monitorTitle}" VerticalAlignment="Center" />
               <Border Classes="pill" Background="#B334C759" IsVisible="{Binding IsRunning}" VerticalAlignment="Center">
-                <TextBlock Text="在线" FontSize="11" Foreground="White" />
+                <TextBlock Text="{DynamicResource L.dash.online}" FontSize="11" Foreground="White" />
               </Border>
               <Border Classes="pill" Background="#80FF3B30" IsVisible="{Binding !IsRunning}" VerticalAlignment="Center">
-                <TextBlock Text="离线" FontSize="11" Foreground="White" />
+                <TextBlock Text="{DynamicResource L.dash.offline}" FontSize="11" Foreground="White" />
               </Border>
             </StackPanel>
 
@@ -116,14 +116,14 @@
               <Border Classes="tag" Padding="10,4" CornerRadius="999">
                 <StackPanel Orientation="Horizontal" Spacing="5">
                   <Path Classes="icon accent" Data="{StaticResource I.Globe}" Width="12" Height="12" />
-                  <TextBlock Text="{Binding PortText, StringFormat='Port: {0}'}" FontSize="11"
+                  <TextBlock Text="{Binding PortLabel}" FontSize="11"
                              Foreground="{DynamicResource Brush.TextSecondary}" />
                 </StackPanel>
               </Border>
               <Border Classes="tag" Padding="10,4" CornerRadius="999">
                 <StackPanel Orientation="Horizontal" Spacing="5">
                   <Path Classes="icon accent" Data="{StaticResource I.Activity}" Width="12" Height="12" />
-                  <TextBlock Text="{Binding ResponseTimeText, StringFormat='响应时间: {0}'}" FontSize="11"
+                  <TextBlock Text="{Binding ResponseTimeLabel}" FontSize="11"
                              Foreground="{DynamicResource Brush.TextSecondary}" />
                 </StackPanel>
               </Border>
@@ -152,26 +152,26 @@
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Path Classes="icon accent" Data="{StaticResource I.Download}" Width="18" Height="18"
                     VerticalAlignment="Center" />
-              <TextBlock Classes="card-title" Text="Rclone 管理" VerticalAlignment="Center" />
+              <TextBlock Classes="card-title" Text="{DynamicResource L.dash.rcloneTitle}" VerticalAlignment="Center" />
             </StackPanel>
 
             <Border Classes="subcard" Background="{DynamicResource Brush.BgPrimary}">
               <StackPanel Spacing="8">
                 <StackPanel Spacing="4">
-                  <TextBlock Classes="card-title" Text="Rclone" FontSize="13" />
+                  <TextBlock Classes="card-title" Text="{DynamicResource L.dash.rclone}" FontSize="13" />
                   <Border Classes="tag" HorizontalAlignment="Left" IsVisible="{Binding HasRcloneVersion}">
                     <TextBlock Text="{Binding RcloneVersionText}" FontSize="11"
                                Foreground="{DynamicResource Brush.TextSecondary}" />
                   </Border>
                 </StackPanel>
                 <ComboBox ItemsSource="{Binding RcloneVersions}" SelectedItem="{Binding SelectedRcloneVersion}"
-                          PlaceholderText="选择版本" MinHeight="30" HorizontalAlignment="Stretch"
+                          PlaceholderText="{DynamicResource L.dash.selectVersion}" MinHeight="30" HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Left" FontSize="12" />
                 <Button Classes="btn btn-primary" Command="{Binding UpdateRcloneCommand}"
                         HorizontalAlignment="Stretch">
                   <StackPanel Orientation="Horizontal" Spacing="6">
                     <Path Classes="icon white" Data="{StaticResource I.Download}" Width="13" Height="13" />
-                    <TextBlock Text="更新" />
+                    <TextBlock Text="{DynamicResource L.dash.update}" />
                   </StackPanel>
                 </Button>
               </StackPanel>
@@ -186,11 +186,11 @@
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Path Classes="icon accent" Data="{StaticResource I.Monitor}" Width="18" Height="18"
                   VerticalAlignment="Center" />
-            <TextBlock Classes="card-title" Text="进程监控" VerticalAlignment="Center" />
+            <TextBlock Classes="card-title" Text="{DynamicResource L.dash.processTitle}" VerticalAlignment="Center" />
             <TextBlock Classes="muted" Text="OpenList.Server" VerticalAlignment="Center" FontSize="12" />
             <Border Classes="pill" Background="#B334C759" IsVisible="{Binding Monitor.IsRunning}"
                     VerticalAlignment="Center">
-              <TextBlock Text="运行中" FontSize="11" Foreground="White" />
+              <TextBlock Text="{DynamicResource L.dash.pillRunning}" FontSize="11" Foreground="White" />
             </Border>
             <Border Classes="pill" Background="#80FF3B30" IsVisible="{Binding !Monitor.IsRunning}"
                     VerticalAlignment="Center">
@@ -202,44 +202,44 @@
           <Grid ColumnDefinitions="*,*,*,*,*,*" ColumnSpacing="10" IsVisible="{Binding Monitor.IsRunning}">
             <Border Classes="subcard" Padding="10,8">
               <StackPanel Spacing="2">
-                <TextBlock Classes="muted" Text="PID" FontSize="11" />
+                <TextBlock Classes="muted" Text="{DynamicResource L.dash.metricPid}" FontSize="11" />
                 <TextBlock Text="{Binding Monitor.PidText}" FontSize="15" FontWeight="SemiBold" />
               </StackPanel>
             </Border>
             <Border Classes="subcard" Padding="10,8" Grid.Column="1">
               <StackPanel Spacing="2">
-                <TextBlock Classes="muted" Text="运行时长" FontSize="11" />
+                <TextBlock Classes="muted" Text="{DynamicResource L.dash.metricUptime}" FontSize="11" />
                 <TextBlock Text="{Binding Monitor.UptimeText}" FontSize="15" FontWeight="SemiBold" />
               </StackPanel>
             </Border>
             <Border Classes="subcard" Padding="10,8" Grid.Column="2">
               <StackPanel Spacing="2">
-                <TextBlock Classes="muted" Text="CPU" FontSize="11" />
+                <TextBlock Classes="muted" Text="{DynamicResource L.dash.metricCpu}" FontSize="11" />
                 <TextBlock Text="{Binding Monitor.CpuText}" FontSize="15" FontWeight="SemiBold" />
               </StackPanel>
             </Border>
             <Border Classes="subcard" Padding="10,8" Grid.Column="3">
               <StackPanel Spacing="2">
-                <TextBlock Classes="muted" Text="内存" FontSize="11" />
+                <TextBlock Classes="muted" Text="{DynamicResource L.dash.metricMemory}" FontSize="11" />
                 <TextBlock Text="{Binding Monitor.MemText}" FontSize="15" FontWeight="SemiBold" />
               </StackPanel>
             </Border>
             <Border Classes="subcard" Padding="10,8" Grid.Column="4">
               <StackPanel Spacing="2">
-                <TextBlock Classes="muted" Text="线程" FontSize="11" />
+                <TextBlock Classes="muted" Text="{DynamicResource L.dash.metricThreads}" FontSize="11" />
                 <TextBlock Text="{Binding Monitor.ThreadsText}" FontSize="15" FontWeight="SemiBold" />
               </StackPanel>
             </Border>
             <Border Classes="subcard" Padding="10,8" Grid.Column="5">
               <StackPanel Spacing="2">
-                <TextBlock Classes="muted" Text="句柄" FontSize="11" />
+                <TextBlock Classes="muted" Text="{DynamicResource L.dash.metricHandles}" FontSize="11" />
                 <TextBlock Text="{Binding Monitor.HandlesText}" FontSize="15" FontWeight="SemiBold" />
               </StackPanel>
             </Border>
           </Grid>
 
           <TextBlock Classes="muted" FontSize="12"
-                     Text="核心未运行。启动核心后开始采集进程指标。"
+                     Text="{DynamicResource L.dash.processIdle}"
                      IsVisible="{Binding !Monitor.IsRunning}" />
 
           <!-- CPU / 内存曲线 -->
@@ -249,7 +249,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Path Classes="icon accent" Data="{StaticResource I.Activity}" Width="14" Height="14"
                         VerticalAlignment="Center" />
-                  <TextBlock Classes="card-title" Text="CPU 占用" FontSize="13" VerticalAlignment="Center" />
+                  <TextBlock Classes="card-title" Text="{DynamicResource L.dash.cpuTitle}" FontSize="13" VerticalAlignment="Center" />
                   <Border Classes="tag" Padding="10,4" CornerRadius="999" VerticalAlignment="Center">
                     <TextBlock Text="{Binding Monitor.CpuText}" FontSize="11"
                                Foreground="{DynamicResource Brush.TextSecondary}" />
@@ -268,7 +268,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Path Classes="icon accent" Data="{StaticResource I.HardDrive}" Width="14" Height="14"
                         VerticalAlignment="Center" />
-                  <TextBlock Classes="card-title" Text="内存占用" FontSize="13" VerticalAlignment="Center" />
+                  <TextBlock Classes="card-title" Text="{DynamicResource L.dash.memoryTitle}" FontSize="13" VerticalAlignment="Center" />
                   <Border Classes="tag" Padding="10,4" CornerRadius="999" VerticalAlignment="Center">
                     <TextBlock Text="{Binding Monitor.MemText}" FontSize="11"
                                Foreground="{DynamicResource Brush.TextSecondary}" />
@@ -295,7 +295,7 @@
                 <Grid ColumnDefinitions="*,Auto">
                   <StackPanel Spacing="2">
                     <TextBlock Classes="card-title" Text="OpenList" FontSize="13" />
-                    <TextBlock Classes="muted" Text="多存储文件列表程序" />
+                    <TextBlock Classes="muted" Text="{DynamicResource L.dash.openListDesc}" />
                   </StackPanel>
                   <Border Width="32" Height="32" CornerRadius="8" VerticalAlignment="Top"
                           Background="{DynamicResource Brush.Indigo}">
@@ -306,7 +306,7 @@
                   <Button Classes="btn btn-primary" HorizontalAlignment="Stretch" Command="{Binding OpenDocsCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Path Classes="icon white" Data="{StaticResource I.ExternalLink}" Width="13" Height="13" />
-                      <TextBlock Text="打开文档" />
+                      <TextBlock Text="{DynamicResource L.dash.openDocs}" />
                     </StackPanel>
                   </Button>
                   <Button Classes="btn btn-secondary" HorizontalAlignment="Stretch"
@@ -325,8 +325,8 @@
               <StackPanel Spacing="12">
                 <Grid ColumnDefinitions="*,Auto">
                   <StackPanel Spacing="2">
-                    <TextBlock Classes="card-title" Text="Rclone" FontSize="13" />
-                    <TextBlock Classes="muted" Text="多平台挂载命令行程序" />
+                    <TextBlock Classes="card-title" Text="{DynamicResource L.dash.rclone}" FontSize="13" />
+                    <TextBlock Classes="muted" Text="{DynamicResource L.dash.rcloneDesc}" />
                   </StackPanel>
                   <Border Width="32" Height="32" CornerRadius="8" VerticalAlignment="Top"
                           Background="{DynamicResource Brush.Success}">
@@ -338,7 +338,7 @@
                           Command="{Binding OpenRcloneDocsCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Path Classes="icon white" Data="{StaticResource I.ExternalLink}" Width="13" Height="13" />
-                      <TextBlock Text="打开文档" />
+                      <TextBlock Text="{DynamicResource L.dash.openDocs}" />
                     </StackPanel>
                   </Button>
                   <Button Classes="btn btn-secondary" HorizontalAlignment="Stretch"
@@ -357,28 +357,28 @@
             <Button Classes="btn btn-secondary" Command="{Binding OpenApiDocsCommand}" HorizontalAlignment="Stretch">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Path Classes="icon secondary" Data="{StaticResource I.Code}" Width="13" Height="13" />
-                <TextBlock Text="API 文档" />
+                <TextBlock Text="{DynamicResource L.dash.apiDocs}" />
               </StackPanel>
             </Button>
             <Button Classes="btn btn-secondary" Grid.Column="1" Command="{Binding OpenMountCommandsCommand}"
                     HorizontalAlignment="Stretch">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Path Classes="icon secondary" Data="{StaticResource I.Terminal}" Width="13" Height="13" />
-                <TextBlock Text="挂载命令" />
+                <TextBlock Text="{DynamicResource L.dash.mountCommands}" />
               </StackPanel>
             </Button>
             <Button Classes="btn btn-secondary" Grid.Column="2" Command="{Binding OpenIssuesCommand}"
                     HorizontalAlignment="Stretch">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Path Classes="icon secondary" Data="{StaticResource I.Info}" Width="13" Height="13" />
-                <TextBlock Text="问题反馈" />
+                <TextBlock Text="{DynamicResource L.dash.issues}" />
               </StackPanel>
             </Button>
             <Button Classes="btn btn-secondary" Grid.Column="3" Command="{Binding OpenFaqCommand}"
                     HorizontalAlignment="Stretch">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Path Classes="icon secondary" Data="{StaticResource I.MessageCircle}" Width="13" Height="13" />
-                <TextBlock Text="常见问题" />
+                <TextBlock Text="{DynamicResource L.dash.faq}" />
               </StackPanel>
             </Button>
           </Grid>

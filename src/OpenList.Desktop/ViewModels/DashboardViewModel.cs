@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OpenList.Desktop.Localization;
 using OpenList.Desktop.Services;
 
 namespace OpenList.Desktop.ViewModels;
@@ -33,12 +34,17 @@ public partial class DashboardViewModel : ViewModelBase
     private int _tick;
     private readonly List<HeartbeatPoint> _points = [];
 
+    /// <summary>rclone 版本原始值；为空表示不可用，显示时再按语言渲染。</summary>
+    private string _rcloneVersion = "";
+
     // ---- 核心管理 ----
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private bool _isBusy;
 
     // ---- 核心监控 ----
-    [ObservableProperty] private string _responseTimeText = "--";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ResponseTimeLabel))]
+    private string _responseTimeText = "--";
     [ObservableProperty] private string _avgResponseTimeText = "--";
     [ObservableProperty] private string _uptimeRateText = "--";
     [ObservableProperty] private bool _hasHeartbeat;
@@ -52,13 +58,17 @@ public partial class DashboardViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasCoreVersion))]
     private string _coreVersionText = "";
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasRcloneVersion))]
-    private string _rcloneVersionText = "";
+
     [ObservableProperty] private VersionEntry? _selectedRcloneVersion;
 
     public bool HasCoreVersion => !string.IsNullOrEmpty(CoreVersionText);
-    public bool HasRcloneVersion => !string.IsNullOrEmpty(RcloneVersionText);
+
+    /// <summary>rclone 版本或"未安装"（按当前语言渲染）。</summary>
+    public string RcloneVersionText => string.IsNullOrEmpty(_rcloneVersion)
+        ? Localizer.Get("dash.rcloneNotInstalled")
+        : _rcloneVersion;
+
+    public bool HasRcloneVersion => !string.IsNullOrEmpty(_rcloneVersion);
 
     public ObservableCollection<VersionEntry> RcloneVersions { get; } = [];
 
@@ -66,6 +76,12 @@ public partial class DashboardViewModel : ViewModelBase
     public IReadOnlyList<HeartbeatPoint> HeartbeatPoints => _points;
 
     public string PortText => _settings.HttpPort.ToString();
+
+    /// <summary>带标签的端口文案（视图直接绑定，避免 XAML 里拼 StringFormat 无法本地化）。</summary>
+    public string PortLabel => Localizer.Format("dash.port", _settings.HttpPort);
+
+    /// <summary>带标签的响应时间文案。</summary>
+    public string ResponseTimeLabel => Localizer.Format("dash.responseTime", ResponseTimeText);
 
     /// <summary>进程监控（核心子进程 CPU/内存/线程/句柄实时采集）。</summary>
     public CoreMonitorViewModel Monitor { get; }
@@ -121,7 +137,7 @@ public partial class DashboardViewModel : ViewModelBase
 
         var ms = await _core.PingLatencyAsync();
         var healthy = ms >= 0;
-        ResponseTimeText = healthy ? $"{ms} ms" : "不可达";
+        ResponseTimeText = healthy ? $"{ms} ms" : Localizer.Get("status.unreachable");
         _points.Add(new HeartbeatPoint(_points.Count, healthy ? ms : 0, healthy,
             DateTime.Now.ToString("HH:mm:ss")));
         if (_points.Count > 60)
@@ -132,10 +148,11 @@ public partial class DashboardViewModel : ViewModelBase
 
         var recent = _points.TakeLast(20).ToList();
         var avg = (long)recent.Where(p => p.Healthy).Select(p => p.Ms).DefaultIfEmpty(0).Average();
-        AvgResponseTimeText = recent.Any(p => p.Healthy) ? $"{avg} ms avg" : "--";
-        var rate = recent.Count * 100.0 / Math.Max(recent.Count, 1);
+        AvgResponseTimeText = recent.Any(p => p.Healthy)
+            ? Localizer.Format("dash.avgLatency", avg)
+            : "--";
         var okRate = recent.Count(p => p.Healthy) * 100.0 / recent.Count;
-        UptimeRateText = $"{okRate:F0}% uptime";
+        UptimeRateText = Localizer.Format("dash.uptimeRate", okRate.ToString("F0"));
         RefreshHeartbeat();
     }
 
@@ -176,11 +193,11 @@ public partial class DashboardViewModel : ViewModelBase
         var pwd = ReadAdminPassword();
         if (string.IsNullOrEmpty(pwd))
         {
-            _log.Error("主页", "未找到管理员密码配置（核心 appsettings.json）");
+            _log.Error(LogSources.Dashboard, Localizer.Get("dash.passwordNotFound"));
             return;
         }
         await UiServices.SetClipboardAsync(pwd);
-        _log.Info("主页", "管理员密码已复制到剪贴板");
+        _log.Info(LogSources.Dashboard, Localizer.Get("dash.passwordCopied"));
     }
 
     /// <summary>重置管理员密码（写回核心 appsettings.json，重启核心后生效）。</summary>
@@ -190,7 +207,7 @@ public partial class DashboardViewModel : ViewModelBase
         var path = FindCoreSettingsFile();
         if (path is null)
         {
-            _log.Error("主页", "未找到核心 appsettings.json，无法重置密码");
+            _log.Error(LogSources.Dashboard, Localizer.Get("dash.coreConfigMissing"));
             return;
         }
         var newPwd = Guid.NewGuid().ToString("N")[..12];
@@ -200,17 +217,17 @@ public partial class DashboardViewModel : ViewModelBase
             var doc = JsonNode.Parse(json) as JsonObject;
             if (doc is null)
             {
-                _log.Error("主页", "核心配置解析失败");
+                _log.Error(LogSources.Dashboard, Localizer.Get("dash.coreConfigInvalid"));
                 return;
             }
             doc["AdminPassword"] = newPwd;
             await File.WriteAllTextAsync(path, doc.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
             await UiServices.SetClipboardAsync(newPwd);
-            _log.Info("主页", "管理员密码已重置并复制到剪贴板（重启核心后生效）");
+            _log.Info(LogSources.Dashboard, Localizer.Get("dash.passwordReset"));
         }
         catch (Exception ex)
         {
-            _log.Error("主页", $"重置密码失败: {ex.Message}");
+            _log.Error(LogSources.Dashboard, Localizer.Format("dash.passwordResetFailed", ex.Message));
         }
     }
 
@@ -250,12 +267,14 @@ public partial class DashboardViewModel : ViewModelBase
             if (FirewallEnabled)
             {
                 FirewallEnabled = !FirewallHelper.RemoveRule();
-                _log.Info("主页", FirewallEnabled ? "移除端口放行失败" : "端口放行已移除");
+                _log.Info(LogSources.Dashboard, Localizer.Get(
+                    FirewallEnabled ? "dash.firewallRemoveFailed" : "dash.firewallRemoved"));
             }
             else
             {
                 FirewallEnabled = FirewallHelper.AllowPort(_settings.HttpPort);
-                _log.Info("主页", FirewallEnabled ? "端口放行成功" : "添加端口放行失败");
+                _log.Info(LogSources.Dashboard, Localizer.Get(
+                    FirewallEnabled ? "dash.firewallAllowed" : "dash.firewallAllowFailed"));
             }
         }
         finally { FirewallBusy = false; }
@@ -266,7 +285,9 @@ public partial class DashboardViewModel : ViewModelBase
     private async Task LoadVersionsAsync()
     {
         CoreVersionText = GetCoreVersion();
-        RcloneVersionText = await GetRcloneVersionAsync();
+        _rcloneVersion = await GetRcloneVersionAsync();
+        OnPropertyChanged(nameof(RcloneVersionText));
+        OnPropertyChanged(nameof(HasRcloneVersion));
 
         var rcloneReleases = await _updater.ListReleasesAsync("rclone/rclone");
         RcloneVersions.Clear();
@@ -286,13 +307,14 @@ public partial class DashboardViewModel : ViewModelBase
         catch { return ""; }
     }
 
-    private static async Task<string> GetRcloneVersionAsync()
+    /// <summary>取 rclone 版本首行；不可用时返回空串（显示层渲染为"未安装"）。</summary>
+    private async Task<string> GetRcloneVersionAsync()
     {
         try
         {
             var psi = new ProcessStartInfo
             {
-                FileName = "rclone",
+                FileName = _settings.RclonePath,
                 Arguments = "version",
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -303,7 +325,7 @@ public partial class DashboardViewModel : ViewModelBase
             await p.WaitForExitAsync(new CancellationTokenSource(8000).Token);
             return first?.Trim() ?? "";
         }
-        catch { return "未安装"; }
+        catch { return ""; }
     }
 
     [RelayCommand]
@@ -330,6 +352,6 @@ public partial class DashboardViewModel : ViewModelBase
     [RelayCommand] private void OpenRcloneGithub() => UpdateChecker.OpenUrl("https://github.com/rclone/rclone");
     [RelayCommand] private void OpenApiDocs() { if (IsRunning) UpdateChecker.OpenUrl($"{_core.BaseUrl}/swagger"); else UpdateChecker.OpenUrl("https://doc.oplist.org/guide/api"); }
     [RelayCommand] private void OpenMountCommands() => UpdateChecker.OpenUrl("https://rclone.org/commands/rclone_mount/");
-    [RelayCommand] private void OpenIssues() => UpdateChecker.OpenUrl("https://github.com/OpenListTeam/OpenList-Desktop/issues");
+    [RelayCommand] private void OpenIssues() => UpdateChecker.OpenUrl($"{AppInfo.RepoUrl}/issues");
     [RelayCommand] private void OpenFaq() => UpdateChecker.OpenUrl("https://doc.oplist.org/faq");
 }

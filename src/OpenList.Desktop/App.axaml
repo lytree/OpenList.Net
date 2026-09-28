@@ -82,7 +82,22 @@
     <Style Selector="Path.icon.success"><Setter Property="Stroke" Value="{DynamicResource Brush.Success}" /></Style>
     <Style Selector="Path.icon.danger"><Setter Property="Stroke" Value="{DynamicResource Brush.Danger}" /></Style>
     <Style Selector="Path.icon.warning"><Setter Property="Stroke" Value="{DynamicResource Brush.Warning}" /></Style>
+    <Style Selector="Path.icon.tertiary"><Setter Property="Stroke" Value="{DynamicResource Brush.TextTertiary}" /></Style>
     <Style Selector="Path.icon.white"><Setter Property="Stroke" Value="White" /></Style>
+
+    <!-- ===== 通知浮层（右下角 toast，见 MainWindow） ===== -->
+    <Style Selector="Border.toast">
+      <Setter Property="Background" Value="{DynamicResource Brush.BgPrimary}" />
+      <Setter Property="BorderThickness" Value="3,1,1,1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="12,10" />
+      <Setter Property="BoxShadow" Value="0 6 18 0 #26000000" />
+    </Style>
+    <!-- 左边框颜色即通知级别 -->
+    <Style Selector="Border.toast.info"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}" /></Style>
+    <Style Selector="Border.toast.success"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Success}" /></Style>
+    <Style Selector="Border.toast.warning"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Warning}" /></Style>
+    <Style Selector="Border.toast.error"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Danger}" /></Style>
 
     <!-- ===== 卡片 ===== -->
     <Style Selector="Border.card">

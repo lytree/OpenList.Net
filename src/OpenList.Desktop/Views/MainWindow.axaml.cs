@@ -15,7 +15,7 @@ public partial class MainWindow : Window
     }
 
     private void OnGitHubClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
-        Services.UpdateChecker.OpenUrl("https://github.com/OpenListTeam/openlist-desktop");
+        UpdateChecker.OpenUrl(AppInfo.RepoUrl);
 
     protected override async void OnClosing(WindowClosingEventArgs e)
     {
@@ -31,8 +31,8 @@ public partial class MainWindow : Window
             if (!_trayHintShown)
             {
                 _trayHintShown = true;
-                App.Services?.GetService<LogEventBus>()
-                    ?.Info("托盘", "程序已驻留系统托盘继续运行；点击托盘图标恢复窗口，托盘菜单「退出」结束程序");
+                App.Services?.GetService<NotificationService>()
+                    ?.Notify("tray.residentTitle", "tray.resident", NoticeLevel.Info);
             }
             return;
         }

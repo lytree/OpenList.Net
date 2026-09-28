@@ -2,18 +2,17 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using OpenList.Desktop.Localization;
 
 namespace OpenList.Desktop.Services;
 
 /// <summary>
-/// 更新检查：查 OpenList-Desktop 上游最新 release（GitHub API），有新版本时
-/// 引导用户打开发布页。当前桌面端仍是本地版本号 0.1.0。
+/// 更新检查：查本项目（<see cref="AppInfo.Repo"/>）在 GitHub 上的最新 release，
+/// 有新版本时引导用户打开发布页。版本号由 <see cref="AppInfo"/> 从程序集读取，
+/// 与发布时注入的 semver 一致。
 /// </summary>
 public sealed class UpdateChecker
 {
-    private const string ReleasesApi = "https://api.github.com/repos/OpenListTeam/OpenList-Desktop/releases/latest";
-    private const string ReleasesPage = "https://github.com/OpenListTeam/OpenList-Desktop/releases";
-
     public sealed record ReleaseInfo(string Tag, string Name, string Url);
 
     public sealed class GhRelease
@@ -38,19 +37,20 @@ public sealed class UpdateChecker
     {
         try
         {
-            var r = await _http.GetFromJsonAsync<GhRelease>(ReleasesApi);
+            var r = await _http.GetFromJsonAsync<GhRelease>(AppInfo.ReleasesApi);
             if (r is null) return null;
-            return new ReleaseInfo(r.TagName, r.Name, string.IsNullOrEmpty(r.HtmlUrl) ? ReleasesPage : r.HtmlUrl);
+            return new ReleaseInfo(r.TagName, r.Name,
+                string.IsNullOrEmpty(r.HtmlUrl) ? AppInfo.ReleasesPage : r.HtmlUrl);
         }
         catch (Exception ex)
         {
-            _log.Error("更新", $"检查更新失败: {ex.Message}");
+            _log.Error("Update", Localizer.Format("upd.checkFailedLog", ex.Message));
             return null;
         }
     }
 
     /// <summary>列出最近的 releases（新→旧），供"选择版本"。repo 形如 "owner/name"。</summary>
-    public async Task<List<ReleaseInfo>> ListReleasesAsync(string repo = "OpenListTeam/OpenList-Desktop", int take = 10)
+    public async Task<List<ReleaseInfo>> ListReleasesAsync(string repo = AppInfo.Repo, int take = 10)
     {
         try
         {
@@ -62,7 +62,7 @@ public sealed class UpdateChecker
         }
         catch (Exception ex)
         {
-            _log.Error("更新", $"获取版本列表失败: {ex.Message}");
+            _log.Error("Update", Localizer.Format("upd.listFailedLog", ex.Message));
             return [];
         }
     }

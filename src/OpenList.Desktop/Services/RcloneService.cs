@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using OpenList.Desktop.Localization;
 
 namespace OpenList.Desktop.Services;
 
@@ -39,10 +40,26 @@ public sealed class RcloneService : IDisposable
 
     public async Task<bool> StartAsync(MountConfig cfg)
     {
-        if (string.IsNullOrWhiteSpace(cfg.Name)) { _log.Error("挂载", "挂载名称不能为空"); return false; }
-        if (string.IsNullOrWhiteSpace(cfg.WebDavUrl)) { _log.Error("挂载", $"[{cfg.Name}] WebDAV 地址不能为空"); return false; }
-        if (string.IsNullOrWhiteSpace(cfg.MountPoint)) { _log.Error("挂载", $"[{cfg.Name}] 挂载点不能为空"); return false; }
-        if (Find(cfg.Name)?.Running == true) { _log.Info("挂载", $"[{cfg.Name}] 已在运行"); return true; }
+        if (string.IsNullOrWhiteSpace(cfg.Name))
+        {
+            _log.Error(LogSources.Rclone, Localizer.Get("rcl.nameRequired"));
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(cfg.WebDavUrl))
+        {
+            _log.Error(LogSources.Rclone, Localizer.Format("rcl.urlRequired", cfg.Name));
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(cfg.MountPoint))
+        {
+            _log.Error(LogSources.Rclone, Localizer.Format("rcl.mountPointRequired", cfg.Name));
+            return false;
+        }
+        if (Find(cfg.Name)?.Running == true)
+        {
+            _log.Info(LogSources.Rclone, Localizer.Format("rcl.alreadyRunning", cfg.Name));
+            return true;
+        }
 
         if (!await CheckRcloneAsync()) return false;
 
@@ -50,7 +67,11 @@ public sealed class RcloneService : IDisposable
         if (!IsWindowsDrive(cfg.MountPoint))
         {
             try { Directory.CreateDirectory(cfg.MountPoint); }
-            catch (Exception ex) { _log.Error("挂载", $"[{cfg.Name}] 无法创建挂载目录: {ex.Message}"); return false; }
+            catch (Exception ex)
+            {
+                _log.Error(LogSources.Rclone, Localizer.Format("rcl.mkdirFailed", cfg.Name, ex.Message));
+                return false;
+            }
         }
 
         var args = new List<string>
@@ -92,17 +113,25 @@ public sealed class RcloneService : IDisposable
             }
             mount.Process = proc;
 
-            proc.OutputDataReceived += (_, e) => { if (e.Data is not null) _log.Info(cfg.Name, e.Data); };
-            proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) _log.Error(cfg.Name, e.Data); };
+            // rclone 的输出统一挂 rclone 标签（远程名已在消息前缀里），
+            // 这样日志页按来源筛选时不会漏掉具体挂载项的行。
+            proc.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null) _log.Info(LogSources.Rclone, $"[{cfg.Name}] {e.Data}");
+            };
+            proc.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is not null) _log.Error(LogSources.Rclone, $"[{cfg.Name}] {e.Data}");
+            };
             proc.Exited += (_, _) =>
             {
-                _log.Info("挂载", $"[{cfg.Name}] rclone 进程已退出");
+                _log.Info(LogSources.Rclone, Localizer.Format("rcl.exited", cfg.Name));
                 Changed?.Invoke();
             };
 
             if (!proc.Start())
             {
-                _log.Error("挂载", $"[{cfg.Name}] rclone 启动失败");
+                _log.Error(LogSources.Rclone, Localizer.Format("rcl.startFailed", cfg.Name));
                 Changed?.Invoke();
                 return false;
             }
@@ -113,17 +142,18 @@ public sealed class RcloneService : IDisposable
             await Task.Delay(300);
             if (proc.HasExited)
             {
-                _log.Error("挂载", $"[{cfg.Name}] rclone 立即退出（退出码 {proc.ExitCode}），请检查参数或挂载点");
+                _log.Error(LogSources.Rclone,
+                    Localizer.Format("rcl.exitedImmediately", cfg.Name, proc.ExitCode));
                 Changed?.Invoke();
                 return false;
             }
-            _log.Info("挂载", $"[{cfg.Name}] 已挂载到 {cfg.MountPoint}");
+            _log.Info(LogSources.Rclone, Localizer.Format("rcl.mounted", cfg.Name, cfg.MountPoint));
             Changed?.Invoke();
             return true;
         }
         catch (Exception ex)
         {
-            _log.Error("挂载", $"[{cfg.Name}] 挂载失败: {ex.Message}");
+            _log.Error(LogSources.Rclone, Localizer.Format("rcl.mountFailed", cfg.Name, ex.Message));
             Changed?.Invoke();
             return false;
         }
@@ -138,12 +168,12 @@ public sealed class RcloneService : IDisposable
         {
             proc.Kill(entireProcessTree: true);
             await proc.WaitForExitAsync();
-            _log.Info("挂载", $"[{name}] 已卸载");
+            _log.Info(LogSources.Rclone, Localizer.Format("rcl.unmounted", name));
             return true;
         }
         catch (Exception ex)
         {
-            _log.Error("挂载", $"[{name}] 卸载失败: {ex.Message}");
+            _log.Error(LogSources.Rclone, Localizer.Format("rcl.unmountFailed", name, ex.Message));
             return false;
         }
         finally
@@ -179,12 +209,13 @@ public sealed class RcloneService : IDisposable
                 CreateNoWindow = true,
             })!;
             var ver = await p.StandardOutput.ReadLineAsync();
-            _log.Info("挂载", $"rclone: {ver?.Trim()}");
+            _log.Info(LogSources.Rclone, $"rclone: {ver?.Trim()}");
             return true;
         }
         catch (Exception ex)
         {
-            _log.Error("挂载", $"无法运行 rclone（{_settings.RclonePath}）: {ex.Message}。请安装 rclone 或在设置中指定路径");
+            _log.Error(LogSources.Rclone,
+                Localizer.Format("rcl.notRunnable", _settings.RclonePath, ex.Message));
             return false;
         }
     }
@@ -206,12 +237,12 @@ public sealed class RcloneService : IDisposable
             await p.WaitForExitAsync();
             var val = outp.Trim();
             if (p.ExitCode == 0 && val.Length > 0) return val;
-            _log.Error("挂载", "rclone obscure 失败，将不携带密码挂载");
+            _log.Error(LogSources.Rclone, Localizer.Get("rcl.obscureFailed"));
             return null;
         }
         catch (Exception ex)
         {
-            _log.Error("挂载", $"rclone obscure 异常: {ex.Message}");
+            _log.Error(LogSources.Rclone, Localizer.Format("rcl.obscureError", ex.Message));
             return null;
         }
     }

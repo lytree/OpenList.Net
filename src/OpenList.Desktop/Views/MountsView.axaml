@@ -16,7 +16,7 @@
               <Path Classes="icon white" Data="{StaticResource I.HardDrive}" Width="18" Height="18" />
             </Border>
             <StackPanel Spacing="1">
-              <TextBlock Classes="h1" Text="挂载管理" />
+              <TextBlock Classes="h1" Text="{DynamicResource L.mount.title}" />
               <TextBlock Classes="muted" Text="{Binding MountedStats}" />
             </StackPanel>
           </StackPanel>
@@ -24,13 +24,13 @@
             <Button Classes="btn btn-secondary" Command="{Binding RefreshStatusCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Path Classes="icon secondary" Data="{StaticResource I.RefreshCw}" Width="13" Height="13" />
-                <TextBlock Text="刷新" />
+                <TextBlock Text="{DynamicResource L.common.refresh}" />
               </StackPanel>
             </Button>
             <Button Classes="btn btn-primary" Command="{Binding AddCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Path Classes="icon white" Data="{StaticResource I.Plus}" Width="13" Height="13" />
-                <TextBlock Text="添加远程" />
+                <TextBlock Text="{DynamicResource L.mount.addRemote}" />
               </StackPanel>
             </Button>
           </StackPanel>
@@ -44,10 +44,10 @@
           <Path Classes="icon warning" Data="{StaticResource I.AlertTriangle}" Width="20" Height="20"
                 VerticalAlignment="Center" />
           <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-            <TextBlock Text="需要安装 WinFSP" FontSize="13" FontWeight="SemiBold"
+            <TextBlock Text="{DynamicResource L.mount.winFspTitle}" FontSize="13" FontWeight="SemiBold"
                        Foreground="{DynamicResource Brush.TextMain}" />
             <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource Brush.TextSecondary}"
-                       Text="在 Windows 系统上，您需要先安装 WinFSP 才能使用挂载功能。请从 GitHub 下载并安装：https://github.com/winfsp/winfsp/releases" />
+                       Text="{DynamicResource L.mount.winFspBody}" />
           </StackPanel>
           <Button Grid.Column="2" Classes="btn-icon" Command="{Binding DismissWinFspTipCommand}"
                   VerticalAlignment="Center">
@@ -61,11 +61,11 @@
 
       <!-- ===== 搜索 + 状态筛选 ===== -->
       <Grid ColumnDefinitions="*,170" ColumnSpacing="10">
-        <TextBox Text="{Binding SearchText}" PlaceholderText="搜索远程配置..." />
+        <TextBox Text="{Binding SearchText}" PlaceholderText="{DynamicResource L.mount.searchPlaceholder}" />
         <ComboBox Grid.Column="1" SelectedIndex="{Binding StatusFilterIndex}" MinHeight="34">
-          <ComboBoxItem Content="所有状态" />
-          <ComboBoxItem Content="已挂载" />
-          <ComboBoxItem Content="未挂载" />
+          <ComboBoxItem Content="{DynamicResource L.mount.filterAll}" />
+          <ComboBoxItem Content="{DynamicResource L.mount.filterMounted}" />
+          <ComboBoxItem Content="{DynamicResource L.mount.filterUnmounted}" />
         </ComboBox>
       </Grid>
 
@@ -74,9 +74,9 @@
         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
           <Path Classes="icon secondary" Data="{StaticResource I.Cloud}" Width="42" Height="42"
                HorizontalAlignment="Center" Opacity="0.7" />
-          <TextBlock Text="无远程配置" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center"
+          <TextBlock Text="{DynamicResource L.mount.emptyTitle}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center"
                      Foreground="{DynamicResource Brush.TextMain}" Margin="0,6,0,0" />
-          <TextBlock Classes="muted" Text="创建您的第一个远程配置以开始挂载云存储。" HorizontalAlignment="Center" />
+          <TextBlock Classes="muted" Text="{DynamicResource L.mount.emptyBody}" HorizontalAlignment="Center" />
         </StackPanel>
       </Border>
 
@@ -97,31 +97,31 @@
                                Foreground="{DynamicResource Brush.TextMain}" VerticalAlignment="Center" />
                     <Border Classes="pill" Padding="8,1" VerticalAlignment="Center"
                             Background="{DynamicResource Brush.Accent10}" IsVisible="{Binding IsRunning}">
-                      <TextBlock Text="已挂载" FontSize="11" Foreground="{DynamicResource Brush.Accent}" />
+                      <TextBlock Text="{DynamicResource L.mount.statusMounted}" FontSize="11" Foreground="{DynamicResource Brush.Accent}" />
                     </Border>
                     <Border Classes="pill" Padding="8,1" VerticalAlignment="Center"
                             Background="{DynamicResource Brush.BgSecondary}" IsVisible="{Binding !IsRunning}">
-                      <TextBlock Text="未挂载" FontSize="11" Foreground="{DynamicResource Brush.TextSecondary}" />
+                      <TextBlock Text="{DynamicResource L.mount.statusUnmounted}" FontSize="11" Foreground="{DynamicResource Brush.TextSecondary}" />
                     </Border>
                   </StackPanel>
 
                   <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <Button Classes="btn btn-primary" Command="{Binding $parent[ItemsControl].DataContext.MountCommand}"
                             CommandParameter="{Binding}" IsEnabled="{Binding !IsRunning}">
-                      <TextBlock Text="挂载" />
+                      <TextBlock Text="{DynamicResource L.mount.actionMount}" />
                     </Button>
                     <Button Classes="btn btn-danger" Command="{Binding $parent[ItemsControl].DataContext.UnmountCommand}"
                             CommandParameter="{Binding}" IsEnabled="{Binding IsRunning}">
-                      <TextBlock Text="卸载" />
+                      <TextBlock Text="{DynamicResource L.mount.actionUnmount}" />
                     </Button>
                     <Button Classes="btn btn-secondary" Command="{Binding $parent[ItemsControl].DataContext.EditCommand}"
                             CommandParameter="{Binding}" IsEnabled="{Binding !IsEditing}">
-                      <TextBlock Text="编辑" />
+                      <TextBlock Text="{DynamicResource L.common.edit}" />
                     </Button>
                     <Button Classes="btn btn-secondary"
                             Command="{Binding $parent[ItemsControl].DataContext.RemoveCommand}"
                             CommandParameter="{Binding}">
-                      <TextBlock Text="删除" />
+                      <TextBlock Text="{DynamicResource L.common.delete}" />
                     </Button>
                   </StackPanel>
                 </Grid>
@@ -131,35 +131,35 @@
                   <TextBlock Text="→" Classes="muted" VerticalAlignment="Center" />
                   <TextBlock Text="{Binding MountPoint}" Classes="muted" VerticalAlignment="Center" />
                   <Border Classes="tag" IsVisible="{Binding AutoMount}" VerticalAlignment="Center">
-                    <TextBlock Text="自动挂载" FontSize="11" Foreground="{DynamicResource Brush.TextSecondary}" />
+                    <TextBlock Text="{DynamicResource L.mount.autoMountTag}" FontSize="11" Foreground="{DynamicResource Brush.TextSecondary}" />
                   </Border>
                 </StackPanel>
 
                 <!-- 编辑区 -->
                 <StackPanel Spacing="8" IsVisible="{Binding IsEditing}">
                   <Grid ColumnDefinitions="90,*,90,*" RowDefinitions="Auto,Auto,Auto" Margin="0,4,0,0">
-                    <TextBlock Text="名称" VerticalAlignment="Center" Classes="muted" />
+                    <TextBlock Text="{DynamicResource L.mount.fieldName}" VerticalAlignment="Center" Classes="muted" />
                     <TextBox Grid.Column="1" Text="{Binding EditName}" Margin="0,0,10,6" />
-                    <TextBlock Grid.Column="2" Text="WebDAV 地址" VerticalAlignment="Center" Classes="muted" />
+                    <TextBlock Grid.Column="2" Text="{DynamicResource L.mount.fieldWebDav}" VerticalAlignment="Center" Classes="muted" />
                     <TextBox Grid.Column="3" Text="{Binding EditUrl}" />
 
-                    <TextBlock Grid.Row="1" Text="用户名" VerticalAlignment="Center" Classes="muted" />
+                    <TextBlock Grid.Row="1" Text="{DynamicResource L.mount.fieldUsername}" VerticalAlignment="Center" Classes="muted" />
                     <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding EditUsername}" Margin="0,0,10,6" />
-                    <TextBlock Grid.Row="1" Grid.Column="2" Text="密码" VerticalAlignment="Center" Classes="muted" />
+                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{DynamicResource L.mount.fieldPassword}" VerticalAlignment="Center" Classes="muted" />
                     <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding EditPassword}" PasswordChar="•" />
 
-                    <TextBlock Grid.Row="2" Text="挂载点" VerticalAlignment="Center" Classes="muted" />
+                    <TextBlock Grid.Row="2" Text="{DynamicResource L.mount.fieldMountPoint}" VerticalAlignment="Center" Classes="muted" />
                     <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EditMountPoint}"
-                             PlaceholderText="例如：T: 或 /mnt/remote" Margin="0,0,10,6" />
-                    <TextBlock Grid.Row="2" Grid.Column="2" Text="额外标志" VerticalAlignment="Center" Classes="muted" />
+                             PlaceholderText="{DynamicResource L.mount.mountPointPlaceholder}" Margin="0,0,10,6" />
+                    <TextBlock Grid.Row="2" Grid.Column="2" Text="{DynamicResource L.mount.fieldExtraFlags}" VerticalAlignment="Center" Classes="muted" />
                     <TextBox Grid.Row="2" Grid.Column="3" Text="{Binding EditExtraFlags}"
-                             PlaceholderText="例如：--vfs-cache-mode=full" />
+                             PlaceholderText="{DynamicResource L.mount.extraFlagsPlaceholder}" />
                   </Grid>
-                  <CheckBox Content="软件启动时自动挂载" IsChecked="{Binding EditAutoMount}" />
+                  <CheckBox Content="{DynamicResource L.mount.checkAutoMount}" IsChecked="{Binding EditAutoMount}" />
                   <Button Classes="btn btn-primary" HorizontalAlignment="Right"
                           Command="{Binding $parent[ItemsControl].DataContext.SaveCommand}"
                           CommandParameter="{Binding}">
-                    <TextBlock Text="保存" />
+                    <TextBlock Text="{DynamicResource L.common.save}" />
                   </Button>
                 </StackPanel>
               </StackPanel>

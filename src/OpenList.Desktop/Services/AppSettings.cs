@@ -30,6 +30,8 @@ public sealed class AppSettings
     public int HttpPort { get; set; } = 5244;
     /// <summary>桌面端启动时自动拉起核心。</summary>
     public bool AutoStartCore { get; set; } = true;
+    /// <summary>核心子进程意外退出（非用户主动停止）时自动重启，带指数退避与次数上限。</summary>
+    public bool AutoRestartCore { get; set; } = true;
     public bool StartMinimized { get; set; }
     /// <summary>关闭主窗口时驻留系统托盘（不退出）；托盘菜单「退出」才真正结束。</summary>
     public bool CloseToTray { get; set; } = true;
@@ -40,6 +42,8 @@ public sealed class AppSettings
 
     /// <summary>界面主题：light / dark（上游 ThemeSwitcher）。</summary>
     public string Theme { get; set; } = "light";
+    /// <summary>界面语言：zh-CN / en（见 Localization.Localizer.Languages）。</summary>
+    public string Language { get; set; } = "zh-CN";
     /// <summary>更新页：自动检查更新开关。</summary>
     public bool AutoCheckUpdate { get; set; } = true;
     /// <summary>挂载页 WinFSP 提示条是否已永久关闭。</summary>

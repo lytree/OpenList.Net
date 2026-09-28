@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
+using OpenList.Desktop.Localization;
 using OpenList.Desktop.Services;
 
 namespace OpenList.Desktop.ViewModels;
@@ -26,7 +27,7 @@ public partial class CoreMonitorViewModel : ViewModelBase
     private int _tick;
 
     [ObservableProperty] private bool _isRunning;
-    [ObservableProperty] private string _statusText = "已停止";
+    [ObservableProperty] private string _statusText = Localizer.Get("status.stopped");
     [ObservableProperty] private string _pidText = "--";
     [ObservableProperty] private string _uptimeText = "--";
     [ObservableProperty] private string _cpuText = "--";
@@ -59,13 +60,8 @@ public partial class CoreMonitorViewModel : ViewModelBase
         _timer.Start();
     }
 
-    private static string Describe(CoreStatus s) => s switch
-    {
-        CoreStatus.Starting => "启动中",
-        CoreStatus.Running => "运行中",
-        CoreStatus.Stopping => "停止中",
-        _ => "已停止",
-    };
+    private static string Describe(CoreStatus s) =>
+        Localizer.Get(NotificationService.CoreStatusKey(s));
 
     private void ResetSeries()
     {
@@ -120,7 +116,7 @@ public partial class CoreMonitorViewModel : ViewModelBase
         if (_tick % 3 == 0)
         {
             var ms = await _core.PingLatencyAsync();
-            LatencyText = ms >= 0 ? $"{ms} ms" : "不可达";
+            LatencyText = ms >= 0 ? $"{ms} ms" : Localizer.Get("status.unreachable");
         }
     }
 

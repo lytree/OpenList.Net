@@ -40,6 +40,7 @@ public static class FirewallHelper
             using var p = Process.Start(psi)!;
             var output = p.StandardOutput.ReadToEnd();
             p.WaitForExit(5000);
+            // 解析 netsh 输出：中文/英文两套 Windows 输出分别匹配，故此处不本地化
             return output.Contains("规则名称", StringComparison.OrdinalIgnoreCase)
                 || output.Contains("Rule Name", StringComparison.OrdinalIgnoreCase);
         }

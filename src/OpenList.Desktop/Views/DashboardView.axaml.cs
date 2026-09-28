@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Media;
+using OpenList.Desktop.Localization;
 using OpenList.Desktop.ViewModels;
 using AvPoint = Avalonia.Point;
 
@@ -117,7 +118,8 @@ public partial class DashboardView : UserControl
             };
             Canvas.SetLeft(dot, cx - 2.5);
             Canvas.SetTop(dot, cy - 2.5);
-            ToolTip.SetTip(dot, $"{p.Time} · {p.Ms} ms · {(p.Healthy ? "健康" : "不健康")}");
+            var health = Localizer.Get(p.Healthy ? "dash.heartbeatHealthy" : "dash.heartbeatUnhealthy");
+            ToolTip.SetTip(dot, $"{p.Time} · {p.Ms} ms · {health}");
             canvas.Children.Add(dot);
         }
     }

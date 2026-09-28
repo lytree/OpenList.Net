@@ -4,6 +4,14 @@
              x:Class="OpenList.Desktop.Views.LogsView"
              x:DataType="vm:LogsViewModel"
              x:CompileBindings="False">
+  <UserControl.KeyBindings>
+    <!-- 工具提示里承诺过的快捷键，这里才是真正生效的地方 -->
+    <KeyBinding Gesture="Space" Command="{Binding TogglePauseCommand}" />
+    <KeyBinding Gesture="Ctrl+R" Command="{Binding RefreshCommand}" />
+    <KeyBinding Gesture="Ctrl+C" Command="{Binding CopyAllAsyncCommand}" />
+    <KeyBinding Gesture="Ctrl+E" Command="{Binding ExportAsyncCommand}" />
+    <KeyBinding Gesture="Ctrl+Delete" Command="{Binding ClearCommand}" />
+  </UserControl.KeyBindings>
 
   <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="24,20" RowSpacing="12" MaxWidth="1200">
 
@@ -11,7 +19,7 @@
     <Border Classes="card" Padding="12,10">
       <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-          <Button Classes="btn-icon" Command="{Binding TogglePauseCommand}" ToolTip.Tip="暂停 / 恢复 (Space)">
+          <Button Classes="btn-icon" Command="{Binding TogglePauseCommand}" ToolTip.Tip="{DynamicResource L.log.pauseTip}">
             <Panel>
               <Path Classes="icon accent" Data="{StaticResource I.Pause}" Width="16" Height="16"
                     IsVisible="{Binding !Paused}" />
@@ -19,13 +27,13 @@
                     IsVisible="{Binding Paused}" />
             </Panel>
           </Button>
-          <Button Classes="btn-icon" Command="{Binding RefreshCommand}" ToolTip.Tip="刷新 (Ctrl+R)">
+          <Button Classes="btn-icon" Command="{Binding RefreshCommand}" ToolTip.Tip="{DynamicResource L.log.refreshTip}">
             <Path Classes="icon accent" Data="{StaticResource I.RefreshCw}" Width="16" Height="16" />
           </Button>
-          <Button Classes="btn-icon" ToolTip.Tip="显示筛选器">
+          <Button Classes="btn-icon" ToolTip.Tip="{DynamicResource L.log.filterTip}">
             <Path Classes="icon white" Data="{StaticResource I.Filter}" Width="16" Height="16" />
           </Button>
-          <TextBox Text="{Binding SearchText}" PlaceholderText="搜索日志... (Ctrl+F)" MinWidth="260"
+          <TextBox Text="{Binding SearchText}" PlaceholderText="{DynamicResource L.log.searchPlaceholder}" MinWidth="260"
                    VerticalAlignment="Center" Height="32" />
         </StackPanel>
 
@@ -33,10 +41,13 @@
                    HorizontalAlignment="Right" Margin="0,0,10,0" />
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-          <Button Classes="btn-icon" Command="{Binding CopyAllAsyncCommand}" ToolTip.Tip="复制到剪贴板 (Ctrl+C)">
+          <Button Classes="btn-icon" Command="{Binding CopyAllAsyncCommand}" ToolTip.Tip="{DynamicResource L.log.copyTip}">
             <Path Classes="icon secondary" Data="{StaticResource I.Copy}" Width="15" Height="15" />
           </Button>
-          <Button Classes="btn-icon" Command="{Binding ClearCommand}" ToolTip.Tip="清除日志 (Ctrl+Delete)">
+          <Button Classes="btn-icon" Command="{Binding ExportAsyncCommand}" ToolTip.Tip="{DynamicResource L.log.exportTip}">
+            <Path Classes="icon secondary" Data="{StaticResource I.Download}" Width="15" Height="15" />
+          </Button>
+          <Button Classes="btn-icon" Command="{Binding ClearCommand}" ToolTip.Tip="{DynamicResource L.log.clearTip}">
             <Path Classes="icon secondary" Data="{StaticResource I.Trash}" Width="15" Height="15" />
           </Button>
         </StackPanel>
@@ -46,20 +57,20 @@
     <!-- ===== 筛选行 ===== -->
     <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
       <ComboBox SelectedIndex="{Binding LevelIndex}" MinHeight="30" MinWidth="110" FontSize="12">
-        <ComboBoxItem Content="所有级别" />
-        <ComboBoxItem Content="信息" />
-        <ComboBoxItem Content="警告" />
-        <ComboBoxItem Content="错误" />
+        <ComboBoxItem Content="{DynamicResource L.log.levelAll}" />
+        <ComboBoxItem Content="{DynamicResource L.log.levelInfo}" />
+        <ComboBoxItem Content="{DynamicResource L.log.levelWarn}" />
+        <ComboBoxItem Content="{DynamicResource L.log.levelError}" />
       </ComboBox>
       <ComboBox Grid.Column="1" SelectedIndex="{Binding SourceIndex}" MinHeight="30" MinWidth="110" FontSize="12">
-        <ComboBoxItem Content="所有来源" />
+        <ComboBoxItem Content="{DynamicResource L.log.sourceAll}" />
         <ComboBoxItem Content="OpenList" />
         <ComboBoxItem Content="Rclone" />
-        <ComboBoxItem Content="桌面" />
+        <ComboBoxItem Content="{DynamicResource L.log.sourceDesktop}" />
       </ComboBox>
-      <CheckBox Grid.Column="3" Content="全选 (Ctrl+A)" IsEnabled="False" VerticalAlignment="Center" FontSize="12" />
-      <CheckBox Grid.Column="4" Content="清除选择 (Esc)" IsEnabled="False" VerticalAlignment="Center" FontSize="12" />
-      <CheckBox Grid.Column="5" Content="自动滚动" IsChecked="{Binding AutoScroll}" VerticalAlignment="Center"
+      <CheckBox Grid.Column="3" Content="{DynamicResource L.log.selectAll}" IsEnabled="False" VerticalAlignment="Center" FontSize="12" />
+      <CheckBox Grid.Column="4" Content="{DynamicResource L.log.clearSelection}" IsEnabled="False" VerticalAlignment="Center" FontSize="12" />
+      <CheckBox Grid.Column="5" Content="{DynamicResource L.log.autoScroll}" IsChecked="{Binding AutoScroll}" VerticalAlignment="Center"
                 FontSize="12" />
     </Grid>
 
@@ -74,8 +85,8 @@
                 HorizontalGridLinesBrush="{DynamicResource Brush.BorderSecondary}"
                 FontFamily="Consolas, Menlo, monospace" FontSize="12">
         <DataGrid.Columns>
-          <DataGridTextColumn Header="时间" Width="110" Binding="{Binding Time}" />
-          <DataGridTemplateColumn Header="级别" Width="90">
+          <DataGridTextColumn Header="{DynamicResource L.log.colTime}" Width="110" Binding="{Binding Time}" />
+          <DataGridTemplateColumn Header="{DynamicResource L.log.colLevel}" Width="90">
             <DataGridTemplateColumn.CellTemplate>
               <DataTemplate>
                 <Border CornerRadius="5" Padding="7,1" HorizontalAlignment="Left" Margin="6,2"
@@ -86,8 +97,8 @@
               </DataTemplate>
             </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>
-          <DataGridTextColumn Header="来源" Width="100" Binding="{Binding Source}" />
-          <DataGridTextColumn Header="消息" Width="7*" Binding="{Binding Message}" />
+          <DataGridTextColumn Header="{DynamicResource L.log.colSource}" Width="100" Binding="{Binding Source}" />
+          <DataGridTextColumn Header="{DynamicResource L.log.colMessage}" Width="7*" Binding="{Binding Message}" />
         </DataGrid.Columns>
       </DataGrid>
     </Border>
@@ -95,7 +106,7 @@
     <!-- ===== 底部状态条 ===== -->
     <Grid Grid.Row="3" ColumnDefinitions="*,Auto">
       <TextBlock Text="{Binding StatusText}" Classes="muted" />
-      <TextBlock Grid.Column="1" Text="{Binding StatsText, StringFormat='显示 {0} 条记录'}" Classes="muted" />
+      <TextBlock Grid.Column="1" Text="{Binding RecordsText}" Classes="muted" />
     </Grid>
   </Grid>
 </UserControl>

@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OpenList.Desktop.Localization;
 using OpenList.Desktop.Services;
 
 namespace OpenList.Desktop.ViewModels;
@@ -22,7 +23,9 @@ public partial class MountItemViewModel : ObservableObject
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private bool _isEditing;
 
-    public string StatusText => IsRunning ? "已挂载" : "未挂载";
+    public string StatusText => IsRunning
+        ? Localizer.Get("mount.statusMounted")
+        : Localizer.Get("mount.statusUnmounted");
 
     // 编辑态字段（直接绑）
     [ObservableProperty] private string _editName = "";
@@ -55,6 +58,7 @@ public partial class MountsViewModel : ViewModelBase
     private readonly RcloneService _rclone;
     private readonly AppSettings _settings;
     private readonly LogEventBus _log;
+    private readonly NotificationService _notify;
 
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private string _searchText = "";
@@ -67,14 +71,15 @@ public partial class MountsViewModel : ViewModelBase
     /// <summary>筛选后的列表（搜索框 + 状态下拉），上游 filters 行为。</summary>
     public ObservableCollection<MountItemViewModel> FilteredItems { get; } = [];
 
-    public string MountedStats => $"{Items.Count(i => i.IsRunning)} / {Items.Count} 已挂载";
+    public string MountedStats => Localizer.Format("mount.stats", Items.Count(i => i.IsRunning), Items.Count);
     public bool HasNoVisibleItem => FilteredItems.Count == 0;
 
-    public MountsViewModel(RcloneService rclone, AppSettings settings, LogEventBus log)
+    public MountsViewModel(RcloneService rclone, AppSettings settings, LogEventBus log, NotificationService notify)
     {
         _rclone = rclone;
         _settings = settings;
         _log = log;
+        _notify = notify;
         _rclone.Changed += () => Dispatcher.UIThread.Post(RefreshStatus);
         foreach (var m in settings.Mounts)
             Items.Add(new MountItemViewModel(Clone(m)) { IsRunning = _rclone.IsRunning(m.Name) });
@@ -140,7 +145,7 @@ public partial class MountsViewModel : ViewModelBase
     {
         foreach (var item in Items)
             item.IsRunning = _rclone.IsRunning(item.Name);
-        StatusText = $"刷新于 {DateTime.Now:HH:mm:ss}";
+        StatusText = Localizer.Format("mount.refreshedAt", DateTime.Now.ToString("HH:mm:ss"));
     }
 
     private static MountConfig Clone(MountConfig m) => new()
@@ -191,9 +196,17 @@ public partial class MountsViewModel : ViewModelBase
     private async Task SaveAsync(MountItemViewModel? item)
     {
         if (item is null) return;
-        if (string.IsNullOrWhiteSpace(item.EditName)) { StatusText = "名称不能为空"; return; }
+        if (string.IsNullOrWhiteSpace(item.EditName))
+        {
+            StatusText = Localizer.Get("mount.nameRequired");
+            return;
+        }
         var dup = Items.FirstOrDefault(i => i != item && i.Name == item.EditName);
-        if (dup is not null) { StatusText = $"名称 {item.EditName} 已存在"; return; }
+        if (dup is not null)
+        {
+            StatusText = Localizer.Format("mount.nameExists", item.EditName);
+            return;
+        }
 
         var wasRunning = item.IsRunning;
         if (wasRunning) await _rclone.StopAsync(item.Config.Name);
@@ -202,7 +215,7 @@ public partial class MountsViewModel : ViewModelBase
         item.IsRunning = false;
         OnPropertyChanged(nameof(Items));
         Persist();
-        StatusText = $"已保存 {item.Name}";
+        StatusText = Localizer.Format("mount.saved", item.Name);
         if (wasRunning) await MountAsync(item);
     }
 
@@ -210,11 +223,23 @@ public partial class MountsViewModel : ViewModelBase
     private async Task MountAsync(MountItemViewModel? item)
     {
         if (item is null) return;
-        if (item.IsEditing) { StatusText = "请先保存"; return; }
-        StatusText = $"挂载中: {item.Name}…";
+        if (item.IsEditing)
+        {
+            StatusText = Localizer.Get("mount.saveFirst");
+            return;
+        }
+        StatusText = Localizer.Format("mount.mounting", item.Name);
         var ok = await _rclone.StartAsync(item.Config);
         item.IsRunning = _rclone.IsRunning(item.Name);
-        StatusText = ok ? $"已挂载: {item.Name} → {item.MountPoint}" : $"挂载失败: {item.Name}";
+        if (ok)
+        {
+            StatusText = Localizer.Format("mount.mounted", item.Name, item.MountPoint);
+            _notify.Notify("notify.mountedTitle", "mount.mounted", NoticeLevel.Success, item.Name, item.MountPoint);
+        }
+        else
+        {
+            StatusText = Localizer.Format("mount.mountFailed", item.Name);
+        }
     }
 
     [RelayCommand]
@@ -223,7 +248,8 @@ public partial class MountsViewModel : ViewModelBase
         if (item is null) return;
         await _rclone.StopAsync(item.Name);
         item.IsRunning = false;
-        StatusText = $"已卸载: {item.Name}";
+        StatusText = Localizer.Format("mount.unmounted", item.Name);
+        _notify.Notify("notify.unmountedTitle", "mount.unmounted", NoticeLevel.Info, item.Name);
     }
 
     private void Persist()

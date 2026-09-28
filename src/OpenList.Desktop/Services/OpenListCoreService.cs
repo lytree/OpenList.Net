@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using OpenList.Desktop.Localization;
 
 namespace OpenList.Desktop.Services;
 
@@ -12,13 +13,25 @@ public enum CoreStatus
 }
 
 /// <summary>
+/// 核心状态变更通知。只带文案 key 与参数，由 UI 层按当前语言渲染，
+/// 这样服务层不必关心本地化，语言切换后新通知也自动是新语言。
+/// </summary>
+public sealed record CoreNotice(string TitleKey, string BodyKey, object?[] BodyArgs, bool IsError);
+
+/// <summary>
 /// OpenList 核心子进程管理（对标 OpenList-Desktop 的"服务管理"功能）：
 /// 启动 / 停止 / 重启 OpenList.Server 进程，采集其 stdout/stderr 到日志总线，
 /// 通过 GET /ping 探活并跟踪运行时长。端口通过 OpenList__Scheme__HttpPort
 /// 环境变量覆盖核心默认配置（核心端支持 OpenList__ 前缀的环境变量覆盖）。
+///
+/// <para><b>崩溃自愈</b>：核心若<b>非本端主动停止</b>而退出，会按指数退避自动重启，
+/// 连续失败到 <see cref="MaxRestartAttempts"/> 次后放弃并通知用户（见 <see cref="Notice"/>）。</para>
 /// </summary>
 public sealed class OpenListCoreService : IDisposable
 {
+    /// <summary>连续自动重启次数上限，超过即放弃（避免无限崩溃循环）。</summary>
+    public const int MaxRestartAttempts = 5;
+
     private readonly LogEventBus _log;
     private readonly AppSettings _settings;
     private readonly HttpClient _http;
@@ -27,7 +40,19 @@ public sealed class OpenListCoreService : IDisposable
     private CoreStatus _status = CoreStatus.Stopped;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    /// <summary>本次退出是否由本端主动触发（用户停止 / 就绪超时放弃 / 退出程序）。</summary>
+    private volatile bool _expectExit;
+
+    /// <summary>用户显式要求保持停止（或程序正在退出），用于取消排队中的自动重启。</summary>
+    private volatile bool _restartCancelled;
+
+    private volatile bool _disposed;
+    private int _restartAttempts;
+
     public event Action<CoreStatus>? StatusChanged;
+
+    /// <summary>需要提示用户的状况（启动成功、意外退出、自动重启、放弃重启等）。</summary>
+    public event Action<CoreNotice>? Notice;
 
     public CoreStatus Status
     {
@@ -55,15 +80,19 @@ public sealed class OpenListCoreService : IDisposable
     /// <summary>核心本次启动时间（监控运行时长用）。</summary>
     public DateTimeOffset? StartedAt => _startedAt;
 
+    /// <summary>已连续自动重启的次数。</summary>
+    public int RestartAttempts => _restartAttempts;
+
     public string? UptimeText
     {
         get
         {
             if (Status != CoreStatus.Running || _startedAt is null) return null;
             var t = DateTimeOffset.Now - _startedAt.Value;
+            var clock = $"{t.Hours:00}:{t.Minutes:00}:{t.Seconds:00}";
             return t.Days > 0
-                ? $"{t.Days}天 {t.Hours:00}:{t.Minutes:00}:{t.Seconds:00}"
-                : $"{t.Hours:00}:{t.Minutes:00}:{t.Seconds:00}";
+                ? Localizer.Format("status.uptimeDays", t.Days, clock)
+                : clock;
         }
     }
 
@@ -119,12 +148,15 @@ public sealed class OpenListCoreService : IDisposable
             var exe = ResolveCorePath();
             if (exe is null)
             {
-                _log.Error("核心", "未找到 OpenList 核心可执行文件，请在「设置」里指定路径");
+                _log.Error(LogSources.Core, Localizer.Get("dash.coreExeMissing"));
+                Raise(LogSources.Core, "notify.startFailedTitle", "dash.coreExeMissing", [], isError: true);
                 return;
             }
 
             Status = CoreStatus.Starting;
-            _log.Info("核心", $"启动核心: {exe}");
+            _expectExit = false;
+            _restartCancelled = false;
+            _log.Info(LogSources.Core, Localizer.Format("dash.coreStarting", exe));
 
             var psi = new ProcessStartInfo
             {
@@ -147,14 +179,15 @@ public sealed class OpenListCoreService : IDisposable
                 psi.Environment["OpenList__DistDir"] = distDir;
 
             var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            proc.OutputDataReceived += (_, e) => { if (e.Data is not null) _log.Info("核心", e.Data); };
-            proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) _log.Error("核心", e.Data); };
+            proc.OutputDataReceived += (_, e) => { if (e.Data is not null) _log.Info(LogSources.Core, e.Data); };
+            proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) _log.Error(LogSources.Core, e.Data); };
             proc.Exited += (_, _) => OnProcessExited(proc);
 
             if (!proc.Start())
             {
                 Status = CoreStatus.Stopped;
-                _log.Error("核心", "进程启动失败");
+                _log.Error(LogSources.Core, Localizer.Get("dash.coreStartProcessFailed"));
+                Raise(LogSources.Core, "notify.startFailedTitle", "dash.coreStartProcessFailed", [], isError: true);
                 return;
             }
             _process = proc;
@@ -168,25 +201,33 @@ public sealed class OpenListCoreService : IDisposable
             {
                 if (proc.HasExited)
                 {
-                    Status = CoreStatus.Stopped;
-                    _log.Error("核心", $"核心异常退出，退出码 {proc.ExitCode}");
+                    // 正常路径下退出事件已处理过（含自动重启排队）；这里兜住事件尚未投递的窗口。
+                    // OnProcessExited 靠 ReferenceEquals(_process, proc) 保证幂等。
+                    OnProcessExited(proc);
                     return;
                 }
-                if (await PingOnceAsync()) 
+                if (await PingOnceAsync())
                 {
                     Status = CoreStatus.Running;
-                    _log.Info("核心", $"核心已就绪: {BaseUrl}");
+                    _restartAttempts = 0;   // 成功就绪即清零退避计数
+                    _log.Info(LogSources.Core, Localizer.Format("dash.coreReady", BaseUrl));
+                    Raise(LogSources.Core, "notify.coreStartedTitle", "notify.coreStartedBody", [BaseUrl], isError: false);
                     return;
                 }
                 await Task.Delay(500);
             }
+
+            // 探活超时：进程还活着但服务不可用。必须主动结束它，
+            // 否则会留下一个占着端口的孤儿进程，且 _process 与 Status 状态不一致。
+            _log.Error(LogSources.Core, Localizer.Get("dash.coreReadyTimeout"));
+            _expectExit = true;
             Status = CoreStatus.Stopped;
-            _log.Error("核心", "等待核心就绪超时（60 秒）");
+            TryKill(proc);
         }
         catch (Exception ex)
         {
             Status = CoreStatus.Stopped;
-            _log.Error("核心", $"启动失败: {ex.Message}");
+            _log.Error(LogSources.Core, Localizer.Format("dash.coreStartFailed", ex.Message));
         }
         finally
         {
@@ -196,6 +237,10 @@ public sealed class OpenListCoreService : IDisposable
 
     public async Task StopAsync()
     {
+        // 用户显式要求保持停止：作废排队中的自动重启
+        _restartCancelled = true;
+        _restartAttempts = 0;
+
         if (_process is null || _process.HasExited)
         {
             Status = CoreStatus.Stopped;
@@ -206,13 +251,14 @@ public sealed class OpenListCoreService : IDisposable
         {
             if (_process is null || _process.HasExited) { Status = CoreStatus.Stopped; return; }
             Status = CoreStatus.Stopping;
-            _log.Info("核心", "停止核心…");
+            _log.Info(LogSources.Core, Localizer.Get("dash.coreStopping"));
+            _expectExit = true;
             TryKill(_process);
             await _process.WaitForExitAsync();
         }
         catch (Exception ex)
         {
-            _log.Error("核心", $"停止失败: {ex.Message}");
+            _log.Error(LogSources.Core, Localizer.Format("dash.coreStopFailed", ex.Message));
         }
         finally
         {
@@ -229,17 +275,67 @@ public sealed class OpenListCoreService : IDisposable
 
     private void OnProcessExited(Process proc)
     {
+        var exitCode = -1;
+        try { exitCode = proc.ExitCode; } catch { /* 退出码可能不可读 */ }
+
+        // 幂等：退出事件与 StartAsync 的兜底调用可能都会进来，只有第一次生效
+        if (!ReferenceEquals(_process, proc)) return;
+
+        var expected = _expectExit;
+        _expectExit = false;
+        _process = null;
+        _startedAt = null;
+        Status = CoreStatus.Stopped;
+
+        _log.Info(LogSources.Core, Localizer.Format("dash.coreExited", exitCode));
+
+        if (expected)
+        {
+            if (!_disposed)
+                Raise(LogSources.Core, "notify.coreStoppedTitle", "notify.coreStoppedBody", [], isError: false);
+            return;
+        }
+
+        // ---- 非预期退出：进入自愈流程 ----
+        Raise(LogSources.Core, "notify.coreExitedTitle", "notify.coreExitedBody", [exitCode], isError: true);
+
+        if (!_settings.AutoRestartCore || _disposed || _restartCancelled)
+            return;
+
+        var attempt = ++_restartAttempts;
+        if (attempt > MaxRestartAttempts)
+        {
+            Raise(LogSources.Core, "notify.gaveUpTitle", "notify.gaveUpBody", [MaxRestartAttempts], isError: true);
+            return;
+        }
+
+        // 指数退避 1s → 2s → 4s → 8s → 16s（上限 30s）
+        var delaySeconds = (int)Math.Min(30, Math.Pow(2, attempt - 1));
+        Raise(LogSources.Core, "notify.restartingTitle", "notify.restartingBody", [attempt, delaySeconds], isError: true);
+        _ = RestartAfterDelayAsync(TimeSpan.FromSeconds(delaySeconds));
+    }
+
+    private async Task RestartAfterDelayAsync(TimeSpan delay)
+    {
         try
         {
-            _log.Info("核心", $"核心进程退出，退出码 {proc.ExitCode}");
+            await Task.Delay(delay);
+            if (_disposed || _restartCancelled) return;
+            await StartAsync();
         }
-        catch { /* 退出码可能不可读 */ }
-        if (ReferenceEquals(_process, proc))
+        catch (Exception ex)
         {
-            _process = null;
-            _startedAt = null;
-            Status = CoreStatus.Stopped;
+            _log.Error(LogSources.Core, $"{ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    private void Raise(string source, string titleKey, string bodyKey, object?[] args, bool isError)
+    {
+        try { Notice?.Invoke(new CoreNotice(titleKey, bodyKey, args, isError)); }
+        catch { /* 订阅方异常不影响核心管理 */ }
+
+        if (isError)
+            _log.Warn(source, Localizer.Format(bodyKey, args));
     }
 
     private static void TryKill(Process p)
@@ -267,7 +363,7 @@ public sealed class OpenListCoreService : IDisposable
     /// <summary>探活并返回延迟（毫秒）；不可达返回 -1。</summary>
     public async Task<long> PingLatencyAsync()
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var sw = Stopwatch.StartNew();
         if (await PingOnceAsync()) return sw.ElapsedMilliseconds;
         return -1;
     }
@@ -287,7 +383,10 @@ public sealed class OpenListCoreService : IDisposable
 
     public void Dispose()
     {
-        // 桌面端退出时带走核心子进程，避免孤儿进程
+        // 桌面端退出时带走核心子进程，避免孤儿进程；并阻止任何排队中的自动重启
+        _disposed = true;
+        _restartCancelled = true;
+        _expectExit = true;
         if (_process is { HasExited: false } p) TryKill(p);
         _http.Dispose();
         _gate.Dispose();

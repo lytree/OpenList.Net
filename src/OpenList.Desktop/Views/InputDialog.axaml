@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="OpenList.Desktop.Views.InputDialog"
-        Title="输入"
+        Title="{DynamicResource L.dialog.inputTitle}"
         Width="440" SizeToContent="Height"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
@@ -24,8 +24,8 @@
       <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
         <!-- 左侧占位，按钮靠右 -->
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-          <Button Classes="btn btn-secondary" Content="取消" IsCancel="True" MinWidth="76" />
-          <Button Classes="btn btn-primary" Content="确定" IsDefault="True" Click="OnOk" MinWidth="76" />
+          <Button Classes="btn btn-secondary" Content="{DynamicResource L.common.cancel}" IsCancel="True" MinWidth="76" />
+          <Button Classes="btn btn-primary" Content="{DynamicResource L.common.ok}" IsDefault="True" Click="OnOk" MinWidth="76" />
         </StackPanel>
       </Grid>
     </StackPanel>

@@ -489,3 +489,6 @@ $RECYCLE.BIN/
 # SQLite runtime sidecar files (WAL/SHM are ephemeral — never commit)
 *.db-shm
 *.db-wal
+
+# WorkBuddy 工作目录（本地验证脚本与截图，非项目源码）
+.workbuddy/

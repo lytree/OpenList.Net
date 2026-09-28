@@ -78,8 +78,7 @@
               <Path Classes="icon" Data="{StaticResource I.Moon}" Width="15" Height="15"
                     IsVisible="{Binding IsDarkTheme}" />
             </Panel>
-            <TextBlock Text="浅色" FontSize="13" IsVisible="{Binding !IsDarkTheme}" />
-            <TextBlock Text="深色" FontSize="13" IsVisible="{Binding IsDarkTheme}" />
+            <TextBlock Text="{Binding ThemeToggleText}" FontSize="13" />
           </StackPanel>
         </Button>
 
@@ -105,7 +104,7 @@
 
         <!-- 底部 GitHub 入口 -->
         <Button Grid.Row="3" Classes="btn-icon" HorizontalAlignment="Center" Margin="0,6,0,10"
-                Click="OnGitHubClick" ToolTip.Tip="View on GitHub">
+                Click="OnGitHubClick" ToolTip.Tip="{DynamicResource L.nav.githubTip}">
           <Path Classes="icon secondary" Data="{StaticResource I.Github}" Width="18" Height="18" />
         </Button>
       </Grid>
@@ -131,5 +130,39 @@
         </DataTemplate>
       </ContentControl.DataTemplates>
     </ContentControl>
+
+    <!-- ===== 通知浮层（托盘通知的窗口内通道；窗口隐藏时靠托盘提示文本兜底） ===== -->
+    <!-- 注意：不要给 ItemsControl 加 IsVisible 绑定——Items.Count 是 int，绑到 bool 的
+         IsVisible 不会隐式转换，会让整个浮层恒为隐藏。空集合本身不渲染任何内容。 -->
+    <ItemsControl Grid.ColumnSpan="2"
+                  x:CompileBindings="False"
+                  ItemsSource="{Binding Notifications.Items}"
+                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                  Width="360" Margin="0,0,20,20">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Border Classes="toast"
+                  Classes.info="{Binding IsInfo}"
+                  Classes.success="{Binding IsSuccess}"
+                  Classes.warning="{Binding IsWarning}"
+                  Classes.error="{Binding IsError}"
+                  Margin="0,8,0,0">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <StackPanel Spacing="3">
+                <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"
+                           Foreground="{DynamicResource Brush.TextMain}" />
+                <TextBlock Text="{Binding Body}" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{DynamicResource Brush.TextSecondary}" />
+              </StackPanel>
+              <Button Grid.Column="1" Classes="btn-icon" Padding="5" VerticalAlignment="Top"
+                      Command="{Binding $parent[ItemsControl].DataContext.Notifications.DismissCommand}"
+                      CommandParameter="{Binding}">
+                <Path Classes="icon tertiary" Data="{StaticResource I.X}" Width="11" Height="11" />
+              </Button>
+            </Grid>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
   </Grid>
 </Window>
