@@ -21,3 +21,19 @@ commit-message-incrementing: Enabled
 update-build-number: false
 ignore:
   commits-before: 2025-01-01T00:00:00
+# main MUST declare label: beta for the v0.1.0-beta.N tags to be usable.
+#
+# GitVersion only accepts a pre-release tag as a version source when the tag's
+# label matches the branch's label. Without this block main's label is empty,
+# so every `v0.1.0-beta.N` tag is silently dropped: `VersionSourceSemVer` stays
+# 0.0.0 and the fallback `0.1.0-<commit-count>` is used instead. A tag push
+# would then publish a release whose name is a commit count
+# (e.g. `openlist-net-0.1.0-tags-v0-1-0-beta-3.1-linux-x64`) rather than
+# `0.1.0-beta.3`. Stable tags (`v1.2.3`) are unaffected either way — this only
+# matters while releases carry a pre-release label.
+#
+# With it: tag builds report the tag itself (0.1.0-beta.3), and commits after
+# a tag auto-increment (0.1.0-beta.4, beta.5, ...) so CI builds stay unique.
+branches:
+  main:
+    label: beta
