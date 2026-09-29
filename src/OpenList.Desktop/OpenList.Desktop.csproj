@@ -22,4 +22,43 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
+
+  <!-- 开发态联动编译：桌面端把 OpenList.Server 当子进程拉起，因此
+       (1) 建立构建依赖 —— `dotnet build` 桌面项目时自动先产出 Server；
+       (2) 由下面的 ResolveOpenListServerCorePath 目标把 Server 的输出程序集路径
+           编译期写进本程序集的 AssemblyMetadata，运行时可精确解析核心 exe，
+           不必再按 net10.0 之类的 TFM 猜目录（见 OpenListCoreService.ResolveCorePath）。
+
+       ReferenceOutputAssembly=false + Private=false 只保留构建顺序，
+       不把 Server 及其依赖复制进桌面端输出目录（桌面端不含 ASP.NET Core 运行时）。 -->
+  <ItemGroup>
+    <ProjectReference Include="..\OpenList.Server\OpenList.Server.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OpenListServerProjectPath>$(MSBuildThisFileDirectory)..\OpenList.Server\OpenList.Server.csproj</OpenListServerProjectPath>
+  </PropertyGroup>
+
+  <!-- 问 Server 项目要它的 TargetPath（bin/<Config>/<tfm>/OpenList.Server.dll），
+       注入为 OpenListServerPath 程序集元数据。
+
+       锚点是 GetAssemblyAttributes 而不是 GenerateAssemblyInfo：后者只是
+       DependsOnTargets="PrepareForBuild;CoreGenerateAssemblyInfo" 的包装目标，
+       BeforeTargets 挂在它上面会晚于 CoreGenerateAssemblyInfo，元数据来不及进
+       AssemblyInfo。而 @(AssemblyMetadata) 正是在 GetAssemblyAttributes 里被
+       翻译成 AssemblyAttribute 的，挂它之前才能生效。 -->
+  <Target Name="ResolveOpenListServerCorePath" BeforeTargets="GetAssemblyAttributes">
+    <MSBuild Projects="$(OpenListServerProjectPath)" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_OpenListServerTargetOutput" />
+    </MSBuild>
+    <ItemGroup>
+      <AssemblyMetadata Include="OpenListServerPath"
+                        Value="@(_OpenListServerTargetOutput->'%(FullPath)')" />
+    </ItemGroup>
+    <Message Importance="normal"
+             Text="OpenList.Desktop: 联动核心 OpenListServerPath = &quot;@(_OpenListServerTargetOutput->'%(FullPath)')&quot;" />
+  </Target>
 </Project>

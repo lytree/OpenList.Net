@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using OpenList.Desktop.Localization;
 
 namespace OpenList.Desktop.Services;
@@ -99,31 +100,146 @@ public sealed class OpenListCoreService : IDisposable
     /// <summary>核心 exe 是否已就绪可启动。</summary>
     public bool CanStart => Status == CoreStatus.Stopped && ResolveCorePath() is not null;
 
-    /// <summary>解析核心可执行文件路径：优先用户设置，其次自动探测。</summary>
+    /// <summary>编译期由 OpenList.Desktop.csproj 注入的 Server 输出程序集路径。</summary>
+    private const string ServerPathMetadataKey = "OpenListServerPath";
+
+    /// <summary>环境变量覆盖核心路径，便于把桌面端指向任意构建产物调试。</summary>
+    private const string ServerPathEnvVar = "OPENLIST_SERVER_PATH";
+
+    /// <summary>
+    /// 解析核心可执行文件路径，优先级：
+    /// <list type="number">
+    /// <item>设置里显式指定的 <see cref="AppSettings.CoreExePath"/></item>
+    /// <item><c>OPENLIST_SERVER_PATH</c> 环境变量（调试/自定义覆盖）</item>
+    /// <item>发布形态随桌面端一起分发的那一份（桌面 exe 同级 / bundle 根的 <c>server/</c> 子目录）</item>
+    /// <item>编译期注入的 Server 输出路径 —— 开发态首选，无需再猜 TFM 目录</item>
+    /// <item>扫描 Server 项目的 bin 目录兜底</item>
+    /// </list>
+    /// 分发包优先于编译期注入是关键：否则在开发机上运行发布产物时，会优先拉起
+    /// 注入的 Debug 目录核心，而不是 bundle 内与之配套的那一份。
+    /// </summary>
     public string? ResolveCorePath()
     {
         var configured = _settings.CoreExePath;
         if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
             return configured;
 
+        var fromEnv = Environment.GetEnvironmentVariable(ServerPathEnvVar);
+        if (!string.IsNullOrWhiteSpace(fromEnv) && File.Exists(fromEnv))
+            return fromEnv;
+
+        // 发布形态：桌面 exe 同级 → bundle 根的 server/ 子目录
         var baseDir = AppContext.BaseDirectory;
-        // 候选：桌面 exe 同级 → 发布目录 server → 开发目录相邻项目
-        string[] candidates =
+        string[] bundled =
         [
             Path.Combine(baseDir, "OpenList.Server.exe"),
             Path.Combine(baseDir, "OpenList.Server"),
             Path.Combine(baseDir, "server", "OpenList.Server.exe"),
             Path.Combine(baseDir, "server", "OpenList.Server"),
-            Path.Combine(baseDir, "..", "..", "..", "..", "OpenList.Server", "bin", "Debug", "net10.0", "OpenList.Server.exe"),
         ];
-        foreach (var c in candidates)
+        foreach (var c in bundled)
         {
             var full = Path.GetFullPath(c);
             if (File.Exists(full)) return full;
         }
+
+        // 开发态：编译期注入的 Server 输出路径，转成同目录的 apphost
+        var injected = ToLaunchablePath(CompileTimeServerPath());
+        if (injected is not null) return injected;
+
+        return ProbeServerProjectOutput();
+    }
+
+    /// <summary>读编译期注入的 Server 程序集路径；未注入（如旧构建产物）时返回 null。</summary>
+    private static string? CompileTimeServerPath()
+    {
+        var value = typeof(OpenListCoreService).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == ServerPathMetadataKey)?.Value;
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// 把程序集路径（.../OpenList.Server.dll）转成可直接启动的形式：优先同目录的
+    /// apphost（Windows 下 <c>.exe</c>、类 Unix 下裸文件名）；若构建时关掉了 apphost
+    /// 则退回托管 <c>.dll</c>，由 <see cref="StartAsync"/> 用 <c>dotnet</c> 启动。
+    /// 目录与文件都不存在时返回 null。
+    /// </summary>
+    private static string? ToLaunchablePath(string? assemblyPath)
+    {
+        if (string.IsNullOrWhiteSpace(assemblyPath)) return null;
+
+        string full;
+        try { full = Path.GetFullPath(assemblyPath); }
+        catch { return null; }
+
+        var dir = Path.GetDirectoryName(full);
+        if (dir is null || !Directory.Exists(dir)) return null;
+
+        var name = Path.GetFileNameWithoutExtension(full);
+        foreach (var apphost in new[] { Path.Combine(dir, name + ".exe"), Path.Combine(dir, name) })
+            if (File.Exists(apphost)) return apphost;
+
+        return File.Exists(full) ? full : null;
+    }
+
+    /// <summary>
+    /// 兜底探测：在 OpenList.Server 项目的 <c>bin/&lt;Configuration&gt;/&lt;tfm&gt;/</c> 下找核心。
+    /// TFM 从目录结构读出来而不是写死，改 <c>TargetFramework</c> 后不用同步维护。
+    /// 只对源码树内的开发态布局有效；发布形态下这些目录不存在，直接返回 null。
+    /// </summary>
+    private static string? ProbeServerProjectOutput()
+    {
+        // AppContext.BaseDirectory = <repo>/src/OpenList.Desktop/bin/<Config>/<tfm>/
+        var baseDir = AppContext.BaseDirectory;
+        var configuration = Path.GetFileName(Path.GetFullPath(Path.Combine(baseDir, "..")));
+        var srcDir = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", ".."));
+        var serverBin = Path.Combine(srcDir, "OpenList.Server", "bin");
+        if (!Directory.Exists(serverBin)) return null;
+
+        // 当前构建配置优先，其次其余配置（Debug / Release）
+        var configs = new List<string>();
+        if (!string.IsNullOrWhiteSpace(configuration)) configs.Add(configuration);
+        configs.AddRange(Directory.EnumerateDirectories(serverBin)
+            .Select(Path.GetFileName)
+            .Where(n => !string.IsNullOrWhiteSpace(n) && !configs.Contains(n, StringComparer.OrdinalIgnoreCase))
+            .Select(n => n!));
+
+        foreach (var config in configs)
+        {
+            var configRoot = Path.Combine(serverBin, config);
+            if (!Directory.Exists(configRoot)) continue;
+
+            foreach (var tfmDir in Directory.EnumerateDirectories(configRoot))
+            {
+                foreach (var probe in new[]
+                         {
+                             Path.Combine(tfmDir, "OpenList.Server.exe"),
+                             Path.Combine(tfmDir, "OpenList.Server"),
+                         })
+                {
+                    if (File.Exists(probe)) return probe;
+                }
+            }
+        }
         return null;
     }
 
+    /// <summary>
+    /// 解析核心子进程的工作目录。这里之所以叫"数据目录"，是因为核心把工作目录当作
+    /// content root：<c>appsettings.json</c> 从它下面读，<c>DBFile</c>/<c>TempDir</c> 这类
+    /// 相对路径也相对它解析，所以数据实际落在 <c>&lt;工作目录&gt;/data/</c>。
+    /// <para>
+    /// 开发态下对齐到核心 exe 所在的构建输出目录，而不是桌面端自己的输出目录；好处是
+    /// 核心能读到随构建产物一起发布的 <c>appsettings.json</c>，行为与"直接运行这个 exe"
+    /// 完全一致，数据落在 <c>bin/&lt;Config&gt;/&lt;tfm&gt;/data/</c> 里并随 <c>dotnet clean</c>
+    /// 一起清理，不会往源码树里写残留。
+    /// </para>
+    /// <para>
+    /// 仅当实际要启动的核心确实来自源码树的构建输出时才对齐。发布形态一律沿用
+    /// 桌面 exe 同级的 <c>data/</c>，避免已发布用户的数据被动搬家。
+    /// </para>
+    /// </summary>
     public string ResolveDataDir()
     {
         if (!string.IsNullOrWhiteSpace(_settings.DataDir))
@@ -131,10 +247,36 @@ public sealed class OpenListCoreService : IDisposable
             Directory.CreateDirectory(_settings.DataDir);
             return _settings.DataDir;
         }
-        // 默认：桌面端 exe 同级 data 目录（发布形态），开发态落在桌面项目输出旁
-        var dir = Path.Combine(AppContext.BaseDirectory, "data");
+
+        var dir = DevAlignedWorkDir() ?? Path.Combine(AppContext.BaseDirectory, "data");
         Directory.CreateDirectory(dir);
         return dir;
+    }
+
+    /// <summary>
+    /// 开发态工作目录对齐：只有「编译期注入了 Server 输出路径」且「实际解析出的核心就位于
+    /// 该输出目录」时，才返回核心 exe 所在目录；其余情况返回 null，交由
+    /// <see cref="ResolveDataDir"/> 走发布形态的默认布局。
+    /// </summary>
+    private string? DevAlignedWorkDir()
+    {
+        var injectedDir = Path.GetDirectoryName(ToLaunchablePath(CompileTimeServerPath()));
+        if (injectedDir is null) return null;
+
+        var resolved = ResolveCorePath();
+        if (string.IsNullOrWhiteSpace(resolved)) return null;
+
+        string? resolvedDir;
+        try { resolvedDir = Path.GetDirectoryName(Path.GetFullPath(resolved)); }
+        catch { return null; }
+        if (resolvedDir is null) return null;
+
+        // 用 CoreExePath / OPENLIST_SERVER_PATH 指到别处时不对齐 —— 那种情况下
+        // 数据跟着哪个副本走是用户的选择，不该由桌面端替他决定。
+        if (!string.Equals(resolvedDir, injectedDir, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return injectedDir;
     }
 
     public async Task StartAsync()
@@ -158,15 +300,24 @@ public sealed class OpenListCoreService : IDisposable
             _restartCancelled = false;
             _log.Info(LogSources.Core, Localizer.Format("dash.coreStarting", exe));
 
+            var workDir = ResolveDataDir();
+            _log.Info(LogSources.Core, Localizer.Format("dash.coreWorkDir", workDir));
+
             var psi = new ProcessStartInfo
             {
                 FileName = exe,
-                WorkingDirectory = ResolveDataDir(),
+                WorkingDirectory = workDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             };
+            // 若解析到的是托管 dll（构建时关掉了 apphost），改用 `dotnet <dll>` 启动
+            if (exe.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            {
+                psi.Arguments = $"\"{exe}\"";
+                psi.FileName = "dotnet";
+            }
             // 核心读取 OpenList__ 前缀环境变量覆盖 appsettings；
             // 但 Kestrel 实际监听地址由 ASPNETCORE_URLS 决定，必须一并注入
             psi.Environment["OpenList__Scheme__HttpPort"] = _settings.HttpPort.ToString();
