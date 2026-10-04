@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.DependencyInjection;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Interfaces;
@@ -20,8 +21,10 @@ public sealed class FileSystemService : IFileSystemService
     private readonly ISignService? _signs;
     private readonly IOfflineDownloadService? _offline;
     private readonly IObjsUpdateHooks? _hooks;
+    private readonly IServiceScopeFactory? _scopes;
+    private readonly ITaskService? _tasks;
 
-    /// <summary>创建文件系统服务实例。</summary>
+    /// <summary>创建文件系统服务实例（仅用于单元测试）。</summary>
     public FileSystemService(ZioMountService mount) => _mount = mount;
 
     /// <summary>
@@ -42,7 +45,7 @@ public sealed class FileSystemService : IFileSystemService
     /// <param name="signs">签名服务（可选）。</param>
     /// <param name="offline">离线下载服务（可选）。</param>
     public FileSystemService(ZioMountService mount, ISignService? signs, IOfflineDownloadService? offline)
-        : this(mount, signs, offline, null)
+        : this(mount, signs, offline, null, null, null)
     {
     }
 
@@ -54,21 +57,48 @@ public sealed class FileSystemService : IFileSystemService
     /// <param name="offline">离线下载服务（可选）。</param>
     /// <param name="hooks">对象更新钩子注册表（可选，用于增量索引等）。</param>
     public FileSystemService(ZioMountService mount, ISignService? signs, IOfflineDownloadService? offline, IObjsUpdateHooks? hooks)
+        : this(mount, signs, offline, hooks, null, null)
+    {
+    }
+
+    /// <summary>
+    /// 完整构造：所有可选依赖可显式注入。
+    /// </summary>
+    /// <param name="mount">挂载服务。</param>
+    /// <param name="signs">签名服务（可选）。</param>
+    /// <param name="offline">离线下载服务（可选）。</param>
+    /// <param name="hooks">对象更新钩子注册表（可选，用于增量索引等）。</param>
+    /// <param name="scopes">DI 作用域工厂（用于解析 scoped 的 IMetaService，可选）。</param>
+    /// <param name="tasks">后台任务服务（用于 move/copy 任务化，可选）。</param>
+    public FileSystemService(
+        ZioMountService mount,
+        ISignService? signs,
+        IOfflineDownloadService? offline,
+        IObjsUpdateHooks? hooks,
+        IServiceScopeFactory? scopes,
+        ITaskService? tasks)
     {
         _mount = mount;
         _signs = signs;
         _offline = offline;
         _hooks = hooks;
+        _scopes = scopes;
+        _tasks = tasks;
     }
 
     /// <summary>
     /// 列出目录下的条目，目录优先、名称字典序，并应用分页。
     /// </summary>
-    public Task<Resp<FsListResp>> ListAsync(FsListReq req, User user, CancellationToken ct = default)
+    public async Task<Resp<FsListResp>> ListAsync(FsListReq req, User user, CancellationToken ct = default)
     {
         var path = Normalize(req.Path);
         if (!_mount.Root.DirectoryExists(path))
-            return Task.FromResult(Resp<FsListResp>.Fail("path not found", RespCodes.NotFound));
+            return Resp<FsListResp>.Fail("path not found", RespCodes.NotFound);
+
+        // Go fsread.go：refresh=true 要求该路径可写；非 admin 路径下报 403。
+        // 决定权交给前端："刷新" 按钮仅管理员可见，但接口侧仍守一道。
+        if (req.Refresh && !user.IsAdmin())
+            return Resp<FsListResp>.Fail("refresh without permission", RespCodes.Forbidden);
 
         var entries = _mount.Root.EnumeratePaths(path)
             .Select(p => _mount.Root.FileExists(p)
@@ -91,25 +121,94 @@ public sealed class FileSystemService : IFileSystemService
         var paged = entries.Skip((page - 1) * perPage).Take(perPage).ToList();
 
         var driver = _mount.FindDriverForPath(req.Path);
-        return Task.FromResult(Resp<FsListResp>.Ok(new FsListResp
+        // 尝试加载 nearest meta，用于 readme/header 注入与"该路径可写"判定。
+        // 单元测试不走 DI 时 _scopes==null，跳过 meta 解析（保持旧行为）。
+        Meta? nearest = null;
+        if (_scopes is not null)
+        {
+            try
+            {
+                using var scope = _scopes.CreateScope();
+                var metaSvc = scope.ServiceProvider.GetService<IMetaService>();
+                if (metaSvc is not null)
+                {
+                    var metaList = (await metaSvc.ListAsync(ct)).Data ?? [];
+                    nearest = FindNearestMeta(metaList, path.ToString());
+                }
+            }
+            catch { /* meta 解析失败不影响 list 本体 */ }
+        }
+
+        // 写入条件：驱动非只读 AND（用户可写 OR meta 显式标记 Write=true）。
+        // 与 Go fsread.go 的 CanWrite(meta, path) 语义对齐。
+        var driverWritable = driver?.ReadOnly == false;
+        var metaForcesWrite = nearest is { Write: true };
+        var write = (driverWritable && (user.IsAdmin() || user.CanWriteContent())) || metaForcesWrite;
+
+        // 镜像 Go isEncrypt(meta, path)：meta 含密码 + RSub/PSub 覆盖则视为加密（readme/header 取 meta）。
+        var readme = nearest is { Readme: { Length: > 0 } r, RSub: true } ? r
+            : nearest is { Readme: { Length: > 0 } r2 } && PathCoveredByMeta(path.ToString(), nearest.Path, "/") ? r2
+            : null;
+        var header = nearest is { Header: { Length: > 0 } h, HeaderSub: true } ? h
+            : nearest is { Header: { Length: > 0 } h2 } && PathCoveredByMeta(path.ToString(), nearest.Path, "/") ? h2
+            : null;
+
+        return Resp<FsListResp>.Ok(new FsListResp
         {
             Content = paged,
             Total = total,
-            Write = driver?.ReadOnly == false,
             Provider = driver?.DriverName,
-        }));
+            DirectUploadTools = driver is IFileSystemDirectUploader ? new List<string> { "direct" } : null,
+            Write = write,
+            WriteContentBypass = metaForcesWrite && !user.CanWriteContent(),
+            Readme = readme,
+            Header = header,
+        });
+    }
+
+    /// <summary>
+    /// 从 meta 列表中找到路径前缀最长匹配的那条。Go `op.GetNearestMeta` 语义。
+    /// </summary>
+    private static Meta? FindNearestMeta(IReadOnlyList<Meta> metas, string path)
+    {
+        Meta? best = null;
+        var bestLen = -1;
+        foreach (var m in metas)
+        {
+            if (string.IsNullOrEmpty(m.Path)) continue;
+            if (path == m.Path || path.StartsWith(m.Path.TrimEnd('/') + "/", StringComparison.Ordinal))
+            {
+                if (m.Path.Length > bestLen)
+                {
+                    best = m;
+                    bestLen = m.Path.Length;
+                }
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// 简化版 "meta 覆盖路径" 判断：路径 == meta.Path 或以 "meta.Path/" 开头。
+    /// </summary>
+    private static bool PathCoveredByMeta(string path, string metaPath, string rSub)
+    {
+        var mp = metaPath.TrimEnd('/');
+        if (string.IsNullOrEmpty(mp)) return true; // 根 meta 默认覆盖所有
+        return path == mp || path.StartsWith(mp + "/", StringComparison.Ordinal);
     }
 
     /// <summary>
     /// 获取文件或目录的详情。对于文件，若配置了签名服务则额外生成指向签名代理端点的 raw_url。
+    /// 当目标是视频文件且位于可列举的目录时，附带同目录同名（去除扩展名后）前缀的兄弟条目。
     /// </summary>
-    public Task<Resp<FsGetResp>> GetAsync(FsGetReq req, User user, CancellationToken ct = default)
+    public async Task<Resp<FsGetResp>> GetAsync(FsGetReq req, User user, CancellationToken ct = default)
     {
         var path = Normalize(req.Path);
         var isFile = _mount.Root.FileExists(path);
         var isDir = _mount.Root.DirectoryExists(path);
         if (!isFile && !isDir)
-            return Task.FromResult(Resp<FsGetResp>.Fail("path not found", RespCodes.NotFound));
+            return Resp<FsGetResp>.Fail("path not found", RespCodes.NotFound);
 
         FileSystemEntry? entry = isFile
             ? _mount.Root.GetFileEntry(path)
@@ -135,7 +234,37 @@ public sealed class FileSystemService : IFileSystemService
         {
             resp.RawUrl = BuildRawUrl(req.Path);
         }
-        return Task.FromResult(Resp<FsGetResp>.Ok(resp));
+
+        // Related：与 Go 9de3f69b 一致 —— 仅当目标是「视频文件」时，才列同目录相似名（去扩展名前缀）的兄弟条目。
+        // 这样前端可以直接在视频详情页切换同系列文件。
+        if (isFile && resp.Type == TypeVideo)
+        {
+            var parent = path.GetDirectory();
+            var baseName = TrimExtension(resp.Name);
+            if (!string.IsNullOrEmpty(baseName) && _mount.Root.DirectoryExists(parent))
+            {
+                var siblings = new List<Obj>();
+                foreach (var p in _mount.Root.EnumeratePaths(parent))
+                {
+                    if (_mount.Root.FileExists(p))
+                    {
+                        var fe = _mount.Root.GetFileEntry(p);
+                        var sibling = ToObj(fe);
+                        if (sibling.Name != resp.Name && sibling.Name.StartsWith(baseName, StringComparison.OrdinalIgnoreCase))
+                            siblings.Add(sibling);
+                    }
+                }
+                resp.Related = siblings;
+            }
+        }
+        return Resp<FsGetResp>.Ok(resp);
+    }
+
+    /// <summary>剥离文件扩展名，保留剩余主体（用于 related 前缀匹配）。</summary>
+    private static string TrimExtension(string name)
+    {
+        var dot = name.LastIndexOf('.');
+        return dot <= 0 ? name : name[..dot];
     }
 
     /// <summary>
@@ -271,6 +400,183 @@ public sealed class FileSystemService : IFileSystemService
 
     /// <summary>把多个源路径复制到目标目录下（文件与目录均支持递归）。</summary>
     public Task<Resp> CopyAsync(IReadOnlyList<string> srcPaths, string destDir, User user, CancellationToken ct = default)
+        => CopyInternalAsync(srcPaths, destDir, merge: false, ct);
+
+    /// <summary>
+    /// 任务化批量移动（与 Go FsMove 语义对齐）：
+    /// <list type="number">
+    /// <item>校验权限与 names 非空；</item>
+    /// <item>用 <paramref name="req"/> 解析出每个 src/dst 完整路径；</item>
+    /// <item>检查 Overwrite/SkipExisting/Merge；</item>
+    /// <item>为每条剩下的路径通过 <see cref="ITaskService"/> 创建一个 Move 任务（fire-and-forget），返回 tid 列表。</item>
+    /// </list>
+    /// 失败原因以 4xx 返回；没有任何名字可移动时 message 仍为 "Move operations completed immediately"。
+    /// </summary>
+    public async Task<Resp<FsManageResp>> MoveBatchAsync(MoveCopyReq req, User user, CancellationToken ct = default)
+    {
+        if (!user.CanMove() && !user.IsAdmin())
+            return Resp<FsManageResp>.Fail("permission denied", RespCodes.Forbidden);
+        if (req.Names.Count == 0)
+            return Resp<FsManageResp>.Fail("empty file names", RespCodes.BadRequest);
+
+        var srcDir = Normalize(req.SrcDir);
+        var dstDir = Normalize(req.DstDir);
+        if (!_mount.Root.DirectoryExists(srcDir))
+            return Resp<FsManageResp>.Fail("src_dir not found", RespCodes.NotFound);
+        if (!_mount.Root.DirectoryExists(dstDir))
+            return Resp<FsManageResp>.Fail("dst_dir not found", RespCodes.NotFound);
+
+        if (!srcDir.FullName.EndsWith("/")) srcDir = srcDir + "/";
+        var valid = new List<string>(req.Names.Count);
+        for (int i = 0; i < req.Names.Count; i++)
+        {
+            var name = req.Names[i];
+            var src = UPath.Combine(srcDir, name);
+            if (!src.FullName.StartsWith(srcDir.FullName, StringComparison.Ordinal))
+                continue;
+            if (!req.Overwrite)
+            {
+                var baseN = src.GetName();
+                if (baseN == "." || baseN == "/")
+                    return Resp<FsManageResp>.Fail($"invalid file name [{name}]", RespCodes.BadRequest);
+                var dst = UPath.Combine(dstDir, baseN);
+                if (_mount.Root.FileExists(dst) || _mount.Root.DirectoryExists(dst))
+                {
+                    if (!req.SkipExisting)
+                        return Resp<FsManageResp>.Fail($"file [{name}] exists", RespCodes.Forbidden);
+                    continue;
+                }
+            }
+            valid.Add(src.FullName);
+        }
+        if (valid.Count == 0)
+            return Resp<FsManageResp>.Ok(new FsManageResp { Message = "Move operations completed immediately", Tasks = [] });
+
+        // 任务化执行：依次把每条 src 移动到 dstDir 下。
+        var tids = await Task.WhenAll(valid.Select(src => _tasks!.CreateAsync(TaskType.Move,
+            (progress, cancel) => DoMoveAsync(src, dstDir, progress, cancel), ct)));
+        return Resp<FsManageResp>.Ok(new FsManageResp
+        {
+            Message = $"Successfully created {tids.Length} move task(s)",
+            Tasks = tids.Select(tid => new TaskInfo { Id = tid, Type = TaskType.Move, Name = tid }).ToList(),
+        });
+    }
+
+    /// <summary>
+    /// 任务化批量复制（与 Go FsCopy 对齐）：
+    /// <list type="number">
+    /// <item><c>overwrite=false</c> 时：同名文件返回 403；同名目录在 <c>merge=true</c> 时合并，在 <c>merge=false</c> 时返回 403；</item>
+    /// <item>通过 <see cref="ITaskService"/> 创建 Copy 任务，返回 tid 列表。</item>
+    /// </list>
+    /// </summary>
+    public async Task<Resp<FsManageResp>> CopyBatchAsync(MoveCopyReq req, User user, CancellationToken ct = default)
+    {
+        if (!user.CanCopy() && !user.IsAdmin())
+            return Resp<FsManageResp>.Fail("permission denied", RespCodes.Forbidden);
+        if (req.Names.Count == 0)
+            return Resp<FsManageResp>.Fail("empty file names", RespCodes.BadRequest);
+
+        var srcDir = Normalize(req.SrcDir);
+        var dstDir = Normalize(req.DstDir);
+        if (!_mount.Root.DirectoryExists(srcDir))
+            return Resp<FsManageResp>.Fail("src_dir not found", RespCodes.NotFound);
+        if (!_mount.Root.DirectoryExists(dstDir))
+            return Resp<FsManageResp>.Fail("dst_dir not found", RespCodes.NotFound);
+
+        if (!srcDir.FullName.EndsWith("/")) srcDir = srcDir + "/";
+        var valid = new List<string>(req.Names.Count);
+        for (int i = 0; i < req.Names.Count; i++)
+        {
+            var name = req.Names[i];
+            var src = UPath.Combine(srcDir, name);
+            if (!src.FullName.StartsWith(srcDir.FullName, StringComparison.Ordinal))
+                continue;
+            if (!req.Overwrite)
+            {
+                var baseN = src.GetName();
+                if (baseN == "." || baseN == "/")
+                    return Resp<FsManageResp>.Fail($"invalid file name [{name}]", RespCodes.BadRequest);
+                var dst = UPath.Combine(dstDir, baseN);
+                var existsAsFile = _mount.Root.FileExists(dst);
+                var existsAsDir = _mount.Root.DirectoryExists(dst);
+                if (existsAsFile || existsAsDir)
+                {
+                    if (!req.SkipExisting && !req.Merge)
+                        return Resp<FsManageResp>.Fail($"file [{name}] exists", RespCodes.Forbidden);
+                    if (!req.Merge || !existsAsDir)
+                        continue;
+                }
+            }
+            valid.Add(src.FullName);
+        }
+        if (valid.Count == 0)
+            return Resp<FsManageResp>.Ok(new FsManageResp { Message = "Copy operations completed immediately", Tasks = [] });
+
+        var tids = await Task.WhenAll(valid.Select(src => _tasks!.CreateAsync(TaskType.Copy,
+            (progress, cancel) => DoCopyAsync(src, dstDir, req.Merge, progress, cancel), ct)));
+        return Resp<FsManageResp>.Ok(new FsManageResp
+        {
+            Message = $"Successfully created {tids.Length} copy task(s)",
+            Tasks = tids.Select(tid => new TaskInfo { Id = tid, Type = TaskType.Copy, Name = tid }).ToList(),
+        });
+    }
+
+    /// <summary>任务体：在同一挂载根内把 src 移到 dstDir 下同名位置，并发布 IObjsUpdateHooks。</summary>
+    private async Task DoMoveAsync(string srcPath, UPath dstDir, IProgress<TaskProgress> progress, CancellationToken ct)
+    {
+        var src = Normalize(srcPath);
+        if (!_mount.Root.FileExists(src) && !_mount.Root.DirectoryExists(src))
+            throw new FileNotFoundException($"source not found: {srcPath}");
+        var target = UPath.Combine(dstDir, src.GetName());
+        var isDir = _mount.Root.DirectoryExists(src);
+        if (isDir) PublishRemoved(src.ToString());
+        if (_mount.Root.FileExists(src))
+            _mount.Root.MoveFile(src, target);
+        else
+            _mount.Root.MoveDirectory(src, target);
+        PublishDir(src.GetDirectory().ToString());
+        PublishDir(dstDir.ToString());
+        progress.Report(new TaskProgress { Current = 1, Total = 1 });
+        await Task.CompletedTask;
+    }
+
+    /// <summary>任务体：把 src 复制到 dstDir 下同名位置；merge=true 时把同名目录的内容合并到目标目录。</summary>
+    private async Task DoCopyAsync(string srcPath, UPath dstDir, bool merge, IProgress<TaskProgress> progress, CancellationToken ct)
+    {
+        var src = Normalize(srcPath);
+        if (!_mount.Root.FileExists(src) && !_mount.Root.DirectoryExists(src))
+            throw new FileNotFoundException($"source not found: {srcPath}");
+        var target = UPath.Combine(dstDir, src.GetName());
+        if (_mount.Root.FileExists(src))
+        {
+            CopyFile(src, target);
+        }
+        else if (_mount.Root.DirectoryExists(src))
+        {
+            if (merge && _mount.Root.DirectoryExists(target))
+            {
+                // merge：把 src 的内容复制到已存在的 target 下（保持同名唯一语义）。
+                foreach (var p in _mount.Root.EnumeratePaths(src))
+                {
+                    var inner = UPath.Combine(target, p.GetName());
+                    if (_mount.Root.FileExists(p)) CopyFile(p, inner);
+                    else if (_mount.Root.DirectoryExists(p)) CopyDir(p, inner);
+                }
+            }
+            else
+            {
+                CopyDir(src, target);
+            }
+        }
+        PublishDir(dstDir.ToString());
+        progress.Report(new TaskProgress { Current = 1, Total = 1 });
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 同步版复制（保留供单元测试与递归移动使用）。merge=true 时同名目录会被合并到目标目录。
+    /// </summary>
+    private Task<Resp> CopyInternalAsync(IReadOnlyList<string> srcPaths, string destDir, bool merge, CancellationToken ct = default)
     {
         var dst = Normalize(destDir);
         if (!_mount.Root.DirectoryExists(dst))
@@ -283,9 +589,25 @@ public sealed class FileSystemService : IFileSystemService
                 if (!_mount.Root.FileExists(s) && !_mount.Root.DirectoryExists(s)) continue;
                 var target = UPath.Combine(dst, s.GetName());
                 if (_mount.Root.FileExists(s))
+                {
                     CopyFile(s, target);
+                }
                 else if (_mount.Root.DirectoryExists(s))
-                    CopyDir(s, target);
+                {
+                    if (merge && _mount.Root.DirectoryExists(target))
+                    {
+                        foreach (var p in _mount.Root.EnumeratePaths(s))
+                        {
+                            var inner = UPath.Combine(target, p.GetName());
+                            if (_mount.Root.FileExists(p)) CopyFile(p, inner);
+                            else if (_mount.Root.DirectoryExists(p)) CopyDir(p, inner);
+                        }
+                    }
+                    else
+                    {
+                        CopyDir(s, target);
+                    }
+                }
             }
             return Task.FromResult(Resp.Ok());
         }

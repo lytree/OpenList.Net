@@ -40,6 +40,24 @@ public sealed class User
     /// <summary>是否可免密访问（权限位 1）。</summary>
     public bool CanAccessWithoutPassword() => ((Permission >> 1) & 1) == 1;
 
+    /// <summary>是否可添加离线下载任务（权限位 2）。</summary>
+    public bool CanAddOfflineDownload() => ((Permission >> 2) & 1) == 1;
+
+    /// <summary>是否可建目录/上传（权限位 3）。</summary>
+    public bool CanWriteContent() => ((Permission >> 3) & 1) == 1;
+
+    /// <summary>是否可重命名（权限位 4）。</summary>
+    public bool CanRename() => ((Permission >> 4) & 1) == 1;
+
+    /// <summary>是否可移动（权限位 5）。</summary>
+    public bool CanMove() => ((Permission >> 5) & 1) == 1;
+
+    /// <summary>是否可复制（权限位 6）。</summary>
+    public bool CanCopy() => ((Permission >> 6) & 1) == 1;
+
+    /// <summary>是否可删除（权限位 7）。</summary>
+    public bool CanRemove() => ((Permission >> 7) & 1) == 1;
+
     /// <summary>用户主键。</summary>
     public long Id { get; set; }
     /// <summary>用户名。</summary>

@@ -91,14 +91,14 @@ public static class FsEndpoints
         g.MapPost("/regex_rename", async (RegexRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
             Results.Ok(await svc.RegexRenameAsync(req.SrcDir, req.SrcNameRegex, req.NewNameRegex, user.ToUser())));
 
-        // POST /fs/move — body: { src_dir, dst_dir, names, overwrite, skip_existing }.
-        // srcPaths = names.Select(n => src_dir/n).
+        // POST /fs/move — taskified, mirrors Go FsMove.
+        // Body: { src_dir, dst_dir, names, overwrite, skip_existing }.
         g.MapPost("/move", async (MoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.MoveAsync(JoinPaths(req.SrcDir, req.Names), req.DstDir, user.ToUser())));
+            Results.Ok(await svc.MoveBatchAsync(ToMoveCopy(req), user.ToUser())));
 
-        // POST /fs/copy — body: { src_dir, dst_dir, names, overwrite, skip_existing, merge }.
+        // POST /fs/copy — taskified with optional merge, mirrors Go FsCopy.
         g.MapPost("/copy", async (MoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.CopyAsync(JoinPaths(req.SrcDir, req.Names), req.DstDir, user.ToUser())));
+            Results.Ok(await svc.CopyBatchAsync(ToMoveCopy(req), user.ToUser())));
 
         // POST /fs/remove — body: { dir, names }. paths = names.Select(n => dir/n).
         g.MapPost("/remove", async (RemoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
@@ -194,21 +194,13 @@ public static class FsEndpoints
             return Results.Ok(await svc.OtherAsync(req.Path, req.Method ?? "", user.ToUser()));
         });
 
-        // --- Torrent endpoints (Phase 6 — not yet implemented, return 501) ---
-        // Route names match the Go reference + frontend api.ts:
-        //   /fs/torrent/parse         (POST, body: { torrent_data })
-        //   /fs/torrent/upload_parse  (POST, multipart "torrent")
-        //   /fs/torrent/rapid_upload  (POST, body: { torrent_data, path })
-        //   /fs/torrent/generate      (POST, body: { path }) — generate torrent for path
-        // Legacy /torrent/list|info|add|cancel stubs retained for older clients.
+        // --- Torrent endpoints ---
+        // /fs/torrent/{parse,rapid_upload,upload_parse,generate} 路由已在 MapTorrentApi 中注册，
+        // 此处保留遗留 /torrent/list|info|add|cancel stub 供旧客户端使用。
         g.MapGet("/torrent/list", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
         g.MapGet("/torrent/info", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
         g.MapPost("/torrent/add", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
         g.MapPost("/torrent/cancel", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
-        g.MapPost("/torrent/parse", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
-        g.MapPost("/torrent/upload_parse", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
-        g.MapPost("/torrent/rapid_upload", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
-        g.MapPost("/torrent/generate", () => Results.Ok(Resp.Fail("torrent not implemented", RespCodes.NotImplemented)));
 
         return app;
     }
@@ -235,6 +227,19 @@ public static class FsEndpoints
         var baseDir = string.IsNullOrEmpty(dir) || dir == "/" ? "" : dir.TrimEnd('/');
         return names.Select(n => baseDir == "" ? $"/{n}" : $"{baseDir}/{n}").ToList();
     }
+
+    /// <summary>
+    /// 把端点用的 <see cref="MoveReq"/> 转成服务层用的 <see cref="MoveCopyReq"/>。
+    /// </summary>
+    internal static MoveCopyReq ToMoveCopy(MoveReq req) => new()
+    {
+        SrcDir = req.SrcDir,
+        DstDir = req.DstDir,
+        Names = req.Names,
+        Overwrite = req.Overwrite,
+        SkipExisting = req.SkipExisting,
+        Merge = req.Merge,
+    };
 }
 
 // --- 请求 DTO ---

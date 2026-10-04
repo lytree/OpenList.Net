@@ -210,6 +210,8 @@ public class MultipartUploadServiceTests
         public Task<Resp> MoveAsync(IReadOnlyList<string> srcPaths, string destDir, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> RecursiveMoveAsync(string srcPath, string destDir, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> CopyAsync(IReadOnlyList<string> srcPaths, string destDir, User user, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Resp<FsManageResp>> MoveBatchAsync(MoveCopyReq req, User user, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Resp<FsManageResp>> CopyBatchAsync(MoveCopyReq req, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> RemoveAsync(IReadOnlyList<string> paths, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> RemoveEmptyDirectoryAsync(string path, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> PutFormAsync(string path, Stream stream, string fileName, User user, CancellationToken ct = default) => throw new NotSupportedException();

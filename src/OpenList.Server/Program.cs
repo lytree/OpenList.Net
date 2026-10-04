@@ -33,7 +33,10 @@ using Serilog;
 // 路由均以 Extension 方式写在 Endpoints/ 目录的各个静态类中（见 MapXxxApi）。
 // =====================================================================
 // Bootstrap logger — captures startup failures before the host is built.
-Log.Logger = new LoggerConfiguration().WriteTo.Console().CreateBootstrapLogger();
+// WebApplicationFactory<Program> 在测试进程里会多次调用顶层语句，先冻结 Log.Logger 后再次 CreateBootstrapLogger 会抛；
+// 用 try/catch 兜底，复用已存在的 logger 即可。
+try { Log.Logger = new LoggerConfiguration().WriteTo.Console().CreateBootstrapLogger(); }
+catch (InvalidOperationException) { /* Serilog 已冻结（测试 fixture 多次实例化），复用现有 logger。 */ }
 try
 {
 
@@ -165,6 +168,10 @@ builder.Services.AddSingleton<Func<IFileSystemService>>(sp => () => sp.GetRequir
 // (ITaskService, IHttpClientFactory) + IServiceScopeFactory for the scoped ISettingService lookups,
 // plus the lazy Func<IFileSystemService>. Resolving it never triggers IFileSystemService construction.
 builder.Services.AddSingleton<IOfflineDownloadService, OfflineDownloadService>();
+// ITorrentService is a singleton — torrent parsing is stateless and only needs the
+// mount registry to resolve the destination storage for rapid_upload. Adding new
+// drivers (e.g. Cloud189PC) would plug into its capability check here.
+builder.Services.AddSingleton<ITorrentService, TorrentService>();
 // ObjsUpdateHooks is a singleton publish/subscribe registry that decouples
 // IFileSystemService (publisher) from ISearchService (subscriber) so incremental
 // search-index updates don't create a construction-time dependency cycle.
@@ -175,12 +182,17 @@ builder.Services.AddSingleton<RateLimitManager>();
 // FileSystemService is a singleton; the 4-arg constructor wires in ISignService,
 // IOfflineDownloadService (both singletons) and the IObjsUpdateHooks registry so
 // AddOfflineDownloadAsync and incremental index publishing can delegate.
+// IServiceScopeFactory is used to resolve the scoped IMetaService per request
+// (for nearest-meta lookup in /fs/list and /fs/get); ITaskService enables the
+// task-based batch move/copy matching Go's FsMove/FsCopy semantics.
 builder.Services.AddSingleton<IFileSystemService>(sp =>
     ActivatorUtilities.CreateInstance<FileSystemService>(sp,
         sp.GetRequiredService<ZioMountService>(),
         sp.GetService<ISignService>(),
         sp.GetService<IOfflineDownloadService>(),
-        sp.GetService<IObjsUpdateHooks>()));
+        sp.GetService<IObjsUpdateHooks>(),
+        sp.GetService<IServiceScopeFactory>(),
+        sp.GetService<ITaskService>()));
 // Multipart (chunked) upload sessions — singleton; depends only on IFileSystemService.
 builder.Services.AddSingleton<IMultipartUploadService, MultipartUploadService>();
 // S3 gateway multipart-upload sessions — singleton; parts staged on disk, TTL-reaped
@@ -338,6 +350,8 @@ app.MapShareApi();
 app.MapSharingDownloadApi();
 // Multipart (chunked) upload — auth'd
 app.MapMultipartApi();
+// Torrent endpoints (parse / upload_parse / rapid_upload / generate) — auth'd
+app.MapTorrentApi();
 // MCP (Model Context Protocol) server — admin, gated by MCP.Enable
 app.MapMcpApi();
 // Debug endpoints (/debug/*) — Development only (mirrors Go flags.Debug || flags.Dev)

@@ -21,12 +21,22 @@ public interface IFileSystemService
     Task<Resp> BatchRenameAsync(IReadOnlyList<BatchRenameItem> items, User user, CancellationToken ct = default);
     /// <summary>按正则表达式批量重命名（srcReg → newReg）。</summary>
     Task<Resp> RegexRenameAsync(string srcDir, string srcReg, string newReg, User user, CancellationToken ct = default);
-    /// <summary>移动多个源路径到目标目录。</summary>
+    /// <summary>移动多个源路径到目标目录（同步执行，保留用于内部测试）。</summary>
     Task<Resp> MoveAsync(IReadOnlyList<string> srcPaths, string destDir, User user, CancellationToken ct = default);
     /// <summary>递归移动单个路径到目标目录。</summary>
     Task<Resp> RecursiveMoveAsync(string srcPath, string destDir, User user, CancellationToken ct = default);
-    /// <summary>复制多个源路径到目标目录。</summary>
+    /// <summary>复制多个源路径到目标目录（同步执行，保留用于内部测试）。</summary>
     Task<Resp> CopyAsync(IReadOnlyList<string> srcPaths, string destDir, User user, CancellationToken ct = default);
+    /// <summary>
+    /// 批量移动（任务化）：与 Go <c>FsMove</c> 对齐，遵循 <paramref name="req"/> 中的 <c>overwrite/skip_existing/merge</c> 规则，
+    /// 返回新建的后台任务列表。
+    /// </summary>
+    Task<Resp<FsManageResp>> MoveBatchAsync(MoveCopyReq req, User user, CancellationToken ct = default);
+    /// <summary>
+    /// 批量复制（任务化）：与 Go <c>FsCopy</c> 对齐，<c>merge=true</c> 时同名目录会被合并（保留并继续），
+    /// 返回新建的后台任务列表。
+    /// </summary>
+    Task<Resp<FsManageResp>> CopyBatchAsync(MoveCopyReq req, User user, CancellationToken ct = default);
     /// <summary>删除多个路径。</summary>
     Task<Resp> RemoveAsync(IReadOnlyList<string> paths, User user, CancellationToken ct = default);
     /// <summary>删除空的目录。</summary>
@@ -272,4 +282,39 @@ public sealed class DirectUploadInfo
     public Dictionary<string, string> Headers { get; set; } = new();
     /// <summary>使用的 HTTP 方法，可为空。</summary>
     public string? Method { get; set; }
+}
+
+/// <summary>
+/// 批量移动 / 复制操作的请求体。对应 Go <c>MoveCopyReq</c>。
+/// 端点 <c>/fs/move</c> 与 <c>/fs/copy</c> 共用此结构。
+/// </summary>
+public sealed class MoveCopyReq
+{
+    /// <summary>源目录（绝对虚拟路径）。</summary>
+    [JsonPropertyName("src_dir")]
+    public string SrcDir { get; set; } = string.Empty;
+    /// <summary>目标目录（绝对虚拟路径）。</summary>
+    [JsonPropertyName("dst_dir")]
+    public string DstDir { get; set; } = string.Empty;
+    /// <summary>要移动/复制的相对名称列表（相对 src_dir）。</summary>
+    public List<string> Names { get; set; } = [];
+    /// <summary>目标已存在同名时是否直接覆盖。</summary>
+    public bool Overwrite { get; set; }
+    /// <summary>目标已存在同名时是否跳过（覆盖优先）。</summary>
+    [JsonPropertyName("skip_existing")]
+    public bool SkipExisting { get; set; }
+    /// <summary>复制时是否把同名目录合并（移动端忽略）。</summary>
+    public bool Merge { get; set; }
+}
+
+/// <summary>
+/// 批量移动 / 复制的返回载荷。对应 Go
+/// <c>{ message: "Successfully created N move task(s)", tasks: [...] }</c>。
+/// </summary>
+public sealed class FsManageResp
+{
+    /// <summary>人可读的结果消息（任务数 / 立即完成等）。</summary>
+    public string Message { get; set; } = string.Empty;
+    /// <summary>本次操作创建的后台任务列表（同步完成时为空数组）。</summary>
+    public List<TaskInfo> Tasks { get; set; } = [];
 }
