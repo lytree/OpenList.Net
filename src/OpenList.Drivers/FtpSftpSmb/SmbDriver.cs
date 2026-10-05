@@ -1,8 +1,7 @@
 using System.Text.Json.Serialization;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.FtpSftpSmb;
 
@@ -12,7 +11,7 @@ namespace OpenList.Drivers.FtpSftpSmb;
 /// 配置字段元数据，使驱动可被发现，但所有文件系统操作在完整实现前将抛出
 /// NotImplementedException。
 /// </summary>
-public sealed class SmbDriver : ZioDriverBase
+public sealed class SmbDriver : DriverBase
 {
     /// <summary>驱动名称。</summary>
     public override string DriverName => "SMB";

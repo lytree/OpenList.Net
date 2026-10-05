@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.Cloud.AliyundriveOpen;
 
@@ -46,7 +46,7 @@ public sealed class AliyundriveOpenDriver : CloudDriverBase, IFileSystemLinkProv
     /// <summary>回调准入注册句柄（释放驱动时注销）。</summary>
     private CallbackLimiterRegistration? _callback;
 
-    /// <summary>Zio 视图（路径 → 对象解析与缓存）。</summary>
+    /// <summary>VFS 视图（路径 → 对象解析与缓存）。</summary>
     private AliyundriveOpenFileSystem? _fs;
 
     /// <summary>测试可注入的 HTTP 客户端；为空时使用进程级共享客户端。</summary>
@@ -418,7 +418,7 @@ public sealed class AliyundriveOpenDriver : CloudDriverBase, IFileSystemLinkProv
     }
 
     // ------------------------------------------------------------------
-    // 云盘操作（供 Zio 视图与下载通道调用）
+    // 云盘操作（供 VFS 视图与下载通道调用）
     // ------------------------------------------------------------------
 
     /// <summary>
@@ -545,7 +545,7 @@ public sealed class AliyundriveOpenDriver : CloudDriverBase, IFileSystemLinkProv
             ["drive_id"] = DriveId,
             ["file_id"] = src.FileId,
             ["to_parent_file_id"] = toParentId,
-            // auto_rename=true：同名时由服务端改名，避免复制直接失败（Zio 的 CopyFile 语义也是覆盖）。
+            // auto_rename=true：同名时由服务端改名，避免复制直接失败（CopyFile 语义也是覆盖）。
             ["auto_rename"] = true,
         };
         await RequestApiAsync(AliyunLimiterKind.Other, "/adrive/v1.0/openFile/copy", body, ct)
@@ -650,7 +650,7 @@ public sealed class AliyundriveOpenDriver : CloudDriverBase, IFileSystemLinkProv
     }
 
     /// <summary>
-    /// 打开文件的读取流（供 Zio 层的读路径使用，例如复制、归档、扫描）。
+    /// 打开文件的读取流（供 VFS 层的读路径使用，例如复制、归档、扫描）。
     /// 走直链下载，不占用回调并发配额 —— 配额只保护「服务端代理」这条容易被限流的通道。
     /// </summary>
     /// <param name="path">路径（完整挂载路径或驱动相对路径均可）。</param>

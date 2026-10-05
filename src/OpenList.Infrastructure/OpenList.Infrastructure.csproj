@@ -17,7 +17,6 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Otp.NET" />
     <PackageReference Include="Mapster" />
-    <PackageReference Include="Zio" />
     <PackageReference Include="Novell.Directory.Ldap.NETStandard" />
     <PackageReference Include="Fido2" />
   </ItemGroup>

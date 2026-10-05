@@ -3,15 +3,14 @@ using System.Text.Json.Serialization;
 using FluentFTP;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.FtpSftpSmb;
 
 /// <summary>
 /// 基于 FluentFTP 的 FTP 存储驱动。
 /// </summary>
-public sealed class FtpDriver : ZioDriverBase, IFileSystemUploader
+public sealed class FtpDriver : DriverBase, IFileSystemUploader
 {
     /// <summary>驱动名称。</summary>
     public override string DriverName => "FTP";

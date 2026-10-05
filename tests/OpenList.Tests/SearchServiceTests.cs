@@ -8,8 +8,7 @@ using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
 using OpenList.Infrastructure.Services;
 using TUnit.Core;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Tests;
 
@@ -243,7 +242,7 @@ public class SearchServiceTests
             return Task.CompletedTask;
         });
 
-        var mount = new ZioMountService();
+        var mount = new MountService();
         var mem = new MemoryFileSystem();
         mount.Root.Mount("/test", mem);
         var fs = new FileSystemService(mount, null, null, hooks);
@@ -279,7 +278,7 @@ public class SearchServiceTests
             return Task.CompletedTask;
         });
 
-        var mount = new ZioMountService();
+        var mount = new MountService();
         var mem = new MemoryFileSystem();
         mount.Root.Mount("/test", mem);
         await using (var s = mount.Root.OpenFile("/test/a.txt", FileMode.Create, FileAccess.Write))
@@ -448,12 +447,12 @@ public class SearchServiceTests
             services.AddSingleton<IObjsUpdateHooks, ObjsUpdateHooks>();
             services.AddSingleton(sp =>
             {
-                var mount = new ZioMountService();
+                var mount = new MountService();
                 mount.Root.Mount("/test", new MemoryFileSystem());
                 return mount;
             });
             services.AddSingleton<IFileSystemService>(sp =>
-                new FileSystemService(sp.GetRequiredService<ZioMountService>(), null, null,
+                new FileSystemService(sp.GetRequiredService<MountService>(), null, null,
                     sp.GetService<IObjsUpdateHooks>()));
             _provider = services.BuildServiceProvider();
 

@@ -3,7 +3,7 @@ using System.Text;
 using OpenList.Core.Drivers;
 using OpenList.Drivers.Cloud;
 using OpenList.Drivers.Cloud.AliyundriveOpen;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Tests;
 
@@ -188,7 +188,7 @@ public class AliyundriveOpenApiTests
         using var driver = await InitAsync(handler);
 
         var names = driver.System!
-            .EnumeratePaths(UPath.Root, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both)
+            .EnumeratePaths(UPath.Root, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both)
             .Select(p => p.GetName())
             .OrderBy(n => n)
             .ToList();
@@ -212,7 +212,7 @@ public class AliyundriveOpenApiTests
         using var driver = await InitAsync(handler);
 
         var names = driver.System!
-            .EnumeratePaths(UPath.Root, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both)
+            .EnumeratePaths(UPath.Root, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both)
             .Select(p => p.GetName())
             .OrderBy(n => n)
             .ToList();
@@ -357,7 +357,7 @@ public class AliyundriveOpenApiTests
         using var driver = await InitAsync(handler, OnlineApiAddition);
 
         var names = driver.System!
-            .EnumeratePaths(UPath.Root, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both)
+            .EnumeratePaths(UPath.Root, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both)
             .Select(p => p.GetName())
             .ToList();
 
@@ -382,7 +382,7 @@ public class AliyundriveOpenApiTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
             _ = driver.System!
-                .EnumeratePaths(UPath.Root, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both)
+                .EnumeratePaths(UPath.Root, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both)
                 .ToList();
             return Task.CompletedTask;
         });
@@ -408,7 +408,7 @@ public class AliyundriveOpenApiTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
             _ = driver.System!
-                .EnumeratePaths(UPath.Root, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both)
+                .EnumeratePaths(UPath.Root, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both)
                 .ToList();
             return Task.CompletedTask;
         });
@@ -428,7 +428,7 @@ public class AliyundriveOpenApiTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
             _ = driver.System!
-                .EnumeratePaths(UPath.Root, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both)
+                .EnumeratePaths(UPath.Root, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both)
                 .ToList();
             return Task.CompletedTask;
         });

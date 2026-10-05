@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Core.Models;
 
@@ -54,11 +54,11 @@ public sealed class HashInfo
 }
 
 /// <summary>
-/// 表示某条路径引用，封装 Zio 的 <see cref="UPath"/> 及其常用便利属性。
+/// 表示某条路径引用，封装 <see cref="UPath"/> 及其常用便利属性。
 /// </summary>
 public sealed class ObjPath
 {
-    /// <summary>底层 Zio 路径。</summary>
+    /// <summary>底层 VFS 路径。</summary>
     public UPath Path { get; set; }
     /// <summary>路径的末级名称（文件名或目录名）。</summary>
     public string Name => Path.GetName();

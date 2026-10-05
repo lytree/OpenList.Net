@@ -3,15 +3,14 @@ using System.Text.Json.Serialization;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using WebDav;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.WebDAV;
 
 /// <summary>
 /// 基于 WebDav.Client 的 WebDAV 存储驱动。
 /// </summary>
-public sealed class WebDavDriver : ZioDriverBase, IFileSystemUploader, IFileSystemLinkProvider
+public sealed class WebDavDriver : DriverBase, IFileSystemUploader, IFileSystemLinkProvider
 {
     /// <summary>驱动名称。</summary>
     public override string DriverName => "WebDAV";
@@ -86,7 +85,7 @@ public sealed class WebDavDriver : ZioDriverBase, IFileSystemUploader, IFileSyst
     /// <summary>
     /// 生成 WebDAV 资源的公开 URL（将路径映射到端点下的完整地址）。
     /// </summary>
-    /// <param name="path">Zio 相对路径。</param>
+    /// <param name="path">VFS 相对路径。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>拼接好的 URL。</returns>
     public Task<Uri?> GetLinkAsync(string path, CancellationToken ct = default)

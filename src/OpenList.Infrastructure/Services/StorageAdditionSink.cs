@@ -9,7 +9,7 @@ namespace OpenList.Infrastructure.Services;
 /// <see cref="IStorageAdditionSink"/> 的默认实现：把驱动回写的 Addition 落到
 /// <c>x_storages</c> 表。对应 OpenList Go 的 <c>op.MustSaveDriverStorage</c>。
 /// <para>
-/// 注册为单例（与 <see cref="ZioMountService"/> 生命周期一致），但 <c>OpenListDbContext</c>
+/// 注册为单例（与 <see cref="MountService"/> 生命周期一致），但 <c>OpenListDbContext</c>
 /// 是 Scoped，因此这里通过 <see cref="IServiceScopeFactory"/> 为每次写入新建一个作用域 ——
 /// 与 <c>RateLimitManager</c> / <c>OfflineDownloadService</c> 的既有做法一致。
 /// </para>

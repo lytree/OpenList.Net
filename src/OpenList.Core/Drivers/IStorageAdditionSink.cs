@@ -6,7 +6,7 @@ namespace OpenList.Core.Drivers;
 /// 对应 OpenList Go 的 <c>op.MustSaveDriverStorage</c>：云盘类驱动（阿里云盘、115、OneDrive 等）
 /// 在访问令牌过期后需要刷新 OAuth token，并把新的 access_token / refresh_token 持久化，
 /// 否则进程重启后会掉线。驱动本身不持有数据库依赖，因此由挂载服务
-/// （<c>ZioMountService</c>）在调用驱动 <c>InitAsync</c> 之前注入本通道。
+/// （<c>MountService</c>）在调用驱动 <c>InitAsync</c> 之前注入本通道。
 /// </para>
 /// </summary>
 public interface IStorageAdditionSink

@@ -1,12 +1,11 @@
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.Cloud.AliyundriveOpen;
 
 /// <summary>
-/// 阿里云盘在 Zio 挂载层上的视图。
+/// 阿里云盘在 VFS 挂载层上的视图。
 /// <para>
 /// 与 S3 / WebDAV 不同，阿里云盘的 API 完全按 <c>file_id</c> 寻址，路径只是展示形式。
 /// 因此本类承担 <b>路径 → 对象</b> 的解析：从配置的根 id 出发逐级列目录下钻，
@@ -17,7 +16,7 @@ namespace OpenList.Drivers.Cloud.AliyundriveOpen;
 /// 增删改一律基于它，避免同一路径被反复解析。
 /// </para>
 /// <para>
-/// 所有 Zio 原语都是同步签名，实现照例用 <c>GetAwaiter().GetResult()</c> 桥接异步调用
+/// 所有 文件系统原语都是同步签名，实现照例用 <c>GetAwaiter().GetResult()</c> 桥接异步调用
 /// （与 <c>WebDavFileSystem</c> 一致）。
 /// </para>
 /// </summary>
@@ -30,7 +29,7 @@ internal sealed class AliyundriveOpenFileSystem : NetworkFileSystemBase
 
     internal AliyundriveOpenFileSystem(AliyundriveOpenDriver driver) => _driver = driver;
 
-    /// <summary>把 Zio 路径规范化成缓存键（去掉末尾斜杠；根路径统一为 <c>/</c>）。</summary>
+    /// <summary>把 VFS 路径规范化成缓存键（去掉末尾斜杠；根路径统一为 <c>/</c>）。</summary>
     private static string Key(UPath path)
     {
         var full = path.FullName;
@@ -42,7 +41,7 @@ internal sealed class AliyundriveOpenFileSystem : NetworkFileSystemBase
     /// 把路径解析为云盘对象；根路径返回 null（它由配置的 <c>root_folder_id</c> 表示，
     /// 本身不是云盘上的一个条目）。
     /// </summary>
-    /// <param name="path">Zio 路径。</param>
+    /// <param name="path">VFS 路径。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>命中时返回对象，路径不存在时返回 null。</returns>
     internal async Task<AliyunFile?> ResolveAsync(UPath path, CancellationToken ct = default)
@@ -140,7 +139,7 @@ internal sealed class AliyundriveOpenFileSystem : NetworkFileSystemBase
 
     /// <summary>
     /// 移动公共路径。云盘 <c>openFile/move</c> 只改父目录，因此目标名与源名不同时
-    /// 需要再补一次 <c>openFile/update</c> 改名（Zio 的移动语义包含改名）。
+    /// 需要再补一次 <c>openFile/update</c> 改名（文件系统的移动语义包含改名）。
     /// </summary>
     private void MoveEntry(UPath srcPath, UPath destPath)
     {
@@ -209,7 +208,7 @@ internal sealed class AliyundriveOpenFileSystem : NetworkFileSystemBase
     /// 顺带预热 <see cref="_pathCache"/>，使随后按子路径访问无需再次下钻。
     /// </summary>
     protected override IEnumerable<UPath> EnumeratePathsImpl(
-        UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
+        UPath path, string searchPattern, SearchDepth searchOption, SearchTarget searchTarget)
     {
         var dir = ResolveAsync(path).GetAwaiter().GetResult();
         var folderId = dir?.FileId ?? _driver.RootFolderId;
@@ -231,7 +230,7 @@ internal sealed class AliyundriveOpenFileSystem : NetworkFileSystemBase
                 yield return childPath;
             }
 
-            if (searchOption == SearchOption.AllDirectories && isDir)
+            if (searchOption == SearchDepth.AllDirectories && isDir)
             {
                 foreach (var sub in EnumeratePathsImpl(childPath, searchPattern, searchOption, searchTarget))
                     yield return sub;

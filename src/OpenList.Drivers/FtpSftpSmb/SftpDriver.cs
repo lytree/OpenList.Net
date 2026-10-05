@@ -2,15 +2,14 @@ using System.Text.Json.Serialization;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using Renci.SshNet;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.FtpSftpSmb;
 
 /// <summary>
 /// 基于 SSH.NET 的 SFTP 存储驱动。
 /// </summary>
-public sealed class SftpDriver : ZioDriverBase, IFileSystemUploader
+public sealed class SftpDriver : DriverBase, IFileSystemUploader
 {
     /// <summary>驱动名称。</summary>
     public override string DriverName => "SFTP";

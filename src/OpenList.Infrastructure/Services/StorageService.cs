@@ -7,13 +7,13 @@ using OpenList.Infrastructure.Data;
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// 存储（存储驱动实例）增删改查 + 驱动加载。驱动实例化委托给 <see cref="ZioMountService"/>。
+/// 存储（存储驱动实例）增删改查 + 驱动加载。驱动实例化委托给 <see cref="MountService"/>。
 /// 对应 Go 参考实现 <c>internal/op/storage.go</c>。
 /// </summary>
 public sealed class StorageService : IStorageService
 {
     private readonly OpenListDbContext _db;
-    private readonly ZioMountService _mount;
+    private readonly MountService _mount;
     private readonly TimeProvider _time;
 
     /// <summary>
@@ -22,7 +22,7 @@ public sealed class StorageService : IStorageService
     /// <param name="db">EF Core 数据库上下文。</param>
     /// <param name="mount">挂载服务（负责驱动的加载/卸载与查询）。</param>
     /// <param name="time">时间源（可选，默认系统时区）。</param>
-    public StorageService(OpenListDbContext db, ZioMountService mount, TimeProvider? time = null)
+    public StorageService(OpenListDbContext db, MountService mount, TimeProvider? time = null)
     {
         _db = db;
         _mount = mount;
@@ -251,11 +251,11 @@ public sealed class StorageService : IStorageService
     }
 
     /// <summary>
-    /// 枚举所有可用的驱动实例（通过反射实例化 <see cref="ZioMountService.DiscoverDriverTypes"/>
+    /// 枚举所有可用的驱动实例（通过反射实例化 <see cref="MountService.DiscoverDriverTypes"/>
     /// 发现的驱动类型）。
     /// </summary>
-    private IEnumerable<ZioDriverBase> EnumerateDrivers() => _mount.DiscoverDriverTypes()
-        .Select(t => Activator.CreateInstance(t) as ZioDriverBase)
+    private IEnumerable<DriverBase> EnumerateDrivers() => _mount.DiscoverDriverTypes()
+        .Select(t => Activator.CreateInstance(t) as DriverBase)
         .Where(d => d is not null)
         .Select(d => d!)!;
 
@@ -263,7 +263,7 @@ public sealed class StorageService : IStorageService
     /// 构建驱动的 <see cref="DriverInfo"/>（通用项 + 扩展项 + 配置）。
     /// 对应 Go 的 <c>op.getMainItems</c> 与 <c>op.getAdditionalItems</c>。
     /// </summary>
-    private static DriverInfo BuildDriverInfo(ZioDriverBase d)
+    private static DriverInfo BuildDriverInfo(DriverBase d)
     {
         return new DriverInfo
         {
@@ -288,7 +288,7 @@ public sealed class StorageService : IStorageService
     /// <summary>
     /// 构建驱动的通用配置项（挂载路径、排序、缓存、代理、排序策略等）。
     /// </summary>
-    private static List<DriverInfoItem> BuildCommonItems(ZioDriverBase d)
+    private static List<DriverInfoItem> BuildCommonItems(DriverBase d)
     {
         var items = new List<DriverInfoItem>
         {
@@ -344,7 +344,7 @@ public sealed class StorageService : IStorageService
     /// <summary>
     /// 构建驱动的扩展配置项（根据驱动的 ConfigItems 生成），并对根目录类字段应用默认值。
     /// </summary>
-    private static List<DriverInfoItem> BuildAdditionalItems(ZioDriverBase d)
+    private static List<DriverInfoItem> BuildAdditionalItems(DriverBase d)
     {
         var items = new List<DriverInfoItem>();
         foreach (var c in d.ConfigItems)

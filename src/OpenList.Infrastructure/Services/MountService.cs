@@ -5,40 +5,39 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Models;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// 自动发现以 “OpenList” 开头的程序集中的 <see cref="ZioDriverBase"/> 子类，
-/// 并把它们挂载到 Zio 的 <see cref="MountFileSystem"/> 中。新增驱动 =
+/// 自动发现以 “OpenList” 开头的程序集中的 <see cref="DriverBase"/> 子类，
+/// 并把它们挂载到 <see cref="MountFileSystem"/> 中。新增驱动 =
 /// 在 OpenList.Drivers 中创建一个类 —— 无需手动注册。
 /// 对应 Go 参考实现 <c>internal/op</c> 的存储加载逻辑。
 /// </summary>
-public sealed class ZioMountService : IDisposable, IAsyncDisposable
+public sealed class MountService : IDisposable, IAsyncDisposable
 {
-    private readonly ConcurrentDictionary<string, ZioDriverBase> _drivers = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, ZioDriverBase> _mounted = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DriverBase> _drivers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DriverBase> _mounted = new(StringComparer.OrdinalIgnoreCase);
     private readonly MountFileSystem _root = new();
     private readonly IStorageAdditionSink? _additionSink;
-    private readonly ILogger<ZioMountService> _logger;
+    private readonly ILogger<MountService> _logger;
 
     /// <summary>
     /// 构造挂载服务。
     /// </summary>
     /// <param name="additionSink">
     /// 可选的 Addition 回写通道，用于让云驱动持久化刷新后的 token。
-    /// 为 null（如单元测试直接 <c>new ZioMountService()</c>）时驱动仍可正常工作，
+    /// 为 null（如单元测试直接 <c>new MountService()</c>）时驱动仍可正常工作，
     /// 只是 <c>SaveAdditionAsync</c> 会静默返回 false。
     /// </param>
     /// <param name="logger">可选日志；为 null 时使用 <see cref="NullLogger{T}"/>。</param>
-    public ZioMountService(
+    public MountService(
         IStorageAdditionSink? additionSink = null,
-        ILogger<ZioMountService>? logger = null)
+        ILogger<MountService>? logger = null)
     {
         _additionSink = additionSink;
-        _logger = logger ?? NullLogger<ZioMountService>.Instance;
+        _logger = logger ?? NullLogger<MountService>.Instance;
     }
 
     /// <summary>根挂载文件系统，按挂载路径暴露所有已启用的存储。</summary>
@@ -46,15 +45,15 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
 
     /// <summary>已发现的驱动类型名 → 类型映射（惰性填充）。</summary>
     public IReadOnlyDictionary<string, Type> DriverTypes => DiscoverDriverTypes()
-        .ToDictionary(t => ((ZioDriverBase)Activator.CreateInstance(t)!).DriverName, StringComparer.OrdinalIgnoreCase);
+        .ToDictionary(t => ((DriverBase)Activator.CreateInstance(t)!).DriverName, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>当前已挂载的驱动，按挂载路径索引。</summary>
-    public IReadOnlyDictionary<string, ZioDriverBase> Mounted => _mounted;
+    public IReadOnlyDictionary<string, DriverBase> Mounted => _mounted;
 
     /// <summary>
     /// 确保 <c>OpenList.Drivers</c> 程序集被加载到 AppDomain。该程序集仅在项目层面被引用
     /// （Server/Infrastructure 中没有直接使用其类型），因此 CLR 不会按需加载它 —— 在扫描
-    /// <see cref="ZioDriverBase"/> 子类之前必须先显式加载。
+    /// <see cref="DriverBase"/> 子类之前必须先显式加载。
     /// </summary>
     private static void EnsureDriverAssembliesLoaded()
     {
@@ -70,7 +69,7 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// 发现所有 <see cref="ZioDriverBase"/> 的具体子类。
+    /// 发现所有 <see cref="DriverBase"/> 的具体子类。
     /// </summary>
     public IEnumerable<Type> DiscoverDriverTypes()
     {
@@ -78,7 +77,7 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
         return AppDomain.CurrentDomain.GetAssemblies()
             .Where(a => a.GetName().Name?.StartsWith("OpenList", StringComparison.OrdinalIgnoreCase) == true)
             .SelectMany(SafeGetTypes)
-            .Where(t => t is { IsClass: true, IsAbstract: false } && typeof(ZioDriverBase).IsAssignableFrom(t));
+            .Where(t => t is { IsClass: true, IsAbstract: false } && typeof(DriverBase).IsAssignableFrom(t));
     }
 
     /// <summary>
@@ -87,7 +86,7 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
     public string GetDriverName(string driverType)
     {
         if (DriverTypes.TryGetValue(driverType, out var t))
-            return ((ZioDriverBase)Activator.CreateInstance(t)!).DriverName;
+            return ((DriverBase)Activator.CreateInstance(t)!).DriverName;
         return driverType;
     }
 
@@ -133,7 +132,7 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
             return;
         }
 
-        var driver = (ZioDriverBase)Activator.CreateInstance(type)!;
+        var driver = (DriverBase)Activator.CreateInstance(type)!;
         // 注入运行时上下文：MountPath 用于 Addition 回写定位，AdditionSink 是回写通道。
         // 必须在 InitAsync 之前调用 —— 云驱动的 InitAsync 里就可能需要刷新并持久化 token。
         driver.AttachRuntime(storage.MountPath, _additionSink);
@@ -171,12 +170,12 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
         // 依次匹配短类型名（如 "LocalDriver"）、驱动名（如 "Local"）、完整名称。
         var types = DiscoverDriverTypes().ToList();
         return types.FirstOrDefault(t => t.Name.Equals(driverName, StringComparison.OrdinalIgnoreCase))
-            ?? types.FirstOrDefault(t => ((ZioDriverBase)Activator.CreateInstance(t)!).DriverName.Equals(driverName, StringComparison.OrdinalIgnoreCase))
+            ?? types.FirstOrDefault(t => ((DriverBase)Activator.CreateInstance(t)!).DriverName.Equals(driverName, StringComparison.OrdinalIgnoreCase))
             ?? types.FirstOrDefault(t => t.FullName?.Equals(driverName, StringComparison.OrdinalIgnoreCase) == true);
     }
 
     /// <summary>查找挂在 <paramref name="path"/> 处或其上层任意祖先上的驱动。</summary>
-    public ZioDriverBase? FindDriverForPath(string path)
+    public DriverBase? FindDriverForPath(string path)
     {
         var norm = NormalizeMountPath(path).FullName;
         var best = _mounted.FirstOrDefault(kvp => norm.StartsWith(kvp.Key, StringComparison.OrdinalIgnoreCase));
@@ -185,7 +184,7 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// 把完整挂载路径（如 <c>/test/a.zip</c>）转换为相对所匹配驱动文件系统的路径（如 <c>/a.zip</c>）。
-    /// 驱动的 <see cref="ZioDriverBase.System"/> 是以其挂载点为根的子文件系统，因此驱动级操作
+    /// 驱动的 <see cref="DriverBase.System"/> 是以其挂载点为根的子文件系统，因此驱动级操作
     /// （归档列举/解压）必须使用相对挂载点的路径，而非完整挂载路径。无匹配挂载时返回原路径。
     /// </summary>
     public string ToDriverRelativePath(string path)
@@ -202,7 +201,7 @@ public sealed class ZioMountService : IDisposable, IAsyncDisposable
         return "/" + rel.TrimStart('/');
     }
 
-    /// <summary>把挂载路径规整为 Zio 的 UPath（补上前导 /）。</summary>
+    /// <summary>把挂载路径规整为 UPath（补上前导 /）。</summary>
     private static UPath NormalizeMountPath(string mountPath)
     {
         if (string.IsNullOrWhiteSpace(mountPath)) return UPath.Root;

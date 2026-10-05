@@ -3,8 +3,7 @@ using System.Text.Json.Serialization;
 using Minio;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.S3;
 
@@ -12,7 +11,7 @@ namespace OpenList.Drivers.S3;
 /// 兼容 S3 协议的对象存储驱动（AWS S3、Minio、R2、B2 等）。
 /// 使用 Minio SDK，可与任意 S3 兼容 API 对接。对应 OpenList Go 的 <c>drivers/s3</c>。
 /// </summary>
-public sealed class S3Driver : ZioDriverBase, IFileSystemUploader, IFileSystemLinkProvider
+public sealed class S3Driver : DriverBase, IFileSystemUploader, IFileSystemLinkProvider
 {
     /// <summary>驱动名称。</summary>
     public override string DriverName => "S3";

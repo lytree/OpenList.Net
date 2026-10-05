@@ -1,8 +1,7 @@
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Tests;
 
@@ -16,7 +15,7 @@ public class MoveCopyBatchTests
 
     private static (FileSystemService svc, ITaskService tasks, MemoryFileSystem mem) Setup()
     {
-        var mount = new ZioMountService();
+        var mount = new MountService();
         var mem = new MemoryFileSystem();
         mount.Root.Mount("/test", mem);
         var tasks = new TaskService();

@@ -1,8 +1,7 @@
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Tests;
 
@@ -21,7 +20,7 @@ public class FileSystemListGetFieldsTests
 
     private static (FileSystemService svc, MemoryFileSystem mem) Setup()
     {
-        var mount = new ZioMountService();
+        var mount = new MountService();
         var mem = new MemoryFileSystem();
         mount.Root.Mount("/test", mem);
         return (new FileSystemService(mount), mem);

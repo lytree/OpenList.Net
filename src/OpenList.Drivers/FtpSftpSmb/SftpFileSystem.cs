@@ -1,12 +1,11 @@
 using Renci.SshNet;
 using Renci.SshNet.Sftp;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.FtpSftpSmb;
 
 /// <summary>
-/// 基于 SSH.NET 的 SFTP 服务器的 Zio 文件系统实现。
+/// 基于 SSH.NET 的 SFTP 服务器的 虚拟文件系统实现。
 /// </summary>
 internal sealed class SftpFileSystem : NetworkFileSystemBase
 {
@@ -23,7 +22,7 @@ internal sealed class SftpFileSystem : NetworkFileSystemBase
 
     // --- 路径转换 ---
 
-    /// <summary>把 Zio 路径拼接到 SFTP 根路径下，得到远程完整路径。</summary>
+    /// <summary>把 VFS 路径拼接到 SFTP 根路径下，得到远程完整路径。</summary>
     private string ToRemote(UPath path)
     {
         var relative = path.FullName.TrimStart('/');
@@ -110,7 +109,7 @@ internal sealed class SftpFileSystem : NetworkFileSystemBase
     // --- 枚举 ---
 
     /// <summary>枚举路径：列出远程目录内容，按搜索目标/通配符过滤，必要时递归。</summary>
-    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
+    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchDepth searchOption, SearchTarget searchTarget)
     {
         foreach (var item in _client.ListDirectory(ToRemote(path)))
         {
@@ -128,7 +127,7 @@ internal sealed class SftpFileSystem : NetworkFileSystemBase
             }
 
             // 需要递归时对目录项逐层下钻。
-            if (searchOption == SearchOption.AllDirectories && isDir)
+            if (searchOption == SearchDepth.AllDirectories && isDir)
             {
                 foreach (var sub in EnumeratePathsImpl(childPath, searchPattern, searchOption, searchTarget))
                     yield return sub;
@@ -146,13 +145,10 @@ internal sealed class SftpFileSystem : NetworkFileSystemBase
     }
 
     /// <summary>释放时断开并销毁 SFTP 客户端连接。</summary>
-    protected override void Dispose(bool disposing)
+    public override void Dispose()
     {
-        if (disposing)
-        {
-            _client.Disconnect();
-            _client.Dispose();
-        }
-        base.Dispose(disposing);
+        _client.Disconnect();
+        _client.Dispose();
+        base.Dispose();
     }
 }

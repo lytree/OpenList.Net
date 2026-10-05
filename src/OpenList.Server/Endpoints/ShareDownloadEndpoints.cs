@@ -87,7 +87,7 @@ public static class ShareDownloadEndpoints
     private static async Task<IResult> HandleAsync(
         HttpContext ctx,
         ISharingService shares,
-        ZioMountService mount)
+        MountService mount)
     {
         var sid = ctx.GetRouteValue("sid")?.ToString();
         if (string.IsNullOrEmpty(sid))

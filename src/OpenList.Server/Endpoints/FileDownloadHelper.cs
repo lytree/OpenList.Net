@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.StaticFiles;
 using OpenList.Core.Drivers;
 using OpenList.Drivers.Cloud;
 using OpenList.Infrastructure.Services;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Server.Endpoints;
 
@@ -14,10 +14,10 @@ namespace OpenList.Server.Endpoints;
 internal static class FileDownloadHelper
 {
     /// <summary>
-    /// 将 Zio 挂载文件系统中的文件以流式输出（含 Content-Type、Accept-Ranges、Last-Modified
+    /// 将 挂载文件系统中的文件以流式输出（含 Content-Type、Accept-Ranges、Last-Modified
     /// 与 Range 206 部分内容响应）。文件不存在时返回 404。
     /// </summary>
-    public static async Task<IResult> StreamFileAsync(ZioMountService mount, string path, HttpContext ctx)
+    public static async Task<IResult> StreamFileAsync(MountService mount, string path, HttpContext ctx)
     {
         var upath = new UPath(path);
         if (!mount.Root.FileExists(upath))
@@ -68,7 +68,7 @@ internal static class FileDownloadHelper
     /// <summary>
     /// 通过驱动的代理区间读取器输出文件（<c>/p/</c> 上的云盘下载路径）。
     /// <para>
-    /// 与 <see cref="StreamFileAsync"/> 的区别：内容不来自 Zio 挂载（Zio 只能顺序读，
+    /// 与 <see cref="StreamFileAsync"/> 的区别：内容不来自 VFS 挂载（VFS 只能顺序读，
     /// 且整份文件的每次读取都要重新打通远端），而是把客户端请求的 Range 直接交给驱动，
     /// 由驱动按区间打开远端流（阿里云盘等还需要在整个响应体生命周期内持有回调并发许可）。
     /// </para>

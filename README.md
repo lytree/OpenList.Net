@@ -1,6 +1,6 @@
 # OpenList.Net
 
-A .NET port of [OpenList](https://github.com/OpenListTeam/OpenList) (originally Go), built on [Zio](https://github.com/xoofx/zio) for filesystem abstraction.
+A .NET port of [OpenList](https://github.com/OpenListTeam/OpenList) (originally Go), with an in-house virtual filesystem (`OpenList.Vfs`) for filesystem abstraction.
 
 > Status: **P0/P1/P2 API 对齐已完成**（对照 Go main / 前端 v4.2.5，2026-08-16）。剩余未实现项见下方「Not Yet Implemented」与 Implementation Plan 中的 `[ ]`（Cloud 驱动 / BitTorrent / 秒传 / Mapster 映射等）。
 
@@ -17,9 +17,9 @@ dotnet format
 
 | Project | Purpose |
 |---|---|
-| `src/OpenList.Core` | Models, `ZioDriverBase`, driver extension interfaces, service interfaces. Depends only on Zio + ASP.NET abstractions |
+| `src/OpenList.Core` | Models, `DriverBase`, driver extension interfaces, service interfaces, in-house VFS (`OpenList.Vfs`). Depends only on ASP.NET abstractions |
 | `src/OpenList.Drivers` | Storage driver implementations (`Local/`, `S3/`, `WebDAV/`, `FtpSftpSmb/`, `Cloud/`, `Stubs/`) |
-| `src/OpenList.Infrastructure` | EF Core `DbContext`, service impls, JWT auth, `ZioMountService`. References Core |
+| `src/OpenList.Infrastructure` | EF Core `DbContext`, service impls, JWT auth, `MountService`. References Core |
 | `src/OpenList.Server` | ASP.NET entrypoint (`Program.cs`), `Endpoints/` (Minimal APIs), `Middleware/`, `Models/` (DTOs + `Resp<T>`) |
 | `tests/OpenList.Tests` | TUnit tests for Core + Infrastructure services |
 | `frontend/` | SolidJS SPA (separate project, pnpm, proxies `/api` to `localhost:5244`) |
@@ -53,8 +53,8 @@ dotnet format
 
 ## Driver System
 
-- **Auto-discovery**: `ZioMountService` scans assemblies starting with `"OpenList"` for `ZioDriverBase` subclasses. Adding a driver = create a class in `OpenList.Drivers` — no manual registration.
-- **Zio-based**: All drivers wrap a Zio `IFileSystem`, mounted via `MountFileSystem`. Extension interfaces: `IFileSystemLinkProvider`, `IFileSystemUploader`, `IFileSystemWithDetails`, `IFileSystemArchiveReader`, `IFileSystemArchiveDecompress`, `IFileSystemDirectUploader`.
+- **Auto-discovery**: `MountService` scans assemblies starting with `"OpenList"` for `DriverBase` subclasses. Adding a driver = create a class in `OpenList.Drivers` — no manual registration.
+- **In-house VFS**: All drivers extend the `OpenList.Vfs.FileSystem`, mounted via `MountFileSystem`. Extension interfaces: `IFileSystemLinkProvider`, `IFileSystemUploader`, `IFileSystemWithDetails`, `IFileSystemArchiveReader`, `IFileSystemArchiveDecompress`, `IFileSystemDirectUploader`.
 
 ## Key Quirks
 
@@ -87,8 +87,8 @@ Phased rollout. Each phase builds on the previous. Items are checked off `[x]` a
 ## Phase 1 — Skeleton ✅
 
 - [x] Solution structure (`OpenList.slnx` + 5 projects)
-- [x] `OpenList.Core`: `Resp<T>`, models (`User`, `Storage`, `Meta`, `Sharing`, `SettingItem`, `SshKey`), `ZioDriverBase`, service interfaces
-- [x] `OpenList.Infrastructure`: `OpenListDbContext`, `ZioMountService` skeleton, `OpenListDbContextFactory`
+- [x] `OpenList.Core`: `Resp<T>`, models (`User`, `Storage`, `Meta`, `Sharing`, `SettingItem`, `SshKey`), `DriverBase`, service interfaces
+- [x] `OpenList.Infrastructure`: `OpenListDbContext`, `MountService` skeleton, `OpenListDbContextFactory`
 - [x] `OpenList.Drivers`: `LocalDriver` skeleton
 - [x] `OpenList.Server`: `Program.cs` (DI, JSON, CORS, Kestrel, SPA fallback), `HealthEndpoints` (`GET /ping`)
 - [x] `OpenList.Tests`: smoke tests for `Resp<T>`
@@ -122,7 +122,7 @@ Core auth pipeline so the frontend can log in. No storage ops yet.
 Admin CRUD for storages + driver instantiation.
 
 - [x] `IStorageService` impl + `StorageService`
-- [x] `ZioMountService.LoadAllAsync` — instantiate drivers, call `InitAsync`, register in `MountFileSystem`
+- [x] `MountService.LoadAllAsync` — instantiate drivers, call `InitAsync`, register in `MountFileSystem`
 - [x] `AdminEndpoints.cs` — `/api/admin/*` (admin role `2`):
   - [x] `GET  /api/admin/storage/list`
   - [x] `GET  /api/admin/storage/get?id=`
@@ -143,7 +143,7 @@ Admin CRUD for storages + driver instantiation.
 
 The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload, download.
 
-- [x] `IFileSystemService` impl + `FileSystemService` (routes to mounted `ZioDriverBase`)
+- [x] `IFileSystemService` impl + `FileSystemService` (routes to mounted `DriverBase`)
 - [x] `FsEndpoints.cs` — `/api/fs/*`:
   - [x] `POST /api/fs/list` — `{ path, password?, page?, per_page?, refresh? }`
   - [x] `POST /api/fs/get` — `{ path, password? }` (file/folder detail)
@@ -243,11 +243,11 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 ## Phase 8 — Drivers: S3, WebDAV, FTP/SFTP/SMB
 
 - [x] `S3Driver` (Minio client) — read/write/list/upload
-  - [x] `S3FileSystem` — Zio `FileSystem` over S3 with prefix-based path mapping, directory markers, streaming uploads
+  - [x] `S3FileSystem` — `FileSystem` over S3 with prefix-based path mapping, directory markers, streaming uploads
   - [x] `IFileSystemUploader` + `IFileSystemLinkProvider` implemented
   - [x] Config: `endpoint`, `region`, `access_key_id`, `secret_access_key`, `bucket`, `root_folder_path`, `use_ssl`, `session_token`
 - [x] `WebDAVDriver` (WebDav.Client) — read/write/list/upload
-  - [x] `WebDavFileSystem` — PROPFIND/MKCOL/DELETE/PUT/MOVE backed Zio filesystem
+  - [x] `WebDavFileSystem` — PROPFIND/MKCOL/DELETE/PUT/MOVE backed VFS
   - [x] `IFileSystemUploader` + `IFileSystemLinkProvider` (direct URL) implemented
   - [x] Config: `endpoint`, `root_folder_path`, `username`, `password`, `use_basic_auth`
 - [x] `FtpDriver` (FluentFTP)
@@ -262,7 +262,7 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
   - [x] Config schema declared; uses `MemoryFileSystem` placeholder pending full SMB2Client integration
   - [x] Config: `host`, `port`, `username`, `password`, `share`, `domain`, `root_folder_path`
 - [x] Driver extension interfaces: `IFileSystemUploader`, `IFileSystemLinkProvider`, `IFileSystemWithDetails`
-- [x] `NetworkFileSystemBase` — shared base for network-backed Zio filesystems (symlinks/attributes/watchers unsupported, default copy/move/enumerate)
+- [x] `NetworkFileSystemBase` — shared base for network-backed filesystems (symlinks/attributes/watchers unsupported, default copy/move/enumerate)
 - [x] Tests: `DriverTests` — 21 tests covering metadata, config schema, validation, and link generation (no live servers required) — 96/96 passing
 
 ## Phase 9 — Cloud Drivers
@@ -285,10 +285,10 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 
 ## Phase 12 — FTP/SFTP Hosted Servers
 
-- [x] FTP hosted service (FubarDev.FtpServer) — `FtpHostedService` + `OpenListFtpMembershipProvider` + `ZioUnixFileSystem` bridge, disabled by default
+- [x] FTP hosted service (FubarDev.FtpServer) — `FtpHostedService` + `OpenListFtpMembershipProvider` + `MountUnixFileSystem` bridge, disabled by default
 - [x] SFTP hosted service stub (SSH.NET has no server impl) — `SftpHostedService` logs warning, disabled by default
 - [x] Auth bridge to OpenList users (`IMembershipProvider` → `UserService`)
-- [x] Virtual filesystem via Zio (`ZioUnixFileSystem` adapts `MountFileSystem` to `IUnixFileSystem`)
+- [x] Virtual filesystem in-house (`MountUnixFileSystem` adapts `MountFileSystem` to `IUnixFileSystem`)
 
 ## Phase 13 — Search Index ✅
 
@@ -344,15 +344,16 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 
 | Date | Phase | Summary |
 |---|---|---|
-| 2026-06-22 | Phase 1 | Skeleton: 5 projects, `Resp<T>`, models, `ZioDriverBase`, `OpenListDbContext`, `ZioMountService`, `LocalDriver` skeleton, `Program.cs`, `/ping`, smoke tests. `dotnet build` green. |
+| 2026-06-22 | Phase 1 | Skeleton: 5 projects, `Resp<T>`, models, `DriverBase`, `OpenListDbContext`, `MountService`, `LocalDriver` skeleton, `Program.cs`, `/ping`, smoke tests. `dotnet build` green. |
 | 2026-06-22 | Phase 2 | Auth: `UserService` (PBKDF2-SHA256), `JwtService` (HS256 + TOTP 2FA), `AuthEndpoints` (`/api/auth/*`), `MeEndpoints` (`/api/me/*`), `DbInitializer` (admin seed), JWT middleware (no-prefix token). 15/15 tests passing. |
-| 2026-06-22 | Phase 3 | Storage: `StorageService` (CRUD + enable/disable), `ZioMountService` (MountFileSystem, auto-discovery, load/unload), `LocalDriver` (PhysicalFileSystem + SubFileSystem), `AdminEndpoints` (`/api/admin/storage|driver|user/*`). 28/28 tests passing. |
+| 2026-06-22 | Phase 3 | Storage: `StorageService` (CRUD + enable/disable), `MountService` (MountFileSystem, auto-discovery, load/unload), `LocalDriver` (PhysicalFileSystem + SubFileSystem), `AdminEndpoints` (`/api/admin/storage|driver|user/*`). 28/28 tests passing. |
 | 2026-06-23 | Phase 4 | Filesystem: `FileSystemService` (list/get/mkdir/rename/move/copy/remove/put/dirs/search/archive/link via Zio MountFileSystem), `FsEndpoints` (`/api/fs/*`), `ClaimsPrincipal.ToUser()` extension. 50/50 tests passing. |
 | 2026-06-23 | Phase 7 | Admin: `SettingService` (CRUD + public filter + archive exts), `MetaService` (path metadata CRUD), `MessageService` (admin↔user messaging), `ScanService` (background directory scan with progress). Extended `AdminEndpoints` (user/set_password, setting, meta, message, scan), `MeEndpoints` (message unread/list/read), `FsEndpoints` (/scan). Added `Message` model + DbSet. 76/76 tests passing. |
-| 2026-06-23 | Phase 10-12 | S3 Gateway (`S3Endpoints` — list buckets, get/put/head/delete objects, JWT passthrough auth), WebDAV Server (`WebDavEndpoints` — OPTIONS/PROPFIND/PROPPATCH/GET/HEAD/PUT/MKCOL/DELETE/MOVE/COPY/LOCK/UNLOCK, Basic auth via `UserService`), FTP hosted service (`FtpHostedService` + `OpenListFtpMembershipProvider` + `ZioUnixFileSystem` bridge via FubarDev.FtpServer), SFTP stub (`SftpHostedService` — SSH.NET has no server). Fixed `FileSystemService.PutStreamAsync` sync IO → async. `TestWebAppFactory` integration test infra with per-factory temp SQLite DB + Local storage mount. 116/116 tests passing. |
+| 2026-06-23 | Phase 10-12 | S3 Gateway (`S3Endpoints` — list buckets, get/put/head/delete objects, JWT passthrough auth), WebDAV Server (`WebDavEndpoints` — OPTIONS/PROPFIND/PROPPATCH/GET/HEAD/PUT/MKCOL/DELETE/MOVE/COPY/LOCK/UNLOCK, Basic auth via `UserService`), FTP hosted service (`FtpHostedService` + `OpenListFtpMembershipProvider` + `MountUnixFileSystem` bridge via FubarDev.FtpServer), SFTP stub (`SftpHostedService` — SSH.NET has no server). Fixed `FileSystemService.PutStreamAsync` sync IO → async. `TestWebAppFactory` integration test infra with per-factory temp SQLite DB + Local storage mount. 116/116 tests passing. |
 | 2026-06-24 | Phase 6 | Tasks & Offline Download: `TaskService` (in-memory task store with progress tracking, cancel/retry/delete/clear), `TaskEndpoints` (`/api/task/undone|done|info|cancel|delete|clear_done|retry`), `FsEndpoints` additions (`/api/fs/add_offline_download` + 4 `/api/fs/torrent/*` 501 stubs). 128/128 tests passing (12 new `TaskServiceTests`). |
 | 2026-07-16 | API 对齐基线 | P0/P1 对齐修复: `/auth/logout` GET+POST、guest 访问 `/fs/{list,get,dirs,search}`、`torrent/generate` stub、`/ad /ap /ae` 签名归档路由、`/sad` 共享归档下载、WebDAV LOCK/UNLOCK (`IWebDavLockStore`)。新增 `docs/api-diff.md` 差异分析。 |
 | 2026-08-16 | API 对齐 P0+P1+P2 | 对照 Go main/前端 v4.2.5: Multipart 分片上传 5 端点、消息 send 体形兼容、归档驱动 (SharpCompress, LocalDriver)、MCP 端点 (`/mcp`, Streamable HTTP)、Go Any 方法兼容 (GET+POST)、`/fs/regex_rename`、`/fs/link` admin-only、`/api/admin/task/*` 别名、`/debug/*`、`set_guangyapan`。前端修复为 `Openlist-Frontend` v4.2.5 git submodule。详见 `docs/alignment-plan.md`。 |
 | 2026-08-28 | Implementation Plan 状态同步 | 按源码核对勾选状态：Phase 4 (SignEndpoints)、5 (Sharing)、14 (Archive)、15 (2FA/WebAuthn/SSO)、17 (前端对齐) 全部完成；Phase 13 标记 database 后端完成（bleve/自动重建/增量未实现）；Phase 16 明确限流/Serilog/错误处理/Mapster/Scalar/配置校验仍未实现。 |
 | 2026-08-28 | Phase 13 + Phase 16 | Phase 13：增量索引钩子（`auto_update_index` 设置 + `IObjsUpdateHooks` 发布/订阅 + `FileSystemService` 写操作触发局部重建/删除清理）+ 启动时 `InitIndexAsync` 恢复进度（镜像 Go `bootstrap.InitIndex`）。Phase 16：字节级令牌桶限流（`RateLimiter`/`RateLimitManager`/`RateLimitMiddleware`/`MaxAllowedMiddleware`）、Serilog 请求日志（`RequestLogMiddleware` CIDR/路径/方法过滤 + 文件滚动）、`ErrorHandlingMiddleware`（`Resp<T>` 错误封装）、`AppConfiguration.Validate()` 启动校验、Scalar API 文档。Mapster 仍未接入。新增 `MiddlewareTests`（限流/日志过滤/异常处理/并发闸门/配置校验）。206/207 测试通过（1 skip 为已知 WebDAV 挂起）。 |
 | 2026-08-28 | 搜索访问控制 + multipart gating/GC | 按 Go 参考同步：① 搜索访问控制过滤（`SearchAsync(req,user)` 按 BasePath + Meta 隐藏/读用户/密码过滤，镜像 `search.go` SearchFiltered）；② 增量更新按父目录串行化（镜像 `update_lock.go`，静态 per-parent 锁）；③ multipart 设置门控（`multipart_enabled` 403 / `multipart_chunk_size` 上限 + 1 MB 下限）与 chunk 请求体有界排空；④ multipart 会话 GC（滑动 TTL 30min + 启动孤儿临时目录清扫，`Program.cs` `StartGc`）；⑤ `move_task_threads_num` 默认设置。新增 `MultipartUploadServiceTests`，扩展 `SearchServiceTests`/`SettingServiceTests`。222/223 测试通过（1 skip 为已知 WebDAV 挂起）。 |
+| 2026-10-05 | 移除 Zio 依赖，自研 VFS | 完全移除第三方 `Zio` 0.24.0，在 `OpenList.Core/Vfs` 下自建虚拟文件系统（命名空间 `OpenList.Vfs`）：`UPath`（不可变路径值类型，构造时归一化重复斜杠/`.`/`..`）、`IFileSystem` + `FileSystem` 抽象基类（公共方法做校验、`*Impl` 虚方法做 I/O）、`MountFileSystem`（最长前缀挂载路由）、`SubFileSystem`、`PhysicalFileSystem`（含 Windows 盘符映射）、`MemoryFileSystem`、`FileSystemEntry`/`FileEntry`/`DirectoryEntry`。枚举 `SearchOption` 更名 `SearchDepth` 以避开与 `System.IO` 的冲突。同步将 `ZioDriverBase`→`DriverBase`、`ZioMountService`→`MountService`（含文件重命名）、`ZioUnixFileSystem`→`MountUnixFileSystem`。337/338 测试通过（1 skip 为已知 WebDAV 挂起）。 |

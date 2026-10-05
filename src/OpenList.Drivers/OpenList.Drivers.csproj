@@ -7,7 +7,6 @@
     <InternalsVisibleTo Include="OpenList.Tests" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Zio" />
     <PackageReference Include="Minio" />
     <PackageReference Include="WebDav.Client" />
     <PackageReference Include="FluentFTP" />

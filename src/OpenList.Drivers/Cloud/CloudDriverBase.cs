@@ -10,11 +10,11 @@ namespace OpenList.Drivers.Cloud;
 /// 具体驱动只需实现协议细节（配置字段、列举、下载链接、上传）。
 /// </para>
 /// <para>
-/// 依赖 <c>ZioDriverBase.MountPath</c> / <c>AdditionSink</c>（由挂载服务注入）来回写配置，
+/// 依赖 <c>DriverBase.MountPath</c> / <c>AdditionSink</c>（由挂载服务注入）来回写配置，
 /// 因此 token 持久化只在正式挂载的实例上生效；单元测试直接构造的实例会静默跳过写入。
 /// </para>
 /// </summary>
-public abstract class CloudDriverBase : ZioDriverBase
+public abstract class CloudDriverBase : DriverBase
 {
     /// <summary>云驱动需要网络访问。</summary>
     public override bool IsCloudDriver => true;

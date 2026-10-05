@@ -15,9 +15,9 @@
 
 | Project | Purpose |
 |---|---|
-| `src/OpenList.Core` | Models, `ZioDriverBase`, driver extension interfaces, service interfaces. Depends only on Zio + ASP.NET abstractions |
+| `src/OpenList.Core` | Models, `DriverBase`, driver extension interfaces, service interfaces, **self-contained VFS** (`OpenList.Vfs`: `UPath`, `FileSystem`, `MountFileSystem`, `SubFileSystem`, `PhysicalFileSystem`, `MemoryFileSystem`). Depends only on ASP.NET abstractions |
 | `src/OpenList.Drivers` | Storage driver implementations (`Local/`, `S3/`, `WebDAV/`, `FtpSftpSmb/`, `Cloud/`) |
-| `src/OpenList.Infrastructure` | EF Core `DbContext`, service impls, JWT auth, `ZioMountService`. References Core |
+| `src/OpenList.Infrastructure` | EF Core `DbContext`, service impls, JWT auth, `MountService`. References Core |
 | `src/OpenList.Server` | ASP.NET entrypoint (`Program.cs`), `Endpoints/` (Minimal APIs), `Middleware/`, `Models/` (DTOs + `Resp<T>`) |
 | `tests/OpenList.Tests` | TUnit tests for Core + Infrastructure services |
 | `frontend/` | SolidJS SPA (separate project, pnpm, proxies `/api` to `localhost:5244`) |
@@ -52,11 +52,11 @@
 
 ## Driver System
 
-- **Auto-discovery**: `ZioMountService` scans assemblies starting with `"OpenList"` for `ZioDriverBase` subclasses. Adding a driver = create a class in `OpenList.Drivers` — no manual registration.
-- **Zio-based**: All drivers extend Zio's `FileSystem`, mounted via `MountFileSystem`. Extension interfaces: `IFileSystemLinkProvider`, `IFileSystemUploader`, `IFileSystemWithDetails`, `IFileSystemArchiveReader`, `IFileSystemArchiveDecompress`, `IFileSystemDirectUploader`.
+- **Auto-discovery**: `MountService` scans assemblies starting with `"OpenList"` for `DriverBase` subclasses. Adding a driver = create a class in `OpenList.Drivers` — no manual registration.
+- **Own VFS (`OpenList.Vfs`)**: All drivers extend the in-house `FileSystem`, mounted via `MountFileSystem` (no third-party VFS dependency). Extension interfaces: `IFileSystemLinkProvider`, `IFileSystemUploader`, `IFileSystemWithDetails`, `IFileSystemArchiveReader`, `IFileSystemArchiveDecompress`, `IFileSystemDirectUploader`.
 - **Driver config schema is backend-driven**: drivers declare `DriverItemAttributes` via `ConfigItems`; `StorageService.BuildDriverInfo` splits them into `common` (generated) + `additional` (from `ConfigItems`) and the frontend renders the form from `GET /admin/driver/list`. Field names double as translation keys in `frontend/src/lang/en/drivers.json` — a mismatch shows raw untranslated keys in the UI.
-- **Runtime context injection**: `ZioMountService.LoadAsync` calls `driver.AttachRuntime(mountPath, additionSink)` **before** `InitAsync`, giving the driver a `MountPath` and an `IStorageAdditionSink`.
-- **Addition write-back** (`IStorageAdditionSink` / `StorageAdditionSink`): mirror of Go `op.MustSaveDriverStorage`. Drivers call `ZioDriverBase.SaveAdditionAsync(addition)` to persist runtime config changes (chiefly refreshed OAuth tokens) back to `x_storages.Addition`. Serialization uses the object's **runtime type** so `[JsonPropertyName]` snake_case keys round-trip with `DriverConfig.GetAddition<T>()`. The sink is a singleton that opens its own DI scope per write (scoped `OpenListDbContext`); it short-circuits when the JSON is unchanged to avoid write amplification.
+- **Runtime context injection**: `MountService.LoadAsync` calls `driver.AttachRuntime(mountPath, additionSink)` **before** `InitAsync`, giving the driver a `MountPath` and an `IStorageAdditionSink`.
+- **Addition write-back** (`IStorageAdditionSink` / `StorageAdditionSink`): mirror of Go `op.MustSaveDriverStorage`. Drivers call `DriverBase.SaveAdditionAsync(addition)` to persist runtime config changes (chiefly refreshed OAuth tokens) back to `x_storages.Addition`. Serialization uses the object's **runtime type** so `[JsonPropertyName]` snake_case keys round-trip with `DriverConfig.GetAddition<T>()`. The sink is a singleton that opens its own DI scope per write (scoped `OpenListDbContext`); it short-circuits when the JSON is unchanged to avoid write amplification.
 - **`LoadAsync` semantics**: a driver that returns successfully but leaves `System == null` is **not mounted** (config still saves). `LoadAllAsync` catches per-storage init failures and continues (mirrors Go `op.initStorage`); without this, one broken storage killed app startup.
 - **Cloud driver base** (`OpenList.Drivers/Cloud/`, mirrors Go `drivers/aliyundrive_open/{limiter,util}.go`):
   - `CloudDriverBase` — sets `IsCloudDriver => true`, exposes a shared `HttpClient` (`CloudHttpClient.Shared`: auto-decompress, 30 s connect timeout, infinite overall timeout, 64 conns/host — a process-level singleton because drivers are created by `Activator.CreateInstance` with no DI), plus `ConfigureRateLimit(rps)` / `WaitRateLimitAsync`. Its `RefreshAndPersistTokensAsync` does refresh → apply → persist, in that order (so a DB write failure doesn't leave the live instance on a stale token).
@@ -140,14 +140,14 @@
 
 ### Driver extension interfaces (defined in `IFileSystemDriverExtensions.cs`)
 
-- ~~`IFileSystemArchiveReader` — `ListArchiveEntriesAsync`~~ **Implemented on `LocalDriver`** via `OpenList.Drivers.Archive.SharpCompressArchiveSupport` (zip/rar/7z/tar/gz, SharpCompress). Any Zio-backed driver can reuse the helper.
+- ~~`IFileSystemArchiveReader` — `ListArchiveEntriesAsync`~~ **Implemented on `LocalDriver`** via `OpenList.Drivers.Archive.SharpCompressArchiveSupport` (zip/rar/7z/tar/gz, SharpCompress). Any VFS-backed driver can reuse the helper.
 - ~~`IFileSystemArchiveDecompress` — `DecompressAsync`~~ **Implemented on `LocalDriver`** (same helper; ZipSlip-guarded).
 - `IFileSystemDirectUploader` — `GetDirectUploadInfoAsync`; no implementation
 - `IFileSystemWithDetails` — no implementation
 
 Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3, AliyundriveOpen), `IFileSystemUploader` (WebDAV, S3, FTP, SFTP, AliyundriveOpen).
 
-**Download channel** (`IFileSystemLinkProvider.GetFileLinkAsync(path, proxy, ct)`): the second entry point next to `GetLinkAsync`, driving `/d/` (302 to the direct URL when `proxy:false`) and `/p/` (server-side proxy stream when `proxy:true` → `FileLink.RangeReader`, a `ProxyRangeReader` opening `[start, start+length)`). The **default interface implementation returns null deliberately**: S3/WebDAV `GetLinkAsync` hands back *unsigned* URLs, so a 302 would turn working downloads into 403s. Only drivers that implement `GetFileLinkAsync` explicitly (cloud drivers) join the channel; everything else falls back to the generic Zio streaming path. `FileDownloadHelper.StreamViaProxyAsync` maps `CallbackCapacityException` to 503 + `Retry-After`, and `HEAD` returns headers without ever calling the reader (a HEAD must not burn Aliyun callback quota).
+**Download channel** (`IFileSystemLinkProvider.GetFileLinkAsync(path, proxy, ct)`): the second entry point next to `GetLinkAsync`, driving `/d/` (302 to the direct URL when `proxy:false`) and `/p/` (server-side proxy stream when `proxy:true` → `FileLink.RangeReader`, a `ProxyRangeReader` opening `[start, start+length)`). The **default interface implementation returns null deliberately**: S3/WebDAV `GetLinkAsync` hands back *unsigned* URLs, so a 302 would turn working downloads into 403s. Only drivers that implement `GetFileLinkAsync` explicitly (cloud drivers) join the channel; everything else falls back to the generic VFS streaming path. `FileDownloadHelper.StreamViaProxyAsync` maps `CallbackCapacityException` to 503 + `Retry-After`, and `HEAD` returns headers without ever calling the reader (a HEAD must not burn Aliyun callback quota).
 
 ## API 对齐进展（2026-08-16，对照 Go main / 前端 v4.2.5）
 

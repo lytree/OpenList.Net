@@ -1,20 +1,19 @@
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Tests;
 
 /// <summary>
-/// FileSystemService tests against an in-memory MemoryFileSystem mounted into ZioMountService.
+/// FileSystemService tests against an in-memory MemoryFileSystem mounted into MountService.
 /// Covers: list, get, mkdir, rename, move, copy, remove, put, dirs, search.
 /// </summary>
 public class FileSystemServiceTests
 {
-    private static (ZioMountService mount, FileSystemService svc, MemoryFileSystem mem) Setup()
+    private static (MountService mount, FileSystemService svc, MemoryFileSystem mem) Setup()
     {
-        var mount = new ZioMountService();
+        var mount = new MountService();
         var mem = new MemoryFileSystem();
         // Mount memory fs at /test — bypasses driver loading for unit tests.
         mount.Root.Mount("/test", mem);
@@ -25,7 +24,7 @@ public class FileSystemServiceTests
     private static readonly User TestUser = new() { Id = 1, Username = "test", Role = UserRole.Admin };
 
     /// <summary>Helper: write a file with the given bytes via the mount root (handles mount point translation).</summary>
-    private static async Task WriteFileAsync(ZioMountService mount, string path, byte[] bytes)
+    private static async Task WriteFileAsync(MountService mount, string path, byte[] bytes)
     {
         // Ensure parent directories exist
         var upath = new UPath(path);
@@ -36,7 +35,7 @@ public class FileSystemServiceTests
         await s.WriteAsync(bytes);
     }
 
-    private static async Task WriteFileAsync(ZioMountService mount, string path, string text)
+    private static async Task WriteFileAsync(MountService mount, string path, string text)
         => await WriteFileAsync(mount, path, System.Text.Encoding.UTF8.GetBytes(text));
 
     [Test]

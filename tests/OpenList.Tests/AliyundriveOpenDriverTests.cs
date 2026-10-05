@@ -189,7 +189,7 @@ public class AliyundriveOpenDriverTests
     [Test]
     public async Task Driver_IsDiscoveredByMountService()
     {
-        using var mount = new ZioMountService();
+        using var mount = new MountService();
         var names = mount.DriverTypes.Keys.ToList();
         await Assert.That(names).Contains("AliyundriveOpen");
         // 原有驱动不受影响。
@@ -200,7 +200,7 @@ public class AliyundriveOpenDriverTests
     [Test]
     public async Task MountService_LoadAsync_InvalidConfig_PropagatesError()
     {
-        using var mount = new ZioMountService();
+        using var mount = new MountService();
         var storage = new Storage
         {
             Id = 1,
@@ -218,7 +218,7 @@ public class AliyundriveOpenDriverTests
     [Test]
     public async Task MountService_LoadAll_ContinuesAfterBrokenStorage()
     {
-        using var mount = new ZioMountService();
+        using var mount = new MountService();
         var storages = new[]
         {
             // 缺 refresh_token → InitAsync 在发请求之前抛 InvalidOperationException。
@@ -237,7 +237,7 @@ public class AliyundriveOpenDriverTests
     public async Task StorageService_ListDrivers_ExposesAliyundriveOpen()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         var r = await svc.ListDriversAsync();
 
         await Assert.That(r.Code).IsEqualTo(200);

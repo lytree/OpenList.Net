@@ -4,20 +4,20 @@ using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
-using Zio;
+using OpenList.Vfs;
 using DirectUploadInfo = OpenList.Core.Interfaces.DirectUploadInfo;
 using ArchiveEntry = OpenList.Core.Interfaces.ArchiveEntry;
 
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// 文件系统操作服务，统一经过 <see cref="ZioMountService"/> 的 <see cref="MountFileSystem"/> 路由。
+/// 文件系统操作服务，统一经过 <see cref="MountService"/> 的 <see cref="MountFileSystem"/> 路由。
 /// 对应 Go 参考实现 <c>internal/fs</c>。操作基于路径；挂载服务负责解析底层驱动。
 /// 可选驱动能力（链接/上传/归档）通过 <see cref="OpenList.Core.Drivers"/> 中的扩展接口探测。
 /// </summary>
 public sealed class FileSystemService : IFileSystemService
 {
-    private readonly ZioMountService _mount;
+    private readonly MountService _mount;
     private readonly ISignService? _signs;
     private readonly IOfflineDownloadService? _offline;
     private readonly IObjsUpdateHooks? _hooks;
@@ -25,14 +25,14 @@ public sealed class FileSystemService : IFileSystemService
     private readonly ITaskService? _tasks;
 
     /// <summary>创建文件系统服务实例（仅用于单元测试）。</summary>
-    public FileSystemService(ZioMountService mount) => _mount = mount;
+    public FileSystemService(MountService mount) => _mount = mount;
 
     /// <summary>
     /// 创建文件系统服务实例（带签名服务，用于在 GetAsync 中生成 raw_url）。
     /// </summary>
     /// <param name="mount">挂载服务。</param>
     /// <param name="signs">签名服务。</param>
-    public FileSystemService(ZioMountService mount, ISignService signs)
+    public FileSystemService(MountService mount, ISignService signs)
     {
         _mount = mount;
         _signs = signs;
@@ -44,7 +44,7 @@ public sealed class FileSystemService : IFileSystemService
     /// <param name="mount">挂载服务。</param>
     /// <param name="signs">签名服务（可选）。</param>
     /// <param name="offline">离线下载服务（可选）。</param>
-    public FileSystemService(ZioMountService mount, ISignService? signs, IOfflineDownloadService? offline)
+    public FileSystemService(MountService mount, ISignService? signs, IOfflineDownloadService? offline)
         : this(mount, signs, offline, null, null, null)
     {
     }
@@ -56,7 +56,7 @@ public sealed class FileSystemService : IFileSystemService
     /// <param name="signs">签名服务（可选）。</param>
     /// <param name="offline">离线下载服务（可选）。</param>
     /// <param name="hooks">对象更新钩子注册表（可选，用于增量索引等）。</param>
-    public FileSystemService(ZioMountService mount, ISignService? signs, IOfflineDownloadService? offline, IObjsUpdateHooks? hooks)
+    public FileSystemService(MountService mount, ISignService? signs, IOfflineDownloadService? offline, IObjsUpdateHooks? hooks)
         : this(mount, signs, offline, hooks, null, null)
     {
     }
@@ -71,7 +71,7 @@ public sealed class FileSystemService : IFileSystemService
     /// <param name="scopes">DI 作用域工厂（用于解析 scoped 的 IMetaService，可选）。</param>
     /// <param name="tasks">后台任务服务（用于 move/copy 任务化，可选）。</param>
     public FileSystemService(
-        ZioMountService mount,
+        MountService mount,
         ISignService? signs,
         IOfflineDownloadService? offline,
         IObjsUpdateHooks? hooks,
@@ -426,13 +426,15 @@ public sealed class FileSystemService : IFileSystemService
         if (!_mount.Root.DirectoryExists(dstDir))
             return Resp<FsManageResp>.Fail("dst_dir not found", RespCodes.NotFound);
 
-        if (!srcDir.FullName.EndsWith("/")) srcDir = srcDir + "/";
+        // 以带尾斜杠的前缀做越界校验：UPath 归一化会去掉尾斜杠，
+        // 因此这里显式构造字符串前缀，确保 name 中的 "../" 无法逃逸出 src_dir。
+        var srcPrefix = srcDir.FullName.EndsWith("/") ? srcDir.FullName : srcDir.FullName + "/";
         var valid = new List<string>(req.Names.Count);
         for (int i = 0; i < req.Names.Count; i++)
         {
             var name = req.Names[i];
             var src = UPath.Combine(srcDir, name);
-            if (!src.FullName.StartsWith(srcDir.FullName, StringComparison.Ordinal))
+            if (!src.FullName.StartsWith(srcPrefix, StringComparison.Ordinal))
                 continue;
             if (!req.Overwrite)
             {
@@ -483,13 +485,15 @@ public sealed class FileSystemService : IFileSystemService
         if (!_mount.Root.DirectoryExists(dstDir))
             return Resp<FsManageResp>.Fail("dst_dir not found", RespCodes.NotFound);
 
-        if (!srcDir.FullName.EndsWith("/")) srcDir = srcDir + "/";
+        // 以带尾斜杠的前缀做越界校验：UPath 归一化会去掉尾斜杠，
+        // 因此这里显式构造字符串前缀，确保 name 中的 "../" 无法逃逸出 src_dir。
+        var srcPrefix = srcDir.FullName.EndsWith("/") ? srcDir.FullName : srcDir.FullName + "/";
         var valid = new List<string>(req.Names.Count);
         for (int i = 0; i < req.Names.Count; i++)
         {
             var name = req.Names[i];
             var src = UPath.Combine(srcDir, name);
-            if (!src.FullName.StartsWith(srcDir.FullName, StringComparison.Ordinal))
+            if (!src.FullName.StartsWith(srcPrefix, StringComparison.Ordinal))
                 continue;
             if (!req.Overwrite)
             {
@@ -825,7 +829,7 @@ public sealed class FileSystemService : IFileSystemService
 
     // --- 辅助方法 ---
 
-    /// <summary>把路径规整为 Zio 的 UPath（补上前导 /）。</summary>
+    /// <summary>把路径规整为 UPath（补上前导 /）。</summary>
     private static UPath Normalize(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return UPath.Root;
@@ -833,7 +837,7 @@ public sealed class FileSystemService : IFileSystemService
         return new UPath(path);
     }
 
-    /// <summary>把 Zio 文件系统条目转为对外对象（区分文件/目录并推断类型）。</summary>
+    /// <summary>把 文件系统条目转为对外对象（区分文件/目录并推断类型）。</summary>
     private static Obj ToObj(FileSystemEntry entry)
     {
         var isDir = entry is DirectoryEntry;

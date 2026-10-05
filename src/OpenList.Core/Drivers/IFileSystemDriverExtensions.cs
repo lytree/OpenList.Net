@@ -10,7 +10,7 @@ public interface IFileSystemLinkProvider
     /// 获取文件的访问通道，供下载端点区分「直链跳转」（<c>/d/</c>）与「服务端代理」（<c>/p/</c>）。
     /// </summary>
     /// <param name="path">
-    /// <b>相对挂载点</b>的驱动内路径（调用方经 <c>ZioMountService.ToDriverRelativePath</c> 转换），
+    /// <b>相对挂载点</b>的驱动内路径（调用方经 <c>MountService.ToDriverRelativePath</c> 转换），
     /// 例如挂载于 <c>/ali</c> 的 <c>/ali/a.txt</c> 传入 <c>/a.txt</c>。
     /// </param>
     /// <param name="proxy">
@@ -18,7 +18,7 @@ public interface IFileSystemLinkProvider
     /// 精确 Range 播放的场景）；<c>false</c> 表示优先直链（<c>/d/</c>）。
     /// </param>
     /// <param name="ct">取消令牌。</param>
-    /// <returns>可用的通道；返回 null 表示驱动不参与本次下载，调用方回退为通用 Zio 流式传输。</returns>
+    /// <returns>可用的通道；返回 null 表示驱动不参与本次下载，调用方回退为通用 VFS 流式传输。</returns>
     /// <remarks>
     /// 默认实现返回 null，即「本驱动不提供专用下载通道」。这是刻意保守的默认值：
     /// <see cref="GetLinkAsync"/> 在 S3 / WebDAV 上返回的是**未签名**地址，直接 302 会让

@@ -25,7 +25,7 @@ using Serilog;
 // ---------------------------------------------------------------------
 // 这是一个"基于项目"的 ASP.NET Core 应用，使用顶层语句(Program.cs)完成：
 //   1. 配置加载（OpenList__ 前缀的环境变量覆盖 appsettings.json）；
-//   2. 依赖注入注册（数据库 EF Core / ZioMountService / 各业务服务 /
+//   2. 依赖注入注册（数据库 EF Core / MountService / 各业务服务 /
 //      JWT 鉴权 / CORS / FTP·SFTP 宿主服务 / Swagger·Scalar / Serilog）；
 //   3. 中间件管道搭建（异常处理 → 请求日志 → 静态文件 → CORS → 认证/授权
 //      → 限流 → 各 API 路由 → SPA 回退）；
@@ -119,11 +119,11 @@ builder.Services.AddDbContext<OpenListDbContext>(opts =>
 // Core services
 // DbContext-consuming services are Scoped to match the EF Core DbContext lifetime.
 // IStorageAdditionSink lets storage drivers persist runtime config changes (notably refreshed
-// OAuth tokens) back to x_storages. It's a singleton like ZioMountService and creates its own
-// DI scope per write to reach the scoped DbContext. Registered BEFORE ZioMountService so the
+// OAuth tokens) back to x_storages. It's a singleton like MountService and creates its own
+// DI scope per write to reach the scoped DbContext. Registered BEFORE MountService so the
 // optional constructor parameter resolves.
 builder.Services.AddSingleton<IStorageAdditionSink, StorageAdditionSink>();
-builder.Services.AddSingleton<ZioMountService>();
+builder.Services.AddSingleton<MountService>();
 builder.Services.AddScoped<IUserService, UserService>();
 // ILdapAuthenticator is a singleton because it only depends on AppConfiguration.
 // JwtService picks it up optionally — empty Url means Enabled=false and /login/ldap returns 501.
@@ -150,7 +150,7 @@ builder.Services.AddScoped<IWebAuthnService, WebAuthnService>();
 builder.Services.AddSingleton<IScanService, ScanService>();
 builder.Services.AddSingleton<ISearchService, SearchService>();
 builder.Services.AddSingleton<ITaskService, TaskService>();
-// SignService must be singleton (matches ZioMountService lifetime) so FileSystemService
+// SignService must be singleton (matches MountService lifetime) so FileSystemService
 // can resolve it. Uses the same JWT secret for HMAC signing.
 builder.Services.AddSingleton<ISignService, SignService>();
 // Offline-download tool adapters (aria2 / qBittorrent / Transmission) talk to external
@@ -187,7 +187,7 @@ builder.Services.AddSingleton<RateLimitManager>();
 // task-based batch move/copy matching Go's FsMove/FsCopy semantics.
 builder.Services.AddSingleton<IFileSystemService>(sp =>
     ActivatorUtilities.CreateInstance<FileSystemService>(sp,
-        sp.GetRequiredService<ZioMountService>(),
+        sp.GetRequiredService<MountService>(),
         sp.GetService<ISignService>(),
         sp.GetService<IOfflineDownloadService>(),
         sp.GetService<IObjsUpdateHooks>(),
@@ -261,7 +261,7 @@ builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 10L * 1024 *
 builder.Services.AddFtpServer(s => s
     .Services
     .AddScoped<FubarDev.FtpServer.AccountManagement.IMembershipProvider, OpenListFtpMembershipProvider>()
-    .AddSingleton<FubarDev.FtpServer.FileSystem.IFileSystemClassFactory, ZioFtpFileSystemFactory>());
+    .AddSingleton<FubarDev.FtpServer.FileSystem.IFileSystemClassFactory, MountFtpFileSystemFactory>());
 builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opts =>
 {
     var (addr, port) = FtpListenParser.Parse(appConfig.FTP.Listen);

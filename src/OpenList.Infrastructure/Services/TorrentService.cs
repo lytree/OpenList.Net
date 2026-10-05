@@ -13,13 +13,13 @@ namespace OpenList.Infrastructure.Services;
 /// </summary>
 public sealed class TorrentService : ITorrentService
 {
-    private readonly ZioMountService _mount;
+    private readonly MountService _mount;
 
     /// <summary>Base64 输入长度上限（≈14MB），对应 ~10MB 解码后大小（Go <c>maxTorrentBase64Len</c>）。</summary>
     public const int MaxBase64Len = 14 * 1024 * 1024;
 
     /// <summary>构造 torrent 服务实例。</summary>
-    public TorrentService(ZioMountService mount) => _mount = mount;
+    public TorrentService(MountService mount) => _mount = mount;
 
     /// <inheritdoc />
     public async Task<Resp<TorrentParsedResp>> ParseAsync(string torrentBase64, CancellationToken ct = default)

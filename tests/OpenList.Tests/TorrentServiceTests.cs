@@ -2,8 +2,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Core.Torrent;
 using OpenList.Infrastructure.Services;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Tests;
 
@@ -14,7 +13,7 @@ public class TorrentServiceTests
 {
     private static (TorrentService svc, MemoryFileSystem mem) Setup()
     {
-        var mount = new ZioMountService();
+        var mount = new MountService();
         var mem = new MemoryFileSystem();
         // 挂载到 /dest 以便 RapidUploadAsync 的 FindDriverForPath("/dest") 能找到驱动。
         mount.Root.Mount("/dest", mem);

@@ -3,7 +3,7 @@ using OpenList.Core.Drivers.Base;
 using OpenList.Drivers.FtpSftpSmb;
 using OpenList.Drivers.S3;
 using OpenList.Drivers.WebDAV;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Tests;
 

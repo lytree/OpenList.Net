@@ -19,7 +19,7 @@ public class StorageServiceTests
     public async Task CreateAsync_Persists_Storage()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         var r = await svc.CreateAsync(new CreateStorageReq
         {
             MountPath = "/local",
@@ -37,7 +37,7 @@ public class StorageServiceTests
     public async Task CreateAsync_Rejects_Duplicate_MountPath()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         await svc.CreateAsync(new CreateStorageReq { MountPath = "/a", Driver = "Local", Disabled = true });
         var dup = await svc.CreateAsync(new CreateStorageReq { MountPath = "/a", Driver = "Local", Disabled = true });
         await Assert.That(dup.Code).IsEqualTo(409);
@@ -47,7 +47,7 @@ public class StorageServiceTests
     public async Task CreateAsync_Validates_MountPath_StartsWith_Slash()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         var r = await svc.CreateAsync(new CreateStorageReq { MountPath = "noslash", Driver = "Local", Disabled = true });
         await Assert.That(r.Code).IsEqualTo(400);
     }
@@ -56,7 +56,7 @@ public class StorageServiceTests
     public async Task ListAsync_Returns_Ordered()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         await svc.CreateAsync(new CreateStorageReq { MountPath = "/b", Driver = "Local", Order = 2, Disabled = true });
         await svc.CreateAsync(new CreateStorageReq { MountPath = "/a", Driver = "Local", Order = 1, Disabled = true });
         var r = await svc.ListAsync();
@@ -69,7 +69,7 @@ public class StorageServiceTests
     public async Task UpdateAsync_Changes_Remark()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         var created = await svc.CreateAsync(new CreateStorageReq { MountPath = "/x", Driver = "Local", Disabled = true });
         var r = await svc.UpdateAsync(created.Data!.Id, new CreateStorageReq
         {
@@ -87,7 +87,7 @@ public class StorageServiceTests
     public async Task DeleteAsync_Removes_Storage()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         var created = await svc.CreateAsync(new CreateStorageReq { MountPath = "/del", Driver = "Local", Disabled = true });
         var r = await svc.DeleteAsync(created.Data!.Id);
         await Assert.That(r.Code).IsEqualTo(200);
@@ -98,7 +98,7 @@ public class StorageServiceTests
     public async Task DisableAsync_Toggles_Disabled_Flag()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         var created = await svc.CreateAsync(new CreateStorageReq
         {
             MountPath = "/toggle",
@@ -114,7 +114,7 @@ public class StorageServiceTests
     public async Task ListDriversAsync_Returns_LocalDriver()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         var r = await svc.ListDriversAsync();
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!.Keys).Contains("Local");
@@ -124,7 +124,7 @@ public class StorageServiceTests
     public async Task ListDriversAsync_LocalDriver_HasCommonFields()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         var r = await svc.ListDriversAsync();
         var local = r.Data!["Local"];
         var commonNames = local.Common.Select(c => c.Name).ToList();
@@ -144,7 +144,7 @@ public class StorageServiceTests
     public async Task GetDriverInfoAsync_Returns_Config_Schema()
     {
         await using var ctx = BuildContext();
-        var svc = new StorageService(ctx, new ZioMountService());
+        var svc = new StorageService(ctx, new MountService());
         var r = await svc.GetDriverInfoAsync("Local");
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!.Additional).Count().IsEqualTo(3);

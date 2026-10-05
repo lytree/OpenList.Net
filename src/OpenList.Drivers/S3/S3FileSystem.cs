@@ -1,12 +1,12 @@
 using Minio;
 using Minio.DataModel;
 using Minio.DataModel.Args;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.S3;
 
 /// <summary>
-/// 基于 S3 兼容存储桶（Minio、AWS S3 等）的 Zio <see cref="FileSystem"/>。
+/// 基于 S3 兼容存储桶（Minio、AWS S3 等）的 <see cref="FileSystem"/>。
 /// S3 是对象存储：所谓"目录"其实是对象键的前缀，"文件"即对象本身。
 /// </summary>
 internal sealed class S3FileSystem : NetworkFileSystemBase
@@ -26,14 +26,14 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
 
     // --- 路径辅助 ---
 
-    /// <summary>把 Zio 路径转换为 S3 对象键（拼接根前缀）。</summary>
+    /// <summary>把 VFS 路径转换为 S3 对象键（拼接根前缀）。</summary>
     private string ToKey(UPath path)
     {
         var relative = path.FullName.TrimStart('/');
         return string.IsNullOrEmpty(relative) ? _rootPrefix : _rootPrefix + relative;
     }
 
-    /// <summary>把 S3 对象键去掉根前缀，转换回 Zio 路径。</summary>
+    /// <summary>把 S3 对象键去掉根前缀，转换回 VFS 路径。</summary>
     private UPath FromKey(string key)
     {
         var relative = key.StartsWith(_rootPrefix, StringComparison.Ordinal)
@@ -94,16 +94,16 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
     protected override void SetCreationTimeImpl(UPath path, DateTime time) { }
 
     /// <summary>
-    /// 枚举路径：按前缀列出对象并映射回 Zio 路径，按搜索目标/通配符过滤。
+    /// 枚举路径：按前缀列出对象并映射回 VFS 路径，按搜索目标/通配符过滤。
     /// </summary>
-    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
+    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchDepth searchOption, SearchTarget searchTarget)
     {
         // 目录路径需以 "/" 结尾才能作为前缀过滤出该目录下的子项。
         var prefix = ToKey(path);
         if (!prefix.EndsWith('/') && path != UPath.Root) prefix += "/";
 
         // 递归搜索时使用 recursive：true 一次取回整棵子树。
-        var items = ListObjectsSync(prefix, recursive: searchOption == SearchOption.AllDirectories);
+        var items = ListObjectsSync(prefix, recursive: searchOption == SearchDepth.AllDirectories);
         foreach (var item in items)
         {
             var itemPath = FromKey(item.Key);
@@ -268,7 +268,7 @@ internal sealed class S3FileSystem : NetworkFileSystemBase
             .WithPrefix(prefix)
             .WithRecursive(recursive);
 
-        // Minio 返回异步枚举器，这里同步遍历以适配 Zio 的同步 API。
+        // Minio 返回异步枚举器，这里同步遍历以适配 VFS 的同步 API。
         var asyncEnum = _client.ListObjectsEnumAsync(args);
         var enumerator = asyncEnum.GetAsyncEnumerator();
         try

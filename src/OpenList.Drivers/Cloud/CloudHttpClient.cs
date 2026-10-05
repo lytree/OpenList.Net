@@ -5,7 +5,7 @@ namespace OpenList.Drivers.Cloud;
 /// <summary>
 /// 所有云驱动共享的 <see cref="HttpClient"/>。
 /// <para>
-/// 驱动由 <c>ZioMountService</c> 通过无参构造反射创建，拿不到 DI 容器，因此这里使用
+/// 驱动由 <c>MountService</c> 通过无参构造反射创建，拿不到 DI 容器，因此这里使用
 /// 进程级单例 —— 与 Go 侧 <c>base.RestyClient</c> 的包级全局客户端做法一致。
 /// 复用同一个 <see cref="HttpClient"/> 可避免 socket 耗尽，并共享连接池与 DNS 缓存。
 /// </para>

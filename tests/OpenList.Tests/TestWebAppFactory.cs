@@ -44,7 +44,7 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
         Directory.CreateDirectory(_tempDir);
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
-        var mount = scope.ServiceProvider.GetRequiredService<ZioMountService>();
+        var mount = scope.ServiceProvider.GetRequiredService<MountService>();
 
         var storage = new Storage
         {

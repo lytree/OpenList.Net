@@ -4,7 +4,7 @@ using OpenList.Core.Drivers;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Server.Endpoints;
 
@@ -33,7 +33,7 @@ public static class SignEndpoints
             string? sign,
             ISignService signs,
             IFileSystemService fs,
-            ZioMountService mount,
+            MountService mount,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
@@ -44,13 +44,13 @@ public static class SignEndpoints
         // /p/{path}?sign=... — 代理下载：始终通过服务器流式传输文件
         // （用于驱动必须代理的场景，或需要 Range 支持的多媒体播放）。
         // 驱动能提供区间读取器时（阿里云盘等有回调并发配额的服务）优先走驱动读端，
-        // 否则回退为通用 Zio 流式传输。
+        // 否则回退为通用 VFS 流式传输。
         app.MapGet("/p/{**path}", async (
             string path,
             string? sign,
             ISignService signs,
             IFileSystemService fs,
-            ZioMountService mount,
+            MountService mount,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
@@ -65,7 +65,7 @@ public static class SignEndpoints
             string path,
             string? sign,
             ISignService signs,
-            ZioMountService mount,
+            MountService mount,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
@@ -76,7 +76,7 @@ public static class SignEndpoints
             string path,
             string? sign,
             ISignService signs,
-            ZioMountService mount,
+            MountService mount,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
@@ -106,7 +106,7 @@ public static class SignEndpoints
             string path,
             string? sign,
             ISignService signs,
-            ZioMountService mount,
+            MountService mount,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
@@ -135,21 +135,21 @@ public static class SignEndpoints
         // HEAD /ad/、/ap/、/ae/ — 仅探测大小/Range 支持，不触发归档逻辑。
         // 注意：此处仍调用 StreamFileAsync，若目标是归档文件则实际输出其二进制流。
         app.MapMethods("/ad/{**path}", new[] { "HEAD" }, async (
-            string path, string? sign, ISignService signs, ZioMountService mount, HttpContext ctx) =>
+            string path, string? sign, ISignService signs, MountService mount, HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
         }).AllowAnonymous();
         app.MapMethods("/ap/{**path}", new[] { "HEAD" }, async (
-            string path, string? sign, ISignService signs, ZioMountService mount, HttpContext ctx) =>
+            string path, string? sign, ISignService signs, MountService mount, HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
         }).AllowAnonymous();
         app.MapMethods("/ae/{**path}", new[] { "HEAD" }, async (
-            string path, string? sign, ISignService signs, ZioMountService mount, HttpContext ctx) =>
+            string path, string? sign, ISignService signs, MountService mount, HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
@@ -171,14 +171,14 @@ public static class SignEndpoints
     /// </list>
     /// <para>
     /// 传给驱动的是**相对挂载点**的路径 —— 驱动的 <c>System</c> 以其挂载点为根，
-    /// 与 <c>ZioMountService.ToDriverRelativePath</c> 的约定一致。
+    /// 与 <c>MountService.ToDriverRelativePath</c> 的约定一致。
     /// </para>
     /// <param name="mount">挂载服务。</param>
     /// <param name="fullPath">请求的完整挂载路径。</param>
     /// <param name="ctx">当前 HTTP 上下文。</param>
     /// <param name="preferProxy">true 走代理通道，false 优先直链。</param>
     private static async Task<IResult> DownloadAsync(
-        ZioMountService mount, string fullPath, HttpContext ctx, bool preferProxy)
+        MountService mount, string fullPath, HttpContext ctx, bool preferProxy)
     {
         if (mount.FindDriverForPath(fullPath) is IFileSystemLinkProvider linkProvider)
         {
@@ -195,7 +195,7 @@ public static class SignEndpoints
             catch
             {
                 // 取链接失败（远端报错、token 失效等）不应把请求打死 —— 结构上仍可能通过
-                // Zio 层读到内容，因此退化为通用流式传输，由它给出最终错误。
+                // VFS 层读到内容，因此退化为通用流式传输，由它给出最终错误。
                 link = null;
             }
 

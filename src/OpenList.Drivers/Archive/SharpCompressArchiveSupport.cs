@@ -1,11 +1,11 @@
 using SharpCompress.Readers;
-using Zio;
+using OpenList.Vfs;
 using ArchiveEntry = OpenList.Core.Drivers.ArchiveEntry;
 
 namespace OpenList.Drivers.Archive;
 
 /// <summary>
-/// 基于 SharpCompress 的归档列表/解压辅助类，作用于 Zio <see cref="IFileSystem"/>，
+/// 基于 SharpCompress 的归档列表/解压辅助类，作用于 <see cref="IFileSystem"/>，
 /// 因此任何驱动（本地、WebDAV、FTP、SFTP…）只需在此委托即可实现
 /// <see cref="OpenList.Core.Drivers.IFileSystemArchiveReader"/> /
 /// <see cref="OpenList.Core.Drivers.IFileSystemArchiveDecompress"/>。
@@ -16,7 +16,7 @@ internal static class SharpCompressArchiveSupport
     /// <summary>
     /// 列出压缩包内的所有条目。
     /// </summary>
-    /// <param name="fs">承载压缩包的 Zio 文件系统。</param>
+    /// <param name="fs">承载压缩包的 虚拟文件系统。</param>
     /// <param name="archivePath">压缩包路径（自动归一化为以 / 开头）。</param>
     /// <param name="password">可选的加密压缩包密码。</param>
     /// <returns>归档条目列表，目录条目 <c>Size</c> 为 0。</returns>
@@ -54,7 +54,7 @@ internal static class SharpCompressArchiveSupport
     /// <summary>
     /// 将压缩包解压到目标目录（含 ZipSlip 路径穿越防护）。
     /// </summary>
-    /// <param name="fs">承载压缩包的 Zio 文件系统。</param>
+    /// <param name="fs">承载压缩包的 虚拟文件系统。</param>
     /// <param name="archivePath">压缩包路径。</param>
     /// <param name="destPath">解压目标目录（会先去除末尾斜杠）。</param>
     /// <param name="password">可选的加密压缩包密码。</param>

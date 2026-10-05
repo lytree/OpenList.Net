@@ -1,21 +1,20 @@
 using System.Reflection;
 using System.Text.Json;
 using OpenList.Core.Drivers;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Core.Drivers.Base;
 
 /// <summary>
-/// 所有 OpenList 存储驱动的基类。封装一个 Zio <see cref="IFileSystem"/>
-/// 并暴露供 <c>ZioMountService</c> 自动发现使用的元数据。
+/// 所有 OpenList 存储驱动的基类。封装一个 <see cref="IFileSystem"/>
+/// 并暴露供 <c>MountService</c> 自动发现使用的元数据。
 /// 具体实现位于 <c>OpenList.Drivers</c>，通过程序集扫描被发现。
 /// 采用组合而非继承——驱动通过 <see cref="System"/> 暴露底层的 <see cref="FileSystem"/>，
 /// 而不是直接子类化它。
 /// </summary>
-public abstract class ZioDriverBase : IDisposable, IAsyncDisposable
+public abstract class DriverBase : IDisposable, IAsyncDisposable
 {
-    /// <summary>底层的 Zio 文件系统（由驱动在 <see cref="InitAsync"/> 中设置）。</summary>
+    /// <summary>底层的 虚拟文件系统（由驱动在 <see cref="InitAsync"/> 中设置）。</summary>
     public IFileSystem? System { get; protected set; }
 
     /// <summary>

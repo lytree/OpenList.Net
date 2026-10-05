@@ -11,12 +11,12 @@ using Microsoft.Extensions.Options;
 using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
 using OpenList.Infrastructure.Services;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Server.Hosting;
 
 /// <summary>
-/// 托管服务，运行一个底层由 Zio <see cref="MountFileSystem"/> 支撑的 FTP 服务器。
+/// 托管服务，运行一个底层由 <see cref="MountFileSystem"/> 支撑的 FTP 服务器。
 /// 默认关闭 —— 通过 <c>FTP:Enable</c> 开启。对应 OpenList Go <c>server/ftp</c>。
 /// </summary>
 public sealed class FtpHostedService : IHostedService
@@ -126,38 +126,38 @@ public sealed class OpenListFtpMembershipProvider : IMembershipProvider
 }
 
 /// <summary>
-/// 为每个 FTP 会话创建基于 Zio 的 <see cref="IUnixFileSystem"/> 的工厂。
+/// 为每个 FTP 会话创建基于 VFS 的 <see cref="IUnixFileSystem"/> 的工厂。
 /// </summary>
-public sealed class ZioFtpFileSystemFactory : IFileSystemClassFactory
+public sealed class MountFtpFileSystemFactory : IFileSystemClassFactory
 {
-    private readonly ZioMountService _mount;
+    private readonly MountService _mount;
 
-    public ZioFtpFileSystemFactory(ZioMountService mount)
+    public MountFtpFileSystemFactory(MountService mount)
     {
         _mount = mount;
     }
 
-    /// <summary>为给定账户创建一个 <see cref="ZioUnixFileSystem"/> 实例。</summary>
+    /// <summary>为给定账户创建一个 <see cref="MountUnixFileSystem"/> 实例。</summary>
     public Task<IUnixFileSystem> Create(IAccountInformation accountInformation)
     {
-        var fs = new ZioUnixFileSystem(_mount);
+        var fs = new MountUnixFileSystem(_mount);
         return Task.FromResult<IUnixFileSystem>(fs);
     }
 }
 
 /// <summary>
-/// 适配器：将 Zio <see cref="MountFileSystem"/> 暴露为 FTP 服务器所需的
+/// 适配器：将 <see cref="MountFileSystem"/> 暴露为 FTP 服务器所需的
 /// <see cref="IUnixFileSystem"/>。
 /// </summary>
-public sealed class ZioUnixFileSystem : IUnixFileSystem
+public sealed class MountUnixFileSystem : IUnixFileSystem
 {
-    private readonly ZioMountService _mount;
-    private readonly ZioUnixDirectoryEntry _root;
+    private readonly MountService _mount;
+    private readonly MountUnixDirectoryEntry _root;
 
-    public ZioUnixFileSystem(ZioMountService mount)
+    public MountUnixFileSystem(MountService mount)
     {
         _mount = mount;
-        _root = new ZioUnixDirectoryEntry(_mount, UPath.Root, "/");
+        _root = new MountUnixDirectoryEntry(_mount, UPath.Root, "/");
     }
 
     public StringComparer FileSystemEntryComparer => StringComparer.OrdinalIgnoreCase;
@@ -169,17 +169,17 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         IUnixDirectoryEntry directoryEntry,
         CancellationToken cancellationToken)
     {
-        var zioEntry = (ZioUnixDirectoryEntry)directoryEntry;
+        var mountEntry = (MountUnixDirectoryEntry)directoryEntry;
         var entries = new List<IUnixFileSystemEntry>();
 
         // 遍历目录下的文件与子目录，统一包装为对应的 Unix 条目。
-        if (_mount.Root.DirectoryExists(zioEntry.Path))
+        if (_mount.Root.DirectoryExists(mountEntry.Path))
         {
-            foreach (var child in _mount.Root.EnumeratePaths(zioEntry.Path, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both))
+            foreach (var child in _mount.Root.EnumeratePaths(mountEntry.Path, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both))
             {
                 entries.Add(_mount.Root.FileExists(child)
-                    ? new ZioUnixFileEntry(_mount, child, child.GetName())
-                    : new ZioUnixDirectoryEntry(_mount, child, child.GetName() + "/"));
+                    ? new MountUnixFileEntry(_mount, child, child.GetName())
+                    : new MountUnixDirectoryEntry(_mount, child, child.GetName() + "/"));
             }
         }
 
@@ -192,13 +192,13 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         string name,
         CancellationToken cancellationToken)
     {
-        var zioEntry = (ZioUnixDirectoryEntry)directoryEntry;
-        var childPath = zioEntry.Path / name;
+        var mountEntry = (MountUnixDirectoryEntry)directoryEntry;
+        var childPath = mountEntry.Path / name;
 
         if (_mount.Root.FileExists(childPath))
-            return Task.FromResult<IUnixFileSystemEntry?>(new ZioUnixFileEntry(_mount, childPath, name));
+            return Task.FromResult<IUnixFileSystemEntry?>(new MountUnixFileEntry(_mount, childPath, name));
         if (_mount.Root.DirectoryExists(childPath))
-            return Task.FromResult<IUnixFileSystemEntry?>(new ZioUnixDirectoryEntry(_mount, childPath, name + "/"));
+            return Task.FromResult<IUnixFileSystemEntry?>(new MountUnixDirectoryEntry(_mount, childPath, name + "/"));
 
         return Task.FromResult<IUnixFileSystemEntry?>(null);
     }
@@ -209,8 +209,8 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         long startPosition,
         CancellationToken cancellationToken)
     {
-        var zioEntry = (ZioUnixFileEntry)fileEntry;
-        var stream = _mount.Root.OpenFile(zioEntry.Path, FileMode.Open, FileAccess.Read);
+        var mountEntry = (MountUnixFileEntry)fileEntry;
+        var stream = _mount.Root.OpenFile(mountEntry.Path, FileMode.Open, FileAccess.Read);
         if (startPosition > 0) stream.Position = startPosition;
         return Task.FromResult(stream);
     }
@@ -222,8 +222,8 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         Stream data,
         CancellationToken cancellationToken)
     {
-        var zioDir = (ZioUnixDirectoryEntry)targetDirectory;
-        var filePath = zioDir.Path / fileName;
+        var mountDir = (MountUnixDirectoryEntry)targetDirectory;
+        var filePath = mountDir.Path / fileName;
 
         var dirPath = filePath.GetDirectory();
         if (!_mount.Root.DirectoryExists(dirPath))
@@ -239,8 +239,8 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         Stream data,
         CancellationToken cancellationToken)
     {
-        var zioEntry = (ZioUnixFileEntry)fileEntry;
-        var fs = _mount.Root.OpenFile(zioEntry.Path, FileMode.Create, FileAccess.Write);
+        var mountEntry = (MountUnixFileEntry)fileEntry;
+        var fs = _mount.Root.OpenFile(mountEntry.Path, FileMode.Create, FileAccess.Write);
         return Task.FromResult<IBackgroundTransfer?>(new StreamBackgroundTransfer(data, fs));
     }
 
@@ -251,8 +251,8 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         Stream data,
         CancellationToken cancellationToken)
     {
-        var zioEntry = (ZioUnixFileEntry)fileEntry;
-        var fs = _mount.Root.OpenFile(zioEntry.Path, FileMode.Append, FileAccess.Write);
+        var mountEntry = (MountUnixFileEntry)fileEntry;
+        var fs = _mount.Root.OpenFile(mountEntry.Path, FileMode.Append, FileAccess.Write);
         return Task.FromResult<IBackgroundTransfer?>(new StreamBackgroundTransfer(data, fs));
     }
 
@@ -262,10 +262,10 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         string directoryName,
         CancellationToken cancellationToken)
     {
-        var zioDir = (ZioUnixDirectoryEntry)targetDirectory;
-        var newPath = zioDir.Path / directoryName;
+        var mountDir = (MountUnixDirectoryEntry)targetDirectory;
+        var newPath = mountDir.Path / directoryName;
         _mount.Root.CreateDirectory(newPath);
-        return Task.FromResult<IUnixDirectoryEntry>(new ZioUnixDirectoryEntry(_mount, newPath, directoryName + "/"));
+        return Task.FromResult<IUnixDirectoryEntry>(new MountUnixDirectoryEntry(_mount, newPath, directoryName + "/"));
     }
 
     /// <summary>删除文件或（递归）删除目录。</summary>
@@ -273,11 +273,11 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         IUnixFileSystemEntry entry,
         CancellationToken cancellationToken)
     {
-        var zioEntry = (IZioUnixEntry)entry;
-        if (_mount.Root.FileExists(zioEntry.Path))
-            _mount.Root.DeleteFile(zioEntry.Path);
-        else if (_mount.Root.DirectoryExists(zioEntry.Path))
-            _mount.Root.DeleteDirectory(zioEntry.Path, true);
+        var mountEntry = (IMountUnixEntry)entry;
+        if (_mount.Root.FileExists(mountEntry.Path))
+            _mount.Root.DeleteFile(mountEntry.Path);
+        else if (_mount.Root.DirectoryExists(mountEntry.Path))
+            _mount.Root.DeleteDirectory(mountEntry.Path, true);
         return Task.CompletedTask;
     }
 
@@ -289,22 +289,22 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         string fileName,
         CancellationToken cancellationToken)
     {
-        var zioSource = (IZioUnixEntry)source;
-        var zioTarget = (ZioUnixDirectoryEntry)target;
-        var newPath = zioTarget.Path / fileName;
+        var mountSource = (IMountUnixEntry)source;
+        var mountTarget = (MountUnixDirectoryEntry)target;
+        var newPath = mountTarget.Path / fileName;
 
-        if (_mount.Root.FileExists(zioSource.Path))
-            _mount.Root.MoveFile(zioSource.Path, newPath);
-        else if (_mount.Root.DirectoryExists(zioSource.Path))
-            _mount.Root.MoveDirectory(zioSource.Path, newPath);
+        if (_mount.Root.FileExists(mountSource.Path))
+            _mount.Root.MoveFile(mountSource.Path, newPath);
+        else if (_mount.Root.DirectoryExists(mountSource.Path))
+            _mount.Root.MoveDirectory(mountSource.Path, newPath);
 
         return Task.FromResult<IUnixFileSystemEntry>(
             _mount.Root.FileExists(newPath)
-                ? new ZioUnixFileEntry(_mount, newPath, fileName)
-                : new ZioUnixDirectoryEntry(_mount, newPath, fileName + "/"));
+                ? new MountUnixFileEntry(_mount, newPath, fileName)
+                : new MountUnixDirectoryEntry(_mount, newPath, fileName + "/"));
     }
 
-    /// <summary>设置条目时间戳（Zio 各驱动对逐条目时间戳的更新支持并不统一，故为空操作）。</summary>
+    /// <summary>设置条目时间戳（各驱动对逐条目时间戳的更新支持并不统一，故为空操作）。</summary>
     public Task<IUnixFileSystemEntry> SetMacTimeAsync(
         IUnixFileSystemEntry entry,
         DateTimeOffset? modify,
@@ -312,25 +312,25 @@ public sealed class ZioUnixFileSystem : IUnixFileSystem
         DateTimeOffset? create,
         CancellationToken cancellationToken)
     {
-        // Zio 不提供跨驱动一致的逐条目时间戳更新接口。
+        // 当前抽象未提供跨驱动一致的逐条目时间戳更新接口。
         return Task.FromResult(entry);
     }
 }
 
-/// <summary>统一暴露 Zio 路径，便于 FTP 条目与挂载文件系统之间互转。</summary>
-public interface IZioUnixEntry
+/// <summary>统一暴露 VFS 路径，便于 FTP 条目与挂载文件系统之间互转。</summary>
+public interface IMountUnixEntry
 {
     UPath Path { get; }
 }
 
-/// <summary>FTP 会话中的文件条目，映射到 Zio 挂载文件系统的文件。</summary>
-public sealed class ZioUnixFileEntry : IUnixFileEntry, IZioUnixEntry
+/// <summary>FTP 会话中的文件条目，映射到 挂载文件系统的文件。</summary>
+public sealed class MountUnixFileEntry : IUnixFileEntry, IMountUnixEntry
 {
-    private readonly ZioMountService _mount;
+    private readonly MountService _mount;
     public UPath Path { get; }
 
-    /// <summary>从 Zio 文件条目读取大小与时间信息，构造对应的 FTP 文件条目。</summary>
-    public ZioUnixFileEntry(ZioMountService mount, UPath path, string name)
+    /// <summary>从 VFS 文件条目读取大小与时间信息，构造对应的 FTP 文件条目。</summary>
+    public MountUnixFileEntry(MountService mount, UPath path, string name)
     {
         _mount = mount;
         Path = path;
@@ -354,14 +354,14 @@ public sealed class ZioUnixFileEntry : IUnixFileEntry, IZioUnixEntry
     public long NumberOfLinks => 1;
 }
 
-/// <summary>FTP 会话中的目录条目，映射到 Zio 挂载文件系统的目录。</summary>
-public sealed class ZioUnixDirectoryEntry : IUnixDirectoryEntry, IZioUnixEntry
+/// <summary>FTP 会话中的目录条目，映射到 挂载文件系统的目录。</summary>
+public sealed class MountUnixDirectoryEntry : IUnixDirectoryEntry, IMountUnixEntry
 {
-    private readonly ZioMountService _mount;
+    private readonly MountService _mount;
     public UPath Path { get; }
 
     /// <summary>构造目录条目；根路径（UPath.Root）被标记为 IsRoot。</summary>
-    public ZioUnixDirectoryEntry(ZioMountService mount, UPath path, string name)
+    public MountUnixDirectoryEntry(MountService mount, UPath path, string name)
     {
         _mount = mount;
         Path = path;

@@ -7,7 +7,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
 using OpenList.Server.Services;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Server.Endpoints;
 
@@ -71,7 +71,7 @@ public static class S3Endpoints
     /// <summary>GET /s3 — 列出所有已启用存储对应的桶并以 S3 ListAllMyBuckets 格式返回。</summary>
     private static async Task<IResult> ListBucketsAsync(
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc)
@@ -103,7 +103,7 @@ public static class S3Endpoints
     private static async Task<IResult> HeadBucketAsync(
         string bucket,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc)
@@ -124,7 +124,7 @@ public static class S3Endpoints
     private static async Task<IResult> ListBucketDispatchAsync(
         string bucket,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc,
@@ -172,7 +172,7 @@ public static class S3Endpoints
     private static async Task<IResult> ListObjectsAsync(
         string bucket,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc)
@@ -270,9 +270,9 @@ public static class S3Endpoints
         return XmlResult(result);
     }
 
-    private static IEnumerable<S3Object> EnumerateRecursive(ZioMountService mount, UPath dir, string prefix)
+    private static IEnumerable<S3Object> EnumerateRecursive(MountService mount, UPath dir, string prefix)
     {
-        foreach (var path in mount.Root.EnumeratePaths(dir, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both))
+        foreach (var path in mount.Root.EnumeratePaths(dir, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both))
         {
             var isDir = mount.Root.DirectoryExists(path);
             var key = path.FullName.TrimStart('/');
@@ -302,7 +302,7 @@ public static class S3Endpoints
         string bucket,
         string key,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc)
@@ -348,7 +348,7 @@ public static class S3Endpoints
         string bucket,
         string key,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc)
@@ -379,7 +379,7 @@ public static class S3Endpoints
         string bucket,
         string key,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc,
@@ -423,7 +423,7 @@ public static class S3Endpoints
         string bucket,
         string key,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         User user,
         IFileSystemService fs)
     {
@@ -447,7 +447,7 @@ public static class S3Endpoints
         string destBucket,
         string destKey,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         User user,
         IFileSystemService fs)
     {
@@ -486,7 +486,7 @@ public static class S3Endpoints
         string bucket,
         string key,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc,
@@ -552,7 +552,7 @@ public static class S3Endpoints
     private static async Task<IResult> PostBucketAsync(
         string bucket,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc,
@@ -598,7 +598,7 @@ public static class S3Endpoints
         string bucket,
         string key,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc,

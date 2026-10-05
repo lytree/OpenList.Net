@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace OpenList.Core.Drivers;
 
 /// <summary>
-/// 传给 <see cref="Base.ZioDriverBase.InitAsync"/> 的配置载荷。
+/// 传给 <see cref="Base.DriverBase.InitAsync"/> 的配置载荷。
 /// <c>Addition</c> 是驱动特有字段的 JSON 字符串。
 /// </summary>
 public sealed class DriverConfig

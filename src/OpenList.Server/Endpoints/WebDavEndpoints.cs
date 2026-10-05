@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Http;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
-using Zio;
+using OpenList.Vfs;
 
 namespace OpenList.Server.Endpoints;
 
@@ -14,7 +14,7 @@ namespace OpenList.Server.Endpoints;
 /// WebDAV 服务端点，路由位于 <c>/dav</c>。
 /// 实现文件管理所需的 WebDAV（RFC 4918）子集：OPTIONS、PROPFIND、GET、HEAD、PUT、
 /// MKCOL、DELETE、MOVE、COPY、LOCK、UNLOCK。
-/// 将 WebDAV 根映射到 Zio <see cref="MountFileSystem"/> 根。
+/// 将 WebDAV 根映射到 <see cref="MountFileSystem"/> 根。
 /// 鉴权：既支持 HTTP Basic → OpenList 用户，也支持 JWT 透传。
 /// 对应 OpenList Go <c>server/webdav</c>。
 /// </summary>
@@ -46,11 +46,11 @@ public static class WebDavEndpoints
         g.MapMethods("/{*path}", ["UNLOCK"], UnlockAsync);
 
         // 不带路径参数的根路径路由
-        g.MapMethods("/", ["OPTIONS"], (HttpContext ctx, ZioMountService m, IStorageService s) => OptionsAsync("", ctx, m, s));
-        g.MapMethods("/", ["PROPFIND"], (HttpContext ctx, ZioMountService m, IStorageService s) => PropfindAsync("", ctx, m, s));
-        g.MapGet("/", (HttpContext ctx, ZioMountService m, IStorageService s) => GetAsync("", ctx, m, s));
-        g.MapMethods("/", ["HEAD"], (HttpContext ctx, ZioMountService m, IStorageService s) => HeadAsync("", ctx, m, s));
-        g.MapMethods("/", ["MKCOL"], (HttpContext ctx, ZioMountService m, IStorageService s, IFileSystemService fs) => MkcolAsync("", ctx, m, s, fs));
+        g.MapMethods("/", ["OPTIONS"], (HttpContext ctx, MountService m, IStorageService s) => OptionsAsync("", ctx, m, s));
+        g.MapMethods("/", ["PROPFIND"], (HttpContext ctx, MountService m, IStorageService s) => PropfindAsync("", ctx, m, s));
+        g.MapGet("/", (HttpContext ctx, MountService m, IStorageService s) => GetAsync("", ctx, m, s));
+        g.MapMethods("/", ["HEAD"], (HttpContext ctx, MountService m, IStorageService s) => HeadAsync("", ctx, m, s));
+        g.MapMethods("/", ["MKCOL"], (HttpContext ctx, MountService m, IStorageService s, IFileSystemService fs) => MkcolAsync("", ctx, m, s, fs));
 
         return app;
     }
@@ -58,7 +58,7 @@ public static class WebDavEndpoints
     // --- OPTIONS：通告 DAV 能力 ---
 
     /// <summary>OPTIONS — 返回 DAV 能力与允许的方法列表。</summary>
-    private static Task<IResult> OptionsAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
+    private static Task<IResult> OptionsAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
     {
         ctx.Response.Headers["DAV"] = "1, 2";
         ctx.Response.Headers["MS-Author-Via"] = "DAV";
@@ -68,15 +68,15 @@ public static class WebDavEndpoints
 
     // --- PROPFIND：列目录或取资源属性 ---
 
-    private static async Task<IResult> PropfindAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
+    private static async Task<IResult> PropfindAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
 
         var upath = NormalizePath(path);
         var depth = ctx.Request.Headers["Depth"].ToString();
-        var searchOption = depth == "0" ? SearchOption.TopDirectoryOnly : SearchOption.AllDirectories;
-        if (string.IsNullOrEmpty(depth)) searchOption = SearchOption.AllDirectories; // default infinity
+        var searchOption = depth == "0" ? SearchDepth.TopDirectoryOnly : SearchDepth.AllDirectories;
+        if (string.IsNullOrEmpty(depth)) searchOption = SearchDepth.AllDirectories; // default infinity
 
         var responses = new List<DavResponse>();
 
@@ -88,7 +88,7 @@ public static class WebDavEndpoints
         else if (mount.Root.DirectoryExists(upath))
         {
             responses.Add(ToDirResponse(mount, upath));
-            if (searchOption == SearchOption.AllDirectories)
+            if (searchOption == SearchDepth.AllDirectories)
             {
                 foreach (var child in EnumerateAll(mount, upath))
                 {
@@ -97,9 +97,9 @@ public static class WebDavEndpoints
                         : ToDirResponse(mount, child));
                 }
             }
-            else if (searchOption == SearchOption.TopDirectoryOnly && depth == "1")
+            else if (searchOption == SearchDepth.TopDirectoryOnly && depth == "1")
             {
-                foreach (var child in mount.Root.EnumeratePaths(upath, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both))
+                foreach (var child in mount.Root.EnumeratePaths(upath, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both))
                 {
                     responses.Add(mount.Root.FileExists(child)
                         ? ToFileResponse(mount, child)
@@ -118,7 +118,7 @@ public static class WebDavEndpoints
 
     // --- PROPPATCH：未完整实现，返回成功 ---
 
-    private static Task<IResult> ProppatchAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
+    private static Task<IResult> ProppatchAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
     {
         var upath = NormalizePath(path);
         var response = new DavResponse
@@ -131,7 +131,7 @@ public static class WebDavEndpoints
 
     // --- GET：下载文件或返回目录的 HTML 列表 ---
 
-    private static async Task<IResult> GetAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
+    private static async Task<IResult> GetAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
@@ -157,7 +157,7 @@ public static class WebDavEndpoints
             {
                 sb.AppendLine("<li><a href=\"../\">../</a></li>");
             }
-            foreach (var child in mount.Root.EnumeratePaths(upath, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both))
+            foreach (var child in mount.Root.EnumeratePaths(upath, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both))
             {
                 var name = child.GetName();
                 var isDir = mount.Root.DirectoryExists(child);
@@ -173,7 +173,7 @@ public static class WebDavEndpoints
 
     // --- HEAD：仅返回元数据 ---
 
-    private static async Task<IResult> HeadAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc)
+    private static async Task<IResult> HeadAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
@@ -198,7 +198,7 @@ public static class WebDavEndpoints
 
     // --- PUT：上传文件 ---
 
-    private static async Task<IResult> PutAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> PutAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
@@ -213,7 +213,7 @@ public static class WebDavEndpoints
 
     // --- MKCOL：创建目录 ---
 
-    private static async Task<IResult> MkcolAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> MkcolAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
@@ -227,7 +227,7 @@ public static class WebDavEndpoints
 
     // --- DELETE：删除文件或目录 ---
 
-    private static async Task<IResult> DeleteAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> DeleteAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
@@ -241,7 +241,7 @@ public static class WebDavEndpoints
 
     // --- MOVE：移动/重命名 ---
 
-    private static async Task<IResult> MoveAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> MoveAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
@@ -262,7 +262,7 @@ public static class WebDavEndpoints
 
     // --- COPY：复制文件/目录 ---
 
-    private static async Task<IResult> CopyAsync(string path, HttpContext ctx, ZioMountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> CopyAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
@@ -289,7 +289,7 @@ public static class WebDavEndpoints
     private static async Task<IResult> LockAsync(
         string path,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IWebDavLockStore lockStore)
     {
@@ -337,7 +337,7 @@ public static class WebDavEndpoints
     private static async Task<IResult> UnlockAsync(
         string path,
         HttpContext ctx,
-        ZioMountService mount,
+        MountService mount,
         IStorageService storageSvc,
         IWebDavLockStore lockStore)
     {
@@ -384,9 +384,9 @@ public static class WebDavEndpoints
         return string.IsNullOrEmpty(path) ? UPath.Root : new UPath(path);
     }
 
-    private static IEnumerable<UPath> EnumerateAll(ZioMountService mount, UPath dir)
+    private static IEnumerable<UPath> EnumerateAll(MountService mount, UPath dir)
     {
-        foreach (var child in mount.Root.EnumeratePaths(dir, "*", SearchOption.TopDirectoryOnly, SearchTarget.Both))
+        foreach (var child in mount.Root.EnumeratePaths(dir, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both))
         {
             yield return child;
             if (mount.Root.DirectoryExists(child))
@@ -397,7 +397,7 @@ public static class WebDavEndpoints
         }
     }
 
-    private static DavResponse ToFileResponse(ZioMountService mount, UPath path)
+    private static DavResponse ToFileResponse(MountService mount, UPath path)
     {
         var entry = mount.Root.GetFileEntry(path);
         return new DavResponse
@@ -419,7 +419,7 @@ public static class WebDavEndpoints
         };
     }
 
-    private static DavResponse ToDirResponse(ZioMountService mount, UPath path)
+    private static DavResponse ToDirResponse(MountService mount, UPath path)
     {
         return new DavResponse
         {

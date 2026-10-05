@@ -1,13 +1,12 @@
 using System.Net;
 using System.Text;
 using WebDav;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.WebDAV;
 
 /// <summary>
-/// 基于 WebDAV 服务器的 Zio 文件系统实现。
+/// 基于 WebDAV 服务器的 虚拟文件系统实现。
 /// </summary>
 internal sealed class WebDavFileSystem : NetworkFileSystemBase
 {
@@ -25,7 +24,7 @@ internal sealed class WebDavFileSystem : NetworkFileSystemBase
 
     // --- 路径转换 ---
 
-    /// <summary>把 Zio 路径映射为 WebDAV 请求用的完整 URL。</summary>
+    /// <summary>把 VFS 路径映射为 WebDAV 请求用的完整 URL。</summary>
     private string ToUrl(UPath path)
     {
         var relative = path.FullName.TrimStart('/');
@@ -78,7 +77,7 @@ internal sealed class WebDavFileSystem : NetworkFileSystemBase
         if (isRecursive)
         {
             // 逐一枚举并删除目录树内的所有子资源。
-            foreach (var child in EnumeratePaths(path, "*", SearchOption.AllDirectories, SearchTarget.Both))
+            foreach (var child in EnumeratePaths(path, "*", SearchDepth.AllDirectories, SearchTarget.Both))
             {
                 _client.Delete(ToUrl(child)).GetAwaiter().GetResult();
             }
@@ -150,7 +149,7 @@ internal sealed class WebDavFileSystem : NetworkFileSystemBase
     // --- 枚举 ---
 
     /// <summary>枚举路径：PROPFIND 拉取子资源列表并按搜索目标/通配符过滤，必要时递归。</summary>
-    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
+    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchDepth searchOption, SearchTarget searchTarget)
     {
         var url = ToUrl(path);
         var resp = _client.Propfind(url, new PropfindParameters
@@ -182,7 +181,7 @@ internal sealed class WebDavFileSystem : NetworkFileSystemBase
             }
 
             // 需递归时对有集合类型的子项逐层下钻。
-            if (searchOption == SearchOption.AllDirectories && isDir)
+            if (searchOption == SearchDepth.AllDirectories && isDir)
             {
                 foreach (var sub in EnumeratePathsImpl(childPath, searchPattern, searchOption, searchTarget))
                     yield return sub;

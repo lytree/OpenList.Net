@@ -2,8 +2,7 @@ using System.Text.Json.Serialization;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Drivers.Archive;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.Local;
 
@@ -12,7 +11,7 @@ namespace OpenList.Drivers.Local;
 /// 对应 OpenList Go 的 <c>drivers/local</c>。通过 <see cref="SharpCompressArchiveSupport"/>
 /// 实现归档读取/解压接口（zip/rar/7z/tar/gz）。
 /// </summary>
-public sealed class LocalDriver : ZioDriverBase, IFileSystemArchiveReader, IFileSystemArchiveDecompress
+public sealed class LocalDriver : DriverBase, IFileSystemArchiveReader, IFileSystemArchiveDecompress
 {
     /// <summary>驱动名称。</summary>
     public override string DriverName => "Local";
@@ -81,7 +80,7 @@ public sealed class LocalDriver : ZioDriverBase, IFileSystemArchiveReader, IFile
     public LocalAddition Addition { get; private set; } = new();
 
     /// <summary>
-    /// 初始化本地驱动：校验根目录、转换为 Zio 物理文件系统。
+    /// 初始化本地驱动：校验根目录、转换为物理文件系统。
     /// </summary>
     /// <param name="config">包含本地路径等字段的驱动配置。</param>
     /// <param name="ct">取消令牌。</param>
@@ -100,9 +99,9 @@ public sealed class LocalDriver : ZioDriverBase, IFileSystemArchiveReader, IFile
 
         var physical = new PhysicalFileSystem();
         // PhysicalFileSystem 使用其操作系统相关的根路径；这里将磁盘上的绝对路径
-        // 转换为该物理文件系统下的 Zio 绝对路径，再以其为根挂载子文件系统，从而把访问限制在根目录内。
-        var zioRoot = physical.ConvertPathFromInternal(root);
-        System = new SubFileSystem(physical, zioRoot);
+        // 转换为该物理文件系统下的 VFS 绝对路径，再以其为根挂载子文件系统，从而把访问限制在根目录内。
+        var vfsRoot = physical.ConvertPathFromInternal(root);
+        System = new SubFileSystem(physical, vfsRoot);
         return Task.CompletedTask;
     }
 }

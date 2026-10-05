@@ -1,12 +1,11 @@
 using System.Net;
 using FluentFTP;
-using Zio;
-using Zio.FileSystems;
+using OpenList.Vfs;
 
 namespace OpenList.Drivers.FtpSftpSmb;
 
 /// <summary>
-/// 基于 FluentFTP 的 FTP 服务器的 Zio 文件系统实现。
+/// 基于 FluentFTP 的 FTP 服务器的 虚拟文件系统实现。
 /// </summary>
 internal sealed class FtpFileSystem : NetworkFileSystemBase
 {
@@ -23,7 +22,7 @@ internal sealed class FtpFileSystem : NetworkFileSystemBase
 
     // --- 路径转换 ---
 
-    /// <summary>把 Zio 路径拼接到 FTP 根路径下，得到远程完整路径。</summary>
+    /// <summary>把 VFS 路径拼接到 FTP 根路径下，得到远程完整路径。</summary>
     private string ToRemote(UPath path)
     {
         var relative = path.FullName.TrimStart('/');
@@ -31,7 +30,7 @@ internal sealed class FtpFileSystem : NetworkFileSystemBase
         return full;
     }
 
-    /// <summary>把远程子项名称挂接到父路径下，得到子项的 Zio 路径。</summary>
+    /// <summary>把远程子项名称挂接到父路径下，得到子项的 VFS 路径。</summary>
     private static UPath FromRemoteName(string name, UPath parent)
     {
         return parent / name;
@@ -95,7 +94,7 @@ internal sealed class FtpFileSystem : NetworkFileSystemBase
     // --- 枚举 ---
 
     /// <summary>枚举路径：列出远程目录内容，按搜索目标/通配符过滤，必要时递归。</summary>
-    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
+    protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchDepth searchOption, SearchTarget searchTarget)
     {
         var items = _client.GetListing(ToRemote(path)).GetAwaiter().GetResult();
 
@@ -113,7 +112,7 @@ internal sealed class FtpFileSystem : NetworkFileSystemBase
             }
 
             // 需要递归时对目录项逐层下钻。
-            if (searchOption == SearchOption.AllDirectories && isDir)
+            if (searchOption == SearchDepth.AllDirectories && isDir)
             {
                 foreach (var sub in EnumeratePathsImpl(childPath, searchPattern, searchOption, searchTarget))
                     yield return sub;
@@ -131,13 +130,10 @@ internal sealed class FtpFileSystem : NetworkFileSystemBase
     }
 
     /// <summary>释放时断开并销毁 FTP 客户端连接。</summary>
-    protected override void Dispose(bool disposing)
+    public override void Dispose()
     {
-        if (disposing)
-        {
-            _client.Disconnect().GetAwaiter().GetResult();
-            _client.Dispose();
-        }
-        base.Dispose(disposing);
+        _client.Disconnect().GetAwaiter().GetResult();
+        _client.Dispose();
+        base.Dispose();
     }
 }

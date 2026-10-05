@@ -32,7 +32,6 @@
     <PackageVersion Include="Fido2.AspNet" Version="4.1.0" />
 
     <!-- Drivers -->
-    <PackageVersion Include="Zio" Version="0.24.0" />
     <PackageVersion Include="FluentFTP" Version="55.0.0" />
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />
     <PackageVersion Include="SMBLibrary" Version="1.5.8.1" />
