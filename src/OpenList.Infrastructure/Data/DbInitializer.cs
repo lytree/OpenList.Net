@@ -18,10 +18,14 @@ public static class DbInitializer
     /// 库表冲突）则回退到 EnsureCreated + 追加式补列，最后写入管理员账号与默认设置。
     /// </summary>
     /// <param name="db">EF Core 数据库上下文。</param>
-    /// <param name="config">应用配置，用于读取数据库类型、管理员账号与密码等。</param>
+    /// <param name="config">应用配置，用于读取数据库类型与管理员初始账号等。</param>
+    /// <param name="devMode">开发模式（对应 Go 的 <c>--dev</c>）：用 "admin" 作为内置
+    /// 管理员初始密码，免去本地每次都走安装向导。非开发模式且未配置
+    /// <see cref="AppConfiguration.AdminPassword"/> 时不创建管理员。</param>
     /// <param name="ct">取消令牌（可选）。</param>
     /// <exception cref="Exception">任意数据库操作失败时抛出（由调用方决定是否放行）。</exception>
-    public static async Task InitializeAsync(OpenListDbContext db, AppConfiguration config, CancellationToken ct = default)
+    public static async Task InitializeAsync(
+        OpenListDbContext db, AppConfiguration config, bool devMode = false, CancellationToken ct = default)
     {
         var isPostgres = IsPostgres(config.Database.Type);
 
@@ -68,7 +72,7 @@ public static class DbInitializer
 
         // Seed on BOTH paths — previously the MigrateAsync path skipped
         // SeedDefaultSettingsAsync, leaving fresh databases without defaults.
-        await SeedAdminAsync(db, config, ct);
+        await SeedAdminAsync(db, config, devMode, ct);
         await SeedDefaultSettingsAsync(db, ct);
     }
 
@@ -89,6 +93,11 @@ public static class DbInitializer
         var additions = new (string Table, string Column, string SqliteDecl, string PgDecl)[]
         {
             ("x_users", "AllowLdap", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            // Built-in admin marker. Backfill: the earliest admin row of a pre-existing
+            // database is the one SeedAdminAsync has been maintaining, so treat it as
+            // built-in to keep it protected after the upgrade.
+            ("x_users", "IsBuiltIn", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("x_users", "BasePath", "TEXT NULL", "TEXT NULL"),
             ("x_storages", "Status", "TEXT NOT NULL DEFAULT 'work'", "TEXT NOT NULL DEFAULT 'work'"),
             // Storage: extended fields mirroring Go model.Storage / frontend Storage type.
             ("x_storages", "OrderBy", "TEXT NULL", "TEXT NULL"),
@@ -138,6 +147,12 @@ public static class DbInitializer
                 // Column may already exist (race) or table missing — ignore.
             }
         }
+
+        // IsBuiltIn was just added as all-zero; without a backfill every pre-existing
+        // admin would lose its delete protection after upgrade. Mark the earliest admin
+        // row (the one the old SeedAdminAsync maintained) as built-in. Runs on both
+        // providers and is idempotent.
+        await BackfillBuiltInAdminAsync(db, ct);
 
         // Ensure whole tables introduced after the initial EnsureCreated run exist.
         // EnsureCreatedAsync only creates tables on a fresh database; for databases
@@ -210,6 +225,31 @@ public static class DbInitializer
                 CREATE UNIQUE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId_CredentialId ON x_authn_credentials (UserId, CredentialId);
                 """, ct);
         }
+    }
+
+    /// <summary>
+    /// 回填 <c>IsBuiltIn</c> 标记：为已存在但没有该标记的旧库，把<em>最早创建的管理员</em>
+    /// 标记为内置账号。旧版 <c>SeedAdminAsync</c> 每次启动都按配置校对同一条管理员记录，
+    /// 因此"最早的管理员"就是它在维护的那条，升级后禁删保护得以延续。
+    ///已有标记的库不受影响（<c>AnyAsync(IsBuiltIn)</c> 短路）。
+    /// </summary>
+    /// <remarks>
+    /// 同时被 <see cref="MigrateSchemaAsync"/> 与集成测试调用，故为 internal 而非 private。
+    /// </remarks>
+    internal static async Task BackfillBuiltInAdminAsync(OpenListDbContext db, CancellationToken ct)
+    {
+        if (await db.Users.AnyAsync(u => u.IsBuiltIn, ct))
+            return;
+
+        var admin = await db.Users
+            .Where(u => u.Role == UserRole.Admin)
+            .OrderBy(u => u.Id)
+            .FirstOrDefaultAsync(ct);
+        if (admin is null)
+            return; // 全新库，交给 SeedAdminAsync 创建。
+
+        admin.IsBuiltIn = true;
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>
@@ -309,59 +349,92 @@ public static class DbInitializer
            type.Equals("postgresql", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// 首次运行时创建或校对超级管理员账号：依据配置的 AdminUsername 定位管理员，
-    /// 不存在则创建，存在则同步用户名/角色/权限（密码仅在配置提供非空值时覆盖）。
-    /// 管理员权限位全部置 1（共 16 位），使其拥有全部前端权限分项。
+    /// 创建内置账号，语义对齐 Go 版 <c>internal/bootstrap/data/user.go</c> 的
+    /// <c>initUser()</c>（= <c>initAdmin</c> + <c>initGuest</c>）。
     /// </summary>
-    private static async Task SeedAdminAsync(OpenListDbContext db, AppConfiguration config, CancellationToken ct)
+    /// <remarks>
+    /// <para>
+    /// <b>管理员：仅在「没有管理员」且「能拿到初始密码」时才创建。</b>拿不到密码就不建 ——
+    /// 对齐 Go 的 <c>initAdmin</c>：它在既无 <c>--dev</c> 又无 <c>OPENLIST_ADMIN_PASSWORD</c>
+    /// 时直接 <c>return</c>，把建号交给 Web 安装向导
+    /// <c>POST /api/public/init/setup</c>。这样部署后不会留下人人可猜的默认凭据。
+    /// 用户装完向导后本方法即变成 no-op（管理员已存在），后续凭据改动只以数据库为准。
+    /// </para>
+    /// <para>
+    /// <b>游客：只要没有就建</b>，与管理员判据相互独立。这点很关键 ——
+    /// 若沿用旧的「用户表为空」判据，游客建好之后表永远不为空，管理员就再也建不出来。
+    /// </para>
+    /// </remarks>
+    /// <param name="db">EF Core 数据库上下文。</param>
+    /// <param name="config">应用配置，<see cref="AppConfiguration.AdminPassword"/> 为空时不建管理员。</param>
+    /// <param name="devMode">开发模式（对应 Go 的 <c>--dev</c>）：用 "admin" 作为初始密码，
+    /// 免去本地每次都要走一遍安装向导。</param>
+    /// <param name="ct">取消令牌。</param>
+    private static async Task SeedAdminAsync(
+        OpenListDbContext db, AppConfiguration config, bool devMode, CancellationToken ct)
     {
-        var now = DateTimeOffset.UtcNow;
-        // Only override the password when a non-empty value is provided in config.
-        // An empty AdminPassword means "leave the existing password untouched".
-        var hasConfigPassword = !string.IsNullOrWhiteSpace(config.AdminPassword);
-        var desiredHash = hasConfigPassword
-            ? UserService.HashPassword(config.AdminPassword)
-            : null;
-
-        // The config-defined super admin: identified by the configured username.
-        // On every startup we reconcile it with the configuration so that changing
-        // AdminUsername / AdminPassword in config propagates without a re-seed.
-        var admin = await db.Users.FirstOrDefaultAsync(u => u.Username == config.AdminUsername, ct);
-
-        if (admin is null)
+        // 管理员：不存在才考虑创建。注意用 Role 判据而非"表为空"—— 游客会在同一次
+        // 初始化里被创建，用表判据会让管理员永远建不出来。
+        if (!await db.Users.AnyAsync(u => u.Role == UserRole.Admin, ct))
         {
-            // No user with the configured username yet. If another admin exists
-            // (e.g. the username was renamed in config), adopt the first admin row.
-            admin = await db.Users.FirstOrDefaultAsync(u => u.Role == UserRole.Admin, ct);
+            // 与 Go 一致：无初始密码 ⇒ 不自动建号，等 Web 安装向导。
+            // devMode 优先，其次是配置里显式提供的密码（appsettings.json 或
+            // OpenList__AdminPassword 环境变量）。
+            var password = devMode
+                ? "admin"
+                : (string.IsNullOrWhiteSpace(config.AdminPassword) ? null : config.AdminPassword);
+
+            if (password is null)
+            {
+                Console.WriteLine(
+                    "No admin account created: no initial password configured. " +
+                    "Open the web UI to finish setup (POST /api/public/init/setup), " +
+                    "or set AdminPassword (env: OpenList__AdminPassword) before the first start.");
+            }
+            else
+            {
+                var username = string.IsNullOrWhiteSpace(config.AdminUsername) ? "admin" : config.AdminUsername;
+                var now = DateTimeOffset.UtcNow;
+                db.Users.Add(new User
+                {
+                    Username = username,
+                    PasswordHash = UserService.HashPassword(password),
+                    Role = UserRole.Admin,
+                    // 权限位对齐 Go:0x71FF（可见隐藏文件 ~ 可分享，含 WebDAV 读写与归档读取位）。
+                    // 必须与 PublicEndpoints 的 /init/setup 建号路径保持一致，否则走安装向导
+                    // 建的管理员权限会低于自动初始化的那个。
+                    Permission = 0x71FF,
+                    BasePath = "/",
+                    Disabled = false,
+                    IsBuiltIn = true,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+
+                // 对齐 Go 版：凭据只打到控制台，不写日志文件（避免明文密码落盘到日志）。
+                Console.WriteLine(
+                    $"Successfully created the built-in admin user \"{username}\" with the initial password: {password}");
+            }
         }
 
-        if (admin is null)
+        // 游客账号：Go 的 initGuest 固定创建（禁用、零权限、密码 "guest"），判据独立于管理员。
+        // 本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（Id=0），与此记录无关；
+        // 建它是为了与 Go 版行为一致，并给管理界面一个可管理的游客账号。
+        if (!await db.Users.AnyAsync(u => u.Username == "guest", ct))
         {
-            // First run — create the super admin from config.
-            // Permission: all 16 bits set (frontend UserPermissions has 16 entries;
-            // userCan does not bypass for admins, so the super admin needs every bit).
+            var now = DateTimeOffset.UtcNow;
             db.Users.Add(new User
             {
-                Username = config.AdminUsername,
-                PasswordHash = desiredHash ?? UserService.HashPassword("admin"),
-                Role = UserRole.Admin,
-                Permission = (1 << 16) - 1,
-                Disabled = false,
+                Username = "guest",
+                PasswordHash = UserService.HashPassword("guest"),
+                Role = UserRole.Guest,
+                Permission = 0,
+                BasePath = "/",
+                Disabled = true,
+                IsBuiltIn = true,
                 CreatedAt = now,
                 UpdatedAt = now,
             });
-        }
-        else
-        {
-            // Sync credentials + role from config on every startup.
-            admin.Username = config.AdminUsername;
-            // Only overwrite the password when config provides a non-empty value.
-            if (desiredHash is not null)
-                admin.PasswordHash = desiredHash;
-            admin.Role = UserRole.Admin;
-            admin.Permission = (1 << 16) - 1;
-            admin.Disabled = false;
-            admin.UpdatedAt = now;
         }
 
         await db.SaveChangesAsync(ct);

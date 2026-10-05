@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -30,6 +29,7 @@ public partial class DashboardViewModel : ViewModelBase
     private readonly AppSettings _settings;
     private readonly LogEventBus _log;
     private readonly UpdateChecker _updater;
+    private readonly OpenListApiClient _api;
     private readonly DispatcherTimer _timer;
     private int _tick;
     private readonly List<HeartbeatPoint> _points = [];
@@ -88,13 +88,14 @@ public partial class DashboardViewModel : ViewModelBase
 
     public DashboardViewModel(OpenListCoreService core, RcloneService rclone,
         AppSettings settings, LogEventBus log, UpdateChecker updater,
-        CoreMonitorViewModel monitor)
+        CoreMonitorViewModel monitor, OpenListApiClient api)
     {
         _core = core;
         _rclone = rclone;
         _settings = settings;
         _log = log;
         _updater = updater;
+        _api = api;
         Monitor = monitor;
         _isRunning = core.Status == CoreStatus.Running;
         core.StatusChanged += OnCoreStatusChanged;
@@ -186,11 +187,17 @@ public partial class DashboardViewModel : ViewModelBase
         UpdateChecker.OpenUrl(_core.BaseUrl);
     }
 
-    /// <summary>复制管理员密码（核心 appsettings.json 的 AdminPassword）。</summary>
+    /// <summary>
+    /// 复制管理员密码。
+    ///
+    /// 密码在数据库里只存哈希，配置里的 AdminPassword 仅在首次建库时被读取一次，因此这里
+    /// 复制的是<em>建库时用的初始密码</em>；用户若已在管理界面或设置页改过密码，它就不再
+    /// 有效 —— 那种情况下提示用设置页的改密功能，而非给出错误的凭据。
+    /// </summary>
     [RelayCommand]
     private async Task CopyAdminPasswordAsync()
     {
-        var pwd = ReadAdminPassword();
+        var pwd = ReadSeedAdminPassword();
         if (string.IsNullOrEmpty(pwd))
         {
             _log.Error(LogSources.Dashboard, Localizer.Get("dash.passwordNotFound"));
@@ -200,28 +207,43 @@ public partial class DashboardViewModel : ViewModelBase
         _log.Info(LogSources.Dashboard, Localizer.Get("dash.passwordCopied"));
     }
 
-    /// <summary>重置管理员密码（写回核心 appsettings.json，重启核心后生效）。</summary>
+    /// <summary>
+    /// 重置内置管理员密码并复制到剪贴板。
+    ///
+    /// 改为直接调用服务端 <c>POST /api/admin/user/reset_admin_password</c>：旧实现是
+    /// 改写核心 appsettings.json 的 AdminPassword 再等核心重启生效，但初始化逻辑已改为
+    /// 「仅建库时读一次配置、之后完全由数据库为准」，那条路径不再有效。
+    ///
+    /// 内置 admin 被刻意设为不可删除 / 不可改名 / 不可降权，所以这个接口（配合设置页的
+    /// 手动改密）是忘记密码后唯一的恢复入口 —— 因此不要求旧密码，但要能以 admin 身份
+    /// 调通：已保存 token 时直接用，否则用配置里的初始密码登录一次。
+    /// </summary>
     [RelayCommand]
     private async Task ResetAdminPasswordAsync()
     {
-        var path = FindCoreSettingsFile();
-        if (path is null)
+        if (_core.Status != CoreStatus.Running)
         {
-            _log.Error(LogSources.Dashboard, Localizer.Get("dash.coreConfigMissing"));
+            _log.Error(LogSources.Dashboard, Localizer.Get("set.adminPwdCoreDown"));
             return;
         }
-        var newPwd = Guid.NewGuid().ToString("N")[..12];
+
+        var previousToken = _api.Token;
         try
         {
-            var json = await File.ReadAllTextAsync(path);
-            var doc = JsonNode.Parse(json) as JsonObject;
-            if (doc is null)
+            _api.ServerUrl = _settings.ServerUrl;
+            if (string.IsNullOrEmpty(previousToken))
             {
-                _log.Error(LogSources.Dashboard, Localizer.Get("dash.coreConfigInvalid"));
-                return;
+                // 没有可用会话：用配置里的初始密码换一个临时 token。
+                var seed = ReadSeedAdminPassword() ?? "admin";
+                await _api.LoginAsync("admin", seed, null);
             }
-            doc["AdminPassword"] = newPwd;
-            await File.WriteAllTextAsync(path, doc.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            else
+            {
+                _api.SetToken(previousToken);
+            }
+
+            var newPwd = Guid.NewGuid().ToString("N")[..12];
+            await _api.ResetAdminPasswordAsync(newPwd);
             await UiServices.SetClipboardAsync(newPwd);
             _log.Info(LogSources.Dashboard, Localizer.Get("dash.passwordReset"));
         }
@@ -229,6 +251,24 @@ public partial class DashboardViewModel : ViewModelBase
         {
             _log.Error(LogSources.Dashboard, Localizer.Format("dash.passwordResetFailed", ex.Message));
         }
+        finally
+        {
+            // 临时登录只用于换取调用权限，结束后恢复原会话。
+            _api.SetToken(previousToken);
+        }
+    }
+
+    /// <summary>读取核心 appsettings.json 里的初始 AdminPassword（仅建库时使用过一次）。</summary>
+    private static string? ReadSeedAdminPassword()
+    {
+        try
+        {
+            var path = FindCoreSettingsFile();
+            if (path is null) return null;
+            var doc = JsonNode.Parse(File.ReadAllText(path));
+            return doc?["AdminPassword"]?.ToString();
+        }
+        catch { return null; }
     }
 
     private static string? FindCoreSettingsFile()
@@ -241,18 +281,6 @@ public partial class DashboardViewModel : ViewModelBase
                 "..", "..", "..", "..", "OpenList.Server", "bin", "Debug", "net10.0", "appsettings.json")),
         ];
         return candidates.FirstOrDefault(File.Exists);
-    }
-
-    private static string? ReadAdminPassword()
-    {
-        try
-        {
-            var path = FindCoreSettingsFile();
-            if (path is null) return null;
-            var doc = JsonNode.Parse(File.ReadAllText(path));
-            return doc?["AdminPassword"]?.ToString() ?? "admin";
-        }
-        catch { return null; }
     }
 
     // ---------------- 防火墙 ----------------

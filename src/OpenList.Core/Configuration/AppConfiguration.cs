@@ -11,8 +11,16 @@ public sealed class AppConfiguration
     public int TokenExpiresIn { get; set; } = 48;
     /// <summary>默认管理员用户名。</summary>
     public string AdminUsername { get; set; } = "admin";
-    /// <summary>默认管理员密码。</summary>
-    public string AdminPassword { get; set; } = "admin";
+    /// <summary>
+    /// 内置管理员的初始密码，<b>仅在首次建库时读取一次</b>。
+    /// 留空（默认）表示不自动创建管理员 —— 改由 Web 安装向导
+    /// <c>POST /api/public/init/setup</c> 在用户首次访问时创建，
+    /// 这样部署后不会留下「admin/admin」这种人人可猜的默认凭据。
+    /// 对齐 Go <c>internal/bootstrap/data/user.go</c> 的 <c>initAdmin</c>：
+    /// 它同样只在 <c>OPENLIST_ADMIN_PASSWORD</c> 非空时才建号，否则 <c>return</c> 等向导。
+    /// 一旦数据库里已有管理员，本项不再有任何作用（凭据以数据库为准）。
+    /// </summary>
+    public string AdminPassword { get; set; } = string.Empty;
     /// <summary>数据库配置。</summary>
     public DatabaseConfig Database { get; set; } = new();
     /// <summary>前端静态文件目录（SPA）。</summary>

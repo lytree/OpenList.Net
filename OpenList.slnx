@@ -6,6 +6,7 @@
     <Project Path="src/OpenList.Migrations.Sqlite/OpenList.Migrations.Sqlite.csproj" />
     <Project Path="src/OpenList.Migrations.Postgres/OpenList.Migrations.Postgres.csproj" />
     <Project Path="src/OpenList.Server/OpenList.Server.csproj" />
+    <Project Path="src/OpenList.Cli/OpenList.Cli.csproj" />
     <Project Path="src/OpenList.Desktop/OpenList.Desktop.csproj" />
   </Folder>
   <Folder Name="/tests/">

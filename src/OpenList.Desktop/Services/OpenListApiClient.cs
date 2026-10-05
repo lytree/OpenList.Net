@@ -40,6 +40,9 @@ public sealed class OpenListApiClient : IDisposable
     public string ServerUrl { get; set; } = "http://127.0.0.1:5244";
     public bool IsLoggedIn => _token is not null;
 
+    /// <summary>当前持有的 token（只读）。调用方需临时换token 时应保存并在finally 还原。</summary>
+    public string? Token => _token;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -76,6 +79,31 @@ public sealed class OpenListApiClient : IDisposable
         catch { /* 尽力而为 */ }
         _token = null;
         AuthChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// 重置内置管理员密码（<c>POST /api/admin/user/reset_admin_password</c>）。
+    /// 需要 admin 身份；服务端不要求旧密码 —— 内置admin 被刻意设为不可删除 / 不可改名，
+    /// 若改密还要求旧密码，忘记密码就彻底失去管理入口。
+    /// </summary>
+    public async Task ResetAdminPasswordAsync(string password, CancellationToken ct = default)
+    {
+        using var resp = await SendAuthedAsync(HttpMethod.Post,
+            $"{ServerUrl.TrimEnd('/')}/api/admin/user/reset_admin_password",
+            new { password }, ct);
+        await UnwrapAsync<object?>(resp, ct);
+    }
+
+    /// <summary>发送带鉴权头的请求（服务端约定裸 token，不加 Bearer 前缀）。</summary>
+    private async Task<HttpResponseMessage> SendAuthedAsync(
+        HttpMethod method, string url, object? body, CancellationToken ct)
+    {
+        var req = new HttpRequestMessage(method, url);
+        if (body is not null)
+            req.Content = JsonContent.Create(body, options: JsonOpts);
+        if (_token is not null)
+            req.Headers.TryAddWithoutValidation("Authorization", _token);
+        return await _http.SendAsync(req, ct);
     }
 
     public void Dispose() => _http.Dispose();

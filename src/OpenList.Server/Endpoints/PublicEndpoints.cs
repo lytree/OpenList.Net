@@ -58,14 +58,9 @@ public static class PublicEndpoints
             if (req.Password.Length < 4)
                 return Results.Ok(Resp.Fail("password must be at least 4 characters", RespCodes.BadRequest));
 
-            var create = await users.CreateAsync(new CreateUserReq
-            {
-                Username = req.Username,
-                Password = req.Password,
-                Role = UserRole.Admin,
-                BasePath = "/",
-                Permission = 0x71FF,
-            }, ct);
+            // 用 CreateInitialAdminAsync 而非 CreateAsync：向导建的是系统唯一的内置管理员，
+            // 必须带 IsBuiltIn 标记，否则装完反而失去"不可删除"的保护。
+            var create = await users.CreateInitialAdminAsync(req.Username, req.Password, ct);
             if (create.Code != RespCodes.Ok)
                 return Results.Ok(Resp.Fail(create.Message, create.Code));
 

@@ -13,6 +13,7 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly AppSettings _settings;
     private readonly OpenListCoreService _core;
     private readonly LogEventBus _log;
+    private readonly OpenListApiClient _api;
 
     [ObservableProperty] private string _coreExePath = "";
     [ObservableProperty] private string _dataDir = "";
@@ -27,6 +28,12 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private string _settingsPathText;
     [ObservableProperty] private LanguageOption? _selectedLanguage;
+
+    // --- 内置管理员改密 ---
+    [ObservableProperty] private string _adminPassword = "";
+    [ObservableProperty] private string _adminPasswordNew = "";
+    [ObservableProperty] private string _adminPasswordConfirm = "";
+    [ObservableProperty] private bool _isChangingAdminPassword;
 
     /// <summary>上游分段选择器：0=OpenList 服务 1=Rclone 存储 2=应用程序。</summary>
     [ObservableProperty] private int _selectedTabIndex;
@@ -51,11 +58,12 @@ public partial class SettingsViewModel : ViewModelBase
     public string AutostartNote => Localizer.Get(
         AutostartHelper.IsSupported ? "set.launchOnStartupNote" : "set.notSupported");
 
-    public SettingsViewModel(AppSettings settings, OpenListCoreService core, LogEventBus log)
+    public SettingsViewModel(AppSettings settings, OpenListCoreService core, LogEventBus log, OpenListApiClient api)
     {
         _settings = settings;
         _core = core;
         _log = log;
+        _api = api;
         _coreExePath = settings.CoreExePath;
         _dataDir = settings.DataDir;
         _httpPort = settings.HttpPort;
@@ -184,5 +192,86 @@ public partial class SettingsViewModel : ViewModelBase
         StatusText = resolved is null
             ? Localizer.Get("set.coreAutoFailed")
             : Localizer.Format("set.coreAutoOk", resolved);
+    }
+
+    /// <summary>
+    /// 修改内置管理员密码。
+    ///
+    /// 流程是「用当前密码登录 → 换token → 调 reset_admin_password」：服务端把内置 admin
+    /// 设为不可删除 / 不可改名 / 不可降权，所以它的密码就是唯一的恢复入口；这里让用户
+    /// 在桌面端直接完成「验证旧密码 + 设置新密码」，不必先去网页端登录。
+    ///
+    /// 登录只为换取临时 token，成功后立即恢复原有登录态，避免顶掉用户当前的会话。
+    /// </summary>
+    [RelayCommand]
+    private async Task ChangeAdminPasswordAsync()
+    {
+        if (IsChangingAdminPassword) return;
+
+        if (string.IsNullOrWhiteSpace(AdminPasswordNew))
+        {
+            StatusText = Localizer.Get("set.adminPwdTooShort");
+            return;
+        }
+        if (AdminPasswordNew.Length < 4)
+        {
+            StatusText = Localizer.Get("set.adminPwdTooShort");
+            return;
+        }
+        if (!string.Equals(AdminPasswordNew, AdminPasswordConfirm, StringComparison.Ordinal))
+        {
+            StatusText = Localizer.Get("set.adminPwdMismatch");
+            return;
+        }
+        if (_core.Status != CoreStatus.Running)
+        {
+            StatusText = Localizer.Get("set.adminPwdCoreDown");
+            return;
+        }
+
+        IsChangingAdminPassword = true;
+        // 记住原登录态：登录只为换 token，成功后要还原。
+        var previousToken = _settings.AuthToken;
+        try
+        {
+            // 复用桌面端已保存的 token（若用户此前在网页端登录过）则无需重新验证旧密码；
+            // 没有 token 时才要求输入当前密码来换一个。
+            if (string.IsNullOrEmpty(previousToken))
+            {
+                if (string.IsNullOrWhiteSpace(AdminPassword))
+                {
+                    StatusText = Localizer.Get("set.adminPwdNeedLogin");
+                    return;
+                }
+                _api.ServerUrl = _settings.ServerUrl;
+                await _api.LoginAsync("admin", AdminPassword, null);
+            }
+            else
+            {
+                _api.SetToken(previousToken);
+            }
+
+            await _api.ResetAdminPasswordAsync(AdminPasswordNew);
+
+            StatusText = Localizer.Get("set.adminPwdDone");
+            _log.Info(LogSources.Settings, Localizer.Get("set.adminPwdDone"));
+            // 清空输入框，避免密码留在内存/界面上。
+            AdminPassword = "";
+            AdminPasswordNew = "";
+            AdminPasswordConfirm = "";
+        }
+        catch (Exception ex)
+        {
+            // ApiException 的 message 已是服务端返回的可读文案（如
+            // "password must be at least 4 characters"），直接展示即可。
+            StatusText = Localizer.Format("set.adminPwdFailed", ex.Message);
+            _log.Error(LogSources.Settings, Localizer.Format("set.adminPwdFailed", ex.Message));
+        }
+        finally
+        {
+            // 无论成败都还原登录态：临时登录只用于换 token。
+            _api.SetToken(previousToken);
+            IsChangingAdminPassword = false;
+        }
     }
 }

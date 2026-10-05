@@ -384,7 +384,10 @@ app.MapFallback("{*path}", ctx =>
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
-    await DbInitializer.InitializeAsync(db, appConfig);
+    // Development ⇒ 用 "admin" 作为内置管理员初始密码（对齐 Go 的 --dev），
+    // 免去本地每次都走一遍 Web 安装向导。生产环境未配置 AdminPassword 时不建管理员，
+    // 改由 /api/public/init/setup 在用户首次访问时创建。
+    await DbInitializer.InitializeAsync(db, appConfig, app.Environment.IsDevelopment());
 
     // Load all enabled storages into the mount filesystem.
     var storageSvc = scope.ServiceProvider.GetRequiredService<IStorageService>();

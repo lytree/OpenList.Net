@@ -7,7 +7,7 @@
 - **Test**: `dotnet test` — uses **TUnit** (not NUnit), async convention: `await Assert.That(actual).Is(expected)`
 - **Lint**: `dotnet format`
 - **Cake build** (file-based `Cake.Sdk` script, `build/build.cs`): `dotnet run build/build.cs -- --target=<Task>` (e.g. `--target=CI`, `--target=Publish --semver=1.2.3`). `Cake.Sdk` is pinned via `global.json` → `msbuild-sdks`. See `build/build.cs` for all targets/args.
-  - **Publish variants** via `--app=`: `server` (default — headless server; framework-dependent without `--rid`, self-contained single-file with it) and `desktop` (`--app=desktop --rid=<rid>` — Avalonia GUI at bundle root + single-file server under `server/` + `frontend/dist/`; always self-contained). Bundle names: `openlist-net[-desktop]-<rid>[-semver]`.
+  - **Publish variants** via `--app=`: `server` (default — headless server; framework-dependent without `--rid`, self-contained with it) and `desktop` (`--app=desktop --rid=<rid>` — Avalonia GUI at bundle root + server under `server/` + `frontend/dist/`; always self-contained). Bundle names: `openlist-net[-desktop]-<rid>[-semver]`.
 - **Dev server** (with frontend proxy): `dotnet run` in server + `pnpm dev` in `frontend/`
 - **Desktop dev run**: `dotnet run --project src/OpenList.Desktop`. Desktop depends on the server at **build** time (a `ProjectReference` with `ReferenceOutputAssembly=false`), so building/running it auto-builds `OpenList.Server` first without pulling its dependencies into the desktop output. The target `ResolveOpenListServerCorePath` in `OpenList.Desktop.csproj` bakes the server's output assembly path into assembly metadata `OpenListServerPath`, which `OpenListCoreService.ResolveCorePath()` reads at runtime — so the core exe is located without guessing the TFM directory. Override via the `OPENLIST_SERVER_PATH` env var or the `CoreExePath` setting. In dev the core's working directory is likewise aligned to the server's build output (`bin/<Config>/<tfm>/`), so it reads that copy's `appsettings.json` and keeps its DB under `bin/<Config>/<tfm>/data/` — override with the `DataDir` setting.
 
@@ -19,6 +19,7 @@
 | `src/OpenList.Drivers` | Storage driver implementations (`Local/`, `S3/`, `WebDAV/`, `FtpSftpSmb/`, `Cloud/`) |
 | `src/OpenList.Infrastructure` | EF Core `DbContext`, service impls, JWT auth, `MountService`. References Core |
 | `src/OpenList.Server` | ASP.NET entrypoint (`Program.cs`), `Endpoints/` (Minimal APIs), `Middleware/`, `Models/` (DTOs + `Resp<T>`) |
+| `src/OpenList.Cli` | Ops CLI (`openlist`, System.CommandLine): `admin info/set/random`, `storage list/disable/delete`, `cancel2fa <user>`. Talks straight to the DB — the recovery path when the web layer is down. Bundled as `cli/` next to the server |
 | `tests/OpenList.Tests` | TUnit tests for Core + Infrastructure services |
 | `frontend/` | SolidJS SPA (separate project, pnpm, proxies `/api` to `localhost:5244`) |
 | `src/OpenList.Desktop` | AvaloniaUI 12 desktop app (mirrors OpenList-Desktop): manages the OpenList core as a child process (`ASPNETCORE_URLS` overrides port), rclone WebDAV mounts, tray icon, live log viewer. No file-management UI (removed; fs API methods dropped from `OpenListApiClient`). Settings persisted to `%APPDATA%/OpenList.Desktop/settings.json` |
@@ -49,6 +50,46 @@
 | `HealthEndpoints.cs` | `/ping` | Public |
 | `S3Endpoints.cs` | `/s3` | Mixed |
 | `WebDavEndpoints.cs` | `/dav` | Mixed |
+
+## Built-in Accounts (mirrors Go `internal/bootstrap/data/user.go`)
+
+`DbInitializer.InitializeAsync` 按 Go 的 `initUser()`（= `initAdmin` + `initGuest`）建两个内置账号。
+**两者判据相互独立**，这点很关键 —— 早期用「用户表为空」统一判据，结果游客先建好之后表永远不为空，
+管理员再也建不出来。
+
+| 账号 | 创建条件 | 角色 | 密码 | 权限 | 默认状态 | `IsBuiltIn` |
+|---|---|---|---|---|---|---|
+| `admin`（或配置的 `AdminUsername`） | **没有管理员** **且** 拿得到初始密码 | `Admin` | `AdminPassword` 配置值；devMode 下为 `admin` | `0x71FF` | 启用 | ✅ |
+| `guest` | 没有 `guest` | `Guest` | `guest` | `0` | **禁用** | ✅ |
+
+**拿不到密码就不建管理员**，改由 Web 安装向导 `POST /api/public/init/setup` 在用户首次访问时创建 ——
+对齐 Go 的 `initAdmin`：它在既无 `--dev` 又无 `OPENLIST_ADMIN_PASSWORD` 时直接 `return`。
+这样部署后不会留下人人可猜的 `admin/admin`。`AdminPassword` 默认为**空字符串**，`appsettings.json`
+里也是 `""`；要自动建号就显式配置它（`appsettings.json` 或 `OpenList__AdminPassword` 环境变量）。
+`devMode`（= `app.Environment.IsDevelopment()`，对应 Go 的 `--dev`）用 `admin` 作密码，免去本地每次都走向导。
+
+其余要点：
+
+- **`IsBuiltIn` 标记是保护的唯一依据**（列由 `AddUserIsBuiltIn` 迁移添加，并在其中回填旧库中最早的管理员）。`UserService.IsSuperAdmin` 读它，**不再**比较 `config.AdminUsername` —— 否则用户在管理界面改过用户名后保护就失效了。**按标记查账号时必须同时限定 `Role == Admin`**，否则会命中同样带标记的 guest（`ResetAdminPasswordAsync` 与 CLI 都踩过这个坑）。
+- 内置 admin **不可删除 / 改名 / 降权 / 禁用 / 改权限位**，但**可以改密码**（那是被保留的唯一理由）。其余 admin 角色账号可正常删除。
+- 安装向导走 `IUserService.CreateInitialAdminAsync`（**不是** `CreateAsync`）：它会打上 `IsBuiltIn`。该标记刻意没做进 `CreateUserReq`，否则已登录的管理员能凭空造出受保护账号；`CreateAsync` 恒定 `IsBuiltIn = false`。
+- 已存在的管理员永不被配置覆盖 —— 凭据以数据库为准（管理界面 / 桌面端 / CLI 改的密码不会被下次启动打回）。
+- 忘记密码的三条恢复路径：`POST /api/admin/user/reset_admin_password`、桌面端设置页、`cli/openlist admin random`（直连数据库，Web 层起不来时唯一可用的）。
+- 注意：本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（`Id=0`，见 `SignEndpoints` / `ShareDownloadEndpoints`），与库里这条 `guest` 记录无关。
+
+## CLI (`src/OpenList.Cli`)
+
+`openlist <command>`，System.CommandLine 解析；**不带子命令时转发启动 Web Server**（与 Go 裸跑一致）。
+
+```
+openlist admin info | set <password> | random
+openlist storage list | disable <mount-path> | delete <id> [--force]
+openlist cancel2fa <username>
+```
+
+它直连数据库（`DbInitializer` + `OpenListDbContext`），**不经过 DI 容器也不挂载存储驱动** ——
+运维只想改密码，却因某个需要网络可达的驱动挂载失败而命令失败是不可接受的。同理不复用
+`StorageService`（它依赖 `MountService`，构造即挂载全部驱动）。发布为 bundle 下的 `cli/`。
 
 ## Driver System
 

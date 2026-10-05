@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    独立的运维 CLI（对齐 Go 版 `openlist <cmd>`: admin / storage / cancel2fa）。
+
+    独立成项目而不是塞进 OpenList.Server 的理由：
+      1. 恢复通道必须不依赖 Web 层。内置管理员被刻意设为不可删除 / 不可改名 /
+         不可降权，它的密码就是唯一的恢复入口；CLI 直连数据库，即使Server 因端口占用、
+         存储驱动崩溃等原因起不来，改密依然可用。
+      2. Server 产物保持纯 Web 宿主，不会因为多一个入口而被远程唤起（见下方
+         RequireClIAttribute 的说明）。
+      3. 发布时能单独分发（运维机 / 容器里没有 GUI 也不需要 Web 栈）。
+
+    注意 Server 并未校验 argv —— 任何人执行 `OpenList.Server admin set xxx` 都会走同一条
+    逻辑。本项目提供的是「同一能力的独立入口」，两者共享 Infrastructure 的服务实现。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>openlist</AssemblyName>
+    <RootNamespace>OpenList.Cli</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- appsettings.json + OpenList__ 前缀环境变量，与 Server 的配置来源保持一致。 -->
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
+    <!-- 子命令 / 参数 / 帮助文本的解析，避免手写 argv 分支。 -->
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
+    <ProjectReference Include="..\OpenList.Infrastructure\OpenList.Infrastructure.csproj" />
+    <ProjectReference Include="..\OpenList.Migrations.Sqlite\OpenList.Migrations.Sqlite.csproj" />
+    <ProjectReference Include="..\OpenList.Migrations.Postgres\OpenList.Migrations.Postgres.csproj" />
+  </ItemGroup>
+</Project>

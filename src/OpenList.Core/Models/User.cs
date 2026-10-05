@@ -34,6 +34,9 @@ public sealed class User
     /// <summary>是否为管理员角色。</summary>
     public bool IsAdmin() => Role == UserRole.Admin;
 
+    /// <summary>是否为受保护的内置管理员（不可删除、改名、降权、禁用）。</summary>
+    public bool IsProtectedAdmin() => IsBuiltIn && Role == UserRole.Admin;
+
     /// <summary>是否可查看隐藏文件（权限位 0）。</summary>
     public bool CanSeeHides() => (Permission & 1) == 1;
 
@@ -86,6 +89,12 @@ public sealed class User
     /// <summary>是否允许 LDAP 登录。</summary>
     [JsonPropertyName("allow_ldap")]
     public bool AllowLdap { get; set; }
+    /// <summary>
+    /// 是否为内置管理员账号（由首次建库时自动创建）。
+    /// 该账号不可被删除、改名或降权，避免系统失去唯一的内置管理入口。
+    /// </summary>
+    [JsonPropertyName("is_built_in")]
+    public bool IsBuiltIn { get; set; }
     /// <summary>创建时间。</summary>
     public DateTimeOffset CreatedAt { get; set; }
     /// <summary>更新时间。</summary>
@@ -119,6 +128,9 @@ public sealed class UserPublic
     /// <summary>是否允许 LDAP 登录。</summary>
     [JsonPropertyName("allow_ldap")]
     public bool AllowLdap { get; set; }
+    /// <summary>是否为内置管理员账号（不可删除 / 改名 / 降权）。</summary>
+    [JsonPropertyName("is_built_in")]
+    public bool IsBuiltIn { get; set; }
     /// <summary>创建时间。</summary>
     public DateTimeOffset CreatedAt { get; set; }
     /// <summary>更新时间。</summary>

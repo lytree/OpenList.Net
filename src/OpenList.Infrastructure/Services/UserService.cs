@@ -31,14 +31,18 @@ public sealed class UserService : IUserService
     }
 
     /// <summary>
-    /// 配置文件中定义的超级管理员用户名。该用户每次启动时从配置同步，
-    /// 不能通过 API 被降权、删除或改名。
+    /// 内置管理员的用户名（仅用于展示与日志，不参与鉴权判定）。
+    /// 数据库里真正的保护依据是 <see cref="User.IsBuiltIn"/> 标记，因此改过用户名后
+    /// 保护依然生效。
     /// </summary>
     public string SuperAdminUsername => _config.AdminUsername;
 
-    /// <summary>判断给定用户是否为配置中定义的超级管理员。</summary>
-    public bool IsSuperAdmin(User u) =>
-        u.Role == UserRole.Admin && string.Equals(u.Username, _config.AdminUsername, StringComparison.Ordinal);
+    /// <summary>
+    /// 判断给定用户是否为受保护的内置管理员（不可删除 / 改名 / 降权 / 禁用）。
+    /// 依据数据库标记 <see cref="User.IsBuiltIn"/>，而非用户名比较 —— 用户通过管理界面
+    /// 或桌面端改过用户名后，保护不应随之失效。
+    /// </summary>
+    public static bool IsSuperAdmin(User u) => u.IsProtectedAdmin();
 
     /// <summary>
     /// 按 Id 获取用户。
@@ -108,8 +112,12 @@ public sealed class UserService : IUserService
     }
 
     /// <summary>
-    /// 分页列出所有用户的对外信息，按 Id 升序。
+    /// 列出所有用户的对外信息，按 Id 升序。
     /// </summary>
+    /// <remarks>
+    /// 投影必须与 <see cref="ToPublic"/> 保持同步：漏掉 <c>IsBuiltIn</c> 会让前端以为内置
+    /// 管理员可以删除，从而放出注定被服务端拒绝的操作。
+    /// </remarks>
     public async Task<Resp<List<UserPublic>>> ListAsync(CancellationToken ct = default)
     {
         var list = await _db.Users.AsNoTracking()
@@ -123,6 +131,9 @@ public sealed class UserService : IUserService
                 Permission = u.Permission,
                 BasePath = u.BasePath,
                 TwoFactorEnabled = u.TwoFactorEnabled,
+                SsoID = u.SsoID,
+                AllowLdap = u.AllowLdap,
+                IsBuiltIn = u.IsBuiltIn,
                 CreatedAt = u.CreatedAt,
                 UpdatedAt = u.UpdatedAt,
             })
@@ -154,6 +165,45 @@ public sealed class UserService : IUserService
             BasePath = req.BasePath,
             Disabled = req.Disabled,
             AllowLdap = req.AllowLdap,
+            // 通过 API 创建的账号一律不是内置账号 —— "内置"是系统级保证，不该由调用方指定。
+            IsBuiltIn = false,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        _db.Users.Add(u);
+        await _db.SaveChangesAsync(ct);
+        return Resp<UserPublic>.Ok(ToPublic(u));
+    }
+
+    /// <summary>
+    /// 创建系统的初始管理员（Web 安装向导用）。带 <see cref="User.IsBuiltIn"/> 标记 ——
+    /// 用户表非空说明系统已初始化，此时拒绝，避免向导被重复调用来追加管理员。
+    /// </summary>
+    public async Task<Resp<UserPublic>> CreateInitialAdminAsync(
+        string username, string password, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+            return Resp<UserPublic>.Fail("username and password required", RespCodes.BadRequest);
+
+        // 判据是"已有管理员"而非"用户表非空"：初始化会自动创建 guest，
+        // 用表判据会让安装向导在全新库上永远返回"已初始化"。
+        if (await _db.Users.AnyAsync(u => u.Role == UserRole.Admin, ct))
+            return Resp<UserPublic>.Fail("system has already been initialized", RespCodes.BadRequest);
+
+        if (await _db.Users.AnyAsync(u => u.Username == username, ct))
+            return Resp<UserPublic>.Fail("username already exists", RespCodes.Conflict);
+
+        var now = _time.GetUtcNow();
+        var u = new User
+        {
+            Username = username,
+            PasswordHash = HashPassword(password),
+            Role = UserRole.Admin,
+            // 与 DbInitializer 的自动初始化路径保持同一位值，避免两种建号方式权限不同。
+            Permission = 0x71FF,
+            BasePath = "/",
+            Disabled = false,
+            IsBuiltIn = true,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -170,16 +220,19 @@ public sealed class UserService : IUserService
         var u = await _db.Users.FindAsync([id], ct);
         if (u is null) return Resp.Fail("user not found", RespCodes.NotFound);
 
-        // 配置定义的超级管理员不能被降权、改名或禁用——其凭据归属配置管理。
+        // 内置管理员不能被降权、改名或禁用 —— 但<em>可以</em>改密码，
+        // 那是它被保留的唯一目的（改密入口见 ResetAdminPasswordAsync / 桌面端）。
         if (IsSuperAdmin(u))
         {
             if (req.Role.HasValue && req.Role.Value != UserRole.Admin)
-                return Resp.Fail("cannot demote super admin", RespCodes.Forbidden);
+                return Resp.Fail("cannot demote built-in admin", RespCodes.Forbidden);
             if (!string.IsNullOrWhiteSpace(req.Username) &&
-                !string.Equals(req.Username, _config.AdminUsername, StringComparison.Ordinal))
-                return Resp.Fail("cannot rename super admin", RespCodes.Forbidden);
+                !string.Equals(req.Username, u.Username, StringComparison.Ordinal))
+                return Resp.Fail("cannot rename built-in admin", RespCodes.Forbidden);
             if (req.Disabled.HasValue && req.Disabled.Value)
-                return Resp.Fail("cannot disable super admin", RespCodes.Forbidden);
+                return Resp.Fail("cannot disable built-in admin", RespCodes.Forbidden);
+            if (req.Permission.HasValue)
+                return Resp.Fail("cannot change built-in admin permissions", RespCodes.Forbidden);
         }
 
         if (!string.IsNullOrWhiteSpace(req.Username)) u.Username = req.Username;
@@ -197,17 +250,49 @@ public sealed class UserService : IUserService
     }
 
     /// <summary>
-    /// 删除用户（超级管理员与管理 API 调用外的管理员用户不可删除）。
+    /// 删除用户。仅内置管理员（<see cref="User.IsBuiltIn"/>）受保护不可删除 ——
+    /// 它是系统唯一保证存在的管理入口；其余账号（含后来手工创建的管理员）均可删除。
+    /// 删掉最后一个管理员仍允许（与 Go 版一致，Go 只保护内置账号不建模），但内置账号
+    /// 本身保证系统不会彻底失去管理入口。
     /// </summary>
     public async Task<Resp> DeleteAsync(long id, CancellationToken ct = default)
     {
         var u = await _db.Users.FindAsync([id], ct);
         if (u is null) return Resp.Fail("user not found", RespCodes.NotFound);
         if (IsSuperAdmin(u))
-            return Resp.Fail("cannot delete super admin", RespCodes.Forbidden);
-        if (u.Role == UserRole.Admin)
-            return Resp.Fail("cannot delete admin user", RespCodes.BadRequest);
+            return Resp.Fail("cannot delete built-in admin", RespCodes.Forbidden);
         _db.Users.Remove(u);
+        await _db.SaveChangesAsync(ct);
+        return Resp.Ok();
+    }
+
+    /// <summary>
+    /// 重置内置管理员的密码，供桌面端与恢复场景使用。
+    /// 与 <see cref="UpdateAsync"/> 的区别是：无需调用者具备该账号身份，也无需旧密码 ——
+    /// 因为内置管理员被刻意设计成不可删除、不可改名、不可降权，若同时要求旧密码，
+    /// 忘记密码就彻底失去管理入口。密码为空时直接拒绝，避免把账号锁死。
+    /// </summary>
+    /// <param name="newPassword">新密码明文；为空或空白则返回 400。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>成功返回 <see cref="RespCodes.Ok"/>；系统未初始化返回 404。</returns>
+    public async Task<Resp> ResetAdminPasswordAsync(string newPassword, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(newPassword))
+            return Resp.Fail("password required", RespCodes.BadRequest);
+
+        // 判据必须带上 Role == Admin：guest 同样带 IsBuiltIn 标记，只按标记查会命中游客
+        // 并改掉它的密码。尚未回填的旧库退回到"最早的管理员"。
+        var admin = await _db.Users.FirstOrDefaultAsync(u => u.IsBuiltIn && u.Role == UserRole.Admin, ct)
+                    ?? await _db.Users.Where(u => u.Role == UserRole.Admin)
+                                      .OrderBy(u => u.Id)
+                                      .FirstOrDefaultAsync(ct);
+        if (admin is null)
+            return Resp.Fail("admin not found", RespCodes.NotFound);
+
+        admin.PasswordHash = HashPassword(newPassword);
+        // 改密即解除锁定：忘记密码时管理员可能已被禁用。
+        admin.Disabled = false;
+        admin.UpdatedAt = _time.GetUtcNow();
         await _db.SaveChangesAsync(ct);
         return Resp.Ok();
     }
@@ -312,6 +397,8 @@ public sealed class UserService : IUserService
         TwoFactorEnabled = u.TwoFactorEnabled,
         SsoID = u.SsoID,
         AllowLdap = u.AllowLdap,
+        // 前端据此禁用"删除"按钮 —— 漏映射会让内置账号看起来可删。
+        IsBuiltIn = u.IsBuiltIn,
         CreatedAt = u.CreatedAt,
         UpdatedAt = u.UpdatedAt,
     };

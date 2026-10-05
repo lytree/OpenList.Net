@@ -88,6 +88,13 @@ public static class AdminEndpoints
         g.MapPost("/user/set_password", async (SetPasswordReq req, IUserService users) =>
             Results.Ok(await users.UpdateAsync(req.Id, new UpdateUserReq { Password = req.Password })));
 
+        // POST /admin/user/reset_admin_password — 重置<em>内置</em>管理员的密码。
+        // 与 set_password 的区别：不针对指定 id、不需要旧密码，只要调用者是 admin 即可。
+        // 内置 admin 被刻意设为不可删除 / 不可改名 / 不可降权，若改密还要求旧密码，
+        // 一旦忘记就彻底失去管理入口；此端点是桌面端与网页端的共同恢复通道。
+        g.MapPost("/user/reset_admin_password", async (ResetAdminPasswordReq req, IUserService users, HttpContext ctx) =>
+            Results.Ok(await users.ResetAdminPasswordAsync(req.Password, ctx.RequestAborted)));
+
         // POST /admin/user/del_cache?id= — clear a user's cached profile (no-op until
         // a cache layer is added, but the route is registered for frontend compat).
         g.MapPost("/user/del_cache", async (long id, IUserService users) =>
@@ -386,6 +393,8 @@ public static class AdminEndpoints
 
 /// <summary>设置用户密码的请求体（<c>POST /admin/user/set_password</c>）。</summary>
 public sealed class SetPasswordReq { public long Id { get; set; } public string Password { get; set; } = ""; }
+/// <summary>重置内置管理员密码的请求体（<c>POST /admin/user/reset_admin_password</c>）。</summary>
+public sealed class ResetAdminPasswordReq { public string Password { get; set; } = ""; }
 /// <summary>创建站内信的请求体（<c>POST /admin/message/create</c>）。</summary>
 public sealed class CreateMessageReq { public long UserId { get; set; } public string Title { get; set; } = ""; public string Content { get; set; } = ""; }
 /// <summary>广播消息请求体（<c>POST /admin/message/send</c>）；Message 兼容字符串或结构化对象。</summary>

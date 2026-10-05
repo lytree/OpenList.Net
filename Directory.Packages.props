@@ -13,6 +13,12 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
+    <!-- CLI (src/OpenList.Cli)：配置加载与数据库 provider，需与 Server 同版本 -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
+    <!-- 运维 CLI 的参数解析（admin / storage / cancel2fa 子命令） -->
+    <PackageVersion Include="System.CommandLine" Version="2.0.12" />
 
     <!-- Extensions -->
     <PackageVersion Include="Mapster" Version="10.0.12" />

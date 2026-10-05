@@ -16,7 +16,7 @@
 //   --configuration=Release    MSBuild configuration
 //   --output=artifacts         Artifact root
 //   --app=server|desktop       What to publish (default: server). desktop = Avalonia GUI
-//                              (bundle root) + single-file server under server/ + frontend/dist;
+//                              (bundle root) + server under server/ + frontend/dist;
 //                              requires --rid (GUI is always self-contained)
 //   --rid=<rid>                Target runtime; empty = framework-dependent (server only)
 //   --self-contained=true      Self-contained publish (only meaningful with --rid)
@@ -45,11 +45,12 @@ var semverArg     = Argument("semver", "");
 
 const string SolutionFile    = "OpenList.slnx";
 const string ServerProject   = "src/OpenList.Server/OpenList.Server.csproj";
+const string CliProject      = "src/OpenList.Cli/OpenList.Cli.csproj";
 const string DesktopProject  = "src/OpenList.Desktop/OpenList.Desktop.csproj";
 const string UpstreamRepo    = "OpenListTeam/OpenList-Frontend";
 
 // Desktop publish (Avalonia GUI managing the server as a child process) is always
-// self-contained single-file — there is no meaningful framework-dependent GUI bundle.
+// self-contained — there is no meaningful framework-dependent GUI bundle.
 bool IsDesktopApp() => app.Equals("desktop", StringComparison.OrdinalIgnoreCase);
 
 // When --frontend-dist is given, use it; otherwise stage the upstream fetch under <output>/frontend-dist.
@@ -301,6 +302,7 @@ void WriteReadme(string bundleRoot)
         "",
         "Layout:",
         "  app/            .NET server (publish output)",
+        "  cli/            Ops CLI (openlist) — password recovery, storage admin",
         "  frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)",
         "  run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server",
         "  README.txt       This file",
@@ -311,6 +313,13 @@ void WriteReadme(string bundleRoot)
         "",
         "The launcher exports OpenList__DistDir=../frontend/dist (relative to app/) so the",
         "server finds the SPA without editing appsettings.json. Default port: http://0.0.0.0:5244",
+        "",
+        "Lost the admin password? The built-in admin cannot be deleted, renamed or demoted,",
+        "so cli/ is the way back in — it talks to the database directly and works even when",
+        "the server is not running:",
+        "  cli/openlist admin info        show the admin username",
+        "  cli/openlist admin random      reset to a random password (printed to console)",
+        "  cli/openlist admin set PASS    set a specific password",
         "",
         "Data is stored under app/data/ by default. Configure via OpenList__ environment variables",
         "(e.g. OpenList__Database__Type=postgres).",
@@ -332,7 +341,8 @@ void WriteDesktopReadme(string bundleRoot)
         "",
         "Layout:",
         $"  {exeName,-14} Avalonia desktop control app (start this)",
-        $"  {coreName,-14} Self-contained single-file server (managed child process)",
+        $"  {coreName,-14} Self-contained server (managed child process)",
+        "  cli/            Ops CLI (openlist) — password recovery, storage admin",
         "  frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)",
         "  README.txt       This file",
         "",
@@ -451,17 +461,14 @@ Task("Frontend")
     FetchFrontend(ver, FeDistDir());
 });
 
-// Server publish: single-file self-contained when --rid is set, framework-dependent otherwise.
+// Server publish: self-contained when --rid is set, framework-dependent otherwise.
 void PublishServer()
 {
     var msbuild = new DotNetMSBuildSettings();
     if (!string.IsNullOrEmpty(rid))
     {
-        msbuild.WithProperty("PublishSingleFile", "true")
-               .WithProperty("SelfContained", "true")
-               .WithProperty("RuntimeIdentifier", rid)
-               .WithProperty("IncludeNativeLibrariesForSelfExtract", "true")
-               .WithProperty("EnableCompressionInSingleFile", "true");
+        msbuild.WithProperty("SelfContained", "true")
+               .WithProperty("RuntimeIdentifier", rid);
     }
     else
     {
@@ -483,7 +490,33 @@ void PublishServer()
     WriteVersionMetadata(publishDir);
 }
 
-// Desktop publish: Avalonia GUI, always self-contained single-file for the given RID.
+// CLI publish: the ops CLI (admin / storage / cancel2fa) ships next to the server so
+// password recovery works without the web layer. It must be self-contained for the same
+// reason the server is — a locked-out admin can't install a runtime first.
+void PublishCli()
+{
+    var msbuild = new DotNetMSBuildSettings();
+    if (!string.IsNullOrEmpty(rid))
+    {
+        msbuild.WithProperty("SelfContained", "true")
+               .WithProperty("RuntimeIdentifier", rid);
+    }
+    else
+    {
+        msbuild.WithProperty("SelfContained", "false")
+               .WithProperty("UseAppHost", "false");
+    }
+    WithVersionProps(msbuild);
+
+    DotNetPublish(CliProject, new DotNetPublishSettings
+    {
+        Configuration = configuration,
+        OutputDirectory = $"{output}/publish-cli",
+        MSBuildSettings = msbuild,
+    });
+}
+
+// Desktop publish: Avalonia GUI, always self-contained for the given RID.
 void PublishDesktop()
 {
     if (string.IsNullOrEmpty(rid))
@@ -491,11 +524,8 @@ void PublishDesktop()
             "Desktop publish requires --rid=<rid> — the Avalonia GUI is always self-contained.");
 
     var msbuild = new DotNetMSBuildSettings()
-        .WithProperty("PublishSingleFile", "true")
         .WithProperty("SelfContained", "true")
-        .WithProperty("RuntimeIdentifier", rid)
-        .WithProperty("IncludeNativeLibrariesForSelfExtract", "true")
-        .WithProperty("EnableCompressionInSingleFile", "true");
+        .WithProperty("RuntimeIdentifier", rid);
     WithVersionProps(msbuild);
 
     var publishDir = $"{output}/publish-desktop";
@@ -510,17 +540,26 @@ void PublishDesktop()
 }
 
 Task("Publish")
-    .Description("dotnet publish — server: framework-dependent unless --rid; desktop: requires --rid (self-contained single-file)")
+    .Description("dotnet publish — server: framework-dependent unless --rid; desktop: requires --rid (self-contained)")
     .IsDependentOn("Version")
     .Does(() =>
 {
     if (IsDesktopApp()) PublishDesktop(); else PublishServer();
 });
 
+// CLI ships with the server bundle. It is the recovery path for a locked-out admin, so it
+// must always be produced — including for framework-dependent builds (the same .NET runtime
+// the server already needs is present, so no extra runtime burden there).
+Task("PublishCli")
+    .Description("dotnet publish — ops CLI (admin / storage / cancel2fa)")
+    .IsDependentOn("Version")
+    .Does(() => PublishCli());
+
 Task("Bundle")
     .Description("Stage publish output + frontend dist + launchers + README into a release layout")
     .IsDependentOn("Frontend")
     .IsDependentOn("Publish")
+    .IsDependentOn("PublishCli")
     .Does(() =>
 {
     var name = BundleNameVersioned();
@@ -529,17 +568,19 @@ Task("Bundle")
 
     if (IsDesktopApp())
     {
-        // Desktop layout: GUI at the bundle root, single-file server under server/
+        // Desktop layout: GUI at the bundle root, server under server/
         // (OpenListCoreService.ResolveCorePath probes <base>/server/OpenList.Server[.exe]),
         // SPA under frontend/dist. The desktop app injects OpenList__DistDir at launch.
         if (string.IsNullOrEmpty(rid))
             throw new InvalidOperationException("Desktop bundle requires --rid=<rid>.");
         EnsureDirectoryExists(bundleRoot);
         EnsureDirectoryExists($"{bundleRoot}/server");
+        EnsureDirectoryExists($"{bundleRoot}/cli");
         EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
 
         CopyTree($"{output}/publish-desktop", bundleRoot);
         CopyTree($"{output}/publish", $"{bundleRoot}/server");
+        CopyTree($"{output}/publish-cli", $"{bundleRoot}/cli");
         CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
 
         WriteDesktopReadme(bundleRoot);
@@ -547,9 +588,11 @@ Task("Bundle")
     else
     {
         EnsureDirectoryExists($"{bundleRoot}/app");
+        EnsureDirectoryExists($"{bundleRoot}/cli");
         EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
 
         CopyTree($"{output}/publish", $"{bundleRoot}/app");
+        CopyTree($"{output}/publish-cli", $"{bundleRoot}/cli");
         CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
 
         WriteRunScripts(bundleRoot);

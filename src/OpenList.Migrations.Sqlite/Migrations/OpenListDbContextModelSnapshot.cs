@@ -15,7 +15,7 @@ namespace OpenList.Migrations.Sqlite.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
             modelBuilder.Entity("OpenList.Core.Models.Message", b =>
                 {
@@ -395,6 +395,10 @@ namespace OpenList.Migrations.Sqlite.Migrations
 
                     b.Property<bool>("Disabled")
                         .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsBuiltIn")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("is_built_in");
 
                     b.Property<string>("Password")
                         .IsRequired()

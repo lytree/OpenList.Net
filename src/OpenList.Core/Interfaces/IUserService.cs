@@ -27,10 +27,30 @@ public interface IUserService
     Task<Resp<List<UserPublic>>> ListAsync(CancellationToken ct = default);
     /// <summary>创建新用户。</summary>
     Task<Resp<UserPublic>> CreateAsync(CreateUserReq req, CancellationToken ct = default);
+    /// <summary>
+    /// 创建系统的<em>初始</em>管理员，仅供 Web 安装向导
+    /// <c>POST /api/public/init/setup</c> 在系统未初始化时调用。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="CreateAsync"/> 的区别是本方法会把账号标记为
+    /// <see cref="User.IsBuiltIn"/>，使其此后不可被删除 / 改名 / 降权 —— 它是系统保证存在的
+    /// 唯一管理入口。刻意不把该标记做进 <see cref="CreateUserReq"/>：那样已登录的管理员就能
+    /// 把任意账号标成"内置"，而这个标记本应全局只有一份。
+    /// 已存在管理员时返回 400，对齐 Go <c>handles.InitSetup</c>。判据是"有 admin"而非
+    /// "用户表非空" —— 初始化会自动创建 guest，用表判据会让向导在全新库上永远被拒。
+    /// </remarks>
+    Task<Resp<UserPublic>> CreateInitialAdminAsync(string username, string password, CancellationToken ct = default);
     /// <summary>更新指定用户。</summary>
     Task<Resp> UpdateAsync(long id, UpdateUserReq req, CancellationToken ct = default);
     /// <summary>删除指定用户。</summary>
     Task<Resp> DeleteAsync(long id, CancellationToken ct = default);
+    /// <summary>
+    /// 重置内置管理员的密码。此操作<em>不需要</em>当前登录用户是自己，也不需要旧密码 ——
+    /// 它是运维/桌面端的恢复入口：内置管理员本身不可删除、不可改名，一旦忘记密码
+    /// 只能靠这个接口（或管理界面）重新取得控制权。
+    /// 用户表为空（系统尚未初始化）时返回 <see cref="RespCodes.NotFound"/>。
+    /// </summary>
+    Task<Resp> ResetAdminPasswordAsync(string newPassword, CancellationToken ct = default);
     /// <summary>取消指定用户的两步验证。</summary>
     Task<Resp> Cancel2FaAsync(long id, CancellationToken ct = default);
     /// <summary>为指定用户设置两步验证密钥。</summary>

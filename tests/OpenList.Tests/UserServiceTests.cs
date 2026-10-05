@@ -78,7 +78,7 @@ public class UserServiceTests
     }
 
     [Test]
-    public async Task DeleteAsync_Refuses_Admin()
+    public async Task DeleteAsync_Allows_Non_BuiltIn_Admin()
     {
         await using var ctx = BuildContext();
         var svc = NewUserService(ctx);
@@ -88,28 +88,32 @@ public class UserServiceTests
             Password = "pw",
             Role = UserRole.Admin,
         });
+        // 保护范围收窄为「内置admin」：只保护系统唯一的管理入口，
+        // 后来手工创建的管理员照常可删（见 BuiltInAdminTests 覆盖标记位语义）。
         var r = await svc.DeleteAsync(created.Data!.Id);
-        await Assert.That(r.Code).IsEqualTo(400);
+        await Assert.That(r.Code).IsEqualTo(200);
     }
 
     [Test]
-    public async Task SuperAdmin_Cannot_Be_Demoted_Deleted_Or_Renamed()
+    public async Task BuiltInAdmin_Cannot_Be_Demoted_Deleted_Or_Renamed()
     {
         await using var ctx = BuildContext();
-        // Config with a custom super-admin username.
         var config = new AppConfiguration { AdminUsername = "root", AdminPassword = "rootpw" };
         var svc = new UserService(ctx, config);
 
-        // Seed the super admin directly (DbInitializer would normally do this).
+        // 内置管理员由 IsBuiltIn 标记识别（不再依赖与配置用户名比对）。
         var created = await svc.CreateAsync(new CreateUserReq
         {
             Username = "root",
             Password = "rootpw",
             Role = UserRole.Admin,
         });
+        var user = ctx.Users.First(u => u.Id == created.Data!.Id);
+        user.IsBuiltIn = true;
+        await ctx.SaveChangesAsync();
 
         // Demotion is forbidden.
-        var demote = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Role = UserRole.General });
+        var demote = await svc.UpdateAsync(created.Data.Id, new UpdateUserReq { Role = UserRole.General });
         await Assert.That(demote.Code).IsEqualTo(403);
 
         // Rename is forbidden.
