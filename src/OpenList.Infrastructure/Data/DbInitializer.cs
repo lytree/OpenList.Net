@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using OpenList.Core.Configuration;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
@@ -23,9 +24,13 @@ public static class DbInitializer
     /// 管理员初始密码，免去本地每次都走安装向导。非开发模式且未配置
     /// <see cref="AppConfiguration.AdminPassword"/> 时不创建管理员。</param>
     /// <param name="ct">取消令牌（可选）。</param>
+    /// <param name="logger">日志器（可选）。初始密码等启动凭据写到这里，
+    /// 由调用方注入已配置好的 Serilog，从而落进日志文件；为 null 时退化为
+    /// <see cref="Console"/> 输出（测试与库调用场景）。</param>
     /// <exception cref="Exception">任意数据库操作失败时抛出（由调用方决定是否放行）。</exception>
     public static async Task InitializeAsync(
-        OpenListDbContext db, AppConfiguration config, bool devMode = false, CancellationToken ct = default)
+        OpenListDbContext db, AppConfiguration config, bool devMode = false, CancellationToken ct = default,
+        ILogger? logger = null)
     {
         var isPostgres = IsPostgres(config.Database.Type);
 
@@ -72,7 +77,7 @@ public static class DbInitializer
 
         // Seed on BOTH paths — previously the MigrateAsync path skipped
         // SeedDefaultSettingsAsync, leaving fresh databases without defaults.
-        await SeedAdminAsync(db, config, devMode, ct);
+        await SeedAdminAsync(db, config, devMode, ct, logger);
         await SeedDefaultSettingsAsync(db, ct);
     }
 
@@ -370,8 +375,9 @@ public static class DbInitializer
     /// <param name="devMode">开发模式（对应 Go 的 <c>--dev</c>）：用 "admin" 作为初始密码，
     /// 免去本地每次都要走一遍安装向导。</param>
     /// <param name="ct">取消令牌。</param>
+    /// <param name="logger">日志器（可选）；为 null 时凭据只打到控制台。</param>
     private static async Task SeedAdminAsync(
-        OpenListDbContext db, AppConfiguration config, bool devMode, CancellationToken ct)
+        OpenListDbContext db, AppConfiguration config, bool devMode, CancellationToken ct, ILogger? logger = null)
     {
         // 管理员：不存在才考虑创建。注意用 Role 判据而非"表为空"—— 游客会在同一次
         // 初始化里被创建，用表判据会让管理员永远建不出来。
@@ -386,7 +392,7 @@ public static class DbInitializer
 
             if (password is null)
             {
-                Console.WriteLine(
+                WriteCredential(logger, LogLevel.Warning,
                     "No admin account created: no initial password configured. " +
                     "Open the web UI to finish setup (POST /api/public/init/setup), " +
                     "or set AdminPassword (env: OpenList__AdminPassword) before the first start.");
@@ -411,8 +417,9 @@ public static class DbInitializer
                     UpdatedAt = now,
                 });
 
-                // 对齐 Go 版：凭据只打到控制台，不写日志文件（避免明文密码落盘到日志）。
-                Console.WriteLine(
+                // 初始密码是这套凭据的唯一一次明文出现（库里只存哈希），必须让用户拿得到：
+                // 走日志器，桌面端 GUI 场景下 stdout 不可见，只有日志文件/日志页能读到。
+                WriteCredential(logger, LogLevel.Information,
                     $"Successfully created the built-in admin user \"{username}\" with the initial password: {password}");
             }
         }
@@ -438,6 +445,23 @@ public static class DbInitializer
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// 输出启动凭据类消息。注入了 <see cref="ILogger"/> 就走日志（因而落进日志文件与
+    /// 桌面端日志页），否则退回控制台 —— 库/测试直接调用时没有日志基础设施。
+    /// </summary>
+    /// <param name="logger">调用方注入的日志器，可为 null。</param>
+    /// <param name="level">日志级别。</param>
+    /// <param name="message">消息文本。</param>
+    private static void WriteCredential(ILogger? logger, LogLevel level, string message)
+    {
+        if (logger is null)
+        {
+            Console.WriteLine(message);
+            return;
+        }
+        logger.Log(level, "{CredentialMessage}", message);
     }
 
     /// <summary>

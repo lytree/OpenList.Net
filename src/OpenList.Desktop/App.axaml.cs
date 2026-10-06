@@ -24,6 +24,9 @@ public partial class App : Application
     /// <summary>托盘「退出」置位：跳过驻留托盘，真正结束程序。</summary>
     public static bool ForceExit { get; set; }
 
+    /// <summary>退出清理是否已完成（两段式关闭的第二段靠它放行）。</summary>
+    private bool _shutdownCleanupDone;
+
     private TrayIcons? _trayIcons;
 
     public override void Initialize()
@@ -83,12 +86,16 @@ public partial class App : Application
             else
                 window.Show();
 
-            // 退出时收尾：停挂载、杀核心子进程，避免孤儿进程
-            desktop.ShutdownRequested += (_, _) =>
-            {
-                _ = vm.OnClosingAsync();
-                core.Dispose();
-            };
+            // 退出时收尾：停挂载、杀核心子进程，避免孤儿进程。
+            //
+            // ShutdownRequested 是同步事件，不能在里面 await —— 原来的 `_ = vm.OnClosingAsync()`
+            // 是火并扔：进程可能在挂载还没卸完、核心还没被杀时就消失了。这里改成
+            // 「先 Cancel 掉这次关闭 → 后台 await 收尾 → 再次 Shutdown 真正退出」两段式。
+            desktop.ShutdownRequested += OnShutdownRequested;
+
+            // 兜底：未经 Avalonia 关闭流程就退出（Environment.Exit / 未捕获异常）时，
+            // ShutdownRequested 可能不触发，这里同步把核心子进程带走。
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => core.Dispose();
 
             // 自动拉起核心（对标上游"开机自启核心"）；通知已接线，启动结果会提示到浮层
             if (settingsStore.AutoStartCore)
@@ -96,6 +103,38 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// 退出收尾的两段式关闭：第一次进来 Cancel 并异步清理，清理完再真正 Shutdown。
+    /// <see cref="_shutdownCleanupDone"/> 保证第二次进来时不再 Cancel。
+    /// </summary>
+    private async void OnShutdownRequested(object? sender, ShutdownRequestedEventArgs e)
+    {
+        if (_shutdownCleanupDone) return;
+        _shutdownCleanupDone = true;
+        e.Cancel = true;
+
+        try
+        {
+            var vm = Services.GetService<MainWindowViewModel>();
+            if (vm is not null) await vm.OnClosingAsync();
+
+            var core = Services.GetService<OpenListCoreService>();
+            if (core is not null)
+            {
+                // 等待核心子进程真正退出，避免留下占着端口的孤儿进程
+                await core.ShutdownAsync();
+                core.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            // 收尾失败不能挡住退出
+            Services.GetService<LogEventBus>()?.Warn(LogSources.Desktop, $"shutdown: {ex.Message}");
+        }
+
+        (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
     }
 
     /// <summary>语言切换：托盘菜单文案是原生对象，得整体重建（必须在 UI 线程）。</summary>

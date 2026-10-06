@@ -276,6 +276,10 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+// 初始化阶段（建库/种子数据）发生在管道搭建之前，此时 DI 已可用但还没经过中间件，
+// 单独取一个 ILogger 供 DbInitializer 记录凭据类消息。
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("OpenList.Startup");
+
 // Phase 16: global error handling (outermost — swallows exceptions into a
 // Resp JSON, mirrors gin.Recovery) then request access log (mirrors
 // FilteredLogger). Both wrap static files + API + SPA fallback.
@@ -387,7 +391,10 @@ using (var scope = app.Services.CreateScope())
     // Development ⇒ 用 "admin" 作为内置管理员初始密码（对齐 Go 的 --dev），
     // 免去本地每次都走一遍 Web 安装向导。生产环境未配置 AdminPassword 时不建管理员，
     // 改由 /api/public/init/setup 在用户首次访问时创建。
-    await DbInitializer.InitializeAsync(db, appConfig, app.Environment.IsDevelopment());
+    // 注入 logger 是为了让初始密码落到日志文件：桌面端把核心当日志子进程拉起（GUI 无控制台），
+    // 只 Console.WriteLine 的话用户根本看不到自己第一次的登录密码。
+    await DbInitializer.InitializeAsync(
+        db, appConfig, app.Environment.IsDevelopment(), logger: startupLogger);
 
     // Load all enabled storages into the mount filesystem.
     var storageSvc = scope.ServiceProvider.GetRequiredService<IStorageService>();

@@ -495,20 +495,24 @@ public sealed class OpenListCoreService : IDisposable
         catch (Exception)
         {
             // 兜底：Windows 下用 taskkill 强杀进程树
-            try
-            {
-                if (OperatingSystem.IsWindows())
-                {
-                    using var k = Process.Start(new ProcessStartInfo("taskkill", $"/PID {p.Id} /T /F")
-                    {
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                    });
-                    k?.WaitForExit(5000);
-                }
-            }
-            catch { /* 已尽力 */ }
+            ForceKillByPid(p.Id);
         }
+    }
+
+    /// <summary>用 taskkill 强杀指定进程树（Windows 专用，失败即放弃）。</summary>
+    private static void ForceKillByPid(int pid)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            using var k = Process.Start(new ProcessStartInfo("taskkill", $"/PID {pid} /T /F")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            k?.WaitForExit(5000);
+        }
+        catch { /* 已尽力 */ }
     }
 
     /// <summary>探活并返回延迟（毫秒）；不可达返回 -1。</summary>
@@ -532,6 +536,23 @@ public sealed class OpenListCoreService : IDisposable
         }
     }
 
+    /// <summary>
+    /// 退出程序时的同步收尾（<see cref="IDisposable.Dispose"/>）。
+    ///
+    /// <para>
+    /// 这里<b>只发信号不等结果</b>：<see cref="IDisposable.Dispose"/> 是同步接口，
+    /// 而进程终止需要时间，调用方（Avalonia 的 ShutdownRequested）没有等待它的余地。
+    /// 真正会等待进程退出的路径是 <see cref="ShutdownAsync"/>，由 App 在
+    /// ShutdownRequested 里先 await 它、再 Dispose。
+    /// </para>
+    ///
+    /// <para>
+    /// <b>_gate 不在这里释放</b>：它可能正被一个尚未返回的 <see cref="StartAsync"/> /
+    /// <see cref="StopAsync"/> 持有（那些方法在 finally 里 Release），提前 Dispose 会让
+    /// 它们的 Release 抛 ObjectDisposedException。SemaphoreSlim 在未用到 AvailableWaitHandle
+    /// 时不持有非托管资源，交给 GC 即可。
+    /// </para>
+    /// </summary>
     public void Dispose()
     {
         // 桌面端退出时带走核心子进程，避免孤儿进程；并阻止任何排队中的自动重启
@@ -540,6 +561,46 @@ public sealed class OpenListCoreService : IDisposable
         _expectExit = true;
         if (_process is { HasExited: false } p) TryKill(p);
         _http.Dispose();
-        _gate.Dispose();
+    }
+
+    /// <summary>
+    /// 桌面端退出时的完整收尾：停掉核心子进程并<b>等待它真正退出</b>，避免留下孤儿进程。
+    ///
+    /// <para>
+    /// 与 <see cref="Dispose"/> 的区别是这里会等：<see cref="Process.Kill"/> 只是发出终止请求，
+    /// 进程真正消失还要一小段时间，程序在这段时间内退出就会留下占着端口的孤儿。
+    /// </para>
+    ///
+    /// <para>
+    /// 幂等：重复调用（含与 <see cref="Dispose"/> 先后各调一次）不会重复发信号；
+    /// 已排队/进行中的自动重启一律作废。
+    /// </para>
+    /// </summary>
+    /// <param name="timeout">等待退出的上限；超时则用 taskkill 强杀（默认 5 秒）。</param>
+    public async Task ShutdownAsync(TimeSpan? timeout = null)
+    {
+        _disposed = true;
+        _restartCancelled = true;
+        _expectExit = true;
+
+        var proc = _process;
+        if (proc is null || proc.HasExited) return;
+
+        _log.Info(LogSources.Core, Localizer.Get("dash.coreStopping"));
+        TryKill(proc);
+
+        // 等它真的消失；超时就上 taskkill（Kill 对已死但未回收的进程可能无效）。
+        var budget = timeout ?? TimeSpan.FromSeconds(5);
+        try
+        {
+            await proc.WaitForExitAsync(new CancellationTokenSource(budget).Token);
+        }
+        catch (OperationCanceledException)
+        {
+            ForceKillByPid(proc.Id);
+            try { await proc.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(3)).Token); }
+            catch { /* 已尽力，交给 Dispose 兜底 */ }
+        }
+        catch { /* 已尽力 */ }
     }
 }

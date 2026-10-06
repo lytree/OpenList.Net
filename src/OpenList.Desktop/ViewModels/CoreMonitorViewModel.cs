@@ -24,7 +24,6 @@ public partial class CoreMonitorViewModel : ViewModelBase
 
     private TimeSpan _lastCpuTime;
     private DateTime _lastSample;
-    private int _tick;
 
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private string _statusText = Localizer.Get("status.stopped");
@@ -42,7 +41,7 @@ public partial class CoreMonitorViewModel : ViewModelBase
     /// <summary>内存曲线（视图监听 PropertyChanged 重绘）。</summary>
     public IReadOnlyList<MetricPoint> MemPoints => _mem;
 
-    public CoreMonitorViewModel(OpenListCoreService core)
+    public CoreMonitorViewModel(OpenListCoreService core, AppSettings settings)
     {
         _core = core;
         _isRunning = core.Status == CoreStatus.Running;
@@ -55,9 +54,25 @@ public partial class CoreMonitorViewModel : ViewModelBase
             if (!IsRunning) ResetSeries();
         });
 
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        // 采样节奏跟随心跳间隔设置（默认 10 秒）。此前是 1 秒定时 + %3 跳拍 = 3 秒一次，
+        // 对"看趋势"这种用途过密，且每次都要 Refresh 进程对象、打一次 /ping。
+        _timer = new DispatcherTimer { Interval = settings.HeartbeatInterval };
         _timer.Tick += async (_, _) => await TickAsync();
         _timer.Start();
+
+        // 设置页改心跳间隔后立即生效，不必重启桌面端
+        settings.HeartbeatIntervalChanged += () => _timer.Interval = settings.HeartbeatInterval;
+    }
+
+    /// <summary>
+    /// 页面可见性开关：监控页不在前台时停止采样。
+    /// 由 <see cref="MainWindowViewModel"/> 在切换导航页时驱动。
+    /// </summary>
+    /// <param name="visible">监控页是否处于前台。</param>
+    public void SetVisible(bool visible)
+    {
+        if (visible) _timer.Start();
+        else _timer.Stop();
     }
 
     private static string Describe(CoreStatus s) =>
@@ -77,7 +92,6 @@ public partial class CoreMonitorViewModel : ViewModelBase
     private async Task TickAsync()
     {
         if (_core.Status != CoreStatus.Running) return;
-        _tick++;
 
         var proc = _core.CurrentProcess;
         if (proc is null) return;
@@ -113,11 +127,8 @@ public partial class CoreMonitorViewModel : ViewModelBase
         _lastCpuTime = cpuTime;
         _lastSample = now;
 
-        if (_tick % 3 == 0)
-        {
-            var ms = await _core.PingLatencyAsync();
-            LatencyText = ms >= 0 ? $"{ms} ms" : Localizer.Get("status.unreachable");
-        }
+        var ms = await _core.PingLatencyAsync();
+        LatencyText = ms >= 0 ? $"{ms} ms" : Localizer.Get("status.unreachable");
     }
 
     private static void AddPoint(List<MetricPoint> list, double value)

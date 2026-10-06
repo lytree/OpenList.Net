@@ -129,18 +129,27 @@
                     <TextBox Text="{Binding HttpPort}" />
                   </StackPanel>
                 </Border>
-                <Border Classes="field">
-                  <StackPanel Spacing="8">
-                    <TextBlock Text="{DynamicResource L.set.coreExePath}" FontSize="12" FontWeight="SemiBold"
-                               Foreground="{DynamicResource Brush.TextMain}" />
-                    <TextBox Text="{Binding CoreExePath}" PlaceholderText="{DynamicResource L.set.coreExePlaceholder}" />
-                    <Button Classes="btn btn-secondary" HorizontalAlignment="Left" Padding="8,4"
-                            Command="{Binding BrowseCoreCommand}">
-                      <Path Classes="icon secondary" Data="{StaticResource I.Folder}" Width="14" Height="14" />
-                    </Button>
-                  </StackPanel>
-                </Border>
+            <Border Classes="field">
+              <StackPanel Spacing="8">
+                <TextBlock Text="{DynamicResource L.set.heartbeatInterval}" FontSize="12" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Brush.TextMain}" />
+                <TextBox Text="{Binding HeartbeatIntervalSeconds}" />
+                <TextBlock Text="{DynamicResource L.set.heartbeatIntervalHint}" FontSize="11"
+                           Foreground="{DynamicResource Brush.TextMain}" TextWrapping="Wrap" Opacity="0.7" />
               </StackPanel>
+            </Border>
+            <Border Classes="field">
+              <StackPanel Spacing="8">
+                <TextBlock Text="{DynamicResource L.set.coreExePath}" FontSize="12" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Brush.TextMain}" />
+                <TextBox Text="{Binding CoreExePath}" PlaceholderText="{DynamicResource L.set.coreExePlaceholder}" />
+                <Button Classes="btn btn-secondary" HorizontalAlignment="Left" Padding="8,4"
+                        Command="{Binding BrowseCoreCommand}">
+                  <Path Classes="icon secondary" Data="{StaticResource I.Folder}" Width="14" Height="14" />
+                </Button>
+              </StackPanel>
+            </Border>
+          </StackPanel>
 
               <StackPanel Grid.Column="1" Spacing="14">
                 <Border Classes="field">

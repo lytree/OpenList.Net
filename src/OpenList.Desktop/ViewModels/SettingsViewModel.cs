@@ -18,6 +18,7 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _coreExePath = "";
     [ObservableProperty] private string _dataDir = "";
     [ObservableProperty] private int _httpPort = 5244;
+    [ObservableProperty] private int _heartbeatIntervalSeconds = AppSettings.MinHeartbeatSeconds;
     [ObservableProperty] private bool _autoStartCore = true;
     [ObservableProperty] private bool _autoRestartCore = true;
     [ObservableProperty] private bool _startMinimized;
@@ -67,6 +68,8 @@ public partial class SettingsViewModel : ViewModelBase
         _coreExePath = settings.CoreExePath;
         _dataDir = settings.DataDir;
         _httpPort = settings.HttpPort;
+        _heartbeatIntervalSeconds = Math.Clamp(settings.HeartbeatIntervalSeconds,
+            AppSettings.MinHeartbeatSeconds, AppSettings.MaxHeartbeatSeconds);
         _autoStartCore = settings.AutoStartCore;
         _autoRestartCore = settings.AutoRestartCore;
         _startMinimized = settings.StartMinimized;
@@ -136,6 +139,8 @@ public partial class SettingsViewModel : ViewModelBase
         _settings.CoreExePath = CoreExePath.Trim();
         _settings.DataDir = DataDir.Trim();
         _settings.HttpPort = HttpPort > 0 ? HttpPort : 5244;
+        _settings.HeartbeatIntervalSeconds = Math.Clamp(HeartbeatIntervalSeconds,
+            AppSettings.MinHeartbeatSeconds, AppSettings.MaxHeartbeatSeconds);
         _settings.AutoStartCore = AutoStartCore;
         _settings.AutoRestartCore = AutoRestartCore;
         _settings.StartMinimized = StartMinimized;
@@ -172,6 +177,8 @@ public partial class SettingsViewModel : ViewModelBase
         CoreExePath = _settings.CoreExePath;
         DataDir = _settings.DataDir;
         HttpPort = _settings.HttpPort;
+        HeartbeatIntervalSeconds = Math.Clamp(_settings.HeartbeatIntervalSeconds,
+            AppSettings.MinHeartbeatSeconds, AppSettings.MaxHeartbeatSeconds);
         AutoStartCore = _settings.AutoStartCore;
         AutoRestartCore = _settings.AutoRestartCore;
         StartMinimized = _settings.StartMinimized;

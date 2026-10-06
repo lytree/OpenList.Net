@@ -80,6 +80,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
         _isDarkTheme = settingsStore.Theme == "dark";
 
+        // 构造函数里是直接给 _selectedPage 赋值（绕过属性 setter），所以这里手动触发一次
+        ApplySamplingVisibility();
+
         // 页面跳转桥（核心管理卡等 VM 通过 UiServices.Navigate 切页）
         UiServices.Navigate = key =>
         {
@@ -115,6 +118,21 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     partial void OnIsDarkThemeChanged(bool value) => OnPropertyChanged(nameof(ThemeToggleText));
+
+    /// <summary>
+    /// 切页时同步两个采样页的可见性。采样只为画曲线，页面不在前台时继续跑就是
+    /// 白白地周期性唤醒 HttpClient 与核心进程线程 —— 这也是"降低心跳"的一部分：
+    /// 光拉长间隔不够，用户长时间停在日志页时更该彻底停掉。
+    /// </summary>
+    partial void OnSelectedPageChanged(NavItem? value) => ApplySamplingVisibility();
+
+    private void ApplySamplingVisibility()
+    {
+        // Pages[0] 是主页，Dashboard 与它内部的监控卡片共用这一档
+        var homeVisible = SelectedPage is null || ReferenceEquals(SelectedPage, Pages[0]);
+        Dashboard.SetVisible(homeVisible);
+        Dashboard.Monitor.SetVisible(homeVisible);
+    }
 
     /// <summary>上游 ThemeSwitcher：浅色 ↔ 深色循环切换。</summary>
     [RelayCommand]

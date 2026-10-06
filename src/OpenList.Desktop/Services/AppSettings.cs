@@ -28,6 +28,13 @@ public sealed class AppSettings
     /// <summary>核心进程的工作目录（数据库/日志都在这里生成）；留空则用 exe 同级 data 目录。</summary>
     public string DataDir { get; set; } = "";
     public int HttpPort { get; set; } = 5244;
+    /// <summary>
+    /// 心跳采样间隔（秒）。桌面端用它决定 <c>GET /ping</c> 的探测频率：
+    /// 主页心跳图与监控页延迟值都按这个节奏更新。间隔越短曲线越密、也越频繁地
+    /// 唤醒 HttpClient 与服务端线程；默认 10 秒对「看个趋势」已经够用。
+    /// 非法值由 <see cref="AppSettings"/> 载入时夹取到 3–300 秒。
+    /// </summary>
+    public int HeartbeatIntervalSeconds { get; set; } = 10;
     /// <summary>桌面端启动时自动拉起核心。</summary>
     public bool AutoStartCore { get; set; } = true;
     /// <summary>核心子进程意外退出（非用户主动停止）时自动重启，带指数退避与次数上限。</summary>
@@ -68,6 +75,12 @@ public sealed class AppSettings
 
     private static string FilePath => Path.Combine(DirPath, "settings.json");
 
+    /// <summary>
+    /// 心跳间隔在 <see cref="Save"/> 后发生变化时触发。采样计时器订阅它，
+    /// 这样在设置页改完立即生效，不必重启桌面端。
+    /// </summary>
+    public event Action? HeartbeatIntervalChanged;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = true,
@@ -81,7 +94,7 @@ public sealed class AppSettings
             if (File.Exists(FilePath))
             {
                 var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), JsonOpts);
-                if (s is not null) return s;
+                if (s is not null) return Normalize(s);
             }
         }
         catch
@@ -91,10 +104,39 @@ public sealed class AppSettings
         return new AppSettings();
     }
 
+    /// <summary>
+    /// 把越界/非法的数值夹回可用区间。放在载入与保存两处兜底，这样即便用户手改了
+    /// settings.json 也不会让心跳间隔变成 0（= 每帧 ping）或负数（Timer 直接抛）。
+    /// </summary>
+    private static AppSettings Normalize(AppSettings s)
+    {
+        if (s.HeartbeatIntervalSeconds is < MinHeartbeatSeconds or > MaxHeartbeatSeconds)
+            s.HeartbeatIntervalSeconds = new AppSettings().HeartbeatIntervalSeconds;
+        if (s.HttpPort is <= 0 or > 65535) s.HttpPort = 5244;
+        return s;
+    }
+
+    /// <summary>心跳间隔下限（秒）：再密也只是徒增开销，没有实际意义。</summary>
+    public const int MinHeartbeatSeconds = 3;
+
+    /// <summary>心跳间隔上限（秒）：超过这个量级不如让用户重启一次核心。</summary>
+    public const int MaxHeartbeatSeconds = 300;
+
+    /// <summary>取夹取后的心跳间隔，供计时器直接使用。</summary>
+    public TimeSpan HeartbeatInterval =>
+        TimeSpan.FromSeconds(Math.Clamp(HeartbeatIntervalSeconds, MinHeartbeatSeconds, MaxHeartbeatSeconds));
+
     public void Save()
     {
+        var before = HeartbeatIntervalSeconds;
+        Normalize(this);
         Directory.CreateDirectory(DirPath);
         File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOpts));
+        if (HeartbeatIntervalSeconds != before)
+        {
+            try { HeartbeatIntervalChanged?.Invoke(); }
+            catch { /* 订阅方异常不影响保存 */ }
+        }
     }
 
     public static string SettingsFilePath => FilePath;

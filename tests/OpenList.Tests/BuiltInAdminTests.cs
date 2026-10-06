@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
@@ -384,6 +385,43 @@ public class BuiltInAdminTests
         await Assert.That(UserService.IsSuperAdmin(renamed)).IsTrue();
     }
 
+    // ---------------- 初始密码的输出通道 ----------------
+
+    /// <summary>
+    /// 初始密码必须走日志器，不能只写控制台：桌面端把核心当日志子进程拉起（GUI 无控制台），
+    /// 只 Console.WriteLine 的话用户根本看不到自己第一次的登录密码。
+    /// </summary>
+    [Test]
+    public async Task InitializeAsync_Logs_Seed_Admin_Password_To_Logger()
+    {
+        await using var ctx = BuildContext();
+        var logger = new RecordingLogger();
+
+        await DbInitializer.InitializeAsync(
+            ctx, new AppConfiguration { AdminPassword = "seeded-pw-123" }, logger: logger);
+
+        // 建了管理员，且密码出现在日志里
+        await Assert.That(await ctx.Users.AnyAsync(u => u.Role == UserRole.Admin)).IsTrue();
+        await Assert.That(logger.Messages.Any(m => m.Contains("seeded-pw-123"))).IsTrue();
+        await Assert.That(logger.Entries.Any(e => e.Level == LogLevel.Information)).IsTrue();
+    }
+
+    /// <summary>
+    /// 未配置初始密码时同样要把"没建号、去走安装向导"这条写进日志 ——
+    /// 否则用户只看到"登录失败"，不知道下一步该做什么。
+    /// </summary>
+    [Test]
+    public async Task InitializeAsync_Logs_Hint_When_No_Password_Configured()
+    {
+        await using var ctx = BuildContext();
+        var logger = new RecordingLogger();
+
+        await DbInitializer.InitializeAsync(ctx, new AppConfiguration(), logger: logger);
+
+        await Assert.That(logger.Messages.Any(m => m.Contains("init/setup"))).IsTrue();
+        await Assert.That(logger.Entries.Any(e => e.Level == LogLevel.Warning)).IsTrue();
+    }
+
     private static OpenListDbContext BuildContext()
     {
         var conn = new SqliteConnection("DataSource=:memory:");
@@ -394,6 +432,37 @@ public class BuiltInAdminTests
         var ctx = new OpenListDbContext(opts, new DatabaseConfig());
         ctx.Database.EnsureCreated();
         return ctx;
+    }
+
+    /// <summary>
+    /// 收集日志输出的最小 ILogger 实现。DbInitializer 的凭据消息用
+    /// <c>{CredentialMessage}</c> 结构化占位符 + 原始文本作为参数传入，
+    /// 这里同时把两者都收下来，断言时只看渲染后的文本。
+    /// </summary>
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IEnumerable<string> Messages => Entries.Select(e => e.Message);
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            var text = formatter(state, exception);
+            // 结构化占位符已被 formatter 渲染进 text，这里再兜一层防止只拿到模板。
+            if (state is IEnumerable<KeyValuePair<string, object?>> pairs)
+            {
+                var extra = string.Join(" ", pairs
+                    .Where(p => p.Key == "CredentialMessage")
+                    .Select(p => p.Value?.ToString() ?? ""));
+                if (extra.Length > 0 && !text.Contains(extra)) text += " " + extra;
+            }
+            Entries.Add((logLevel, text));
+        }
     }
 
     /// <summary>

@@ -31,7 +31,6 @@ public partial class DashboardViewModel : ViewModelBase
     private readonly UpdateChecker _updater;
     private readonly OpenListApiClient _api;
     private readonly DispatcherTimer _timer;
-    private int _tick;
     private readonly List<HeartbeatPoint> _points = [];
 
     /// <summary>rclone 版本原始值；为空表示不可用，显示时再按语言渲染。</summary>
@@ -100,12 +99,27 @@ public partial class DashboardViewModel : ViewModelBase
         _isRunning = core.Status == CoreStatus.Running;
         core.StatusChanged += OnCoreStatusChanged;
 
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _timer = new DispatcherTimer { Interval = settings.HeartbeatInterval };
         _timer.Tick += async (_, _) => await TickAsync();
         _timer.Start();
 
+        // 设置页改心跳间隔后立即生效，不必重启桌面端
+        settings.HeartbeatIntervalChanged += () => _timer.Interval = settings.HeartbeatInterval;
+
         _ = LoadVersionsAsync();
         FirewallEnabled = FirewallHelper.IsPortAllowed();
+    }
+
+    /// <summary>
+    /// 页面可见性开关。主页不在前台时停止心跳探测 —— 采样只为画曲线，用户看不到时
+    /// 每秒打一次 <c>/ping</c> 是纯开销（还会唤起服务端的连接与日志）。
+    /// 由 <see cref="MainWindowViewModel"/> 在切换导航页时驱动。
+    /// </summary>
+    /// <param name="visible">主页是否处于前台。</param>
+    public void SetVisible(bool visible)
+    {
+        if (visible) _timer.Start();
+        else _timer.Stop();
     }
 
     private void OnCoreStatusChanged(CoreStatus s)
@@ -134,7 +148,6 @@ public partial class DashboardViewModel : ViewModelBase
             ResponseTimeText = "--";
             return;
         }
-        if (++_tick % 3 != 0) return;
 
         var ms = await _core.PingLatencyAsync();
         var healthy = ms >= 0;
