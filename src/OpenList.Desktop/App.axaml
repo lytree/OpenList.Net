@@ -67,7 +67,6 @@
 
   <Application.Styles>
     <FluentTheme />
-    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
 
     <!-- ===== lucide 图标：stroke 线性风格 ===== -->
     <Style Selector="Path.icon">
@@ -227,14 +226,5 @@
       <Setter Property="FontSize" Value="13" />
     </Style>
 
-    <!-- ===== DataGrid 微调 ===== -->
-    <Style Selector="DataGrid">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="RowBackground" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="HeadersVisibility" Value="Column" />
-      <Setter Property="GridLinesVisibility" Value="Horizontal" />
-      <Setter Property="FontSize" Value="13" />
-    </Style>
-  </Application.Styles>
+    </Application.Styles>
 </Application>

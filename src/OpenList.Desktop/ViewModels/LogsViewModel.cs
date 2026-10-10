@@ -1,8 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Text;
+using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OpenList.Desktop.Controls;
 using OpenList.Desktop.Localization;
 using OpenList.Desktop.Services;
 
@@ -63,7 +66,8 @@ public partial class LogRowViewModel : ObservableObject
 /// <summary>日志页（上游 LogView 复刻）：工具条 + 级别/来源筛选 + 表格 + 导出 + 底部状态。</summary>
 public partial class LogsViewModel : ViewModelBase
 {
-    private const int MaxRows = 2000;
+    /// <summary>内存中最多保留的日志条数，超出后丢弃最旧的（环形裁剪）。</summary>
+    private const int MaxRows = 500;
     private readonly LogEventBus _bus;
 
     [ObservableProperty] private bool _autoScroll = true;
@@ -74,6 +78,33 @@ public partial class LogsViewModel : ViewModelBase
 
     public ObservableCollection<LogRowViewModel> Rows { get; } = [];
     public ObservableCollection<LogRowViewModel> Filtered { get; } = [];
+
+    /// <summary>
+    /// 表格列定义。由 <see cref="BuildColumns"/> 在视图构造后注入（单元格模板是 XAML 资源，
+    /// 只能在 Avalonia 起来后取）。列宽可拖拽、表头随语言切换刷新，细节见 <c>Controls/LogTable.cs</c>。
+    /// </summary>
+    public IReadOnlyList<LogColumn> TableColumns { get; private set; } = [];
+
+    /// <summary>
+    /// 用视图资源字典里的四个单元格模板组装列定义。
+    /// 表头键走 <c>L.log.*</c>，语言切换时 DynamicResource 自动刷新。
+    /// </summary>
+    public void BuildColumns(Avalonia.Controls.IResourceDictionary resources)
+    {
+        TableColumns =
+        [
+            new LogColumn("L.log.colTime", Tpl(resources, "LogCellTime"), 110),
+            // 级别是 pill，自身左右已有 Margin，这里不再叠加通用内边距
+            new LogColumn("L.log.colLevel", Tpl(resources, "LogCellLevel"), 90, CellPadding: new Avalonia.Thickness(6, 0, 6, 0)),
+            new LogColumn("L.log.colSource", Tpl(resources, "LogCellSource"), 100),
+            new LogColumn("L.log.colMessage", Tpl(resources, "LogCellMessage"), 0, Star: 7, Resizable: false),
+        ];
+        OnPropertyChanged(nameof(TableColumns));
+    }
+
+    private static IDataTemplate Tpl(Avalonia.Controls.IResourceDictionary resources, string key) =>
+        resources[key] as IDataTemplate
+        ?? new FuncDataTemplate<object>((o, _) => new TextBlock { Text = o?.ToString() ?? "" });
 
     /// <summary>工具条上的计数（"已显示 / 总数"）。</summary>
     public string StatsText => $"{Filtered.Count} / {Rows.Count}";

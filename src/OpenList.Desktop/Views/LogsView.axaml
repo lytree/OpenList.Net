@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OpenList.Desktop.ViewModels"
+             xmlns:controls="using:OpenList.Desktop.Controls"
              x:Class="OpenList.Desktop.Views.LogsView"
              x:DataType="vm:LogsViewModel"
              x:CompileBindings="False">
@@ -12,6 +13,26 @@
     <KeyBinding Gesture="Ctrl+E" Command="{Binding ExportAsyncCommand}" />
     <KeyBinding Gesture="Ctrl+Delete" Command="{Binding ClearCommand}" />
   </UserControl.KeyBindings>
+
+  <UserControl.Resources>
+    <!-- 四个单元格模板：列定义在 VM 里组装（要拿到这里的模板实例） -->
+    <DataTemplate x:Key="LogCellTime">
+      <TextBlock Text="{Binding Time}" TextTrimming="CharacterEllipsis" />
+    </DataTemplate>
+    <DataTemplate x:Key="LogCellLevel">
+      <Border CornerRadius="5" Padding="7,1" HorizontalAlignment="Left" VerticalAlignment="Center"
+              Background="{Binding LevelBackground}">
+        <TextBlock Text="{Binding LevelText}" FontSize="10" FontWeight="SemiBold"
+                   FontFamily="Segoe UI" Foreground="{Binding LevelForeground}" />
+      </Border>
+    </DataTemplate>
+    <DataTemplate x:Key="LogCellSource">
+      <TextBlock Text="{Binding Source}" TextTrimming="CharacterEllipsis" />
+    </DataTemplate>
+    <DataTemplate x:Key="LogCellMessage">
+      <TextBlock Text="{Binding Message}" TextTrimming="CharacterEllipsis" />
+    </DataTemplate>
+  </UserControl.Resources>
 
   <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="24,20" RowSpacing="12" MaxWidth="1200">
 
@@ -76,31 +97,13 @@
 
     <!-- ===== 日志表格 ===== -->
     <Border Classes="card" Grid.Row="2" Padding="4">
-      <DataGrid ItemsSource="{Binding Filtered}"
-                IsReadOnly="True"
-                CanUserResizeColumns="True"
-                CanUserSortColumns="False"
-                SelectionMode="Extended"
-                GridLinesVisibility="Horizontal"
-                HorizontalGridLinesBrush="{DynamicResource Brush.BorderSecondary}"
-                FontFamily="Consolas, Menlo, monospace" FontSize="12">
-        <DataGrid.Columns>
-          <DataGridTextColumn Header="{DynamicResource L.log.colTime}" Width="110" Binding="{Binding Time}" />
-          <DataGridTemplateColumn Header="{DynamicResource L.log.colLevel}" Width="90">
-            <DataGridTemplateColumn.CellTemplate>
-              <DataTemplate>
-                <Border CornerRadius="5" Padding="7,1" HorizontalAlignment="Left" Margin="6,2"
-                        VerticalAlignment="Center" Background="{Binding LevelBackground}">
-                  <TextBlock Text="{Binding LevelText}" FontSize="10" FontWeight="SemiBold"
-                             FontFamily="Segoe UI" Foreground="{Binding LevelForeground}" />
-                </Border>
-              </DataTemplate>
-            </DataGridTemplateColumn.CellTemplate>
-          </DataGridTemplateColumn>
-          <DataGridTextColumn Header="{DynamicResource L.log.colSource}" Width="100" Binding="{Binding Source}" />
-          <DataGridTextColumn Header="{DynamicResource L.log.colMessage}" Width="7*" Binding="{Binding Message}" />
-        </DataGrid.Columns>
-      </DataGrid>
+      <controls:LogTable x:Name="Table"
+                         Rows="{Binding Filtered}"
+                         Columns="{Binding TableColumns}"
+                         RowHeight="26"
+                         FollowTail="{Binding AutoScroll}"
+                         FontFamily="Consolas, Menlo, monospace"
+                         FontSize="12" />
     </Border>
 
     <!-- ===== 底部状态条 ===== -->
