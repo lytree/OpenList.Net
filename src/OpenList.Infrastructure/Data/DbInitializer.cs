@@ -563,6 +563,7 @@ public static class DbInitializer
         ("sso_login_enabled", "false", SettingValueType.Bool, SettingFlag.Public, 7, null),
         ("sso_login_platform", "Casdoor", SettingValueType.Select, SettingFlag.Public, 7, "Casdoor,Gitlab,Google,Microsoft,Discord,Twitter,Github"),
         ("sso_compatibility_mode", "false", SettingValueType.Bool, SettingFlag.Public, 7, null),
+        ("sso_postmessage_origin", "", SettingValueType.String, SettingFlag.Public, 7, null),
         ("sso_auto_register", "false", SettingValueType.Bool, SettingFlag.Public, 7, null),
         ("sso_default_dir", "/", SettingValueType.String, SettingFlag.Public, 7, null),
         ("sso_default_permission", "0", SettingValueType.Number, SettingFlag.Public, 7, null),

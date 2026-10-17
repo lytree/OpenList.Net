@@ -158,6 +158,18 @@ public readonly struct UPath : IEquatable<UPath>, IComparable<UPath>
         return parent._fullName == _fullName;
     }
 
+    /// <summary>
+    /// 判断 <paramref name="name"/> 是否为合法的单个文件名/目录名（不含路径分隔符，且非空、非 <c>.</c>、非 <c>..</c>）。
+    /// 镜像 Go <c>server/handles/fsmanage.go</c> 的 <c>checkRelativePath</c>：批量 move/copy/remove 的
+    /// <c>names</c> 只允许是纯名称，出现 <c>/</c>、<c>\</c> 等路径成分即视为越界尝试。
+    /// </summary>
+    public static bool IsValidName(string? name) =>
+        !string.IsNullOrEmpty(name)
+        && name != "."
+        && name != ".."
+        && !name.Contains('/')
+        && !name.Contains('\\');
+
     /// <summary>以子路径形式追加（<c>parent / child</c>）。</summary>
     public static UPath operator /(UPath path, string subPath) => Combine(path, subPath);
 

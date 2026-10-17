@@ -118,6 +118,50 @@ public class MoveCopyBatchTests
         await Assert.That(buf[0]).IsEqualTo((byte)'1');
     }
 
+    [Test]
+    public async Task MoveBatchAsync_Rejects_RelativePathNames()
+    {
+        // 镜像 Go checkRelativePath：names 只允许纯名称；含 "/" 或 "\" 的路径成分（含反斜杠穿越）
+        // 一律 403，否则 UPath 归一化后可越出 src_dir。
+        var (svc, _, mem) = Setup();
+        mem.CreateDirectory("/dest");
+        WriteFile(mem, "/secret.txt", "s"u8.ToArray());
+
+        foreach (var name in new[] { "../../secret.txt", @"..\..\secret.txt", "a/b.txt", ".", "..", "" })
+        {
+            var r = await svc.MoveBatchAsync(new MoveCopyReq
+            {
+                SrcDir = "/test",
+                DstDir = "/test/dest",
+                Names = [name],
+            }, MoveUser);
+            await Assert.That(r.Code).IsEqualTo(403);
+        }
+
+        // 兄弟文件未被移走。
+        await Assert.That(mem.FileExists("/secret.txt")).IsTrue();
+    }
+
+    [Test]
+    public async Task CopyBatchAsync_Rejects_RelativePathNames()
+    {
+        var (svc, _, mem) = Setup();
+        mem.CreateDirectory("/dest");
+        WriteFile(mem, "/secret.txt", "s"u8.ToArray());
+
+        foreach (var name in new[] { "../../secret.txt", @"..\..\secret.txt", "a/b.txt" })
+        {
+            var r = await svc.CopyBatchAsync(new MoveCopyReq
+            {
+                SrcDir = "/test",
+                DstDir = "/test/dest",
+                Names = [name],
+            }, MoveUser);
+            await Assert.That(r.Code).IsEqualTo(403);
+        }
+        await Assert.That(mem.FileExists("/secret.txt")).IsTrue();
+    }
+
     private static void WriteFile(MemoryFileSystem mem, string path, byte[] bytes)
     {
         using var s = mem.OpenFile(new UPath(path), FileMode.Create, FileAccess.Write);

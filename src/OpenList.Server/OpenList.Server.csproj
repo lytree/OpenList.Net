@@ -20,6 +20,9 @@
     <PackageReference Include="SSH.NET" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="OpenList.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
     <ProjectReference Include="..\OpenList.Infrastructure\OpenList.Infrastructure.csproj" />
     <ProjectReference Include="..\OpenList.Drivers\OpenList.Drivers.csproj" />

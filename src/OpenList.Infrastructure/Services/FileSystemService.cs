@@ -433,6 +433,10 @@ public sealed class FileSystemService : IFileSystemService
         for (int i = 0; i < req.Names.Count; i++)
         {
             var name = req.Names[i];
+            // 镜像 Go checkRelativePath：names 只允许纯名称，含路径成分（/ \ . ..）一律拒绝，
+            // 否则 UPath.Combine 归一化 "../" 后可越出 src_dir。
+            if (!UPath.IsValidName(name))
+                return Resp<FsManageResp>.Fail("using relative path is not allowed", RespCodes.Forbidden);
             var src = UPath.Combine(srcDir, name);
             if (!src.FullName.StartsWith(srcPrefix, StringComparison.Ordinal))
                 continue;
@@ -492,6 +496,10 @@ public sealed class FileSystemService : IFileSystemService
         for (int i = 0; i < req.Names.Count; i++)
         {
             var name = req.Names[i];
+            // 镜像 Go checkRelativePath：names 只允许纯名称，含路径成分（/ \ . ..）一律拒绝，
+            // 否则 UPath.Combine 归一化 "../" 后可越出 src_dir。
+            if (!UPath.IsValidName(name))
+                return Resp<FsManageResp>.Fail("using relative path is not allowed", RespCodes.Forbidden);
             var src = UPath.Combine(srcDir, name);
             if (!src.FullName.StartsWith(srcPrefix, StringComparison.Ordinal))
                 continue;

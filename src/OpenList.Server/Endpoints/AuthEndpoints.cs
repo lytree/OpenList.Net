@@ -138,7 +138,7 @@ public static class AuthEndpoints
         }).AllowAnonymous();
 
         // GET /api/auth/sso_callback — IdP 回调，换取 token/ssoId 并回传前端
-        g.MapGet("/sso_callback", async (string? method, string? code, string? state, HttpContext ctx, ISsoService sso) =>
+        g.MapGet("/sso_callback", async (string? method, string? code, string? state, HttpContext ctx, ISsoService sso, ISettingService settings) =>
         {
             // 兼容模式：method 以 URL 路径段而非查询参数编码
             var effectiveMethod = method ?? LastUrlSegment(ctx.Request.Path.Value);
@@ -147,27 +147,73 @@ public static class AuthEndpoints
             var redirectUri = BuildSsoCallbackUrl(ctx, effectiveMethod);
             var r = await sso.HandleCallbackAsync(effectiveMethod, code ?? "", state, redirectUri);
             if (r.Code != RespCodes.Ok) return Results.Ok(r);
-            // 返回一段 HTML，通过 postMessage 把结果交回弹窗 opener
-            return Results.Text(RenderSsoCallbackHtml(r.Data!), "text/html; charset=utf-8");
+            // 返回一段 HTML，通过 postMessage 把结果交回弹窗 opener（目标源受限）
+            return Results.Text(RenderSsoCallbackHtml(r.Data!, await ResolveSsoTargetOriginAsync(ctx, settings)),
+                "text/html; charset=utf-8");
         }).AllowAnonymous();
 
         // Aliases matching Go's dedicated callback routes (compatibility mode paths).
-        g.MapGet("/get_sso_id", (string? code, string? state, HttpContext ctx, ISsoService sso) =>
-            HandleCompatCallbackAsync("get_sso_id", code, state, ctx, sso)).AllowAnonymous();
-        g.MapGet("/sso_get_token", (string? code, string? state, HttpContext ctx, ISsoService sso) =>
-            HandleCompatCallbackAsync("sso_get_token", code, state, ctx, sso)).AllowAnonymous();
+        g.MapGet("/get_sso_id", (string? code, string? state, HttpContext ctx, ISsoService sso, ISettingService settings) =>
+            HandleCompatCallbackAsync("get_sso_id", code, state, ctx, sso, settings)).AllowAnonymous();
+        g.MapGet("/sso_get_token", (string? code, string? state, HttpContext ctx, ISsoService sso, ISettingService settings) =>
+            HandleCompatCallbackAsync("sso_get_token", code, state, ctx, sso, settings)).AllowAnonymous();
 
         return app;
     }
 
-    private static async Task<IResult> HandleCompatCallbackAsync(string method, string? code, string? state, HttpContext ctx, ISsoService sso)
+    private static async Task<IResult> HandleCompatCallbackAsync(string method, string? code, string? state, HttpContext ctx, ISsoService sso, ISettingService settings)
     {
         // 兼容模式下 IdP 直接回调 /api/auth/get_sso_id（不携带 ?method=）。
         // 传给 IdP 的 redirect_uri 正是基于此路径构造的，这里重建以便 token 交换时校验。
         var redirectUri = $"{GetApiBaseUrl(ctx)}/api/auth/{method}";
         var r = await sso.HandleCallbackAsync(method, code ?? "", state, redirectUri);
         if (r.Code != RespCodes.Ok) return Results.Ok(r);
-        return Results.Text(RenderSsoCallbackHtml(r.Data!), "text/html; charset=utf-8");
+        return Results.Text(RenderSsoCallbackHtml(r.Data!, await ResolveSsoTargetOriginAsync(ctx, settings)),
+            "text/html; charset=utf-8");
+    }
+
+    /// <summary>
+    /// 解析 SSO 回调 postMessage 的 targetOrigin。镜像 Go <c>server/handles/ssologin.go</c> 的
+    /// <c>ssoTargetOrigin</c>：优先采用操作员配置的 <c>sso_postmessage_origin</c>
+    /// （须为纯 scheme+host 的 http/https 源），否则退回 API 自身源，
+    /// 都拿不到时退回 <c>"/"</c>（仅允许同源 opener 接收）。
+    /// </summary>
+    private static async Task<string> ResolveSsoTargetOriginAsync(HttpContext ctx, ISettingService settings)
+    {
+        try
+        {
+            var item = await settings.GetAsync("sso_postmessage_origin", ctx.RequestAborted);
+            return SsoTargetOrigin(ctx, item.Code == 200 ? item.Data?.Value : null);
+        }
+        catch
+        {
+            return SsoTargetOrigin(ctx, null);
+        }
+    }
+
+    /// <summary>校验并归一化 SSO 回调目标源；非法配置回退到 API 源或 "/"。</summary>
+    internal static string SsoTargetOrigin(HttpContext ctx, string? configured)
+    {
+        if (!string.IsNullOrEmpty(configured)
+            && Uri.TryCreate(configured, UriKind.Absolute, out var cu)
+            && (cu.Scheme == Uri.UriSchemeHttp || cu.Scheme == Uri.UriSchemeHttps)
+            && !string.IsNullOrEmpty(cu.Host)
+            && string.IsNullOrEmpty(cu.UserInfo)
+            && cu.AbsolutePath is "" or "/"
+            && string.IsNullOrEmpty(cu.Query)
+            && string.IsNullOrEmpty(cu.Fragment))
+        {
+            return $"{cu.Scheme}://{cu.Authority}";
+        }
+
+        if (Uri.TryCreate(GetApiBaseUrl(ctx), UriKind.Absolute, out var au)
+            && !string.IsNullOrEmpty(au.Scheme)
+            && !string.IsNullOrEmpty(au.Host))
+        {
+            return $"{au.Scheme}://{au.Authority}";
+        }
+
+        return "/";
     }
 
     private static string BuildSsoCallbackUrl(HttpContext ctx, string method)
@@ -195,14 +241,16 @@ public static class AuthEndpoints
     /// <summary>
     /// 输出与 Go 服务一致的 HTML：通过 postMessage 把 { sso_id } 或 { token }
     /// 交给窗口 opener 后自动关闭弹窗，供前端 Profile.tsx 监听。
+    /// <paramref name="targetOrigin"/> 由 <see cref="SsoTargetOrigin"/> 钉死，
+    /// 不使用 <c>"*"</c>，避免任意页面开弹窗窃取登录令牌。
     /// </summary>
-    private static string RenderSsoCallbackHtml(SsoCallbackResult r)
+    internal static string RenderSsoCallbackHtml(SsoCallbackResult r, string targetOrigin)
     {
         var payload = r.Token is not null
             ? $"{{\"token\":\"{EscapeJs(r.Token)}\"}}"
             : $"{{\"sso_id\":\"{EscapeJs(r.SsoId ?? string.Empty)}\"}}";
         return $@"<!DOCTYPE html><head></head><body><script>
-window.opener.postMessage({payload}, ""*"");
+window.opener.postMessage({payload}, ""{EscapeJs(targetOrigin)}"");
 window.close();
 </script></body>";
     }

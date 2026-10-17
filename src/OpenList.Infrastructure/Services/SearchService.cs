@@ -247,15 +247,17 @@ public sealed class SearchService : ISearchService
 
     /// <summary>
     /// 判断搜索结果节点对当前用户是否可访问。镜像 Go <c>server/handles/search.go</c>
-    /// SearchFiltered 的过滤谓词：先校验 <paramref name="node"/> 位于用户 BasePath 之下，
-    /// 再用最近 Meta 做隐藏/读用户/密码校验。
+    /// <c>isSearchNodeAccessible</c>：先校验 <paramref name="node"/> 位于用户 BasePath 之下，
+    /// 再用最近 Meta 做隐藏/读用户/密码校验；目录节点以自身路径解析 Meta，
+    /// 否则挂在目录本身的隐藏/密码 Meta 会被遗漏。
     /// </summary>
     private static bool CanAccessNode(SearchNode node, SearchReq req, User user, Dictionary<string, Meta> metasByPath)
     {
         if (!IsSubPath(user.BasePath, node.Parent))
             return false;
-        var meta = GetNearestMeta(node.Parent, metasByPath);
-        return CanAccess(user, meta, JoinPath(node.Parent, node.Name), req.Password);
+        var nodePath = JoinPath(node.Parent, node.Name);
+        var meta = GetNearestMeta(node.IsDir ? nodePath : node.Parent, metasByPath);
+        return CanAccess(user, meta, nodePath, req.Password);
     }
 
     /// <summary>

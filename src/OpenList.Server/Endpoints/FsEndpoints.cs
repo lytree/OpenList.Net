@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Server.Models;
+using OpenList.Vfs;
 
 namespace OpenList.Server.Endpoints;
 
@@ -101,8 +102,14 @@ public static class FsEndpoints
             Results.Ok(await svc.CopyBatchAsync(ToMoveCopy(req), user.ToUser())));
 
         // POST /fs/remove — body: { dir, names }. paths = names.Select(n => dir/n).
+        // names 必须是纯名称：含路径成分（/ \ . ..）时返回 403（镜像 Go checkRelativePath）。
+        // 否则 UPath 归一化会解析 "\..\.."，拼接后可越出 dir 删除任意文件。
         g.MapPost("/remove", async (RemoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.RemoveAsync(JoinPaths(req.Dir, req.Names), user.ToUser())));
+        {
+            if (req.Names.Any(n => !UPath.IsValidName(n)))
+                return Results.Ok(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
+            return Results.Ok(await svc.RemoveAsync(JoinPaths(req.Dir, req.Names), user.ToUser()));
+        });
 
         g.MapPost("/remove_empty_directory", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
             Results.Ok(await svc.RemoveEmptyDirectoryAsync(req.Path, user.ToUser())));

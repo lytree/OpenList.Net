@@ -208,6 +208,17 @@ Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3, AliyundriveOpen),
 
 **前端关联**：`frontend/` 已修复为指向 `OpenListTeam/Openlist-Frontend`（v4.2.5, commit `feae2d0`）的 git submodule（原为损坏的 gitlink 160000 + 旧 v4.2.2 dist）。`pnpm build` 产出 `frontend/dist`，后端 `DistDir=../../frontend/dist` 天然匹配。`src/Example.Tests` 残留工程已删除。
 
+## 安全修复对齐（2026-10-17，对照 Go v4.2.7）
+
+上游 `ea10624f` 的安全修复只在 .NET 侧命中 3 处真实缺口（其余改动涉及未移植驱动，见下）：
+
+- **1. 批量 move/copy/remove 的 `names` 未做纯名称校验（目录穿越）**：`.NET` 的 `UPath.Normalize` 会把 `\` 归一化为 `/` **并解析 `..`**，而 `MoveBatchAsync` / `CopyBatchAsync` 以及 `/api/fs/remove` 都是直接用 `UPath.Combine(srcDir, name)` / `JoinPaths(dir, names)` 拼接后下传，于是 `names: ["..\\..\\secret.txt"]` 可越出 `src_dir`/`dir` 读写任意路径。修复镜像 Go `server/handles/fsmanage.go` 的 `checkRelativePath`：新增 `UPath.IsValidName(name)`（非空、非 `.`、非 `..`、不含 `/` 与 `\`），`FileSystemService` 两处批量循环与 `FsEndpoints` 的 `/remove` 均在拼接前校验，命中即返回 403 `using relative path is not allowed`（Go `errs.RelativePath`）。
+  - ⚠️ **残留缺口（与 Go 一致但本移植未实现）**：Go 的 `FsRemove` 用 `user.JoinPath(req.Dir)` 把路径钉在用户 BasePath 之内；.NET 的 `RemoveAsync` 目前**完全忽略 `user`/BasePath**（全项目普遍未落地 BasePath 约束）。本次修复严格对齐 Go 提交范围、未顺手引入 BasePath 强制，以免回归；该缺口单独记录待办。
+- **2. 搜索结果目录节点用父目录解析 Meta（本目录自身的隐藏/密码 Meta 被漏判）**：`SearchService.CanAccessNode` 原先无论文件还是目录都用 `node.Parent` 查最近 Meta，导致挂在目录节点自身的 `hide`/`password`/`read_users` 设置不生效。修复镜像 Go `isSearchNodeAccessible`：目录节点以**自身路径** `node.Parent/node.Name` 解析 Meta，文件节点仍用 `node.Parent`。
+- **3. SSO 回调 postMessage 用 `"*"` 作为 targetOrigin（令牌可被任意页面窃取）**：`RenderSsoCallbackHtml` 原先硬编码 `window.opener.postMessage(payload, "*")`，任何页面只要开弹窗并指向 SSO 回调地址即可收走 `token`。修复镜像 Go `ssologin.go` 的 `ssoTargetOrigin`：新增 `sso_postmessage_origin` 设置项（Group 7，Public，默认 `""`），按「配置的合法源 → API 自身源 → `"/"`」三级回退；配置值须为纯 scheme+host 的 http/https 源，含 `UserInfo`/路径/查询串/片段或非 http(s) 协议一律视为非法并回退（`AuthEndpoints.SsoTargetOrigin`）。`/sso_callback`、`/get_sso_id`、`/sso_get_token` 三个入口都改用解析结果。
+
+**无需合并的上游改动**：`139`/`189pc`/`lanzou`/`onedrive` 驱动修复对应未移植驱动；S3 直传（`IFileSystemDirectUploader` 未实现）；gzip 手工解压 bug（.NET 用 `HttpClient.AutomaticDecompression`）；代理请求头上游黑名单（.NET 无客户端请求头透传管道）；S3 `CommonPrefixes` 尾斜杠（.NET 已自带）。
+
 ## S3 网关增强（2026-09-21，对照 Go v4.2.6）
 
 `S3Endpoints` 在基础对象读写之上补齐了 S3 客户端实际依赖的能力：

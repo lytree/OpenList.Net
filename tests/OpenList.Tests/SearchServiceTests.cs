@@ -383,6 +383,27 @@ public class SearchServiceTests
         await Assert.That(free.Data!.Total).IsEqualTo(1);
     }
 
+    [Test]
+    public async Task SearchDatabaseAsync_Applies_Directory_Own_Meta_To_Dir_Nodes()
+    {
+        // 镜像 Go isSearchNodeAccessible：目录节点以自身路径解析最近 Meta，
+        // 否则挂在目录本身上的密码/读用户 Meta 会被遗漏而泄漏目录节点。
+        await using var fixture = new Fixture();
+        fixture.SetDatabaseBackend();
+        await fixture.AddIndexEntry("/docs", "secretdir", isDir: true);
+        await fixture.AddMeta("/docs/secretdir", password: "s3cret", pSub: true);
+
+        var user = new User { Id = 1, Username = "u", Role = UserRole.General };
+
+        var denied = await fixture.Search.SearchAsync(
+            new SearchReq { Keywords = "secretdir", Recursive = true }, user);
+        await Assert.That(denied.Data!.Total).IsEqualTo(0);
+
+        var allowed = await fixture.Search.SearchAsync(
+            new SearchReq { Keywords = "secretdir", Recursive = true, Password = "s3cret" }, user);
+        await Assert.That(allowed.Data!.Total).IsEqualTo(1);
+    }
+
     // ---------------- 增量更新按父目录串行化（parent lock） ----------------
 
     [Test]

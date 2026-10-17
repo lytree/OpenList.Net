@@ -90,6 +90,39 @@ public class FsEndpointsTests
     }
 
     [Test]
+    public async Task Remove_Rejects_RelativePathNames()
+    {
+        // 镜像 Go checkRelativePath：/fs/remove 的 names 只允许纯名称；
+        // "../../secret.txt" 会被 UPath 归一化解析后越出 dir 删除兄弟文件，必须 403。
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("secret.txt", "s"u8.ToArray());
+            await factory.WriteFileAsync("writable/a.txt", "a"u8.ToArray());
+
+            var loginResp = await client.PostAsync("/api/auth/login",
+                JsonContent.Create(new { username = "admin", password = "admin" }));
+            var loginJson = await loginResp.Content.ReadFromJsonAsync<JsonDocument>();
+            var token = loginJson!.RootElement.GetProperty("data").GetProperty("token").GetString()!;
+            client.DefaultRequestHeaders.Authorization = new("Bearer", token);
+
+            foreach (var name in new[] { "../../secret.txt", @"..\..\secret.txt" })
+            {
+                var resp = await client.PostAsync("/api/fs/remove",
+                    JsonContent.Create(new { dir = "/test/writable", names = new[] { name } }));
+                var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+                await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
+            }
+
+            // 兄弟文件仍在。
+            var getResp = await client.PostAsync("/api/fs/get",
+                JsonContent.Create(new { path = "/test/secret.txt" }));
+            var getJson = await getResp.Content.ReadFromJsonAsync<JsonDocument>();
+            await Assert.That(getJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
+        }
+    }
+
+    [Test]
     public async Task List_With_Valid_Token_Resolves_Real_User()
     {
         // When a valid JWT is presented, the user is resolved (not guest).

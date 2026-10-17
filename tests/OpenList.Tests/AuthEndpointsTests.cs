@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using OpenList.Core.Interfaces;
+using OpenList.Server.Endpoints;
 using OpenList.Server.Models;
 using TUnit.Core;
 
@@ -243,5 +246,88 @@ public class AuthEndpointsTests
             await Assert.That(json.GetProperty("data").GetProperty("secret").GetString()).IsNotNull();
             await Assert.That(json.GetProperty("data").GetProperty("qrUri").GetString()).Contains("otpauth://");
         }
+    }
+}
+
+/// <summary>
+/// SSO 回调 postMessage 目标源钉死逻辑（镜像 Go server/handles/ssologin.go 的 ssoTargetOrigin）。
+/// 纯单元测试，不启动 Web 主机，故无需 [NotInParallel]。
+/// </summary>
+public class SsoTargetOriginTests
+{
+    private static HttpContext Ctx(string scheme, string host)
+    {
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Scheme = scheme;
+        ctx.Request.Host = new HostString(host);
+        return ctx;
+    }
+
+    [Test]
+    public async Task SsoTargetOrigin_Prefers_Valid_Configured_Origin()
+    {
+        var ctx = Ctx("https", "api.example.com");
+        await Assert.That(AuthEndpoints.SsoTargetOrigin(ctx, "https://app.example.com"))
+            .IsEqualTo("https://app.example.com");
+    }
+
+    [Test]
+    public async Task SsoTargetOrigin_Normalizes_Trailing_Slash_And_Ignores_Api_Case()
+    {
+        var ctx = Ctx("https", "api.example.com");
+        // 配置源大小写不敏感、尾斜杠被归一化（Uri.Authority 会小写化 host）。
+        await Assert.That(AuthEndpoints.SsoTargetOrigin(ctx, "HTTPS://App.Example.com/"))
+            .IsEqualTo("https://app.example.com");
+    }
+
+    [Test]
+    public async Task SsoTargetOrigin_Rejects_Invalid_Configured_Values()
+    {
+        var ctx = Ctx("https", "api.example.com");
+        // 非法配置一律回退到 API 自身源，绝不原样透传（否则可能钉到攻击者页面）。
+        string?[] invalid =
+        [
+            "https://user:pass@evil.com",   // 含 UserInfo
+            "https://evil.com/path",        // 含路径
+            "https://evil.com/?q=1",        // 含查询串
+            "https://evil.com/#f",          // 含片段
+            "javascript:alert(1)",          // 非 http/https 协议
+            "ftp://evil.com",               // 非 http/https 协议
+            "*",                            // 通配符
+            "",
+            null,
+        ];
+        foreach (var v in invalid)
+            await Assert.That(AuthEndpoints.SsoTargetOrigin(ctx, v)).IsEqualTo("https://api.example.com");
+    }
+
+    [Test]
+    public async Task SsoTargetOrigin_Falls_Back_To_Slash_When_Api_Base_Unparseable()
+    {
+        // 无 scheme/host 的上下文 → 连 API 源都构造不出来，退回 "/"（仅同源可接收）。
+        var ctx = new DefaultHttpContext();
+        await Assert.That(AuthEndpoints.SsoTargetOrigin(ctx, null)).IsEqualTo("/");
+        await Assert.That(AuthEndpoints.SsoTargetOrigin(ctx, "https://user:pass@evil.com")).IsEqualTo("/");
+    }
+
+    [Test]
+    public async Task RenderSsoCallbackHtml_Pins_Origin_And_Omits_Wildcard()
+    {
+        var html = AuthEndpoints.RenderSsoCallbackHtml(
+            new SsoCallbackResult { Token = "tok-123" }, "https://app.example.com");
+        await Assert.That(html).Contains("postMessage");
+        await Assert.That(html).Contains("{\"token\":\"tok-123\"}");
+        await Assert.That(html).Contains("\"https://app.example.com\"");
+        await Assert.That(html).DoesNotContain("\"*\"");
+    }
+
+    [Test]
+    public async Task RenderSsoCallbackHtml_Emits_SsoId_In_Link_Mode()
+    {
+        var html = AuthEndpoints.RenderSsoCallbackHtml(
+            new SsoCallbackResult { SsoId = "id-42" }, "/");
+        await Assert.That(html).Contains("{\"sso_id\":\"id-42\"}");
+        await Assert.That(html).Contains("\"/\"");
+        await Assert.That(html).DoesNotContain("\"*\"");
     }
 }
