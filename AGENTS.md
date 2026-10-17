@@ -225,8 +225,9 @@ Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3, AliyundriveOpen),
 
 - **路径原语**（`OpenList.Vfs.UPath`）：新增 `FixAndCleanPath`（镜像 Go `utils.FixAndCleanPath`：转斜杠 + 补前导 `/` + 等价 `stdpath.Clean`）与 `TryJoinBasePath(basePath, reqPath, out result)`（镜像 Go `utils.JoinBasePath`）。**关键差异是相对路径守卫**：若 `reqPath` 原本含 `..`、清洗后已不含 `..`，说明那些 `..` 被规范化解析掉了、拼接会越出 `basePath`，因此返回 `false`（调用方回 403 `using relative path is not allowed`）。
 - **用户级入口**（`OpenList.Core.Models.User.TryJoinPath`）：`BasePath` 为 null/空时等价 `/`（内置 admin / guest 情形，无约束）。
-- **端点接线**（`OpenList.Server.Endpoints.FsEndpoints`）：新增 `JoinGuard(user, reqPath, out joined)`（返回非 null 即 403 结果）、`WriteGateAsync`（见下）与 `ParentPath`/`FindNearestMeta`/`CanWriteContent*`/`CanWrite`/`MetaCoversPath`/`IsSubPath` 等 helper。读端点（`list`/`get`/`dirs`/`search`）、管理端点（`mkdir`/`rename`/`rename_batch`/`batch_rename`/`regex_rename`/`move`/`copy`/`remove`/`remove_empty_directory`）以及 `put`/`form`/`archive/*`/`scan`/`add_offline_download`/`other` 的路径参数**全部**先经 `JoinGuard` 套到用户 BasePath 之下。`/search` 的越界相对路径按 Go 回 **400**（其余回 403）。
+- **端点接线**（`OpenList.Server.Endpoints.FsEndpoints`）：新增 `JoinGuard(user, reqPath, out joined)`（返回非 null 即 403 结果）、`WriteGateAsync`（见下）与 `ParentPath`/`FindNearestMeta`/`CanWriteContent*`/`CanWrite`/`CanRead`/`MetaCoversPath`/`IsSubPath` 等 helper。读端点（`list`/`get`/`dirs`/`search`）、管理端点（`mkdir`/`rename`/`rename_batch`/`batch_rename`/`regex_rename`/`move`/`copy`/`remove`/`remove_empty_directory`）以及 `put`/`form`/`archive/*`/`scan`/`add_offline_download`/`other` 的路径参数**全部**先经 `JoinGuard` 套到用户 BasePath 之下。`/search` 的越界相对路径按 Go 回 **400**（其余回 403）。
 - **写入门控**（`/fs/put`、`/fs/form`，镜像 Go `server/middlewares/fsup.go`）：先 `JoinGuard`，再 `WriteGateAsync` 三重校验 —— ① `user.CanWriteContent()`（权限位 3），除非 `CanWriteContentBypass`（meta `write` 且路径被 `PathEqual`/`IsSubPath` 且 `w_sub` 覆盖）；② `CanWrite(user, nearestMeta, parent)`（`meta.WriteUsers` 非空、不含 `user.Id` 且 meta 覆盖父路径 → 拒绝）。命中即 403。meta 解析失败不阻断写入（fail-open）。
+- **管理端点权限门禁**（镜像 Go `fsmanage.go` / `fsbatch.go` 各端点内联检查）：`mkdir` 用 `CanWriteContent()`（权限位 3）；`rename`/`rename_batch`/`batch_rename`/`regex_rename` 用 `CanRename()`（位 4）；`move`/`recursive_move` 用 `CanMove()`（位 5）；`copy` 用 `CanCopy()`（位 6）；`remove`/`remove_empty_directory` 用 `CanRemove()`（位 7）。helper：`PermissionGuard(bool)`（权限位 → 403 `permission denied`）+ `MetaWriteGateAsync`（`common.CanWrite`）+ `ContentWriteGateAsync`（权限位 3 + bypass + `CanWrite` 组合，`WriteGateAsync` 委托之并作用于 `ParentPath(path)`）。校验顺序镜像 Go：`PermissionGuard` → `JoinGuard` → meta 门禁。**`admin` 不豁免**（`CanWrite`/`CanWriteContentBypass` 均不豁免，与 Go 一致）；内置 admin 权限位 `0x71FF` 全开，故不受影响。
 - **刻意保留的 Go 例外**：`/fs/link` **不 join**（Go 注释：请求路径本就是完整路径）；`/fs/dirs` 的 `force_root` 分支**不 join** 且仅管理员可用（非管理员 403）。
 
 **身份来源决策（「两者结合」）**：BasePath/Permission 随 JWT 一并签发（无状态快速路径），并在凭据变更时即时失效既有 token：
@@ -237,7 +238,10 @@ Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3, AliyundriveOpen),
 **决策与已知缺口**：
 
 - **admin 不豁免 BasePath**（严格对齐 Go；admin 通常 `BasePath="/"` → no-op）。旧 token 无 `base_path` claim 时 fail-open（等价 `/`）；失效登记表 fail-closed。
-- 档 B 的权限位校验**只覆盖 `/fs/put` + `/fs/form`**（Go `fsup` 中间件的三重校验）。`mkdir`/`rename`/`remove` 等管理端点在 Go 内联有权限位检查，本次**未搬**（超出批准范围）——路径穿越已由 `JoinGuard` 覆盖，但**权限位未校验**，属已知缺口。
+- ~~档 B 的权限位校验只覆盖 `/fs/put` + `/fs/form`；`mkdir`/`rename`/`remove` 等管理端点的权限位未校验~~ **已闭合**（2026-10-17 追加）：`mkdir`/`rename`/`rename_batch`/`batch_rename`/`regex_rename`/`move`/`copy`/`remove`/`remove_empty_directory`/`recursive_move` 均已补权限位 + `common.CanWrite` meta 白名单校验（见上「管理端点权限门禁」）。
+- **直传门禁**（`/fs/get_direct_upload_info`，镜像 Go `server/handles/direct_upload.go`）：已补 `checkRelativePath(file_name)`（`UPath.IsValidName`，非纯名称 → 403）与目标**父目录**的 `CanWriteContent`（或 meta bypass）+ `CanWrite` 白名单门禁（复用 `ContentWriteGateAsync`，`parentPath = Dir(join(path, file_name))`，纯名称下恒等于 `path`）。**顺带修复**：`DirectUploadInfoReq` 原先缺 `[JsonPropertyName("file_name"/"file_size")]`，前端发送的 snake_case 从未绑定成功（`FileName` 恒为 null），已补属性。
+- **`/copy` 读门禁**（镜像 Go `FsCopy`）：已补源目录的 `common.CanRead`（新增 `MetaReadGateAsync` + `CanRead` helper，按 `meta.ReadUsers`/`ReadUsersSub` 白名单判定）。`/copy` 现为 `CanCopy()` → 源目录 `CanRead` → 目标目录 `CanWrite` 三段校验，与 Go 一致。
+- **未搬的残留**：Go `FsGetDirectUploadInfo` 另有「父目录与目标挂载点须一致」守卫（`op.GetStorageVirtualMountPath`），.NET 无该挂载点原语，暂缺。
 - 既有缺陷（本次未改）：`Disabled` 未签进 token；`JwtService._revoked` 是实例字段（登出吊销不跨请求）；`FileSystemService.RemoveAsync` 仍忽略 `user`（路径约束现由端点层 `JoinGuard` 兜住）。
 
 ## S3 网关增强（2026-09-21，对照 Go v4.2.6）

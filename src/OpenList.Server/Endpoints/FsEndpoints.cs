@@ -77,37 +77,42 @@ public static class FsEndpoints
         }).AllowAnonymous();
 
         // --- Manage ---
-        g.MapPost("/mkdir", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/mkdir", async (PathReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            // 镜像 Go FsMkdir：CanWriteContent（或 meta 显式开放写入）+ meta WriteUsers 白名单。
+            if (await WriteGateAsync(metaSvc, u, path, ct) is { } denied) return denied;
             return Results.Ok(await svc.MkdirAsync(path, u));
         });
 
         // POST /fs/rename — body: { path, name, overwrite }. newPath = parent(join(path)) + name.
         // 新名字必须是纯名称（镜像 Go FsRename 的 checkRelativePath(req.Name)）。
-        g.MapPost("/rename", async (RenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/rename", async (RenameReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
+            // 镜像 Go FsRename 的顺序：先 CanRename，再 JoinPath + checkRelativePath，最后父目录 meta 写入校验。
+            if (PermissionGuard(u.CanRename()) is { } denied) return denied;
             if (JoinGuard(u, req.Path, out var reqPath) is { } fail) return fail;
             if (!UPath.IsValidName(req.Name))
                 return Results.Ok(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
-            var trimmed = reqPath.TrimEnd('/');
-            var slash = trimmed.LastIndexOf('/');
-            var parent = slash <= 0 ? "/" : trimmed[..slash];
+            var parent = ParentPath(reqPath);
+            if (await MetaWriteGateAsync(metaSvc, u, parent, ct) is { } metaDenied) return metaDenied;
             var newPath = parent == "/" ? $"/{req.Name}" : $"{parent}/{req.Name}";
             return Results.Ok(await svc.RenameAsync(reqPath, newPath, u));
         });
 
         // 旧版 API 兼容入口：Items 携带完整路径（非本项目的 Go 对齐面），逐项套用 BasePath。
-        g.MapPost("/rename_batch", async (BatchRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/rename_batch", async (BatchRenameReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
+            if (PermissionGuard(u.CanRename()) is { } denied) return denied;
             var items = new List<BatchRenameItem>(req.Items.Count);
             foreach (var it in req.Items)
             {
                 if (JoinGuard(u, it.SrcName, out var src) is { } f1) return f1;
                 if (JoinGuard(u, it.NewName, out var name) is { } f2) return f2;
+                if (await MetaWriteGateAsync(metaSvc, u, ParentPath(src), ct) is { } md) return md;
                 items.Add(new BatchRenameItem { SrcName = src, NewName = name });
             }
             return Results.Ok(await svc.BatchRenameAsync(items, u));
@@ -116,10 +121,13 @@ public static class FsEndpoints
         // POST /fs/batch_rename — frontend variant. Body: { src_dir, rename_objects: [{src_name, new_name}] }
         // rename_objects carry only file names; src_dir is prepended to form full paths.
         // 名称必须是纯名称（镜像 Go FsBatchRename 的 checkRelativePath）。
-        g.MapPost("/batch_rename", async (FsBatchRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/batch_rename", async (FsBatchRenameReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
+            // 镜像 Go FsBatchRename：CanRename + src_dir 的 meta 写入校验。
+            if (PermissionGuard(u.CanRename()) is { } denied) return denied;
             if (JoinGuard(u, req.SrcDir, out var dir) is { } fail) return fail;
+            if (await MetaWriteGateAsync(metaSvc, u, dir, ct) is { } metaDenied) return metaDenied;
             var baseDir = string.IsNullOrEmpty(dir) || dir == "/" ? "" : dir.TrimEnd('/');
             var items = new List<BatchRenameItem>(req.RenameObjects.Count);
             foreach (var o in req.RenameObjects)
@@ -139,20 +147,26 @@ public static class FsEndpoints
         // POST /fs/regex_rename — Go API completeness (the frontend computes new
         // names client-side and uses /batch_rename instead). Body: { src_dir,
         // src_name_regex, new_name_regex }. Delegates to IFileSystemService.RegexRenameAsync.
-        g.MapPost("/regex_rename", async (RegexRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/regex_rename", async (RegexRenameReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
+            if (PermissionGuard(u.CanRename()) is { } denied) return denied;
             if (JoinGuard(u, req.SrcDir, out var dir) is { } fail) return fail;
+            if (await MetaWriteGateAsync(metaSvc, u, dir, ct) is { } metaDenied) return metaDenied;
             return Results.Ok(await svc.RegexRenameAsync(dir, req.SrcNameRegex, req.NewNameRegex, u));
         });
 
         // POST /fs/move — taskified, mirrors Go FsMove.
         // Body: { src_dir, dst_dir, names, overwrite, skip_existing }.
-        g.MapPost("/move", async (MoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/move", async (MoveReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
+            // 镜像 Go FsMove：CanMove + 源目录、目标目录的 meta 写入校验。
+            if (PermissionGuard(u.CanMove()) is { } denied) return denied;
             if (JoinGuard(u, req.SrcDir, out var src) is { } f1) return f1;
+            if (await MetaWriteGateAsync(metaSvc, u, src, ct) is { } m1) return m1;
             if (JoinGuard(u, req.DstDir, out var dst) is { } f2) return f2;
+            if (await MetaWriteGateAsync(metaSvc, u, dst, ct) is { } m2) return m2;
             var mc = ToMoveCopy(req);
             mc.SrcDir = src;
             mc.DstDir = dst;
@@ -160,11 +174,15 @@ public static class FsEndpoints
         });
 
         // POST /fs/copy — taskified with optional merge, mirrors Go FsCopy.
-        g.MapPost("/copy", async (MoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/copy", async (MoveReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
+            // 镜像 Go FsCopy：CanCopy + 源目录的 meta 读权限校验（CanRead）+ 目标目录的 meta 写权限校验（CanWrite）。
+            if (PermissionGuard(u.CanCopy()) is { } denied) return denied;
             if (JoinGuard(u, req.SrcDir, out var src) is { } f1) return f1;
+            if (await MetaReadGateAsync(metaSvc, u, src, ct) is { } r1) return r1;
             if (JoinGuard(u, req.DstDir, out var dst) is { } f2) return f2;
+            if (await MetaWriteGateAsync(metaSvc, u, dst, ct) is { } m2) return m2;
             var mc = ToMoveCopy(req);
             mc.SrcDir = src;
             mc.DstDir = dst;
@@ -174,19 +192,25 @@ public static class FsEndpoints
         // POST /fs/remove — body: { dir, names }. paths = join(dir)/names.
         // names 必须是纯名称：含路径成分（/ \ . ..）时返回 403（镜像 Go checkRelativePath）。
         // 否则 UPath 归一化会解析 "\..\.."，拼接后可越出 dir 删除任意文件。
-        g.MapPost("/remove", async (RemoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/remove", async (RemoveReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             if (req.Names.Any(n => !UPath.IsValidName(n)))
                 return Results.Ok(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
             var u = user.ToUser();
+            // 镜像 Go FsRemove：CanRemove + dir 的 meta 写入校验。
+            if (PermissionGuard(u.CanRemove()) is { } denied) return denied;
             if (JoinGuard(u, req.Dir, out var dir) is { } fail) return fail;
+            if (await MetaWriteGateAsync(metaSvc, u, dir, ct) is { } metaDenied) return metaDenied;
             return Results.Ok(await svc.RemoveAsync(JoinPaths(dir, req.Names), u));
         });
 
-        g.MapPost("/remove_empty_directory", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/remove_empty_directory", async (PathReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
+            // 镜像 Go FsRemoveEmptyDirectory：CanRemove + src_dir 的 meta 写入校验。
+            if (PermissionGuard(u.CanRemove()) is { } denied) return denied;
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            if (await MetaWriteGateAsync(metaSvc, u, path, ct) is { } metaDenied) return metaDenied;
             return Results.Ok(await svc.RemoveEmptyDirectoryAsync(path, u));
         });
 
@@ -225,19 +249,33 @@ public static class FsEndpoints
         });
 
         // Go: handles.FsGetDirectUploadInfo. Returns presigned upload URL if driver supports it.
-        g.MapPost("/get_direct_upload_info", async (DirectUploadInfoReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        // 镜像 Go 门禁：JoinPath → checkRelativePath(file_name) → 目标父目录的 CanWriteContent（或 meta
+        // 显式开放写入）+ CanWrite 白名单。任一命中返回 403。
+        // 注：Go 另有「父目录与目标挂载点须一致」的守卫（op.GetStorageVirtualMountPath），.NET 无该挂载点
+        // 原语，暂未搬（见 AGENTS.md）。
+        g.MapPost("/get_direct_upload_info", async (DirectUploadInfoReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
-            return Results.Ok(await svc.GetDirectUploadInfoAsync(path, req.FileSize, u));
+            // file_name 必须是纯名称（镜像 Go FsGetDirectUploadInfo 的 checkRelativePath(req.FileName)）。
+            if (!UPath.IsValidName(req.FileName))
+                return Results.Ok(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
+            // 先把目标路径解析出来，使权限校验与直传能力签发指向同一路径（Go 注释）。纯名称下父目录恒为 path。
+            var parentPath = ParentPath($"{path.TrimEnd('/')}/{req.FileName}");
+            if (await ContentWriteGateAsync(metaSvc, u, parentPath, ct) is { } denied) return denied;
+            return Results.Ok(await svc.GetDirectUploadInfoAsync(path, req.FileSize, u, ct));
         });
 
         // Go: handles.FsRecursiveMove (alias for move with single src).
-        g.MapPost("/recursive_move", async (RecursiveMoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/recursive_move", async (RecursiveMoveReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
+            // 镜像 Go FsRecursiveMove：CanMove + 源目录、目标目录的 meta 写入校验。
+            if (PermissionGuard(u.CanMove()) is { } denied) return denied;
             if (JoinGuard(u, req.SrcDir, out var src) is { } f1) return f1;
+            if (await MetaWriteGateAsync(metaSvc, u, src, ct) is { } m1) return m1;
             if (JoinGuard(u, req.DstDir, out var dst) is { } f2) return f2;
+            if (await MetaWriteGateAsync(metaSvc, u, dst, ct) is { } m2) return m2;
             return Results.Ok(await svc.RecursiveMoveAsync(src, dst, u));
         });
 
@@ -371,29 +409,62 @@ public static class FsEndpoints
     }
 
     /// <summary>
-    /// 上传/写入前置门禁，镜像 Go <c>server/middlewares/fsup.go</c>：解析目标文件父目录的最近 meta 后，
-    /// 依次校验 (1) 用户权限位 <see cref="User.CanWriteContent"/>，或 meta 显式开放写入
-    /// （<c>meta.Write</c> 且 <c>WSub</c> 覆盖）；(2) meta 的 <c>WriteUsers</c> 白名单。
-    /// 返回 null 表示放行，否则返回 403。
+    /// 权限位门禁：镜像 Go 各管理端点内联的 <c>user.CanXxx()</c> 检查（缺位返回 403 permission denied）。
+    /// 返回 null 表示放行。
     /// </summary>
-    private static async Task<IResult?> WriteGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
-    {
-        // Go 校验的是父目录（stdpath.Dir(path)）的 meta，而非文件本身。
-        var parent = ParentPath(path);
-        Meta? nearest = null;
-        try
-        {
-            var metas = (await meta.ListAsync(ct)).Data ?? [];
-            nearest = FindNearestMeta(metas, parent);
-        }
-        catch { /* meta 解析失败不阻断写入，与 FileSystemService.ListAsync 的处理保持一致 */ }
+    private static IResult? PermissionGuard(bool allowed)
+        => allowed ? null : Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
 
-        if (!user.CanWriteContent() && !CanWriteContentBypass(nearest, parent))
-            return Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
-        if (!CanWrite(user, nearest, parent))
-            return Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
-        return null;
+    /// <summary>
+    /// 解析 <paramref name="path"/> 的最近 meta（镜像 Go <c>op.GetNearestMeta</c>）。
+    /// 解析失败返回 null 而不抛错 —— 与 Go 内联处「仅 MetaNotFound 可忽略、其余报 500」相比更宽松，
+    /// 但与本项目既有 meta 处理（<c>FileSystemService.ListAsync</c>）保持一致，避免 meta 故障阻断写入。
+    /// </summary>
+    private static async Task<Meta?> NearestMetaAsync(IMetaService meta, string path, CancellationToken ct)
+    {
+        try { return FindNearestMeta((await meta.ListAsync(ct)).Data ?? [], path); }
+        catch { return null; }
     }
+
+    /// <summary>
+    /// meta 写权限门禁（镜像 Go <c>common.CanWrite(user, meta, path)</c>）：meta 的 <c>WriteUsers</c>
+    /// 白名单非空、不含该用户且 meta 覆盖该路径时返回 403，否则 null。
+    /// </summary>
+    private static async Task<IResult?> MetaWriteGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
+        => CanWrite(user, await NearestMetaAsync(meta, path, ct), path)
+            ? null
+            : Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
+
+    /// <summary>
+    /// meta 读权限门禁（镜像 Go <c>common.CanRead(user, meta, path)</c>）：meta 的 <c>ReadUsers</c>
+    /// 白名单非空、不含该用户且 meta 覆盖该路径时返回 403，否则 null。
+    /// </summary>
+    private static async Task<IResult?> MetaReadGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
+        => CanRead(user, await NearestMetaAsync(meta, path, ct), path)
+            ? null
+            : Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
+
+    /// <summary>
+    /// 「权限位 <see cref="User.CanWriteContent"/> 或 meta 显式开放写入」+ <c>WriteUsers</c> 白名单的组合门禁，
+    /// meta 直接挂在 <paramref name="path"/> 自身。镜像 Go <c>common.CanWriteContentBypassUserPerms</c> +
+    /// <c>common.CanWrite</c> 在 mkdir / fsup / direct_upload 内联处的成对校验。
+    /// </summary>
+    private static async Task<IResult?> ContentWriteGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
+    {
+        var nearest = await NearestMetaAsync(meta, path, ct);
+        if (!user.CanWriteContent() && !CanWriteContentBypass(nearest, path))
+            return Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
+        return CanWrite(user, nearest, path)
+            ? null
+            : Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
+    }
+
+    /// <summary>
+    /// 上传/写入前置门禁，镜像 Go <c>server/middlewares/fsup.go</c>：校验目标文件<b>父目录</b>
+    /// （<c>stdpath.Dir(path)</c>）的权限位与 meta 写入白名单。返回 null 表示放行，否则返回 403。
+    /// </summary>
+    private static Task<IResult?> WriteGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
+        => ContentWriteGateAsync(meta, user, ParentPath(path), ct);
 
     /// <summary>路径的父目录（镜像 Go <c>stdpath.Dir</c>）。</summary>
     private static string ParentPath(string path)
@@ -435,6 +506,15 @@ public static class FsEndpoints
     {
         if (meta is not null && meta.WriteUsers.Count > 0 && !meta.WriteUsers.Contains(user.Id)
             && MetaCoversPath(meta.Path, path, meta.WriteUsersSub))
+            return false;
+        return true;
+    }
+
+    /// <summary>镜像 Go <c>common.CanRead</c>：ReadUsers 白名单命中，或 meta 未覆盖该路径时放行。</summary>
+    private static bool CanRead(User user, Meta? meta, string path)
+    {
+        if (meta is not null && meta.ReadUsers.Count > 0 && !meta.ReadUsers.Contains(user.Id)
+            && MetaCoversPath(meta.Path, path, meta.ReadUsersSub))
             return false;
         return true;
     }
@@ -573,8 +653,16 @@ public sealed class ArchiveDecompressReq
     public bool Overwrite { get; set; }
 }
 
-/// <summary>获取直传（预签 URL）信息的请求体（<c>/fs/get_direct_upload_info</c>）。</summary>
-public sealed class DirectUploadInfoReq { public string Path { get; set; } = ""; public string? FileName { get; set; } public long FileSize { get; set; } public string? Tool { get; set; } }
+/// <summary>获取直传（预签 URL）信息的请求体（<c>POST /fs/get_direct_upload_info</c>，对应 Go <c>FsGetDirectUploadInfoReq</c>）。</summary>
+public sealed class DirectUploadInfoReq
+{
+    public string Path { get; set; } = "";
+    [JsonPropertyName("file_name")]
+    public string? FileName { get; set; }
+    [JsonPropertyName("file_size")]
+    public long FileSize { get; set; }
+    public string? Tool { get; set; }
+}
 
 /// <summary>递归移动请求体（<c>/fs/recursive_move</c>）。</summary>
 public sealed class RecursiveMoveReq
