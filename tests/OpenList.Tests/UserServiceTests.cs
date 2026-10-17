@@ -170,6 +170,50 @@ public class UserServiceTests
         await Assert.That(r.Data.Role).IsEqualTo(UserRole.Admin);
     }
 
+    [Test]
+    public async Task UpdateAsync_Invalidates_Tokens_When_BasePath_Changes()
+    {
+        // BasePath 被签进 token，改小后必须让既有 token 失效（详见 UserTokenCutoffRegistry）。
+        await using var ctx = BuildContext();
+        var cutoffs = new UserTokenCutoffRegistry();
+        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
+        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw", BasePath = "/a" });
+        var before = DateTime.UtcNow.AddMinutes(-1);
+
+        await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { BasePath = "/b" });
+
+        await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsTrue();
+    }
+
+    [Test]
+    public async Task UpdateAsync_Invalidates_Tokens_When_Permission_Changes()
+    {
+        await using var ctx = BuildContext();
+        var cutoffs = new UserTokenCutoffRegistry();
+        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
+        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw", Permission = 7 });
+        var before = DateTime.UtcNow.AddMinutes(-1);
+
+        await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Permission = 0 });
+
+        await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsTrue();
+    }
+
+    [Test]
+    public async Task UpdateAsync_Keeps_Tokens_When_Nothing_Relevant_Changes()
+    {
+        // 仅改密码（不涉及 Role/Permission/BasePath）不应登记失效。
+        await using var ctx = BuildContext();
+        var cutoffs = new UserTokenCutoffRegistry();
+        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
+        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw", BasePath = "/a" });
+        var before = DateTime.UtcNow.AddMinutes(-1);
+
+        await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Password = "newpw" });
+
+        await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsFalse();
+    }
+
     private static OpenListDbContext BuildContext()
     {
         var conn = new SqliteConnection("DataSource=:memory:");

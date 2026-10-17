@@ -213,11 +213,32 @@ Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3, AliyundriveOpen),
 上游 `ea10624f` 的安全修复只在 .NET 侧命中 3 处真实缺口（其余改动涉及未移植驱动，见下）：
 
 - **1. 批量 move/copy/remove 的 `names` 未做纯名称校验（目录穿越）**：`.NET` 的 `UPath.Normalize` 会把 `\` 归一化为 `/` **并解析 `..`**，而 `MoveBatchAsync` / `CopyBatchAsync` 以及 `/api/fs/remove` 都是直接用 `UPath.Combine(srcDir, name)` / `JoinPaths(dir, names)` 拼接后下传，于是 `names: ["..\\..\\secret.txt"]` 可越出 `src_dir`/`dir` 读写任意路径。修复镜像 Go `server/handles/fsmanage.go` 的 `checkRelativePath`：新增 `UPath.IsValidName(name)`（非空、非 `.`、非 `..`、不含 `/` 与 `\`），`FileSystemService` 两处批量循环与 `FsEndpoints` 的 `/remove` 均在拼接前校验，命中即返回 403 `using relative path is not allowed`（Go `errs.RelativePath`）。
-  - ⚠️ **残留缺口（与 Go 一致但本移植未实现）**：Go 的 `FsRemove` 用 `user.JoinPath(req.Dir)` 把路径钉在用户 BasePath 之内；.NET 的 `RemoveAsync` 目前**完全忽略 `user`/BasePath**（全项目普遍未落地 BasePath 约束）。本次修复严格对齐 Go 提交范围、未顺手引入 BasePath 强制，以免回归；该缺口单独记录待办。
+  - ⚠️ **当时的残留缺口（已由下节「BasePath 用户目录隔离落地」闭合）**：Go 的 `FsRemove` 用 `user.JoinPath(req.Dir)` 把路径钉在用户 BasePath 之内；.NET 的 `RemoveAsync` 当时**完全忽略 `user`/BasePath**。本次修复严格对齐 Go 提交范围、未顺手引入 BasePath 强制，以免回归 —— 端点层现已由 `JoinGuard` 兜住（服务层 `RemoveAsync` 仍不改）。
 - **2. 搜索结果目录节点用父目录解析 Meta（本目录自身的隐藏/密码 Meta 被漏判）**：`SearchService.CanAccessNode` 原先无论文件还是目录都用 `node.Parent` 查最近 Meta，导致挂在目录节点自身的 `hide`/`password`/`read_users` 设置不生效。修复镜像 Go `isSearchNodeAccessible`：目录节点以**自身路径** `node.Parent/node.Name` 解析 Meta，文件节点仍用 `node.Parent`。
 - **3. SSO 回调 postMessage 用 `"*"` 作为 targetOrigin（令牌可被任意页面窃取）**：`RenderSsoCallbackHtml` 原先硬编码 `window.opener.postMessage(payload, "*")`，任何页面只要开弹窗并指向 SSO 回调地址即可收走 `token`。修复镜像 Go `ssologin.go` 的 `ssoTargetOrigin`：新增 `sso_postmessage_origin` 设置项（Group 7，Public，默认 `""`），按「配置的合法源 → API 自身源 → `"/"`」三级回退；配置值须为纯 scheme+host 的 http/https 源，含 `UserInfo`/路径/查询串/片段或非 http(s) 协议一律视为非法并回退（`AuthEndpoints.SsoTargetOrigin`）。`/sso_callback`、`/get_sso_id`、`/sso_get_token` 三个入口都改用解析结果。
 
 **无需合并的上游改动**：`139`/`189pc`/`lanzou`/`onedrive` 驱动修复对应未移植驱动；S3 直传（`IFileSystemDirectUploader` 未实现）；gzip 手工解压 bug（.NET 用 `HttpClient.AutomaticDecompression`）；代理请求头上游黑名单（.NET 无客户端请求头透传管道）；S3 `CommonPrefixes` 尾斜杠（.NET 已自带）。
+
+## BasePath 用户目录隔离落地（2026-10-17）
+
+承接上节遗留的「BasePath 约束全项目普遍未落地」缺口，本次按 Go 语义把 `internal/model/user.go` 的 `User.JoinPath`（= `utils.JoinBasePath`）铺到 HTTP 层：
+
+- **路径原语**（`OpenList.Vfs.UPath`）：新增 `FixAndCleanPath`（镜像 Go `utils.FixAndCleanPath`：转斜杠 + 补前导 `/` + 等价 `stdpath.Clean`）与 `TryJoinBasePath(basePath, reqPath, out result)`（镜像 Go `utils.JoinBasePath`）。**关键差异是相对路径守卫**：若 `reqPath` 原本含 `..`、清洗后已不含 `..`，说明那些 `..` 被规范化解析掉了、拼接会越出 `basePath`，因此返回 `false`（调用方回 403 `using relative path is not allowed`）。
+- **用户级入口**（`OpenList.Core.Models.User.TryJoinPath`）：`BasePath` 为 null/空时等价 `/`（内置 admin / guest 情形，无约束）。
+- **端点接线**（`OpenList.Server.Endpoints.FsEndpoints`）：新增 `JoinGuard(user, reqPath, out joined)`（返回非 null 即 403 结果）、`WriteGateAsync`（见下）与 `ParentPath`/`FindNearestMeta`/`CanWriteContent*`/`CanWrite`/`MetaCoversPath`/`IsSubPath` 等 helper。读端点（`list`/`get`/`dirs`/`search`）、管理端点（`mkdir`/`rename`/`rename_batch`/`batch_rename`/`regex_rename`/`move`/`copy`/`remove`/`remove_empty_directory`）以及 `put`/`form`/`archive/*`/`scan`/`add_offline_download`/`other` 的路径参数**全部**先经 `JoinGuard` 套到用户 BasePath 之下。`/search` 的越界相对路径按 Go 回 **400**（其余回 403）。
+- **写入门控**（`/fs/put`、`/fs/form`，镜像 Go `server/middlewares/fsup.go`）：先 `JoinGuard`，再 `WriteGateAsync` 三重校验 —— ① `user.CanWriteContent()`（权限位 3），除非 `CanWriteContentBypass`（meta `write` 且路径被 `PathEqual`/`IsSubPath` 且 `w_sub` 覆盖）；② `CanWrite(user, nearestMeta, parent)`（`meta.WriteUsers` 非空、不含 `user.Id` 且 meta 覆盖父路径 → 拒绝）。命中即 403。meta 解析失败不阻断写入（fail-open）。
+- **刻意保留的 Go 例外**：`/fs/link` **不 join**（Go 注释：请求路径本就是完整路径）；`/fs/dirs` 的 `force_root` 分支**不 join** 且仅管理员可用（非管理员 403）。
+
+**身份来源决策（「两者结合」）**：BasePath/Permission 随 JWT 一并签发（无状态快速路径），并在凭据变更时即时失效既有 token：
+
+- `IAuthService.OpenListClaims` 新增 `BasePath`（`base_path`）/ `Permission`（`permission`）两个 claim 名；`JwtService.IssueToken` 把它们签进 token（`BasePath` 先经 `FixAndCleanPath` 规范化，null→`/`）；`UserService.UpdateAsync` 在 Role/Permission/BasePath 任一变化后登记失效。
+- `UserTokenCutoffRegistry`（`OpenList.Infrastructure.Services`，**进程级 singleton**）：记「某用户在 T 之前签发的 token 全部失效」。截止点取整秒 **+1s**（JWT `nbf` 只有秒级精度；fail-closed —— 代价至多是变更瞬间登录的用户被要求重登，而不是旧权限 token 被放行）。`JwtBearerEvents.OnTokenValidated`（`Program.cs`）在标准校验通过后比对 `SecurityToken.ValidFrom`；`JwtService.ValidateTokenAsync`（S3 网关走这条入口）同样比对。**局限**：登记表在进程内存，重启清空、多实例各自独立（要强一致需分布式缓存）——与既有 `_revoked` 集合同性质。
+
+**决策与已知缺口**：
+
+- **admin 不豁免 BasePath**（严格对齐 Go；admin 通常 `BasePath="/"` → no-op）。旧 token 无 `base_path` claim 时 fail-open（等价 `/`）；失效登记表 fail-closed。
+- 档 B 的权限位校验**只覆盖 `/fs/put` + `/fs/form`**（Go `fsup` 中间件的三重校验）。`mkdir`/`rename`/`remove` 等管理端点在 Go 内联有权限位检查，本次**未搬**（超出批准范围）——路径穿越已由 `JoinGuard` 覆盖，但**权限位未校验**，属已知缺口。
+- 既有缺陷（本次未改）：`Disabled` 未签进 token；`JwtService._revoked` 是实例字段（登出吊销不跨请求）；`FileSystemService.RemoveAsync` 仍忽略 `user`（路径约束现由端点层 `JoinGuard` 兜住）。
 
 ## S3 网关增强（2026-09-21，对照 Go v4.2.6）
 

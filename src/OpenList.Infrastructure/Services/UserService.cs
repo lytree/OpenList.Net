@@ -16,6 +16,7 @@ public sealed class UserService : IUserService
     private readonly OpenListDbContext _db;
     private readonly TimeProvider _time;
     private readonly AppConfiguration _config;
+    private readonly UserTokenCutoffRegistry? _cutoffs;
 
     /// <summary>
     /// 创建用户服务实例。
@@ -23,11 +24,14 @@ public sealed class UserService : IUserService
     /// <param name="db">EF Core 数据库上下文。</param>
     /// <param name="config">应用配置（读取超级管理员用户名）。</param>
     /// <param name="time">时间源（可选，默认系统时区）。</param>
-    public UserService(OpenListDbContext db, AppConfiguration config, TimeProvider? time = null)
+    /// <param name="cutoffs">token 失效登记表（可选；BasePath/权限位变更时用来即时失效既有 token）。</param>
+    public UserService(OpenListDbContext db, AppConfiguration config, TimeProvider? time = null,
+        UserTokenCutoffRegistry? cutoffs = null)
     {
         _db = db;
         _config = config;
         _time = time ?? TimeProvider.System;
+        _cutoffs = cutoffs;
     }
 
     /// <summary>
@@ -235,6 +239,13 @@ public sealed class UserService : IUserService
                 return Resp.Fail("cannot change built-in admin permissions", RespCodes.Forbidden);
         }
 
+        // Role / Permission / BasePath 会被签进 token（见 JwtService.IssueToken），是签发时刻的
+        // 权限快照。这三者一旦变化，既有 token 就不再反映最新权限 —— 必须让它们失效，
+        // 否则旧 token 会带着旧权限继续有效到期。改动前的值先记下，改后再比对。
+        var oldRole = u.Role;
+        var oldPermission = u.Permission;
+        var oldBasePath = u.BasePath;
+
         if (!string.IsNullOrWhiteSpace(req.Username)) u.Username = req.Username;
         if (!string.IsNullOrWhiteSpace(req.Password)) u.PasswordHash = HashPassword(req.Password);
         if (req.Role.HasValue) u.Role = req.Role.Value;
@@ -246,6 +257,13 @@ public sealed class UserService : IUserService
         if (req.SsoID is not null) u.SsoID = string.IsNullOrWhiteSpace(req.SsoID) ? null : req.SsoID;
         u.UpdatedAt = _time.GetUtcNow();
         await _db.SaveChangesAsync(ct);
+
+        if (_cutoffs is not null &&
+            (u.Role != oldRole || u.Permission != oldPermission ||
+             !string.Equals(u.BasePath, oldBasePath, StringComparison.Ordinal)))
+        {
+            _cutoffs.InvalidateUser(id, _time.GetUtcNow());
+        }
         return Resp.Ok();
     }
 

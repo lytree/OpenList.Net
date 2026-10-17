@@ -170,6 +170,47 @@ public readonly struct UPath : IEquatable<UPath>, IComparable<UPath>
         && !name.Contains('/')
         && !name.Contains('\\');
 
+    /// <summary>
+    /// 把路径规整为以 <c>/</c> 开头、无重复斜杠与 <c>.</c>/<c>..</c> 的标准形式（空路径视为根目录）。
+    /// 镜像 Go <c>pkg/utils/path.go</c> 的 <c>FixAndCleanPath</c>：先把 <c>\</c> 转成 <c>/</c>，
+    /// 缺前导斜杠则补上，再等价于 <c>stdpath.Clean</c>（根之上的 <c>..</c> 被吸收，不越界）。
+    /// </summary>
+    public static string FixAndCleanPath(string? path)
+        => new UPath(string.IsNullOrEmpty(path) ? "/" : path).FullName!;
+
+    /// <summary>
+    /// 把用户的请求路径套到其 <paramref name="basePath"/> 之下（用户级目录隔离），
+    /// 镜像 Go <c>pkg/utils/path.go</c> 的 <c>JoinBasePath</c>。
+    /// <para>
+    /// 与「直接拼接」的关键差异是<b>相对路径守卫</b>：若原始路径含 <c>..</c>，而清洗后已不含 <c>..</c>，
+    /// 说明那些 <c>..</c> 被规范化解析掉了 —— 拼接结果会越出 <paramref name="basePath"/>，
+    /// 因此判定为越界尝试并返回 <c>false</c>（调用方应回 403 <c>using relative path is not allowed</c>，
+    /// 即 Go 的 <c>errs.RelativePath</c>）。这正是 <see cref="IsValidName"/> 只覆盖 <c>names</c> 一层时
+    /// 留下的缺口：顶层目录参数（dir/src_dir/dst_dir）走的是这条守卫。
+    /// </para>
+    /// </summary>
+    /// <param name="basePath">用户 BasePath；null/空视为根目录（不产生约束）。</param>
+    /// <param name="reqPath">请求路径（绝对，或相对根目录）。</param>
+    /// <param name="result">成功时为拼接并规范化后的绝对路径；失败时为空串（与 Go 返回空串一致）。</param>
+    /// <returns>路径是否合法。</returns>
+    public static bool TryJoinBasePath(string? basePath, string? reqPath, out string result)
+    {
+        var isRelativePath = reqPath is not null && reqPath.Contains("..");
+        var cleaned = FixAndCleanPath(reqPath);
+
+        // 含 ".." 却被清洗掉 = 试图用相对路径逃出 basePath，直接拒绝。
+        if (isRelativePath && !cleaned.Contains(".."))
+        {
+            result = string.Empty;
+            return false;
+        }
+
+        var root = FixAndCleanPath(basePath);
+        // 与 Go stdpath.Join 一致：basePath 为根时不引入额外层级。
+        result = root == "/" ? cleaned : new UPath(root + cleaned).FullName!;
+        return true;
+    }
+
     /// <summary>以子路径形式追加（<c>parent / child</c>）。</summary>
     public static UPath operator /(UPath path, string subPath) => Combine(path, subPath);
 

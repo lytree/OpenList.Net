@@ -25,3 +25,18 @@ public interface IAuthService
     /// <summary>为用户签发一个 JWT。</summary>
     string IssueToken(User user);
 }
+
+/// <summary>
+/// JWT 中承载用户权限身份的自定义 claim 名。签发端（<c>JwtService</c>）与解析端
+/// （<c>ClaimsPrincipal.ToUser</c>）共用同一组常量，避免两处字面量漂移 —— 漂移的表现是
+/// 「token 里没有/读不到该字段」，而 <c>User.BasePath</c>/<c>Permission</c> 缺失恰好等价于不约束，
+/// 是个静默失效的坑。
+/// </summary>
+public static class OpenListClaims
+{
+    /// <summary>用户文件根路径，对应 <see cref="User.BasePath"/>（用户级目录隔离）。</summary>
+    public const string BasePath = "base_path";
+
+    /// <summary>权限位掩码，对应 <see cref="User.Permission"/>。</summary>
+    public const string Permission = "permission";
+}

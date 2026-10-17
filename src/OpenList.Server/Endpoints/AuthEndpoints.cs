@@ -375,15 +375,31 @@ public static class AuthClaimsExtensions
     /// <summary>是否为管理员角色。</summary>
     public static bool IsAdmin(this ClaimsPrincipal principal) => principal.UserRole() == Core.Models.UserRole.Admin;
 
-    /// <summary>把声明映射为最小 <see cref="User"/>，供服务层做权限校验。</summary>
+    /// <summary>
+    /// 把声明映射为最小 <see cref="User"/>，供服务层做权限校验。
+    /// <para>
+    /// 除身份三件套外还带出 <see cref="User.BasePath"/> 与 <see cref="User.Permission"/>：
+    /// 它们由 <c>JwtService.IssueToken</c> 签进 token，是目录隔离（BasePath）与权限位判定的唯一来源。
+    /// 之前没带出来，导致服务层看到的用户永远是 BasePath=null、Permission=0 ——
+    /// 表现为「普通用户被当成零权限、且 BasePath 约束完全不生效」。
+    /// </para>
+    /// <para>
+    /// 匿名请求（虚拟 Guest，<c>Id=0</c>）没有这两个 claim：BasePath 退回 null（等价于根目录、不约束），
+    /// Permission 退回 0。改造前签发的旧 token 同理，行为与改造前一致，因此不存在兼容性回归。
+    /// </para>
+    /// </summary>
     public static User ToUser(this ClaimsPrincipal principal)
     {
         var id = principal.UserId() ?? 0;
+        var basePath = principal.FindFirst(OpenListClaims.BasePath)?.Value;
+        var permission = principal.FindFirst(OpenListClaims.Permission)?.Value;
         return new User
         {
             Id = id,
             Username = principal.Identity?.Name ?? string.Empty,
             Role = principal.UserRole(),
+            BasePath = string.IsNullOrEmpty(basePath) ? null : basePath,
+            Permission = int.TryParse(permission, out var p) ? p : 0,
         };
     }
 }

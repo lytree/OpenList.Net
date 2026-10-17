@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using OpenList.Vfs;
 
 namespace OpenList.Core.Models;
 
@@ -60,6 +61,17 @@ public sealed class User
 
     /// <summary>是否可删除（权限位 7）。</summary>
     public bool CanRemove() => ((Permission >> 7) & 1) == 1;
+
+    /// <summary>
+    /// 把请求路径套到本用户的 <see cref="BasePath"/> 之下（用户级目录隔离），
+    /// 镜像 Go <c>internal/model/user.go</c> 的 <c>User.JoinPath</c> → <c>utils.JoinBasePath</c>。
+    /// <see cref="BasePath"/> 为 null/空时等价于根目录 <c>/</c>，即不产生约束（内置 admin / guest 的情形）。
+    /// 返回 <c>false</c> 表示路径含越界的 <c>..</c>，调用方应回 403 <c>using relative path is not allowed</c>。
+    /// </summary>
+    /// <param name="reqPath">请求路径。</param>
+    /// <param name="result">拼接并规范化后的绝对路径。</param>
+    public bool TryJoinPath(string? reqPath, out string result)
+        => UPath.TryJoinBasePath(BasePath, reqPath, out result);
 
     /// <summary>用户主键。</summary>
     public long Id { get; set; }

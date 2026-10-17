@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using FubarDev.FtpServer;
 using FubarDev.FtpServer.AccountManagement;
@@ -128,6 +129,11 @@ builder.Services.AddScoped<IUserService, UserService>();
 // ILdapAuthenticator is a singleton because it only depends on AppConfiguration.
 // JwtService picks it up optionally — empty Url means Enabled=false and /login/ldap returns 501.
 builder.Services.AddSingleton<ILdapAuthenticator, LdapAuthenticator>();
+// UserTokenCutoffRegistry is a process-wide singleton: it records "tokens issued before
+// this moment for user X are stale". JwtService writes into it when a user's token-relevant
+// fields (BasePath/Permission/Role) change, and the JwtBearer OnTokenValidated hook reads from
+// it. Must be a singleton so both sides share the same instance.
+builder.Services.AddSingleton<UserTokenCutoffRegistry>();
 builder.Services.AddScoped<IAuthService, JwtService>();
 // ISsoService depends on IUserService + IAuthService (both scoped) so it's scoped too.
 // It reads SSO config from the settings table at request time — admins can toggle
@@ -242,6 +248,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                         ? token[7..]
                         : token;
                 }
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = ctx =>
+            {
+                // A token carries a snapshot of BasePath/Permission (see JwtService.IssueToken).
+                // When an admin later changes those fields, the old token must stop working;
+                // the cutoff registry records the moment of change and this hook rejects
+                // anything issued before it, forcing a re-login to pick up the new values.
+                var cutoffs = ctx.HttpContext.RequestServices.GetRequiredService<UserTokenCutoffRegistry>();
+                var idClaim = ctx.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (long.TryParse(idClaim, out var userId) && cutoffs.IsStale(userId, ctx.SecurityToken.ValidFrom))
+                    ctx.Fail("token revoked");
                 return Task.CompletedTask;
             },
         };

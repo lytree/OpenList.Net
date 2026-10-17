@@ -20,6 +20,7 @@ public sealed class JwtService : IAuthService
     private readonly AppConfiguration _config;
     private readonly TimeProvider _time;
     private readonly ILdapAuthenticator? _ldap;
+    private readonly UserTokenCutoffRegistry? _cutoffs;
     private readonly HashSet<string> _revoked = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -29,12 +30,15 @@ public sealed class JwtService : IAuthService
     /// <param name="config">应用配置（读取密钥与 Token 有效期）。</param>
     /// <param name="time">时间源（可选，默认系统时区）。</param>
     /// <param name="ldap">LDAP 认证器（可选，未配置时 LDAP 登录不可用）。</param>
-    public JwtService(IUserService users, AppConfiguration config, TimeProvider? time = null, ILdapAuthenticator? ldap = null)
+    /// <param name="cutoffs">token 失效登记表（可选；用于 BasePath/权限位变更后即时失效既有 token）。</param>
+    public JwtService(IUserService users, AppConfiguration config, TimeProvider? time = null,
+        ILdapAuthenticator? ldap = null, UserTokenCutoffRegistry? cutoffs = null)
     {
         _users = users;
         _config = config;
         _time = time ?? TimeProvider.System;
         _ldap = ldap;
+        _cutoffs = cutoffs;
     }
 
     /// <summary>
@@ -220,9 +224,16 @@ public sealed class JwtService : IAuthService
         {
             var handler = new JwtSecurityTokenHandler();
             var parameters = BuildValidationParameters();
-            var principal = handler.ValidateToken(token, parameters, out _);
+            var principal = handler.ValidateToken(token, parameters, out var validated);
             var idClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            return Task.FromResult<long?>(long.TryParse(idClaim, out var id) ? id : null);
+            if (!long.TryParse(idClaim, out var id)) return Task.FromResult<long?>(null);
+
+            // BasePath / 权限位变更后，早于截止点签发的 token 视为失效（详见 UserTokenCutoffRegistry）：
+            // 走这条入口的调用方（如 S3 网关）同样必须看到最新权限，否则改了 BasePath 也拦不住它。
+            if (_cutoffs is not null && _cutoffs.IsStale(id, validated!.ValidFrom))
+                return Task.FromResult<long?>(null);
+
+            return Task.FromResult<long?>(id);
         }
         catch
         {
@@ -244,6 +255,11 @@ public sealed class JwtService : IAuthService
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Name, user.Username),
             new Claim(ClaimTypes.Role, ((int)user.Role).ToString()),
+            // BasePath 与 Permission 是每个文件系统请求都要用的权限输入（目录隔离 + 权限位），
+            // 而 .NET 侧刻意保持无状态 JWT（不每请求查库），因此必须随身份一起签进 token。
+            // BasePath 先规范化：Go 的 JoinBasePath 对 null/空是按 "/" 处理的，这里统一成同一形式。
+            new Claim(OpenListClaims.BasePath, Vfs.UPath.FixAndCleanPath(user.BasePath)),
+            new Claim(OpenListClaims.Permission, user.Permission.ToString()),
         };
         var creds = new SigningCredentials(BuildSymmetricKey(_config.JwtSecret), SecurityAlgorithms.HmacSha256);
         var token = new JwtSecurityToken(

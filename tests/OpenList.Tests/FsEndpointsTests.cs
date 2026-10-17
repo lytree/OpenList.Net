@@ -147,4 +147,53 @@ public class FsEndpointsTests
             await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
         }
     }
+
+    [Test]
+    public async Task List_Respects_User_BasePath_Isolation()
+    {
+        // 镜像 Go：user.JoinPath 把请求路径钉在用户 BasePath 之内，越界相对路径返回 403。
+        // 这里验证非 admin 用户的根请求落在自己的 BasePath 内，且看不到兄弟目录。
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("writable/a.txt", "a"u8.ToArray());
+            await factory.WriteFileAsync("other/b.txt", "b"u8.ToArray());
+
+            // 以 admin 建一个 BasePath=/test/writable 的普通用户（权限位全开，避免权限位干扰路径断言）。
+            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
+            var create = await client.PostAsync("/api/admin/user/create", JsonContent.Create(new
+            {
+                username = "bob",
+                password = "pw",
+                role = 0,
+                base_path = "/test/writable",
+                permission = 0x71FF,
+            }));
+            var createJson = await create.Content.ReadFromJsonAsync<JsonDocument>();
+            await Assert.That(createJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
+
+            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "bob", "pw"));
+
+            // 根路径请求被套到 bob 的 BasePath 内：只看得到自己的文件，看不到兄弟目录内容。
+            var resp = await client.PostAsync("/api/fs/list", JsonContent.Create(new { path = "/" }));
+            var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
+            var names = json.RootElement.GetProperty("data").GetProperty("content")
+                .EnumerateArray().Select(e => e.GetProperty("name").GetString()).ToList();
+            await Assert.That(names.Any(n => n == "a.txt")).IsTrue();
+            await Assert.That(names.Any(n => n == "other")).IsFalse();
+
+            // 越界相对路径被拒绝（镜像 Go utils.JoinBasePath → errs.RelativePath）。
+            var esc = await client.PostAsync("/api/fs/list", JsonContent.Create(new { path = "../other" }));
+            var escJson = await esc.Content.ReadFromJsonAsync<JsonDocument>();
+            await Assert.That(escJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
+        }
+    }
+
+    private static async Task<string> LoginAsync(HttpClient client, string username, string password)
+    {
+        var resp = await client.PostAsync("/api/auth/login", JsonContent.Create(new { username, password }));
+        var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+        return json!.RootElement.GetProperty("data").GetProperty("token").GetString()!;
+    }
 }

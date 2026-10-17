@@ -35,107 +35,190 @@ public static class FsEndpoints
         g.MapMethods("/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsListReq>(ctx, ctx.RequestAborted);
-            return Results.Ok(await svc.ListAsync(req, user.ToUser()));
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            req.Path = path;
+            return Results.Ok(await svc.ListAsync(req, u));
         }).AllowAnonymous();
 
         g.MapMethods("/get", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsGetReq>(ctx, ctx.RequestAborted);
-            return Results.Ok(await svc.GetAsync(req, user.ToUser()));
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            req.Path = path;
+            return Results.Ok(await svc.GetAsync(req, u));
         }).AllowAnonymous();
 
         g.MapMethods("/dirs", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<DirsReq>(ctx, ctx.RequestAborted);
-            return Results.Ok(await svc.DirsAsync(req.Path, user.ToUser()));
-        }).AllowAnonymous(); // password/force_root accepted but ignored (no driver uses them yet)
+            var u = user.ToUser();
+            // Go FsDirs：force_root 仅管理员可用且不做 BasePath 拼接；否则套 BasePath。
+            string path;
+            if (req.ForceRoot)
+            {
+                if (!u.IsAdmin()) return Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
+                path = UPath.FixAndCleanPath(req.Path);
+            }
+            else if (JoinGuard(u, req.Path, out path) is { } fail) { return fail; }
+            return Results.Ok(await svc.DirsAsync(path, u));
+        }).AllowAnonymous(); // password accepted but ignored (no driver uses it yet)
 
         g.MapMethods("/search", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<SearchReq>(ctx, ctx.RequestAborted);
-            return Results.Ok(await svc.SearchAsync(req, user.ToUser()));
+            var u = user.ToUser();
+            // Go search.go 对越界相对路径回 400（而非 403），此处保持一致。
+            if (!u.TryJoinPath(req.Parent, out var parent))
+                return Results.Ok(Resp.Fail("using relative path is not allowed", RespCodes.BadRequest));
+            req.Parent = parent;
+            return Results.Ok(await svc.SearchAsync(req, u));
         }).AllowAnonymous();
 
         // --- Manage ---
         g.MapPost("/mkdir", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.MkdirAsync(req.Path, user.ToUser())));
+        {
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            return Results.Ok(await svc.MkdirAsync(path, u));
+        });
 
-        // POST /fs/rename — body: { path, name, overwrite }. newPath = parent(path) + name.
+        // POST /fs/rename — body: { path, name, overwrite }. newPath = parent(join(path)) + name.
+        // 新名字必须是纯名称（镜像 Go FsRename 的 checkRelativePath(req.Name)）。
         g.MapPost("/rename", async (RenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
         {
-            var trimmed = req.Path.TrimEnd('/');
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Path, out var reqPath) is { } fail) return fail;
+            if (!UPath.IsValidName(req.Name))
+                return Results.Ok(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
+            var trimmed = reqPath.TrimEnd('/');
             var slash = trimmed.LastIndexOf('/');
             var parent = slash <= 0 ? "/" : trimmed[..slash];
             var newPath = parent == "/" ? $"/{req.Name}" : $"{parent}/{req.Name}";
-            return Results.Ok(await svc.RenameAsync(req.Path, newPath, user.ToUser()));
+            return Results.Ok(await svc.RenameAsync(reqPath, newPath, u));
         });
 
+        // 旧版 API 兼容入口：Items 携带完整路径（非本项目的 Go 对齐面），逐项套用 BasePath。
         g.MapPost("/rename_batch", async (BatchRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.BatchRenameAsync(req.Items, user.ToUser())));
+        {
+            var u = user.ToUser();
+            var items = new List<BatchRenameItem>(req.Items.Count);
+            foreach (var it in req.Items)
+            {
+                if (JoinGuard(u, it.SrcName, out var src) is { } f1) return f1;
+                if (JoinGuard(u, it.NewName, out var name) is { } f2) return f2;
+                items.Add(new BatchRenameItem { SrcName = src, NewName = name });
+            }
+            return Results.Ok(await svc.BatchRenameAsync(items, u));
+        });
 
         // POST /fs/batch_rename — frontend variant. Body: { src_dir, rename_objects: [{src_name, new_name}] }
         // rename_objects carry only file names; src_dir is prepended to form full paths.
+        // 名称必须是纯名称（镜像 Go FsBatchRename 的 checkRelativePath）。
         g.MapPost("/batch_rename", async (FsBatchRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
         {
-            var dir = req.SrcDir?.TrimEnd('/') ?? "/";
-            var items = req.RenameObjects.Select(o => new BatchRenameItem
+            var u = user.ToUser();
+            if (JoinGuard(u, req.SrcDir, out var dir) is { } fail) return fail;
+            var baseDir = string.IsNullOrEmpty(dir) || dir == "/" ? "" : dir.TrimEnd('/');
+            var items = new List<BatchRenameItem>(req.RenameObjects.Count);
+            foreach (var o in req.RenameObjects)
             {
-                SrcName = string.IsNullOrEmpty(dir) || dir == "/" ? o.SrcName : $"{dir}/{o.SrcName}",
-                NewName = string.IsNullOrEmpty(dir) || dir == "/" ? o.NewName : $"{dir}/{o.NewName}",
-            }).ToList();
-            return Results.Ok(await svc.BatchRenameAsync(items, user.ToUser()));
+                if (string.IsNullOrEmpty(o.SrcName) || string.IsNullOrEmpty(o.NewName)) continue;
+                if (!UPath.IsValidName(o.SrcName) || !UPath.IsValidName(o.NewName))
+                    return Results.Ok(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
+                items.Add(new BatchRenameItem
+                {
+                    SrcName = baseDir == "" ? $"/{o.SrcName}" : $"{baseDir}/{o.SrcName}",
+                    NewName = baseDir == "" ? $"/{o.NewName}" : $"{baseDir}/{o.NewName}",
+                });
+            }
+            return Results.Ok(await svc.BatchRenameAsync(items, u));
         });
 
         // POST /fs/regex_rename — Go API completeness (the frontend computes new
         // names client-side and uses /batch_rename instead). Body: { src_dir,
         // src_name_regex, new_name_regex }. Delegates to IFileSystemService.RegexRenameAsync.
         g.MapPost("/regex_rename", async (RegexRenameReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.RegexRenameAsync(req.SrcDir, req.SrcNameRegex, req.NewNameRegex, user.ToUser())));
+        {
+            var u = user.ToUser();
+            if (JoinGuard(u, req.SrcDir, out var dir) is { } fail) return fail;
+            return Results.Ok(await svc.RegexRenameAsync(dir, req.SrcNameRegex, req.NewNameRegex, u));
+        });
 
         // POST /fs/move — taskified, mirrors Go FsMove.
         // Body: { src_dir, dst_dir, names, overwrite, skip_existing }.
         g.MapPost("/move", async (MoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.MoveBatchAsync(ToMoveCopy(req), user.ToUser())));
+        {
+            var u = user.ToUser();
+            if (JoinGuard(u, req.SrcDir, out var src) is { } f1) return f1;
+            if (JoinGuard(u, req.DstDir, out var dst) is { } f2) return f2;
+            var mc = ToMoveCopy(req);
+            mc.SrcDir = src;
+            mc.DstDir = dst;
+            return Results.Ok(await svc.MoveBatchAsync(mc, u));
+        });
 
         // POST /fs/copy — taskified with optional merge, mirrors Go FsCopy.
         g.MapPost("/copy", async (MoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.CopyBatchAsync(ToMoveCopy(req), user.ToUser())));
+        {
+            var u = user.ToUser();
+            if (JoinGuard(u, req.SrcDir, out var src) is { } f1) return f1;
+            if (JoinGuard(u, req.DstDir, out var dst) is { } f2) return f2;
+            var mc = ToMoveCopy(req);
+            mc.SrcDir = src;
+            mc.DstDir = dst;
+            return Results.Ok(await svc.CopyBatchAsync(mc, u));
+        });
 
-        // POST /fs/remove — body: { dir, names }. paths = names.Select(n => dir/n).
+        // POST /fs/remove — body: { dir, names }. paths = join(dir)/names.
         // names 必须是纯名称：含路径成分（/ \ . ..）时返回 403（镜像 Go checkRelativePath）。
         // 否则 UPath 归一化会解析 "\..\.."，拼接后可越出 dir 删除任意文件。
         g.MapPost("/remove", async (RemoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
         {
             if (req.Names.Any(n => !UPath.IsValidName(n)))
                 return Results.Ok(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
-            return Results.Ok(await svc.RemoveAsync(JoinPaths(req.Dir, req.Names), user.ToUser()));
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Dir, out var dir) is { } fail) return fail;
+            return Results.Ok(await svc.RemoveAsync(JoinPaths(dir, req.Names), u));
         });
 
         g.MapPost("/remove_empty_directory", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.RemoveEmptyDirectoryAsync(req.Path, user.ToUser())));
-
-        // --- Upload ---
-        // Go: handles.FsStream. Path from "File-Path" header (URL-encoded), like the frontend.
-        g.MapPut("/put", async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
         {
-            var path = ReadFilePathHeader(ctx);
-            if (path is null)
-                return Results.Ok(Resp.Fail("File-Path header is required", RespCodes.BadRequest));
-            await using var stream = ctx.Request.Body;
-            return Results.Ok(await svc.PutStreamAsync(path, stream, user.ToUser(), ctx.RequestAborted));
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            return Results.Ok(await svc.RemoveEmptyDirectoryAsync(path, u));
         });
 
-        // Go: handles.FsForm. Multipart form upload. Path from "File-Path" header.
-        g.MapPut("/form", async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        // --- Upload ---
+        // Go: handles.FsStream + middlewares.FsUp. Path from "File-Path" header (URL-encoded).
+        // 套用 BasePath，并补 fsup 的 CanWriteContent + meta 写入校验（无权限返回 403）。
+        g.MapPut("/put", async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user) =>
         {
             var path = ReadFilePathHeader(ctx);
             if (path is null)
                 return Results.Ok(Resp.Fail("File-Path header is required", RespCodes.BadRequest));
+            var u = user.ToUser();
+            if (JoinGuard(u, path, out var joined) is { } fail) return fail;
+            if (await WriteGateAsync(metaSvc, u, joined, ctx.RequestAborted) is { } denied) return denied;
+            await using var stream = ctx.Request.Body;
+            return Results.Ok(await svc.PutStreamAsync(joined, stream, u, ctx.RequestAborted));
+        });
+
+        // Go: handles.FsForm + middlewares.FsUp. Multipart form upload. Path from "File-Path" header.
+        g.MapPut("/form", async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user) =>
+        {
+            var path = ReadFilePathHeader(ctx);
+            if (path is null)
+                return Results.Ok(Resp.Fail("File-Path header is required", RespCodes.BadRequest));
+            var u = user.ToUser();
+            if (JoinGuard(u, path, out var joined) is { } fail) return fail;
+            if (await WriteGateAsync(metaSvc, u, joined, ctx.RequestAborted) is { } denied) return denied;
             var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
             foreach (var file in form.Files)
             {
                 await using var stream = file.OpenReadStream();
-                var r = await svc.PutFormAsync(path, stream, file.FileName, user.ToUser(), ctx.RequestAborted);
+                var r = await svc.PutFormAsync(joined, stream, file.FileName, u, ctx.RequestAborted);
                 if (r.Code != 200) return Results.Ok(r);
             }
             return Results.Ok(Resp.Ok());
@@ -143,52 +226,77 @@ public static class FsEndpoints
 
         // Go: handles.FsGetDirectUploadInfo. Returns presigned upload URL if driver supports it.
         g.MapPost("/get_direct_upload_info", async (DirectUploadInfoReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.GetDirectUploadInfoAsync(req.Path, req.FileSize, user.ToUser())));
+        {
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            return Results.Ok(await svc.GetDirectUploadInfoAsync(path, req.FileSize, u));
+        });
 
         // Go: handles.FsRecursiveMove (alias for move with single src).
         g.MapPost("/recursive_move", async (RecursiveMoveReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.RecursiveMoveAsync(req.SrcDir, req.DstDir, user.ToUser())));
+        {
+            var u = user.ToUser();
+            if (JoinGuard(u, req.SrcDir, out var src) is { } f1) return f1;
+            if (JoinGuard(u, req.DstDir, out var dst) is { } f2) return f2;
+            return Results.Ok(await svc.RecursiveMoveAsync(src, dst, u));
+        });
 
         // --- Link / Archive ---
         // Go: g.POST("/link", middlewares.AuthAdmin, handles.Link) — link generation
         // is admin-only because it can expose storage credentials/direct URLs.
+        // 注意：Go 的 Link 刻意不做 BasePath 拼接（注释：请求路径本就是完整路径），此处保持一致。
         g.MapPost("/link", async (PathReq req, IFileSystemService svc, ClaimsPrincipal user) =>
             Results.Ok(await svc.LinkAsync(req.Path, user.ToUser()))).RequireAuthorization("admin");
 
         g.MapMethods("/archive/meta", ["GET", "POST"], async (IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.ArchiveMetaAsync("/", user.ToUser())));
+        {
+            var u = user.ToUser();
+            if (JoinGuard(u, "/", out var path) is { } fail) return fail;
+            return Results.Ok(await svc.ArchiveMetaAsync(path, u));
+        });
 
         g.MapMethods("/archive/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<ArchiveListReq>(ctx, ctx.RequestAborted);
-            return Results.Ok(await svc.ArchiveListAsync(req.Path, req.ArchivePass ?? req.Password, user.ToUser()));
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            return Results.Ok(await svc.ArchiveListAsync(path, req.ArchivePass ?? req.Password, u));
         });
 
         // POST /fs/archive/decompress — body: { src_dir, dst_dir, name, archive_pass, ... }.
-        // archivePath = src_dir + name[0]; destPath = dst_dir (+ name folder if put_into_new_dir).
+        // archivePath = join(src_dir + name[0]); destPath = join(dst_dir) (+ name folder if put_into_new_dir).
         g.MapPost("/archive/decompress", async (ArchiveDecompressReq req, IFileSystemService svc, ClaimsPrincipal user) =>
         {
-            var archivePath = JoinPaths(req.SrcDir, req.Name).FirstOrDefault() ?? req.SrcDir;
-            var destDir = req.DstDir;
+            var u = user.ToUser();
+            var archiveRel = JoinPaths(req.SrcDir, req.Name).FirstOrDefault() ?? req.SrcDir;
+            if (JoinGuard(u, archiveRel, out var archivePath) is { } f1) return f1;
+            if (JoinGuard(u, req.DstDir, out var destDir) is { } f2) return f2;
             if (req.PutIntoNewDir && req.Name.Count > 0)
             {
                 var folder = req.Name[0].TrimEnd('/').Split('/').Last();
                 destDir = destDir.TrimEnd('/') + "/" + folder;
             }
-            return Results.Ok(await svc.ArchiveDecompressAsync(archivePath, destDir, req.ArchivePass, user.ToUser()));
+            return Results.Ok(await svc.ArchiveDecompressAsync(archivePath, destDir, req.ArchivePass, u));
         });
 
         // --- Scan (admin-only) ---
         g.MapPost("/scan", async (PathReq req, IScanService scan, ClaimsPrincipal user) =>
         {
-            if (!user.IsAdmin())
+            var u = user.ToUser();
+            if (!u.IsAdmin())
                 return Results.Ok(Resp.Fail("admin only", RespCodes.Forbidden));
-            return Results.Ok(await scan.StartAsync(req.Path));
+            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            return Results.Ok(await scan.StartAsync(path));
         });
 
         // --- Offline download (Phase 6) ---
         g.MapPost("/add_offline_download", async (OfflineDownloadReq req, IFileSystemService svc, ClaimsPrincipal user) =>
-            Results.Ok(await svc.AddOfflineDownloadAsync(req, user.ToUser())));
+        {
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            req.Path = path;
+            return Results.Ok(await svc.AddOfflineDownloadAsync(req, u));
+        });
 
         // POST /fs/other — driver-specific operations (e.g. aliyun video_preview).
         // Body: { path, password, method, ... }. Delegates to
@@ -198,7 +306,9 @@ public static class FsEndpoints
         g.MapMethods("/other", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsOtherReq>(ctx, ctx.RequestAborted);
-            return Results.Ok(await svc.OtherAsync(req.Path, req.Method ?? "", user.ToUser()));
+            var u = user.ToUser();
+            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            return Results.Ok(await svc.OtherAsync(path, req.Method ?? "", u));
         });
 
         // --- Torrent endpoints ---
@@ -247,6 +357,111 @@ public static class FsEndpoints
         SkipExisting = req.SkipExisting,
         Merge = req.Merge,
     };
+
+    /// <summary>
+    /// 把请求路径套到用户的 <see cref="User.BasePath"/> 之下（镜像 Go <c>User.JoinPath</c>）。
+    /// 成功返回 null 并把结果写入 <paramref name="joined"/>；失败（越界相对路径）返回 403
+    /// <c>using relative path is not allowed</c>。
+    /// </summary>
+    internal static IResult? JoinGuard(User user, string? reqPath, out string joined)
+    {
+        if (user.TryJoinPath(reqPath, out joined)) return null;
+        joined = string.Empty;
+        return Results.Ok(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
+    }
+
+    /// <summary>
+    /// 上传/写入前置门禁，镜像 Go <c>server/middlewares/fsup.go</c>：解析目标文件父目录的最近 meta 后，
+    /// 依次校验 (1) 用户权限位 <see cref="User.CanWriteContent"/>，或 meta 显式开放写入
+    /// （<c>meta.Write</c> 且 <c>WSub</c> 覆盖）；(2) meta 的 <c>WriteUsers</c> 白名单。
+    /// 返回 null 表示放行，否则返回 403。
+    /// </summary>
+    private static async Task<IResult?> WriteGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
+    {
+        // Go 校验的是父目录（stdpath.Dir(path)）的 meta，而非文件本身。
+        var parent = ParentPath(path);
+        Meta? nearest = null;
+        try
+        {
+            var metas = (await meta.ListAsync(ct)).Data ?? [];
+            nearest = FindNearestMeta(metas, parent);
+        }
+        catch { /* meta 解析失败不阻断写入，与 FileSystemService.ListAsync 的处理保持一致 */ }
+
+        if (!user.CanWriteContent() && !CanWriteContentBypass(nearest, parent))
+            return Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
+        if (!CanWrite(user, nearest, parent))
+            return Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
+        return null;
+    }
+
+    /// <summary>路径的父目录（镜像 Go <c>stdpath.Dir</c>）。</summary>
+    private static string ParentPath(string path)
+    {
+        var p = UPath.FixAndCleanPath(path).TrimEnd('/');
+        var slash = p.LastIndexOf('/');
+        return slash <= 0 ? "/" : p[..slash];
+    }
+
+    /// <summary>从 meta 列表里取路径前缀最长匹配的那条（镜像 Go <c>op.GetNearestMeta</c>）。</summary>
+    private static Meta? FindNearestMeta(IReadOnlyList<Meta> metas, string path)
+    {
+        Meta? best = null;
+        var bestLen = -1;
+        foreach (var m in metas)
+        {
+            if (string.IsNullOrEmpty(m.Path)) continue;
+            if (MetaCoversPath(m.Path, path, true) && m.Path.Length > bestLen)
+            {
+                best = m;
+                bestLen = m.Path.Length;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>镜像 Go <c>common.CanWriteContentBypassUserPerms</c>：meta 显式开放写入时绕过用户权限位。</summary>
+    private static bool CanWriteContentBypass(Meta? meta, string path)
+    {
+        if (meta is null || !meta.Write) return false;
+        var mp = UPath.FixAndCleanPath(meta.Path);
+        var p = UPath.FixAndCleanPath(path);
+        if (string.Equals(mp, p, StringComparison.OrdinalIgnoreCase)) return true;
+        return IsSubPath(mp, p) && meta.WSub;
+    }
+
+    /// <summary>镜像 Go <c>common.CanWrite</c>：WriteUsers 白名单命中，或 meta 未覆盖该路径时放行。</summary>
+    private static bool CanWrite(User user, Meta? meta, string path)
+    {
+        if (meta is not null && meta.WriteUsers.Count > 0 && !meta.WriteUsers.Contains(user.Id)
+            && MetaCoversPath(meta.Path, path, meta.WriteUsersSub))
+            return false;
+        return true;
+    }
+
+    /// <summary>镜像 Go <c>common.MetaCoversPath</c>：meta 是否覆盖给定路径（可选是否作用于子目录）。</summary>
+    private static bool MetaCoversPath(string metaPath, string reqPath, bool applyToSubFolder)
+    {
+        var mp = UPath.FixAndCleanPath(metaPath);
+        var rp = UPath.FixAndCleanPath(reqPath);
+        if (string.Equals(mp, rp, StringComparison.OrdinalIgnoreCase)) return true;
+        if (!applyToSubFolder) return false;
+        while (rp != "/")
+        {
+            rp = ParentPath(rp);
+            if (string.Equals(mp, rp, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>镜像 Go <c>utils.IsSubPath</c>：<paramref name="path"/> 是否位于 <paramref name="parent"/> 之下。</summary>
+    private static bool IsSubPath(string parent, string path)
+    {
+        var p = UPath.FixAndCleanPath(parent).TrimEnd('/');
+        if (p.Length == 0) return true; // 根目录覆盖一切
+        var c = UPath.FixAndCleanPath(path);
+        return c == p || c.StartsWith(p + "/", StringComparison.Ordinal);
+    }
 }
 
 // --- 请求 DTO ---

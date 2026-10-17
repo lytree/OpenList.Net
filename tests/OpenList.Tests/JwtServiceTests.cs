@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using OpenList.Core.Configuration;
@@ -69,6 +70,60 @@ public class JwtServiceTests
         var (svc, _) = await BuildAsync();
         var id = await svc.ValidateTokenAsync("not.a.jwt");
         await Assert.That(id).IsNull();
+    }
+
+    [Test]
+    public async Task IssueToken_Includes_BasePath_And_Permission_Claims()
+    {
+        // BasePath 与 Permission 是每请求的权限输入，必须随身份签进 token
+        //（.NET 侧刻意保持无状态 JWT，不每请求查库）。
+        var (svc, _) = await BuildAsync();
+        var user = new User { Id = 7, Username = "bob", Role = UserRole.General, BasePath = "/home/bob", Permission = 0x71FF };
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(svc.IssueToken(user));
+
+        await Assert.That(jwt.Claims.First(c => c.Type == OpenListClaims.BasePath).Value).IsEqualTo("/home/bob");
+        await Assert.That(jwt.Claims.First(c => c.Type == OpenListClaims.Permission).Value).IsEqualTo(0x71FF.ToString());
+    }
+
+    [Test]
+    public async Task IssueToken_Normalizes_Null_BasePath_To_Root()
+    {
+        // Go 的 JoinBasePath 对 null/空 BasePath 按 "/" 处理；签进 token 的值统一成同一形式。
+        var (svc, _) = await BuildAsync();
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(
+            svc.IssueToken(new User { Id = 8, Username = "root", Role = UserRole.Admin }));
+
+        await Assert.That(jwt.Claims.First(c => c.Type == OpenListClaims.BasePath).Value).IsEqualTo("/");
+    }
+
+    [Test]
+    public async Task ValidateTokenAsync_Returns_Null_After_CutoffInvalidation()
+    {
+        // BasePath/权限变更后，早于截止点签发的 token 必须失效（详见 UserTokenCutoffRegistry）。
+        var (svc, db, cutoffs) = await BuildWithCutoffsAsync();
+        var u = db.Users.First();
+        var token = svc.IssueToken(u);
+        await Assert.That(await svc.ValidateTokenAsync(token)).IsEqualTo(u.Id);
+
+        cutoffs.InvalidateUser(u.Id, DateTimeOffset.UtcNow);
+        await Assert.That(await svc.ValidateTokenAsync(token)).IsNull();
+    }
+
+    private static async Task<(JwtService svc, OpenListDbContext db, UserTokenCutoffRegistry cutoffs)> BuildWithCutoffsAsync()
+    {
+        var conn = new SqliteConnection("DataSource=:memory:");
+        await conn.OpenAsync();
+        var opts = new DbContextOptionsBuilder<OpenListDbContext>()
+            .UseSqlite(conn)
+            .Options;
+        var db = new OpenListDbContext(opts, new DatabaseConfig());
+        await db.Database.EnsureCreatedAsync();
+        var cutoffs = new UserTokenCutoffRegistry();
+        var users = new UserService(db, new AppConfiguration(), null, cutoffs);
+        await users.CreateAsync(new CreateUserReq { Username = "alice", Password = "pw" });
+        var config = new AppConfiguration { JwtSecret = Secret, TokenExpiresIn = 1 };
+        var svc = new JwtService(users, config, null, null, cutoffs);
+        return (svc, db, cutoffs);
     }
 
     private static async Task<(JwtService svc, OpenListDbContext db)> BuildAsync()
