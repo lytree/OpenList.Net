@@ -1,9 +1,9 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Core.Security;
 using OpenList.Infrastructure.Data;
 
 namespace OpenList.Infrastructure.Services;
@@ -261,56 +261,15 @@ public sealed class SearchService : ISearchService
     }
 
     /// <summary>
-    /// 综合权限判断（隐藏文件/读用户/免密/密码），镜像 Go <c>server/common/check.go</c> CanAccess。
+    /// 综合权限判断（隐藏文件/读用户/免密/密码）。判定逻辑统一收敛在
+    /// <see cref="MetaAccess.CanAccess"/>，避免与 fs/list、fs/get 的密码门禁各写一份而走偏。
     /// </summary>
     private static bool CanAccess(User user, Meta? meta, string reqPath, string? password)
-    {
-        // 隐藏文件：meta 的 hide 规则适用于 reqPath 的父目录且用户不可见隐藏 → 按正则匹配名称拦截。
-        if (meta is not null && !user.CanSeeHides() && !string.IsNullOrEmpty(meta.Hide)
-            && MetaCoversPath(meta.Path, ParentPath(reqPath), meta.HideSub))
-        {
-            var baseName = NamePath(reqPath);
-            foreach (var line in meta.Hide.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                try
-                {
-                    if (Regex.IsMatch(baseName, line))
-                        return false;
-                }
-                catch { /* 非法正则按不匹配处理 */ }
-            }
-        }
-        if (!CanRead(user, meta, reqPath))
-            return false;
-        // 可免密访问的用户直接放行。
-        if (user.CanAccessWithoutPassword())
-            return true;
-        // 无 meta 或未设密码 → 可访问。
-        if (meta is null || string.IsNullOrEmpty(meta.Password))
-            return true;
-        // 密码不适用于子目录 → 可访问。
-        if (!MetaCoversPath(meta.Path, reqPath, meta.PSub))
-            return true;
-        // 校验密码。
-        return meta.Password == password;
-    }
+        => MetaAccess.CanAccess(user, meta, reqPath, password);
 
     /// <summary>读用户限制校验，镜像 Go <c>server/common/check.go</c> CanRead。</summary>
     private static bool CanRead(User user, Meta? meta, string path)
-    {
-        if (meta is not null && meta.ReadUsers.Count > 0
-            && !meta.ReadUsers.Contains(user.Id)
-            && MetaCoversPath(meta.Path, path, meta.ReadUsersSub))
-            return false;
-        return true;
-    }
-
-    /// <summary>判断 meta 是否覆盖给定路径（路径相等或为子路径且开启子目录生效），镜像 Go MetaCoversPath。</summary>
-    private static bool MetaCoversPath(string metaPath, string reqPath, bool applyToSubFolder)
-    {
-        if (PathEqual(metaPath, reqPath)) return true;
-        return IsSubPath(metaPath, reqPath) && applyToSubFolder;
-    }
+        => MetaAccess.CanRead(user, meta, path);
 
     /// <summary>
     /// 从路径向上找到最近的 Meta（含自身），找不到返回 null。镜像 Go <c>internal/op/meta.go</c> GetNearestMeta。
@@ -334,10 +293,6 @@ public sealed class SearchService : ISearchService
         var s = FixAndCleanPath(subPath);
         return p == s || s.StartsWith(AddTrailingSlash(p), StringComparison.Ordinal);
     }
-
-    /// <summary>规范化并比较两个路径是否相等，镜像 Go utils.PathEqual。</summary>
-    private static bool PathEqual(string p1, string p2)
-        => FixAndCleanPath(p1) == FixAndCleanPath(p2);
 
     /// <summary>把路径规整为以 / 开头、无 ./.. 与重复斜杠的标准形式（空视为根目录），镜像 Go utils.FixAndCleanPath。</summary>
     private static string FixAndCleanPath(string path)
@@ -370,14 +325,6 @@ public sealed class SearchService : ISearchService
         if (cleaned == "/") return "/";
         var idx = cleaned.LastIndexOf('/');
         return idx <= 0 ? "/" : cleaned[..idx];
-    }
-
-    /// <summary>返回路径的末段名称（根目录返回空串）。</summary>
-    private static string NamePath(string path)
-    {
-        var cleaned = FixAndCleanPath(path);
-        if (cleaned == "/") return string.Empty;
-        return cleaned[(cleaned.LastIndexOf('/') + 1)..];
     }
 
     /// <summary>

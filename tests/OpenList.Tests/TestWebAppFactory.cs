@@ -107,6 +107,19 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
         InvalidateSignCache();
     }
 
+    /// <summary>
+    /// 直接写入一条路径元数据（密码目录 / 隐藏 / 读用户白名单），并让签名策略缓存立即失效。
+    /// </summary>
+    public async Task SeedMetaAsync(Meta meta)
+    {
+        meta.SyncJson();
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+        db.Metas.Add(meta);
+        await db.SaveChangesAsync();
+        InvalidateSignCache();
+    }
+
     /// <summary>丢弃签名策略的内存缓存（设置/存储改动后立即生效）。</summary>
     public void InvalidateSignCache()
     {

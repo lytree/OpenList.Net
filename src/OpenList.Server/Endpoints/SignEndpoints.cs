@@ -13,7 +13,7 @@ namespace OpenList.Server.Endpoints;
 /// /ad/（归档下载/列表）、/ap/（归档代理）、/ae/（归档内部解压）。
 /// 对应 OpenList Go <c>server/handles/down.go</c> 与 <c>server/handles/archive.go</c>。
 /// 全部公开（无需 JWT）；<b>是否要求 <c>?sign=</c> 由签名策略决定</b> ——
-/// 只有 <c>sign_all</c> 开启或路径所属存储勾了 <c>enable_sign</c> 时才校验，
+/// 只有 <c>sign_all</c> 开启、路径所属存储勾了 <c>enable_sign</c>、或路径落在设了密码的 meta 目录下时才校验，
 /// 其余情况放行（对齐 Go <c>middlewares.Down</c> 的 <c>needSign</c>）。
 /// 否则 <c>.strm</c>、播放器书签、第三方下载器等不经过 <c>fs/get</c> 的直链会一律 401。
 /// GET 与 HEAD 均受支持，便于播放器/下载器探测大小与 Range 支持。

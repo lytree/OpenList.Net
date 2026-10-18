@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Core.Security;
 using OpenList.Server.Models;
 using OpenList.Vfs;
 
@@ -32,25 +33,31 @@ public static class FsEndpoints
         // Go registers these via g.Any(...) — accept GET or POST for third-party
         // clients that follow the Go convention (the frontend itself uses POST).
         // POST binds the JSON body; GET binds the DTO from query params.
-        g.MapMethods("/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapMethods("/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsListReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
             req.Path = path;
+            // 镜像 Go FsList：CanAccess(user, meta, path, req.Password)。
+            if (await AccessGateAsync(metaSvc, u, path, req.Password, ct) is { } denied) return denied;
             return Results.Ok(await svc.ListAsync(req, u));
         }).AllowAnonymous();
 
-        g.MapMethods("/get", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapMethods("/get", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsGetReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
             req.Path = path;
+            // 镜像 Go FsGet：CanAccess(user, meta, path, req.Password)。
+            // 这一道同时是直链的保护来源：未通过密码校验就拿不到 sign/raw_url，
+            // 而密码目录的 /d/ 由 needSign 强制要求签名。
+            if (await AccessGateAsync(metaSvc, u, path, req.Password, ct) is { } denied) return denied;
             return Results.Ok(await svc.GetAsync(req, u));
         }).AllowAnonymous();
 
-        g.MapMethods("/dirs", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapMethods("/dirs", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<DirsReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
@@ -62,8 +69,10 @@ public static class FsEndpoints
                 path = UPath.FixAndCleanPath(req.Path);
             }
             else if (JoinGuard(u, req.Path, out path) is { } fail) { return fail; }
+            // 镜像 Go FsDirs：CanAccess(user, meta, path, req.Password)（此前 password 被忽略）。
+            if (await AccessGateAsync(metaSvc, u, path, req.Password, ct) is { } denied) return denied;
             return Results.Ok(await svc.DirsAsync(path, u));
-        }).AllowAnonymous(); // password accepted but ignored (no driver uses it yet)
+        }).AllowAnonymous();
 
         g.MapMethods("/search", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
         {
@@ -341,11 +350,13 @@ public static class FsEndpoints
         // IFileSystemService.OtherAsync(path, method); drivers that don't override
         // it return 501 so the frontend shows "unsupported" cleanly.
         // Go: handles.FsOther via g.Any(...).
-        g.MapMethods("/other", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapMethods("/other", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsOtherReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            // 镜像 Go FsOther：CanAccess(user, meta, path, req.Password)。
+            if (await AccessGateAsync(metaSvc, u, path, req.Password, ct) is { } denied) return denied;
             return Results.Ok(await svc.OtherAsync(path, req.Method ?? "", u));
         });
 
@@ -467,81 +478,38 @@ public static class FsEndpoints
         => ContentWriteGateAsync(meta, user, ParentPath(path), ct);
 
     /// <summary>路径的父目录（镜像 Go <c>stdpath.Dir</c>）。</summary>
-    private static string ParentPath(string path)
-    {
-        var p = UPath.FixAndCleanPath(path).TrimEnd('/');
-        var slash = p.LastIndexOf('/');
-        return slash <= 0 ? "/" : p[..slash];
-    }
+    private static string ParentPath(string path) => MetaAccess.Parent(path);
 
     /// <summary>从 meta 列表里取路径前缀最长匹配的那条（镜像 Go <c>op.GetNearestMeta</c>）。</summary>
-    private static Meta? FindNearestMeta(IReadOnlyList<Meta> metas, string path)
-    {
-        Meta? best = null;
-        var bestLen = -1;
-        foreach (var m in metas)
-        {
-            if (string.IsNullOrEmpty(m.Path)) continue;
-            if (MetaCoversPath(m.Path, path, true) && m.Path.Length > bestLen)
-            {
-                best = m;
-                bestLen = m.Path.Length;
-            }
-        }
-        return best;
-    }
+    private static Meta? FindNearestMeta(IReadOnlyList<Meta> metas, string path) => MetaAccess.FindNearest(metas, path);
 
     /// <summary>镜像 Go <c>common.CanWriteContentBypassUserPerms</c>：meta 显式开放写入时绕过用户权限位。</summary>
-    private static bool CanWriteContentBypass(Meta? meta, string path)
-    {
-        if (meta is null || !meta.Write) return false;
-        var mp = UPath.FixAndCleanPath(meta.Path);
-        var p = UPath.FixAndCleanPath(path);
-        if (string.Equals(mp, p, StringComparison.OrdinalIgnoreCase)) return true;
-        return IsSubPath(mp, p) && meta.WSub;
-    }
+    private static bool CanWriteContentBypass(Meta? meta, string path) => MetaAccess.CanWriteContentBypass(meta, path);
 
     /// <summary>镜像 Go <c>common.CanWrite</c>：WriteUsers 白名单命中，或 meta 未覆盖该路径时放行。</summary>
-    private static bool CanWrite(User user, Meta? meta, string path)
-    {
-        if (meta is not null && meta.WriteUsers.Count > 0 && !meta.WriteUsers.Contains(user.Id)
-            && MetaCoversPath(meta.Path, path, meta.WriteUsersSub))
-            return false;
-        return true;
-    }
+    private static bool CanWrite(User user, Meta? meta, string path) => MetaAccess.CanWrite(user, meta, path);
 
     /// <summary>镜像 Go <c>common.CanRead</c>：ReadUsers 白名单命中，或 meta 未覆盖该路径时放行。</summary>
-    private static bool CanRead(User user, Meta? meta, string path)
-    {
-        if (meta is not null && meta.ReadUsers.Count > 0 && !meta.ReadUsers.Contains(user.Id)
-            && MetaCoversPath(meta.Path, path, meta.ReadUsersSub))
-            return false;
-        return true;
-    }
+    private static bool CanRead(User user, Meta? meta, string path) => MetaAccess.CanRead(user, meta, path);
 
     /// <summary>镜像 Go <c>common.MetaCoversPath</c>：meta 是否覆盖给定路径（可选是否作用于子目录）。</summary>
     private static bool MetaCoversPath(string metaPath, string reqPath, bool applyToSubFolder)
-    {
-        var mp = UPath.FixAndCleanPath(metaPath);
-        var rp = UPath.FixAndCleanPath(reqPath);
-        if (string.Equals(mp, rp, StringComparison.OrdinalIgnoreCase)) return true;
-        if (!applyToSubFolder) return false;
-        while (rp != "/")
-        {
-            rp = ParentPath(rp);
-            if (string.Equals(mp, rp, StringComparison.OrdinalIgnoreCase)) return true;
-        }
-        return false;
-    }
+        => MetaAccess.MetaCoversPath(metaPath, reqPath, applyToSubFolder);
 
     /// <summary>镜像 Go <c>utils.IsSubPath</c>：<paramref name="path"/> 是否位于 <paramref name="parent"/> 之下。</summary>
-    private static bool IsSubPath(string parent, string path)
-    {
-        var p = UPath.FixAndCleanPath(parent).TrimEnd('/');
-        if (p.Length == 0) return true; // 根目录覆盖一切
-        var c = UPath.FixAndCleanPath(path);
-        return c == p || c.StartsWith(p + "/", StringComparison.Ordinal);
-    }
+    private static bool IsSubPath(string parent, string path) => MetaAccess.IsSubPath(parent, path);
+
+    /// <summary>
+    /// 只读端点的 meta 访问门禁，镜像 Go <c>FsList</c> / <c>FsGet</c> / <c>FsDirs</c> / <c>FsOther</c>
+    /// 内联的 <c>common.CanAccess(user, meta, reqPath, req.Password)</c>：隐藏条目、读用户白名单、
+    /// 目录密码三项任一不通过即返回 403。前端在响应体 <c>code=403</c> 时弹出密码输入框，
+    /// 因此这里沿用项目惯例（HTTP 200 + 业务码 403），与其它 meta 门禁一致。
+    /// </summary>
+    private static async Task<IResult?> AccessGateAsync(
+        IMetaService meta, User user, string path, string? password, CancellationToken ct)
+        => MetaAccess.CanAccess(user, await NearestMetaAsync(meta, path, ct), path, password)
+            ? null
+            : Results.Ok(Resp.Fail("password is incorrect or you have no permission", RespCodes.Forbidden));
 }
 
 // --- 请求 DTO ---

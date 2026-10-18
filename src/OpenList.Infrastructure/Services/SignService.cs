@@ -6,6 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
+using OpenList.Core.Models;
+using OpenList.Core.Security;
 using OpenList.Infrastructure.Data;
 
 namespace OpenList.Infrastructure.Services;
@@ -20,11 +22,12 @@ namespace OpenList.Infrastructure.Services;
 /// <c>base64url(hmac_sha256(path + ":" + expire)) + ":" + expire</c>（<c>base64.URLEncoding</c>，含 <c>=</c> 填充）。</item>
 /// <item><c>internal/sign/sign.go</c> —— expire 取 <c>link_expiration</c> 设置（单位小时），0 表示永不过期。</item>
 /// <item><c>server/common/sign.go</c> + <c>server/middlewares/down.go</c> ——
-/// 是否签名只看 <c>sign_all</c> 与所属存储的 <c>enable_sign</c>；两处共用同一判定。</item>
+/// 是否签名只看 <c>sign_all</c>、所属存储的 <c>enable_sign</c>、以及「设了密码的 meta 目录」三档；
+/// 生成侧与校验侧共用同一判定。</item>
 /// </list>
 /// </para>
 /// <para>
-/// 判定要素（设置与存储表）做 3 秒内存缓存：一次目录列举会对每个条目判定一次，
+/// 判定要素（设置、存储表、meta 表）做 3 秒内存缓存：一次目录列举会对每个条目判定一次，
 /// 不能每次都打数据库；3 秒足够让管理端的开关几乎立即生效。
 /// </para>
 /// </summary>
@@ -68,17 +71,20 @@ public sealed class SignService : ISignService
     }
 
     /// <summary>
-    /// 解析某路径的签名策略，等价于 Go 的：
+    /// 解析某路径的签名策略，等价于 Go <c>server/middlewares/down.go</c> 的 <c>needSign</c>：
     /// <code>
-    /// needSign(meta, path) = SignAll || IsStorageSignEnabled(path)
+    /// needSign(meta, path) = sign_all
+    ///                     || IsStorageSignEnabled(path)
+    ///                     || (最近的 meta 设了密码 &amp;&amp; 该密码覆盖此路径)
     /// </code>
-    /// 我们的 meta 密码目录尚未在 fs/down 链路上接线，故此处只看前两项；
-    /// 等密码门禁补齐后应在这里追加 <c>meta.Password != "" &amp;&amp; MetaCoversPath(...)</c>。
+    /// 第三档是把「密码目录」与直链保护接上的关键：/d/ 自身不校验密码（与 Go 一致），
+    /// 而是要求签名；签名只能通过 fs/get 取得，而 fs/get 会校验密码。
     /// </summary>
     public async Task<SignContext> GetContextAsync(string path, CancellationToken ct = default)
     {
         var snap = await GetSnapshotAsync(ct);
-        var need = snap.SignAll || IsStorageSignEnabled(snap, path);
+        var norm = NormalizePath(path);
+        var need = snap.SignAll || IsStorageSignEnabled(snap, norm) || IsMetaPasswordProtected(snap, norm);
         if (!need) return SignContext.NotNeeded;
 
         var expireAt = snap.LinkExpirationHours > 0
@@ -153,6 +159,18 @@ public sealed class SignService : ISignService
         return enabled;
     }
 
+    /// <summary>
+    /// 最近的 meta 是否对这个路径设了密码，等价于 Go <c>needSign</c> 的第三档：
+    /// <c>meta.Password != "" &amp;&amp; MetaCoversPath(meta.Path, path, meta.PSub)</c>。
+    /// </summary>
+    private static bool IsMetaPasswordProtected(Snapshot snapshot, string path)
+    {
+        if (snapshot.Metas.Count == 0) return false;
+        var meta = MetaAccess.FindNearest(snapshot.Metas, path);
+        if (meta is null || string.IsNullOrEmpty(meta.Password)) return false;
+        return MetaAccess.MetaCoversPath(meta.Path, path, meta.PSub);
+    }
+
     /// <summary>挂载点是否是路径的前缀（按整段匹配：<c>/a</c> 覆盖 <c>/a/b</c>，不覆盖 <c>/ab</c>）。</summary>
     private static bool IsMountPrefix(string mountPath, string path)
         => mountPath == "/"
@@ -198,10 +216,19 @@ public sealed class SignService : ISignService
                 .Select(s => new { s.MountPath, s.EnableSign })
                 .ToListAsync(ct);
 
+            // 只需要 Path / Password / PSub 三项来判定 needSign，不必取整行。
+            var metaRows = await db.Metas.AsNoTracking()
+                .Select(m => new { m.Path, m.Password, m.PSub })
+                .ToListAsync(ct);
+            var metas = metaRows
+                .Select(m => new Meta { Path = m.Path, Password = m.Password, PSub = m.PSub })
+                .ToList();
+
             _snapshot = new Snapshot(
                 signAll,
                 hours,
-                storages.Select(s => (NormalizeMount(s.MountPath), s.EnableSign)).ToList());
+                storages.Select(s => (NormalizeMount(s.MountPath), s.EnableSign)).ToList(),
+                metas);
             _freshUntil = _time.GetUtcNow() + CacheTtl;
             return _snapshot;
         }
@@ -238,8 +265,9 @@ public sealed class SignService : ISignService
     private sealed record Snapshot(
         bool SignAll,
         int LinkExpirationHours,
-        IReadOnlyList<(string MountPath, bool EnableSign)> Storages)
+        IReadOnlyList<(string MountPath, bool EnableSign)> Storages,
+        IReadOnlyList<Meta> Metas)
     {
-        public static readonly Snapshot Empty = new(false, 0, []);
+        public static readonly Snapshot Empty = new(false, 0, [], []);
     }
 }
