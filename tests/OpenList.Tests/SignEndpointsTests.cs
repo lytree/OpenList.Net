@@ -10,6 +10,10 @@ namespace OpenList.Tests;
 /// Integration tests for the signed archive routes /ad/, /ap/, /ae/ (P1-5).
 /// Verifies signature enforcement and that handlers return 501 when the underlying
 /// driver does not implement IFileSystemArchiveReader / IFileSystemArchiveDecompress.
+/// <para>
+/// 签名是「按策略生效」的：默认配置下不发也不校验（对齐 Go 的 needSign）。
+/// 本类验证的是<b>启用签名后</b>的行为，故 Setup 里显式打开 <c>sign_all</c>。
+/// </para>
 /// </summary>
 [NotInParallel("WebIntegration")]
 public class SignEndpointsTests
@@ -19,6 +23,9 @@ public class SignEndpointsTests
         var factory = new TestWebAppFactory();
         var client = factory.CreateClient();
         await factory.SeedStorageAsync();
+        // 这些用例断言「缺签名 → 401 / 带签名 → 200」，必须先开启签名策略，
+        // 否则默认配置下 needSign 为 false，缺签名也会被放行。
+        await factory.SetSettingAsync("sign_all", "true");
         return (factory, client);
     }
 
@@ -37,7 +44,7 @@ public class SignEndpointsTests
             JsonContent.Create(new { path }));
         var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
         var rawUrl = json!.RootElement.GetProperty("data").GetProperty("raw_url").GetString()!;
-        // raw_url is like "/p/<path>?sign=<sig>" — extract the sign value.
+        // raw_url 形如 "{base}/p/<path>?sign=<sig>"（绝对地址）；取出 sign 的值。
         var idx = rawUrl.IndexOf("sign=", StringComparison.Ordinal);
         return rawUrl[(idx + 5)..];
     }

@@ -7,6 +7,17 @@ public sealed class AppConfiguration
 {
     /// <summary>JWT 签名密钥。</summary>
     public string JwtSecret { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 对外的站点地址（镜像 Go 的 <c>site_url</c>）。
+    /// <para>
+    /// 以 <c>http://</c> / <c>https://</c> 开头时视为完整地址（反代部署应配这一项）；
+    /// 否则当作路径前缀与请求的 Host 拼接；留空则完全按请求头现场推导。
+    /// 用于生成交给外部程序（PotPlayer / IINA / 下载器）的绝对直链 ——
+    /// 这些程序不会用页面 origin 解析相对地址。
+    /// </para>
+    /// </summary>
+    public string SiteUrl { get; set; } = string.Empty;
     /// <summary>令牌有效期（小时）。</summary>
     public int TokenExpiresIn { get; set; } = 48;
     /// <summary>默认管理员用户名。</summary>

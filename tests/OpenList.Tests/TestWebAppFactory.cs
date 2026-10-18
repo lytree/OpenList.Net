@@ -70,6 +70,51 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>
+    /// 直接改写一条设置（模拟管理端保存设置），并让签名策略缓存立即失效。
+    /// </summary>
+    public async Task SetSettingAsync(string key, string value)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+        var item = await db.Settings.FindAsync(key);
+        if (item is null)
+        {
+            db.Settings.Add(new SettingItem
+            {
+                Key = key,
+                Value = value,
+                Type = SettingValueType.String,
+                Flag = SettingFlag.Private,
+                Group = 4,
+            });
+        }
+        else
+        {
+            item.Value = value;
+        }
+        await db.SaveChangesAsync();
+        InvalidateSignCache();
+    }
+
+    /// <summary>切换某个存储的「签名访问」（enable_sign），并让签名策略缓存立即失效。</summary>
+    public async Task SetStorageEnableSignAsync(string mountPath, bool enableSign)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+        var storage = await db.Storages.FirstAsync(s => s.MountPath == mountPath);
+        storage.EnableSign = enableSign;
+        await db.SaveChangesAsync();
+        InvalidateSignCache();
+    }
+
+    /// <summary>丢弃签名策略的内存缓存（设置/存储改动后立即生效）。</summary>
+    public void InvalidateSignCache()
+    {
+        if (Services.GetRequiredService<OpenList.Core.Interfaces.ISignService>() is SignService signs)
+            signs.InvalidateCache();
+    }
+
+    /// <summary>
     /// Build a valid ZIP archive containing a single textual entry. The LocalDriver now
     /// implements the archive interfaces (SharpCompress), so archive endpoints expect a
     /// real archive rather than a bare magic-header stub.

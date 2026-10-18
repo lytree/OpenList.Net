@@ -23,6 +23,7 @@ public sealed class FileSystemService : IFileSystemService
     private readonly IObjsUpdateHooks? _hooks;
     private readonly IServiceScopeFactory? _scopes;
     private readonly ITaskService? _tasks;
+    private readonly IPublicUrlResolver? _publicUrls;
 
     /// <summary>创建文件系统服务实例（仅用于单元测试）。</summary>
     public FileSystemService(MountService mount) => _mount = mount;
@@ -70,13 +71,15 @@ public sealed class FileSystemService : IFileSystemService
     /// <param name="hooks">对象更新钩子注册表（可选，用于增量索引等）。</param>
     /// <param name="scopes">DI 作用域工厂（用于解析 scoped 的 IMetaService，可选）。</param>
     /// <param name="tasks">后台任务服务（用于 move/copy 任务化，可选）。</param>
+    /// <param name="publicUrls">站点基地址解析器（用于把 raw_url 生成为绝对地址，可选）。</param>
     public FileSystemService(
         MountService mount,
         ISignService? signs,
         IOfflineDownloadService? offline,
         IObjsUpdateHooks? hooks,
         IServiceScopeFactory? scopes,
-        ITaskService? tasks)
+        ITaskService? tasks,
+        IPublicUrlResolver? publicUrls = null)
     {
         _mount = mount;
         _signs = signs;
@@ -84,6 +87,7 @@ public sealed class FileSystemService : IFileSystemService
         _hooks = hooks;
         _scopes = scopes;
         _tasks = tasks;
+        _publicUrls = publicUrls;
     }
 
     /// <summary>
@@ -100,11 +104,13 @@ public sealed class FileSystemService : IFileSystemService
         if (req.Refresh && !user.IsAdmin())
             return Resp<FsListResp>.Fail("refresh without permission", RespCodes.Forbidden);
 
+        // 签名策略与 Go 的 isEncrypt(meta, reqPath) 一样，每个请求只算一次，条目共用。
+        var signCtx = await ResolveSignContextAsync(path.ToString(), ct);
         var entries = _mount.Root.EnumeratePaths(path)
             .Select(p => _mount.Root.FileExists(p)
                 ? (FileSystemEntry)_mount.Root.GetFileEntry(p)
                 : _mount.Root.GetDirectoryEntry(p))
-            .Select(ToObj)
+            .Select(e => ToObj(e, signCtx))
             .OrderBy(e => !e.IsDir)
             .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -218,9 +224,11 @@ public sealed class FileSystemService : IFileSystemService
         {
             Provider = driver?.DriverName,
         };
+        // 签名策略每个请求解析一次，条目共用：对齐 Go 的 isEncrypt(meta, reqPath) 只算一次。
+        var signCtx = await ResolveSignContextAsync(path.ToString(), ct);
         if (entry is not null)
         {
-            var obj = ToObj(entry);
+            var obj = ToObj(entry, signCtx);
             resp.Name = obj.Name;
             resp.Size = obj.Size;
             resp.IsDir = obj.IsDir;
@@ -230,13 +238,14 @@ public sealed class FileSystemService : IFileSystemService
             // 前端把 sign 拼到 /d/ 直链上（外部播放器用），与 raw_url 的签名同源。
             resp.Sign = obj.Sign;
         }
-        // 对文件生成指向签名 /p/ 代理端点的 raw_url。
-        // 这是前端用作视频/音频/pdf 预览的媒体源。
+        // 对文件生成指向代理端点 /p 的 raw_url。
+        // 这是前端用作视频/音频/pdf 预览的媒体源；路径是否需要签名由 signCtx 决定，
+        // 与 /p/ 端的校验共用同一判定（Go 的 needSign）。
         if (isFile && _signs is not null)
         {
             // 必须用规范化后的路径签名：/p/ 端点是拿路由捕获到的路径重算签名来校验的，
             // 直接签 "req.Path" 在调用方省略前导斜杠或带多余斜杠时会得到一张对不上的签名。
-            resp.RawUrl = BuildRawUrl(path.ToString());
+            resp.RawUrl = BuildRawUrl(path.ToString(), signCtx);
         }
 
         // Related：与 Go 9de3f69b 一致 —— 仅当目标是「视频文件」时，才列同目录相似名（去扩展名前缀）的兄弟条目。
@@ -253,7 +262,7 @@ public sealed class FileSystemService : IFileSystemService
                     if (_mount.Root.FileExists(p))
                     {
                         var fe = _mount.Root.GetFileEntry(p);
-                        var sibling = ToObj(fe);
+                        var sibling = ToObj(fe, signCtx);
                         if (sibling.Name != resp.Name && sibling.Name.StartsWith(baseName, StringComparison.OrdinalIgnoreCase))
                             siblings.Add(sibling);
                     }
@@ -272,18 +281,33 @@ public sealed class FileSystemService : IFileSystemService
     }
 
     /// <summary>
-    /// 构建签名代理 URL：<c>/p/{path}?sign={hmac}</c>。路径段逐个进行 URL 编码，
-    /// 以保留 '/' 分隔符（ASP.NET 通配路由所需）。
+    /// 构建代理 URL：<c>{站点基地址}/p/{path}</c>，路径段逐个进行 URL 编码，
+    /// 以保留 '/' 分隔符（ASP.NET 通配路由所需）。需要签名时追加 <c>?sign=</c>。
+    /// <para>
+    /// 必须是<b>绝对地址</b>：这份 URL 的主要消费方是浏览器之外的程序（IINA / Vivid /
+    /// 下载器），它们不会用页面 origin 去解析相对路径。对齐 Go <c>fsread.go</c> 用
+    /// <c>common.GetApiUrl(c)</c> 拼 <c>/p</c> 的做法。站点基地址解析不出来时退回相对地址。
+    /// </para>
     /// </summary>
-    private string BuildRawUrl(string path)
+    private string BuildRawUrl(string path, SignContext signCtx)
     {
-        var sign = _signs!.Sign(path);
         // 逐段编码以保留 '/' 作为路径分隔符。
         // 前导 '/' 产生一个空首段，将其去掉以避免双斜杠。
         var segments = path.Split('/').SkipWhile(string.IsNullOrEmpty).Select(Uri.EscapeDataString);
         var encoded = string.Join('/', segments);
-        return $"/p/{encoded}?sign={Uri.EscapeDataString(sign)}";
+        var baseUrl = _publicUrls?.Resolve() ?? string.Empty;
+
+        var url = $"{baseUrl}/p/{encoded}";
+        if (signCtx.NeedSign)
+            url += "?sign=" + Uri.EscapeDataString(_signs!.Sign(path, signCtx.ExpireAt));
+        return url;
     }
+
+    /// <summary>
+    /// 解析某路径的签名策略。未注入签名服务（单元测试）时视为「不需要签名」。
+    /// </summary>
+    private async Task<SignContext> ResolveSignContextAsync(string path, CancellationToken ct)
+        => _signs is null ? SignContext.NotNeeded : await _signs.GetContextAsync(path, ct);
 
     /// <summary>新建目录；若已存在返回冲突。</summary>
     public Task<Resp> MkdirAsync(string path, User user, CancellationToken ct = default)
@@ -852,16 +876,16 @@ public sealed class FileSystemService : IFileSystemService
     /// <summary>
     /// 把 文件系统条目转为对外对象（区分文件/目录并推断类型）。
     /// <para>
-    /// 文件会额外带上 <see cref="Obj.Sign"/>：前端（<c>hooks/useLink.ts</c>）正是靠它给
-    /// <c>/d/{path}</c> 直链补上 <c>&amp;sign=</c>。这些直链的消费方是浏览器之外的程序
-    /// —— PotPlayer / VLC / 下载器 —— 它们不带登录凭据，而 <c>/d/</c> 只认签名，
-    /// 所以少了这个字段，前端生成的所有直链都会 401，外部播放器表现就是「无法打开」。
-    /// 目录不签（没有可下载的内容）。
+    /// 仅在 <paramref name="signCtx"/> 要求签名时给<b>文件</b>填 <see cref="Obj.Sign"/>：
+    /// 前端（<c>hooks/useLink.ts</c>）靠它给 <c>/d/{path}</c> 直链补上 <c>&amp;sign=</c>；
+    /// 为空则不拼 query，直链就靠 <c>/d/</c> 端点的「无需签名」放行（Go 默认行为）。
+    /// 目录不签（没有可下载的内容）。内部调用方（索引 / 搜索）不传上下文，签名恒为空。
     /// </para>
     /// </summary>
-    private Obj ToObj(FileSystemEntry entry)
+    private Obj ToObj(FileSystemEntry entry, SignContext? signCtx = null)
     {
         var isDir = entry is DirectoryEntry;
+        var needsSign = !isDir && signCtx is { NeedSign: true } && _signs is not null;
         return new Obj
         {
             Name = entry.Name,
@@ -870,7 +894,7 @@ public sealed class FileSystemService : IFileSystemService
             Modified = entry.LastWriteTime,
             Created = entry.CreationTime,
             Type = GetObjType(entry.Name, isDir),
-            Sign = isDir || _signs is null ? null : _signs.Sign(entry.Path.ToString()),
+            Sign = needsSign ? _signs!.Sign(entry.Path.ToString(), signCtx!.Value.ExpireAt) : null,
         };
     }
 
@@ -931,7 +955,8 @@ public sealed class FileSystemService : IFileSystemService
                 .Select(p => _mount.Root.FileExists(p)
                     ? (FileSystemEntry)_mount.Root.GetFileEntry(p)
                     : _mount.Root.GetDirectoryEntry(p))
-                .Select(ToObj)
+                // 索引/钩子场景不带签名上下文：签名属于「对外响应」，不属于内部对象。
+                .Select(e => ToObj(e, SignContext.NotNeeded))
                 .ToList();
             _ = _hooks.PublishDirectoryUpdateAsync(upath.ToString(), entries, CancellationToken.None);
         }

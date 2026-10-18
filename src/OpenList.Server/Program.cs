@@ -159,6 +159,9 @@ builder.Services.AddSingleton<ITaskService, TaskService>();
 // SignService must be singleton (matches MountService lifetime) so FileSystemService
 // can resolve it. Uses the same JWT secret for HMAC signing.
 builder.Services.AddSingleton<ISignService, SignService>();
+// 站点基地址解析：把 raw_url 生成成绝对地址，供浏览器之外的程序
+// （PotPlayer / IINA / 下载器）直接使用；它们不会用页面 origin 补全相对路径。
+builder.Services.AddSingleton<IPublicUrlResolver, PublicUrlResolver>();
 // Offline-download tool adapters (aria2 / qBittorrent / Transmission) talk to external
 // daemons over HTTP — register a named HttpClient per tool so timeouts/policies can be
 // tuned independently. IHttpClientFactory is the standard ASP.NET Core pattern.

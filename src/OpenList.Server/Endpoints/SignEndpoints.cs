@@ -12,7 +12,10 @@ namespace OpenList.Server.Endpoints;
 /// 签名 URL 端点：/d/（直接下载）、/p/（代理下载）、
 /// /ad/（归档下载/列表）、/ap/（归档代理）、/ae/（归档内部解压）。
 /// 对应 OpenList Go <c>server/handles/down.go</c> 与 <c>server/handles/archive.go</c>。
-/// 全部公开（无需 JWT），但要求路径携带合法的 HMAC 签名（?sign=）。
+/// 全部公开（无需 JWT）；<b>是否要求 <c>?sign=</c> 由签名策略决定</b> ——
+/// 只有 <c>sign_all</c> 开启或路径所属存储勾了 <c>enable_sign</c> 时才校验，
+/// 其余情况放行（对齐 Go <c>middlewares.Down</c> 的 <c>needSign</c>）。
+/// 否则 <c>.strm</c>、播放器书签、第三方下载器等不经过 <c>fs/get</c> 的直链会一律 401。
 /// GET 与 HEAD 均受支持，便于播放器/下载器探测大小与 Range 支持。
 /// </summary>
 public static class SignEndpoints
@@ -37,7 +40,7 @@ public static class SignEndpoints
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await DownloadAsync(mount, fullPath, ctx, preferProxy: false);
         }).AllowAnonymous();
 
@@ -54,7 +57,7 @@ public static class SignEndpoints
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await DownloadAsync(mount, fullPath, ctx, preferProxy: true);
         }).AllowAnonymous();
 
@@ -69,7 +72,7 @@ public static class SignEndpoints
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await DownloadAsync(mount, fullPath, ctx, preferProxy: false);
         }).AllowAnonymous();
         app.MapMethods("/p/{**path}", new[] { "HEAD" }, async (
@@ -80,7 +83,7 @@ public static class SignEndpoints
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await DownloadAsync(mount, fullPath, ctx, preferProxy: true);
         }).AllowAnonymous();
 
@@ -96,7 +99,7 @@ public static class SignEndpoints
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return Results.Ok(await fs.ArchiveListAsync(fullPath, null, GuestUser));
         }).AllowAnonymous();
 
@@ -110,7 +113,7 @@ public static class SignEndpoints
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
         }).AllowAnonymous();
 
@@ -125,7 +128,7 @@ public static class SignEndpoints
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             // 解压到归档所在目录（对齐 Go 的 ArchiveInternalExtract 行为）。
             var parent = fullPath.TrimEnd('/').LastIndexOf('/');
             var destDir = parent <= 0 ? "/" : fullPath[..parent];
@@ -138,21 +141,21 @@ public static class SignEndpoints
             string path, string? sign, ISignService signs, MountService mount, HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
         }).AllowAnonymous();
         app.MapMethods("/ap/{**path}", new[] { "HEAD" }, async (
             string path, string? sign, ISignService signs, MountService mount, HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
         }).AllowAnonymous();
         app.MapMethods("/ae/{**path}", new[] { "HEAD" }, async (
             string path, string? sign, ISignService signs, MountService mount, HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
-            if (!VerifySign(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
         }).AllowAnonymous();
 
@@ -227,6 +230,22 @@ public static class SignEndpoints
         if (string.IsNullOrEmpty(path)) return "/";
         if (!path.StartsWith('/')) path = "/" + path;
         return path;
+    }
+
+    /// <summary>
+    /// 是否放行本次请求：仅当签名策略判定「该路径需要签名」时才校验 <c>?sign=</c>，
+    /// 否则直接放行。对齐 Go <c>middlewares.Down</c>：
+    /// <code>
+    /// if needSign(meta, rawPath) { verify(...) }
+    /// </code>
+    /// 判定必须与生成侧（<c>fs/list</c>、<c>fs/get</c> 的 <c>Obj.Sign</c>）用同一个策略，
+    /// 否则会出现「发了签名但不校验」或「校验了却没发签名」。
+    /// </summary>
+    private static async Task<bool> IsAllowedAsync(ISignService signs, string path, string? sign, HttpContext ctx)
+    {
+        var signCtx = await signs.GetContextAsync(path, ctx.RequestAborted);
+        if (!signCtx.NeedSign) return true;
+        return VerifySign(signs, path, sign, ctx);
     }
 
     /// <summary>
