@@ -13,12 +13,27 @@ namespace OpenList.Vfs;
 /// 挂载表使用并发字典，且读取路径前缀时取<b>最长匹配</b>，
 /// 以正确支持 <c>/a</c> 与 <c>/a/b</c> 同时挂载的场景。
 /// </para>
+/// <para>
+/// <b>虚拟目录</b>：根目录 <c>/</c> 以及各挂载点的祖先目录（例如只挂了 <c>/a/b</c> 时的 <c>/a</c>）
+/// 不对应任何子文件系统，但它们在逻辑上必然存在 —— 否则无法逐层进入深层挂载点。这类路径的
+/// 存在性、子项枚举与元数据都由本类就地合成，不做任何转发。
+/// <b>注意</b>：基类把「根目录恒存在」写死在 <see cref="FileSystem.DirectoryExists"/> 与
+/// <see cref="FileSystem.ValidatePath"/> 里，因此这里的元数据实现必须同样兜住虚拟目录，
+/// 否则 <c>GetDirectoryEntry("/")</c> 会直接抛 <see cref="FileNotFoundException"/>。
+/// </para>
 /// </summary>
 public sealed class MountFileSystem : FileSystem
 {
     /// <summary>挂载路径 → 子文件系统。</summary>
     private readonly ConcurrentDictionary<string, IFileSystem> _mounts =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 虚拟目录的时间戳占位值。虚拟目录不对应任何真实存储，没有可查询的修改/创建时间，
+    /// 统一返回「无时间信息」的纪元时间，而不是抛异常或返回 <c>DateTime.Now</c>（后者会让
+    /// 每次请求的值都不同，干扰前端缓存与增量索引比对）。
+    /// </summary>
+    public static readonly DateTime VirtualDirectoryTime = DateTime.UnixEpoch;
 
     /// <inheritdoc/>
     public override bool IsCaseSensitive => false;
@@ -120,11 +135,64 @@ public sealed class MountFileSystem : FileSystem
     /// <summary>按挂载点枚举子路径（用于列出所有挂载存储）。</summary>
     public IEnumerable<UPath> EnumerateMounts() => MountedPaths;
 
+    // --- 虚拟目录 ---
+
+    /// <summary>
+    /// 判断路径是否为虚拟目录：根目录，或某个挂载点的祖先目录（如挂载 <c>/a/b</c> 时的 <c>/a</c>）。
+    /// </summary>
+    /// <param name="path">待判断的路径。</param>
+    /// <returns>是虚拟目录返回 true。</returns>
+    public bool IsVirtualDirectory(UPath path)
+    {
+        if (path.IsNull) return false;
+        var full = path.ToString();
+        if (full == "/") return true;
+
+        foreach (var key in _mounts.Keys)
+        {
+            // 必须是「整段前缀」：/a 是 /a/b 的祖先，但不是 /ab 的祖先。
+            if (key.Length > full.Length &&
+                key.StartsWith(full, StringComparison.OrdinalIgnoreCase) &&
+                key[full.Length] == '/')
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 枚举虚拟目录的「下一级名称」：把所有落在其下的挂载路径截到下一段并去重。
+    /// 例如挂载了 <c>/a/b</c> 与 <c>/c</c> 时，根目录得到 <c>a</c>、<c>c</c>；<c>/a</c> 得到 <c>b</c>。
+    /// </summary>
+    /// <param name="path">虚拟目录路径。</param>
+    /// <returns>按名称排序的子目录名。</returns>
+    private List<string> EnumerateVirtualChildNames(UPath path)
+    {
+        var full = path.ToString();
+        var prefix = full == "/" ? "/" : full + "/";
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var key in _mounts.Keys)
+        {
+            if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            var rest = key[prefix.Length..];
+            if (rest.Length == 0) continue;
+            var slash = rest.IndexOf('/');
+            var name = slash < 0 ? rest : rest[..slash];
+            if (name.Length > 0) names.Add(name);
+        }
+
+        // 稳定排序：并发字典的键顺序不确定，直接透出会让列表顺序随机。
+        var list = names.ToList();
+        list.Sort(StringComparer.OrdinalIgnoreCase);
+        return list;
+    }
+
     // --- 存在性 ---
 
     /// <inheritdoc/>
     protected override bool DirectoryExistsImpl(UPath path)
-        => TryTranslate(path, out var fs, out var rel) ? fs.DirectoryExists(rel) : false;
+        => TryTranslate(path, out var fs, out var rel) ? fs.DirectoryExists(rel) : IsVirtualDirectory(path);
 
     /// <inheritdoc/>
     protected override bool FileExistsImpl(UPath path)
@@ -135,13 +203,16 @@ public sealed class MountFileSystem : FileSystem
     /// <inheritdoc/>
     protected override void CreateDirectoryImpl(UPath path)
     {
-        if (TryTranslate(path, out var fs, out var rel)) fs.CreateDirectory(rel);
+        if (TryTranslate(path, out var fs, out var rel)) { fs.CreateDirectory(rel); return; }
+        // 虚拟目录由挂载表推导得出，不可能被「创建」；静默成功会让调用方误以为建成功了。
+        if (IsVirtualDirectory(path)) throw new NotSupportedException($"Virtual directory is read-only: {path}");
     }
 
     /// <inheritdoc/>
     protected override void DeleteDirectoryImpl(UPath path, bool isRecursive)
     {
-        if (TryTranslate(path, out var fs, out var rel)) fs.DeleteDirectory(rel, isRecursive);
+        if (TryTranslate(path, out var fs, out var rel)) { fs.DeleteDirectory(rel, isRecursive); return; }
+        if (IsVirtualDirectory(path)) throw new NotSupportedException($"Virtual directory is read-only: {path}");
     }
 
     /// <inheritdoc/>
@@ -214,23 +285,38 @@ public sealed class MountFileSystem : FileSystem
     protected override IEnumerable<UPath> EnumeratePathsImpl(
         UPath path, string searchPattern, SearchDepth searchOption, SearchTarget searchTarget)
     {
-        // 未挂载任何文件系统时，根路径的枚举结果就是「各挂载点本身」，
-        // 这样前端才能在没有子文件系统提供列表时仍看到存储列表。
+        // 虚拟目录（根目录、挂载点的祖先）：内容就是「下一级挂载路径段」。
+        // 否则前端在只挂了 /a/b 时既看不到 a，也进不去 /a。
         if (!TryTranslate(path, out var fs, out var rel))
         {
-            foreach (var mount in EnumerateMounts())
+            if (searchTarget == SearchTarget.File) yield break;
+            foreach (var name in EnumerateVirtualChildNames(path))
             {
-                if (searchTarget == SearchTarget.File) continue;
-                if (MatchesPattern(mount.GetName(), searchPattern))
-                    yield return mount;
+                if (MatchesPattern(name, searchPattern))
+                    yield return path.Combine(name);
             }
 
             yield break;
         }
 
+        var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var child in fs.EnumeratePaths(rel, searchPattern, searchOption, searchTarget))
         {
-            yield return path == UPath.Root ? child : path / child.GetName();
+            var item = path == UPath.Root ? child : path.Combine(child.GetName());
+            if (emitted.Add(item.GetName()))
+                yield return item;
+        }
+
+        // 子挂载点也要补进列表：/a 处已有存储、又在其下挂了 /a/b 时，
+        // 上面的枚举来自 /a 的存储，看不到 /a/b 这个挂载点本身。
+        // 只在顶层枚举时补充 —— 递归跨挂载点遍历的成本与语义都不在此处定义。
+        if (searchTarget == SearchTarget.File || searchOption != SearchDepth.TopDirectoryOnly)
+            yield break;
+
+        foreach (var name in EnumerateVirtualChildNames(path))
+        {
+            if (MatchesPattern(name, searchPattern) && emitted.Add(name))
+                yield return path.Combine(name);
         }
     }
 
@@ -257,6 +343,9 @@ public sealed class MountFileSystem : FileSystem
     protected override DateTime GetLastWriteTimeImpl(UPath path)
     {
         if (TryTranslate(path, out var fs, out var rel)) return fs.GetLastWriteTime(rel);
+        // 虚拟目录没有真实时间戳，返回占位值而不是抛异常：
+        // 基类已把「根路径恒存在」当成契约，这里必须一致。
+        if (IsVirtualDirectory(path)) return VirtualDirectoryTime;
         throw new FileNotFoundException($"Path not found: {path}");
     }
 
@@ -264,6 +353,7 @@ public sealed class MountFileSystem : FileSystem
     protected override DateTime GetCreationTimeImpl(UPath path)
     {
         if (TryTranslate(path, out var fs, out var rel)) return fs.GetCreationTime(rel);
+        if (IsVirtualDirectory(path)) return VirtualDirectoryTime;
         throw new FileNotFoundException($"Path not found: {path}");
     }
 
@@ -271,6 +361,7 @@ public sealed class MountFileSystem : FileSystem
     protected override DateTime GetLastAccessTimeImpl(UPath path)
     {
         if (TryTranslate(path, out var fs, out var rel)) return fs.GetLastAccessTime(rel);
+        if (IsVirtualDirectory(path)) return VirtualDirectoryTime;
         throw new FileNotFoundException($"Path not found: {path}");
     }
 
@@ -290,6 +381,7 @@ public sealed class MountFileSystem : FileSystem
     protected override FileAttributes GetAttributesImpl(UPath path)
     {
         if (TryTranslate(path, out var fs, out var rel)) return fs.GetAttributes(rel);
+        if (IsVirtualDirectory(path)) return FileAttributes.Directory;
         throw new FileNotFoundException($"Path not found: {path}");
     }
 
