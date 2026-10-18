@@ -227,12 +227,16 @@ public sealed class FileSystemService : IFileSystemService
             resp.Modified = obj.Modified;
             resp.Created = obj.Created;
             resp.Type = obj.Type;
+            // 前端把 sign 拼到 /d/ 直链上（外部播放器用），与 raw_url 的签名同源。
+            resp.Sign = obj.Sign;
         }
         // 对文件生成指向签名 /p/ 代理端点的 raw_url。
         // 这是前端用作视频/音频/pdf 预览的媒体源。
         if (isFile && _signs is not null)
         {
-            resp.RawUrl = BuildRawUrl(req.Path);
+            // 必须用规范化后的路径签名：/p/ 端点是拿路由捕获到的路径重算签名来校验的，
+            // 直接签 "req.Path" 在调用方省略前导斜杠或带多余斜杠时会得到一张对不上的签名。
+            resp.RawUrl = BuildRawUrl(path.ToString());
         }
 
         // Related：与 Go 9de3f69b 一致 —— 仅当目标是「视频文件」时，才列同目录相似名（去扩展名前缀）的兄弟条目。
@@ -845,8 +849,17 @@ public sealed class FileSystemService : IFileSystemService
         return new UPath(path);
     }
 
-    /// <summary>把 文件系统条目转为对外对象（区分文件/目录并推断类型）。</summary>
-    private static Obj ToObj(FileSystemEntry entry)
+    /// <summary>
+    /// 把 文件系统条目转为对外对象（区分文件/目录并推断类型）。
+    /// <para>
+    /// 文件会额外带上 <see cref="Obj.Sign"/>：前端（<c>hooks/useLink.ts</c>）正是靠它给
+    /// <c>/d/{path}</c> 直链补上 <c>&amp;sign=</c>。这些直链的消费方是浏览器之外的程序
+    /// —— PotPlayer / VLC / 下载器 —— 它们不带登录凭据，而 <c>/d/</c> 只认签名，
+    /// 所以少了这个字段，前端生成的所有直链都会 401，外部播放器表现就是「无法打开」。
+    /// 目录不签（没有可下载的内容）。
+    /// </para>
+    /// </summary>
+    private Obj ToObj(FileSystemEntry entry)
     {
         var isDir = entry is DirectoryEntry;
         return new Obj
@@ -857,6 +870,7 @@ public sealed class FileSystemService : IFileSystemService
             Modified = entry.LastWriteTime,
             Created = entry.CreationTime,
             Type = GetObjType(entry.Name, isDir),
+            Sign = isDir || _signs is null ? null : _signs.Sign(entry.Path.ToString()),
         };
     }
 
