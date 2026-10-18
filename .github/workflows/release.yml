@@ -1,8 +1,12 @@
 name: Release
 
 # Pushing a v* tag cuts a formal release: 8 self-contained platform bundles,
-# a multi-arch container image, and a GitHub Release with generated notes.
-# For dry runs on a commit, use ci.yml's build artifacts instead.
+# 6 desktop bundles, a multi-arch container image, and a GitHub Release with
+# generated notes.
+#
+# The actual platform build is delegated to build-bundles.yml — the same reusable
+# workflow ci.yml runs on every main-branch commit. CI produces artifacts only;
+# this file is the ONLY place that writes to GitHub Releases.
 on:
   push:
     tags:
@@ -107,347 +111,25 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Self-contained binaries for 8 runtime identifiers.
-  # Bundle name is version-suffixed, e.g. openlist-net-1.2.3-linux-x64.
-  binaries:
+  # 8 self-contained server bundles + 6 desktop bundles (matrix lives in the
+  # reusable workflow, shared with ci.yml).
+  bundles:
     needs: [resolve-frontend, resolve-version, build-test]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - rid: linux-x64
-            archive: tar.gz
-          - rid: linux-arm64
-            archive: tar.gz
-          - rid: linux-musl-x64
-            archive: tar.gz
-          - rid: linux-musl-arm64
-            archive: tar.gz
-          - rid: win-x64
-            archive: zip
-          - rid: win-arm64
-            archive: zip
-          - rid: osx-x64
-            archive: tar.gz
-          - rid: osx-arm64
-            archive: tar.gz
-    env:
-      SEMVER: ${{ needs.resolve-version.outputs.semver }}
-      ASM_VER: ${{ needs.resolve-version.outputs.assemblyVer }}
-      FILE_VER: ${{ needs.resolve-version.outputs.fileVer }}
-      INFO_VER: ${{ needs.resolve-version.outputs.infoVer }}
-      SHA: ${{ needs.resolve-version.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_REF }}
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Publish server (self-contained)
-        run: |
-          set -euo pipefail
-          BUNDLE="openlist-net-${SEMVER}-${{ matrix.rid }}"
-          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
-          dotnet publish src/OpenList.Server/OpenList.Server.csproj \
-            -c "$CONFIGURATION" \
-            -o "$BUNDLE/app" \
-            -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
-            -p:Version="$SEMVER" \
-            -p:AssemblyVersion="$ASM_VER" \
-            -p:FileVersion="$FILE_VER" \
-            -p:InformationalVersion="$INFO_VER" \
-            -p:SourceRevisionId="$SHA"
-          {
-            echo "semver=$SEMVER"
-            echo "assemblyVer=$ASM_VER"
-            echo "fileVer=$FILE_VER"
-            echo "informationalVer=$INFO_VER"
-            echo "sha=$SHA"
-          } > "$BUNDLE/app/VERSION"
-
-      # Ops CLI — the recovery path for a locked-out admin. Self-contained for the same
-      # reason the server is: you can't install a runtime before you can reset the password.
-      - name: Publish ops CLI (self-contained)
-        run: |
-          set -euo pipefail
-          dotnet publish src/OpenList.Cli/OpenList.Cli.csproj \
-            -c "$CONFIGURATION" \
-            -o "$BUNDLE/cli" \
-            -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
-            -p:Version="$SEMVER" \
-            -p:AssemblyVersion="$ASM_VER" \
-            -p:FileVersion="$FILE_VER" \
-            -p:InformationalVersion="$INFO_VER" \
-            -p:SourceRevisionId="$SHA"
-
-      # Ops CLI inside the desktop bundle too — the GUI has no password-recovery path
-      # of its own, and a locked-out admin must not be stuck.
-      - name: Publish ops CLI (self-contained)
-        run: |
-          set -euo pipefail
-          dotnet publish src/OpenList.Cli/OpenList.Cli.csproj \
-            -c "$CONFIGURATION" \
-            -o "$BUNDLE/cli" \
-            -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
-            -p:Version="$SEMVER" \
-            -p:AssemblyVersion="$ASM_VER" \
-            -p:FileVersion="$FILE_VER" \
-            -p:InformationalVersion="$INFO_VER" \
-            -p:SourceRevisionId="$SHA"
-
-      - name: Download upstream frontend dist (non-lite)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p fe "$BUNDLE/frontend/dist"
-          gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
-            --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
-          tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" -C "$BUNDLE/frontend/dist"
-          printf '%s' "$FE_TAG" > "$BUNDLE/frontend/dist/VERSION"
-
-      - name: Write launchers and README
-        env:
-          RID: ${{ matrix.rid }}
-          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
-        run: |
-          set -euo pipefail
-          cd "$BUNDLE"
-
-          case "$RID" in
-            win-*)
-              cat > run.bat <<'EOF'
-          @echo off
-          cd /d "%~dp0app"
-          set OpenList__DistDir=../frontend/dist
-          OpenList.Server.exe
-          EOF
-              ;;
-            *)
-              cat > run.sh <<'EOF'
-          #!/usr/bin/env sh
-          cd "$(dirname "$0")/app" || exit 1
-          export OpenList__DistDir="../frontend/dist"
-          exec ./OpenList.Server
-          EOF
-              chmod +x run.sh
-              ;;
-          esac
-
-          cat > README.txt <<EOF
-          $BUNDLE
-          =========================
-
-          Build: $SEMVER (sha $SHA)
-          Frontend: $FE_TAG
-
-          Self-contained build — no .NET runtime required on the host.
-
-          Layout:
-            app/             .NET server (self-contained publish output)
-            cli/             Ops CLI (openlist) — password recovery, storage admin
-            frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)
-            run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
-            README.txt       This file
-
-          Run:
-            Linux/macOS:  ./run.sh
-            Windows:      run.bat
-
-          The launcher exports OpenList__DistDir=../frontend/dist (relative to app/) so the
-          server finds the SPA without editing appsettings.json. Default port: http://0.0.0.0:5244
-
-          Lost the admin password? The built-in admin cannot be deleted, renamed or demoted,
-          so cli/ is the way back in — it talks to the database directly and works even when
-          the server is not running:
-            cli/openlist admin info        show the admin username
-            cli/openlist admin random      reset to a random password (printed to console)
-            cli/openlist admin set PASS    set a specific password
-
-          Data is stored under app/data/ by default. Configure via OpenList__ environment
-          variables (e.g. OpenList__Database__Type=postgres).
-          EOF
-
-      - name: Package bundle
-        env:
-          ARCHIVE: ${{ matrix.archive }}
-        run: |
-          set -euo pipefail
-          if [ "$ARCHIVE" = "zip" ]; then
-            zip -r "$BUNDLE.zip" "$BUNDLE"
-            FILE="$BUNDLE.zip"
-          else
-            tar -czf "$BUNDLE.tar.gz" "$BUNDLE"
-            FILE="$BUNDLE.tar.gz"
-          fi
-          # Publish a checksum alongside every asset so downloads are verifiable.
-          sha256sum "$FILE" > "$FILE.sha256"
-          cat "$FILE.sha256"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.BUNDLE }}
-          path: |
-            ${{ env.BUNDLE }}.${{ matrix.archive }}
-            ${{ env.BUNDLE }}.${{ matrix.archive }}.sha256
-          if-no-files-found: error
-          retention-days: 7
-
-  # Desktop control app (Avalonia GUI managing the server as a child process).
-  # One bundle per GUI-capable RID: desktop exe at the bundle root, server under
-  # server/ (probed by OpenListCoreService.ResolveCorePath), frontend/dist alongside
-  # (injected as OpenList__DistDir at launch).
-  # No musl RIDs — the GUI targets glibc desktops.
-  binaries-desktop:
-    needs: [resolve-frontend, resolve-version, build-test]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - rid: linux-x64
-            archive: tar.gz
-          - rid: linux-arm64
-            archive: tar.gz
-          - rid: win-x64
-            archive: zip
-          - rid: win-arm64
-            archive: zip
-          - rid: osx-x64
-            archive: tar.gz
-          - rid: osx-arm64
-            archive: tar.gz
-    env:
-      SEMVER: ${{ needs.resolve-version.outputs.semver }}
-      ASM_VER: ${{ needs.resolve-version.outputs.assemblyVer }}
-      FILE_VER: ${{ needs.resolve-version.outputs.fileVer }}
-      INFO_VER: ${{ needs.resolve-version.outputs.infoVer }}
-      SHA: ${{ needs.resolve-version.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_REF }}
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Publish server core (self-contained)
-        run: |
-          set -euo pipefail
-          BUNDLE="openlist-net-desktop-${SEMVER}-${{ matrix.rid }}"
-          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
-          dotnet publish src/OpenList.Server/OpenList.Server.csproj \
-            -c "$CONFIGURATION" \
-            -o "$BUNDLE/server" \
-            -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
-            -p:Version="$SEMVER" \
-            -p:AssemblyVersion="$ASM_VER" \
-            -p:FileVersion="$FILE_VER" \
-            -p:InformationalVersion="$INFO_VER" \
-            -p:SourceRevisionId="$SHA"
-
-      - name: Publish desktop app (self-contained)
-        run: |
-          set -euo pipefail
-          dotnet publish src/OpenList.Desktop/OpenList.Desktop.csproj \
-            -c "$CONFIGURATION" \
-            -o "$BUNDLE" \
-            -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
-            -p:Version="$SEMVER" \
-            -p:AssemblyVersion="$ASM_VER" \
-            -p:FileVersion="$FILE_VER" \
-            -p:InformationalVersion="$INFO_VER" \
-            -p:SourceRevisionId="$SHA"
-          {
-            echo "semver=$SEMVER"
-            echo "assemblyVer=$ASM_VER"
-            echo "fileVer=$FILE_VER"
-            echo "informationalVer=$INFO_VER"
-            echo "sha=$SHA"
-          } > "$BUNDLE/VERSION"
-
-      - name: Download upstream frontend dist (non-lite)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p fe "$BUNDLE/frontend/dist"
-          gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
-            --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
-          tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" -C "$BUNDLE/frontend/dist"
-          printf '%s' "$FE_TAG" > "$BUNDLE/frontend/dist/VERSION"
-
-      - name: Write README
-        env:
-          BUNDLE_NAME: ${{ env.BUNDLE }}
-          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
-        run: |
-          set -euo pipefail
-          cat > "$BUNDLE/README.txt" <<EOF
-          $BUNDLE_NAME
-          =========================
-
-          Build: $SEMVER (sha $SHA)
-          Frontend: $FE_TAG
-
-          Self-contained build — no .NET runtime required on the host.
-
-          Layout:
-            OpenList.Desktop[.exe]  Avalonia desktop control app (start this)
-            server/OpenList.Server  Self-contained server (managed child process)
-            cli/openlist[.exe]      Ops CLI — password recovery, storage admin
-            frontend/dist/          OpenList SPA (pre-built, upstream non-lite release)
-            README.txt              This file
-
-          Run:
-            Start OpenList.Desktop (double-click on Windows). The desktop app launches the
-            server automatically (port configurable in settings), shows a tray icon and a
-            live log viewer. Data is stored under data/ next to the desktop executable.
-
-          The desktop app injects OpenList__DistDir so the server serves frontend/dist on
-          the same port as the API. Default port: http://0.0.0.0:5244.
-
-          Note (macOS/Linux): the desktop app is not wrapped in an .app/.desktop bundle —
-          run it directly from this directory.
-          EOF
-
-      - name: Package bundle
-        env:
-          ARCHIVE: ${{ matrix.archive }}
-        run: |
-          set -euo pipefail
-          if [ "$ARCHIVE" = "zip" ]; then
-            zip -r "$BUNDLE.zip" "$BUNDLE"
-            FILE="$BUNDLE.zip"
-          else
-            tar -czf "$BUNDLE.tar.gz" "$BUNDLE"
-            FILE="$BUNDLE.tar.gz"
-          fi
-          sha256sum "$FILE" > "$FILE.sha256"
-          cat "$FILE.sha256"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.BUNDLE }}
-          path: |
-            ${{ env.BUNDLE }}.${{ matrix.archive }}
-            ${{ env.BUNDLE }}.${{ matrix.archive }}.sha256
-          if-no-files-found: error
-          retention-days: 7
+    uses: ./.github/workflows/build-bundles.yml
+    with:
+      ref: ${{ github.event.inputs.tag || github.ref }}
+      frontend-tag: ${{ needs.resolve-frontend.outputs.tag }}
+      semver: ${{ needs.resolve-version.outputs.semver }}
+      assembly-ver: ${{ needs.resolve-version.outputs.assemblyVer }}
+      file-ver: ${{ needs.resolve-version.outputs.fileVer }}
+      info-ver: ${{ needs.resolve-version.outputs.infoVer }}
+      sha: ${{ needs.resolve-version.outputs.sha }}
+      # Only has to survive until the release job below has uploaded the assets.
+      retention-days: 7
 
   # Attach every binary archive (plus checksums) to the GitHub Release.
   release:
-    needs: [resolve-frontend, resolve-version, binaries, binaries-desktop]
+    needs: [resolve-frontend, resolve-version, bundles]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

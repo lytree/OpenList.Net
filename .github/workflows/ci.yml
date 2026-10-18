@@ -1,7 +1,12 @@
 name: CI
 
-# Main-branch commits are automatically built and shipped as CI artifacts.
-# Formal releases are produced by release.yml on v* tags.
+# Every commit on main is built for ALL platforms (8 self-contained server bundles
+# + 6 desktop bundles + the lightweight framework-dependent bundle) and kept as
+# downloadable Actions Artifacts. CI never publishes to GitHub Releases — that
+# only happens in release.yml when a v* tag is pushed.
+#
+# The platform matrix itself lives in build-bundles.yml (a reusable workflow) so
+# ci.yml and release.yml cannot drift apart.
 on:
   push:
     branches: [main]
@@ -11,7 +16,7 @@ on:
 
 # A newer commit on the same ref supersedes the previous run.
 # PRs cancel each other aggressively to save runner minutes; main does NOT
-# cancel, so every commit on main keeps its own build artifact.
+# cancel, so every commit on main keeps its own set of build artifacts.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -98,8 +103,29 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # All-platform build (server: linux-x64/arm64, linux-musl-x64/arm64, win-x64/arm64,
+  # osx-x64/arm64 — plus desktop bundles for the 6 GUI-capable RIDs).
+  # Artifacts only; nothing is published to Releases here.
+  # Skipped on pull_request — PRs only need to prove build + test pass.
+  bundles:
+    if: github.event_name != 'pull_request'
+    needs: [resolve-frontend, resolve-version, build-test]
+    uses: ./.github/workflows/build-bundles.yml
+    with:
+      ref: ${{ github.ref }}
+      frontend-tag: ${{ needs.resolve-frontend.outputs.tag }}
+      semver: ${{ needs.resolve-version.outputs.semver }}
+      assembly-ver: ${{ needs.resolve-version.outputs.assemblyVer }}
+      file-ver: ${{ needs.resolve-version.outputs.fileVer }}
+      info-ver: ${{ needs.resolve-version.outputs.infoVer }}
+      sha: ${{ needs.resolve-version.outputs.sha }}
+      # 14 days: main-branch artifacts are for testers, not for shipping.
+      retention-days: 14
+
   # Framework-dependent bundle: app/ + frontend/dist/ + launchers + README,
-  # packaged as tar.gz and kept as a downloadable CI artifact.
+  # packaged as tar.gz and kept as a downloadable CI artifact. Small and
+  # platform-agnostic — the self-contained bundles above cost ~1 GB in total,
+  # this one is a few MB when you already have the .NET 10 runtime.
   # Skipped on pull_request — PRs only need to prove build + test pass.
   bundle:
     if: github.event_name != 'pull_request'
