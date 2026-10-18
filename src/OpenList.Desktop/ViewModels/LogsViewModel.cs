@@ -159,7 +159,14 @@ public partial class LogsViewModel : ViewModelBase
             Message = e.Message,
         });
         if (Rows.Count > MaxRows)
+        {
+            // 超限丢最旧的一条；它若也在筛选结果里，一并摘掉，
+            // 否则两边的窗口会错位（屏幕上留着一条已经从总表里消失的日志）
+            var dropped = Rows[0];
             Rows.RemoveAt(0);
+            if (Filtered.Count > 0 && ReferenceEquals(Filtered[0], dropped))
+                Filtered.RemoveAt(0);
+        }
         // 只对新增行做增量过滤（大多数场景新行都匹配）
         var row = Rows[^1];
         if (MatchesFilter(row))
