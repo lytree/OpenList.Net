@@ -40,6 +40,20 @@ public sealed class OpenListDbContext : DbContext
     public DbSet<SearchIndexEntry> SearchIndex => Set<SearchIndexEntry>();
     /// <summary>WebAuthn 凭据表。</summary>
     public DbSet<WebAuthnCredential> AuthnCredentials => Set<WebAuthnCredential>();
+    /// <summary>媒体库表。</summary>
+    public DbSet<MediaLibrary> MediaLibraries => Set<MediaLibrary>();
+    /// <summary>媒体库扫描历史表。</summary>
+    public DbSet<MediaScanLog> MediaScanLogs => Set<MediaScanLog>();
+    /// <summary>媒体条目表。</summary>
+    public DbSet<MediaItem> MediaItems => Set<MediaItem>();
+    /// <summary>媒体文件表。</summary>
+    public DbSet<MediaFile> MediaFiles => Set<MediaFile>();
+    /// <summary>创作者表。</summary>
+    public DbSet<MediaPerson> MediaPersons => Set<MediaPerson>();
+    /// <summary>媒体条目与创作者关联表。</summary>
+    public DbSet<MediaItemPerson> MediaItemPersons => Set<MediaItemPerson>();
+    /// <summary>用户媒体状态表。</summary>
+    public DbSet<UserMediaState> UserMediaStates => Set<UserMediaState>();
 
     /// <summary>
     /// 配置实体到数据表的映射关系（表名、主键、唯一索引等）。
@@ -104,6 +118,54 @@ public sealed class OpenListDbContext : DbContext
             // Credential ids must be unique per user so re-registering a key
             // with the same authenticator replaces rather than duplicates.
             e.HasIndex(c => new { c.UserId, c.CredentialId }).IsUnique();
+        });
+        b.Entity<MediaLibrary>(e =>
+        {
+            e.ToTable(prefix + "media_libraries");
+            e.HasKey(l => l.Id);
+            e.HasIndex(l => l.Path).IsUnique();
+        });
+        b.Entity<MediaScanLog>(e =>
+        {
+            e.ToTable(prefix + "media_scan_logs");
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.LibraryId);
+        });
+        b.Entity<MediaItem>(e =>
+        {
+            e.ToTable(prefix + "media_items");
+            e.HasKey(i => i.Id);
+            e.HasIndex(i => i.LibraryId);
+            e.HasIndex(i => new { i.LibraryId, i.DirectoryPath }).IsUnique();
+            e.HasIndex(i => i.TmdbId);
+        });
+        b.Entity<MediaFile>(e =>
+        {
+            e.ToTable(prefix + "media_files");
+            e.HasKey(f => f.Id);
+            e.HasIndex(f => f.ItemId);
+            e.HasIndex(f => f.Path).IsUnique();
+        });
+        b.Entity<MediaPerson>(e =>
+        {
+            e.ToTable(prefix + "media_persons");
+            e.HasKey(p => p.Id);
+            e.HasIndex(p => p.Name);
+            e.HasIndex(p => new { p.Name, p.TmdbId }).IsUnique();
+        });
+        b.Entity<MediaItemPerson>(e =>
+        {
+            e.ToTable(prefix + "media_item_persons");
+            e.HasKey(r => r.Id);
+            e.HasIndex(r => r.ItemId);
+            e.HasIndex(r => r.PersonId);
+            e.HasIndex(r => new { r.ItemId, r.PersonId, r.Role }).IsUnique();
+        });
+        b.Entity<UserMediaState>(e =>
+        {
+            e.ToTable(prefix + "user_media_states");
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => new { s.UserId, s.ItemId }).IsUnique();
         });
     }
 }

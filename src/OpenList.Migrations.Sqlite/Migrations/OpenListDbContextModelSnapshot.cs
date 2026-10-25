@@ -17,6 +17,273 @@ namespace OpenList.Migrations.Sqlite.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
+            modelBuilder.Entity("OpenList.Core.Models.MediaFile", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DurationSeconds")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("duration_seconds");
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("item_id");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Resolution")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("Path")
+                        .IsUnique();
+
+                    b.ToTable("x_media_files", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.MediaItem", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BackdropPath")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("backdrop_path");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DirectoryPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("directory_path");
+
+                    b.Property<string>("GenresJson")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("genres");
+
+                    b.Property<long>("LibraryId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("library_id");
+
+                    b.Property<string>("OriginalTitle")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("original_title");
+
+                    b.Property<string>("Overview")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PosterPath")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("poster_path");
+
+                    b.Property<double?>("Rating")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TmdbId")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("tmdb_id");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LibraryId");
+
+                    b.HasIndex("TmdbId");
+
+                    b.HasIndex("LibraryId", "DirectoryPath")
+                        .IsUnique();
+
+                    b.ToTable("x_media_items", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.MediaItemPerson", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Character")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("item_id");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("PersonId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("person_id");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("PersonId");
+
+                    b.HasIndex("ItemId", "PersonId", "Role")
+                        .IsUnique();
+
+                    b.ToTable("x_media_item_persons", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.MediaLibrary", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AutoScan")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("auto_scan");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedBy")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("created_by");
+
+                    b.Property<DateTimeOffset?>("LastScanAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("last_scan_at");
+
+                    b.Property<string>("MetadataLanguage")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("metadata_language");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Path")
+                        .IsUnique();
+
+                    b.ToTable("x_media_libraries", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.MediaPerson", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProfilePath")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("profile_path");
+
+                    b.Property<string>("TmdbId")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("tmdb_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name");
+
+                    b.HasIndex("Name", "TmdbId")
+                        .IsUnique();
+
+                    b.ToTable("x_media_persons", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.MediaScanLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Added")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("finished_at");
+
+                    b.Property<long>("LibraryId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("library_id");
+
+                    b.Property<int>("Removed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("started_at");
+
+                    b.Property<string>("TaskId")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("task_id");
+
+                    b.Property<int>("Updated")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LibraryId");
+
+                    b.ToTable("x_media_scan_logs", (string)null);
+                });
+
             modelBuilder.Entity("OpenList.Core.Models.Message", b =>
                 {
                     b.Property<long>("Id")
@@ -438,6 +705,49 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.ToTable("x_users", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Core.Models.UserMediaState", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Favorite")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("item_id");
+
+                    b.Property<DateTimeOffset?>("LastPlayedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("last_played_at");
+
+                    b.Property<long>("ProgressSeconds")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("progress_seconds");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("user_id");
+
+                    b.Property<int?>("UserRating")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("user_rating");
+
+                    b.Property<bool>("Watched")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "ItemId")
+                        .IsUnique();
+
+                    b.ToTable("x_user_media_states", (string)null);
                 });
 
             modelBuilder.Entity("OpenList.Core.Models.WebAuthnCredential", b =>

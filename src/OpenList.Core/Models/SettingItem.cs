@@ -103,6 +103,8 @@ public enum SettingGroup : int
     Ftp = 10,
     /// <summary>流量。</summary>
     Traffic = 11,
+    /// <summary>媒体库。</summary>
+    Media = 12,
 }
 
 /// <summary>

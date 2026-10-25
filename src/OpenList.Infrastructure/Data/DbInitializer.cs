@@ -612,6 +612,16 @@ public static class DbInitializer
         ("multipart_enabled", "true", SettingValueType.Bool, SettingFlag.Public, 11, null),
         ("multipart_chunk_size", "10", SettingValueType.Number, SettingFlag.Public, 11, null),
         ("move_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
+
+        // --- Group 12: MEDIA（媒体库 / 刮削 / 字幕） ---
+        // TMDB 与 OpenSubtitles 的 API Key 属于私有配置，只对管理员可见。
+        ("media_tmdb_api_key", "", SettingValueType.String, SettingFlag.Private, 12, null),
+        ("media_default_provider", "tmdb", SettingValueType.String, SettingFlag.Private, 12, "tmdb"),
+        ("media_metadata_language", "zh-CN", SettingValueType.String, SettingFlag.Public, 12, "zh-CN,zh-TW,en-US,ja-JP"),
+        ("media_opensubtitles_api_key", "", SettingValueType.String, SettingFlag.Private, 12, null),
+        ("media_subtitle_language", "zh-cn", SettingValueType.String, SettingFlag.Public, 12, "zh-cn,zh-tw,en"),
+        // 自动增量扫描间隔（小时）；0 表示关闭，仅手动触发。
+        ("media_auto_scan_interval_hours", "0", SettingValueType.Number, SettingFlag.Private, 12, null),
     };
 
     /// <summary>

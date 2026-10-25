@@ -63,6 +63,16 @@ public sealed class User
     public bool CanRemove() => ((Permission >> 7) & 1) == 1;
 
     /// <summary>
+    /// 是否可管理媒体库（创建/更新/删除媒体库、触发扫描与刮削）。
+    /// 使用权限位 14：已实现的权限位仅 0-7，8-13 预留给 WebDAV/FTP/归档/分享，
+    /// 14 起为媒体域新增位，管理员恒为 true。
+    /// </summary>
+    public bool CanManageMediaLibrary() => IsAdmin() || ((Permission >> 14) & 1) == 1;
+
+    /// <summary>媒体库管理权限位掩码（对应 <see cref="CanManageMediaLibrary"/>）。</summary>
+    public const int MediaManagePermissionBit = 1 << 14;
+
+    /// <summary>
     /// 把请求路径套到本用户的 <see cref="BasePath"/> 之下（用户级目录隔离），
     /// 镜像 Go <c>internal/model/user.go</c> 的 <c>User.JoinPath</c> → <c>utils.JoinBasePath</c>。
     /// <see cref="BasePath"/> 为 null/空时等价于根目录 <c>/</c>，即不产生约束（内置 admin / guest 的情形）。
