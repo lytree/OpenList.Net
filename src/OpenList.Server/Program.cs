@@ -14,6 +14,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
 using OpenList.Infrastructure.Services;
+using OpenList.Infrastructure.Services.Media;
 using OpenList.Server.Endpoints;
 using OpenList.Server.Hosting;
 using OpenList.Server.Middleware;
@@ -188,6 +189,20 @@ builder.Services.AddSingleton<IObjsUpdateHooks, ObjsUpdateHooks>();
 // Rate limiters — singleton manager holding the 4 byte-token-bucket limiters
 // (client/server × download/upload), refreshed from the settings table.
 builder.Services.AddSingleton<RateLimitManager>();
+// ---------------------------------------------------------------------
+// 媒体域（Peach 功能原生实现）：媒体库、扫描、TMDB 刮削、字幕、个人状态。
+// 库/条目/元数据是全局资源（管理员管理），收藏/进度/口味按 (UserId, ItemId) 隔离。
+// IMediaScanService 是 singleton：后台扫描需要自己开 scope 拿 DbContext。
+// ---------------------------------------------------------------------
+builder.Services.AddHttpClient("tmdb");
+builder.Services.AddHttpClient("opensubtitles");
+builder.Services.AddScoped<IMediaLibraryService, MediaLibraryService>();
+builder.Services.AddScoped<IMetadataProvider, TmdbMetadataProvider>();
+builder.Services.AddScoped<IMediaMetadataService, MediaMetadataService>();
+builder.Services.AddScoped<IUserMediaStateService, UserMediaStateService>();
+builder.Services.AddScoped<ISubtitleProvider, OpenSubtitlesProvider>();
+builder.Services.AddScoped<ISubtitleService, SubtitleService>();
+builder.Services.AddSingleton<IMediaScanService, MediaScanService>();
 // FileSystemService is a singleton; the 4-arg constructor wires in ISignService,
 // IOfflineDownloadService (both singletons) and the IObjsUpdateHooks registry so
 // AddOfflineDownloadAsync and incremental index publishing can delegate.
@@ -291,6 +306,8 @@ builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opts =>
 });
 builder.Services.AddHostedService<FtpHostedService>();
 builder.Services.AddHostedService<SftpHostedService>();
+// 媒体库定时增量扫描（间隔 0 时关闭，默认关闭）
+builder.Services.AddHostedService<MediaAutoScanHostedService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -373,6 +390,8 @@ app.MapMiscApi();
 app.MapShareApi();
 // Sharing signed download (/sd/{sid}[/*path]) — public, share-verified
 app.MapSharingDownloadApi();
+// 媒体域端点（媒体库 / 扫描 / 刮削 / 个人状态 / 口味 / 字幕）
+app.MapMediaApi();
 // Multipart (chunked) upload — auth'd
 app.MapMultipartApi();
 // Torrent endpoints (parse / upload_parse / rapid_upload / generate) — auth'd
