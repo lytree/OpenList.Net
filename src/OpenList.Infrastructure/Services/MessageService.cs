@@ -69,10 +69,18 @@ public sealed class MessageService : IMessageService
     /// <summary>
     /// 将指定消息标记为已读。
     /// </summary>
-    public async Task<Resp> MarkReadAsync(long messageId, CancellationToken ct = default)
+    public async Task<Resp> MarkReadAsync(long messageId, long? ownerUserId = null, CancellationToken ct = default)
     {
         var msg = await _db.Messages.FindAsync([messageId], ct);
         if (msg is null) return Resp.Fail("message not found", RespCodes.NotFound);
+
+        // 归属校验：/me/message/read 走的就是这条路。原先没有这道检查，任何登录用户
+        // 猜到（自增）id 就能把别人的消息标成已读 —— 不泄露正文，但能静默清掉对方的
+        // 未读徽标，「未读」这个信号就不可信了。
+        // 越权返回 NotFound 而不是 Forbidden：Forbidden 等于确认「这个 id 存在」。
+        if (ownerUserId is { } owner && msg.UserId != owner)
+            return Resp.Fail("message not found", RespCodes.NotFound);
+
         msg.Read = true;
         await _db.SaveChangesAsync(ct);
         return Resp.Ok();

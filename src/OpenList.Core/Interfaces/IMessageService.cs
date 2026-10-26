@@ -14,8 +14,16 @@ public interface IMessageService
     Task<Resp<Message>> GetByIdAsync(long messageId, CancellationToken ct = default);
     /// <summary>向指定用户发送一条消息。</summary>
     Task<Resp> SendAsync(long userId, string title, string content, CancellationToken ct = default);
-    /// <summary>将消息标记为已读。</summary>
-    Task<Resp> MarkReadAsync(long messageId, CancellationToken ct = default);
+    /// <summary>
+    /// 将消息标记为已读。
+    /// </summary>
+    /// <param name="messageId">消息 id。</param>
+    /// <param name="ownerUserId">
+    /// 非空时要求消息属于该用户，否则返回 404（用户侧调用必须传，见 /me/message/read）；
+    /// 空表示不校验归属（管理端调用）。
+    /// </param>
+    /// <param name="ct">取消令牌。</param>
+    Task<Resp> MarkReadAsync(long messageId, long? ownerUserId = null, CancellationToken ct = default);
     /// <summary>删除消息。</summary>
     Task<Resp> DeleteAsync(long messageId, CancellationToken ct = default);
 }

@@ -127,7 +127,8 @@ public static class MeEndpoints
         {
             var id = user.UserId();
             if (id is null) return Results.Ok(Resp.Fail("unauthorized", RespCodes.Unauthorized));
-            return Results.Ok(await msgs.MarkReadAsync(req.Id));
+            // 带上当前用户 id：服务端据此拒绝跨用户标记（否则猜到 id 就能清掉别人的未读）
+            return Results.Ok(await msgs.MarkReadAsync(req.Id, id.Value));
         });
 
         return app;

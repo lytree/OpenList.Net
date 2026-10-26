@@ -111,6 +111,37 @@ public class MessageServiceTests
         await Assert.That(r.Data!).IsEmpty();
     }
 
+    [Test]
+    public async Task MarkReadAsync_Rejects_Other_Users_Message_And_Keeps_It_Unread()
+    {
+        await using var ctx = BuildContext();
+        var svc = new MessageService(ctx);
+        await svc.SendAsync(1, "For user 1", "C");
+        var msg = (await svc.GetAsync(1)).Data![0];
+
+        // 用户端 /me/message/read 会带上当前用户 id：别人的消息必须动不了。
+        // 原先没有这道校验，猜到自增 id 就能清掉对方的未读徽标。
+        var r = await svc.MarkReadAsync(msg.Id, ownerUserId: 2);
+
+        await Assert.That(r.Code).IsEqualTo(404);
+        await Assert.That((await svc.GetAsync(1)).Data![0].Read).IsFalse();
+    }
+
+    [Test]
+    public async Task MarkReadAsync_Without_Owner_Keeps_Admin_Path_Working()
+    {
+        await using var ctx = BuildContext();
+        var svc = new MessageService(ctx);
+        await svc.SendAsync(7, "For user 7", "C");
+        var msg = (await svc.GetAsync(7)).Data![0];
+
+        // 管理端 /admin/message/update 不传 owner，保持跨用户能力
+        var r = await svc.MarkReadAsync(msg.Id);
+
+        await Assert.That(r.Code).IsEqualTo(200);
+        await Assert.That((await svc.GetAsync(7)).Data![0].Read).IsTrue();
+    }
+
     private static OpenListDbContext BuildContext()
     {
         var conn = new SqliteConnection("DataSource=:memory:");
