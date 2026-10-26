@@ -1,0 +1,10 @@
+{
+  "bell": "Messages",
+  "title": "Inbox",
+  "empty": "No messages yet.",
+  "unread": "{{count}} unread",
+  "all_read": "Everything read",
+  "mark_read": "Mark as read",
+  "close": "Close",
+  "refresh": "Refresh"
+}

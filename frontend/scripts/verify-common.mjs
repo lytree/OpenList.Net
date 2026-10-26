@@ -70,7 +70,8 @@ await page.reload({ waitUntil: "networkidle" })
 await page.waitForTimeout(1200)
 check("刷新后保持登录", (await page.locator(".ol-login-page").count()) === 0, page.url())
 
-// ---------- E. 管理台 8 个模块都能打开 ----------
+// ---------- E. 管理台 9 个已就绪模块都能打开 ----------
+// （plugins / backup-restore / dashboard / about 仍是 (soon) 禁用态，不在断言范围内）
 const ADMIN_PAGES = [
   ["#/@manage/storages", "Storages"],
   ["#/@manage/users", "Users"],
@@ -79,6 +80,7 @@ const ADMIN_PAGES = [
   ["#/@manage/indexes", "Indexes"],
   ["#/@manage/tasks", "Tasks"],
   ["#/@manage/media", "Media"],
+  ["#/@manage/messenger", "Messages"],
   ["#/@manage/settings", "Settings"],
 ]
 for (const [hash, label] of ADMIN_PAGES) {

@@ -15,6 +15,7 @@
     "about": "About",
     "tasks": "Tasks",
     "media": "Media Libraries",
+    "messenger": "Messages",
     "upload": "Upload",
     "copy": "Copy",
     "move": "Move",
@@ -40,5 +41,26 @@
   "add_storage-tips": "You may need to fill in some information in the newly opened tab.",
   "messenger-tips": "You may need to fill in some information on this tab as prompted.",
   "load_default_setting": "Load default settings",
-  "load_default_setting_success": "Loaded successfully, not saved"
+  "load_default_setting_success": "Loaded successfully, not saved",
+  "messenger": {
+    "title": "Messages",
+    "hint": "Send a persistent message to a specific user. It shows up in that user's inbox (the bell in the top bar) and stays unread until they open it.",
+    "no_users": "No users yet.",
+    "search_user": "Filter users",
+    "no_match": "No user matches the filter.",
+    "recipient": "To",
+    "total": "{{count}} message(s)",
+    "unread": "{{count}} unread",
+    "unread_one": "Unread",
+    "builtin": "built-in",
+    "disabled": "disabled",
+    "title_placeholder": "Subject",
+    "content_placeholder": "Message body",
+    "send": "Send",
+    "sent": "Sent to {{name}}",
+    "need_title_content": "Subject and body are both required",
+    "empty": "No messages for this user yet.",
+    "delete": "Delete",
+    "confirm_delete": "Delete \"{{title}}\"? This cannot be undone."
+  }
 }

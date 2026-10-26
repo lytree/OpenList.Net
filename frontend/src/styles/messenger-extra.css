@@ -1,0 +1,230 @@
+/* ============================================================================
+ * 站内信（§34）：管理台发信页 + 顶栏收件箱
+ * 命名统一 ol-msg-* / ol-inbox-*，避免和媒体域、文件浏览的规则串味。
+ * ========================================================================== */
+
+/* ---- 管理台：左选人 / 右写信 ---- */
+.ol-msg-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--ol-space-3);
+  align-items: start;
+}
+
+.ol-msg-users {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  padding: var(--ol-space-2);
+  background: var(--ol-bg-surface);
+}
+
+.ol-msg-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 44vh;
+  overflow-y: auto;
+}
+
+.ol-msg-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px var(--ol-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--ol-radius-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--ol-text);
+}
+
+.ol-msg-user:hover {
+  background: var(--el-fill-color-light);
+}
+
+.ol-msg-user.is-active {
+  border-color: var(--el-color-primary-light-5);
+  background: var(--el-color-primary-light-9);
+}
+
+.ol-msg-user-name {
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-msg-user-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--ol-text-muted);
+}
+
+.ol-msg-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+  min-width: 0;
+}
+
+.ol-msg-recipient {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ol-space-2);
+  flex-wrap: wrap;
+}
+
+.ol-msg-compose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+  padding: var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-msg-compose-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ol-msg-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+  min-height: 120px;
+}
+
+.ol-msg-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--ol-space-2) var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-msg-item.is-unread {
+  border-left: 3px solid var(--el-color-primary);
+}
+
+.ol-msg-item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+.ol-msg-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ol-text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-msg-item.is-read .ol-msg-item-title {
+  font-weight: 500;
+  color: var(--ol-text-secondary, var(--ol-text));
+}
+
+.ol-msg-item-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ol-text-secondary, var(--ol-text));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ol-msg-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  flex: none;
+}
+
+/* ---- 顶栏收件箱 ---- */
+.ol-inbox-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 2px;
+}
+
+.ol-inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+  max-height: 56vh;
+  overflow-y: auto;
+  min-height: 100px;
+}
+
+.ol-inbox-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--ol-space-2) var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+}
+
+.ol-inbox-item.is-unread {
+  border-left: 3px solid var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.ol-inbox-item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+.ol-inbox-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ol-text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-inbox-item-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ol-text-secondary, var(--ol-text));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ol-inbox-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  flex: none;
+}
+
+@media (max-width: 900px) {
+  .ol-msg-layout {
+    grid-template-columns: 1fr;
+  }
+}

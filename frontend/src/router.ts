@@ -157,6 +157,12 @@ const routes: RouteRecordRaw[] = [
             meta: { title: "media.manage.title" },
           },
           {
+            path: "messenger",
+            name: "messenger",
+            component: () => import("~/pages/manage/messenger/Messenger"),
+            meta: { title: "manage.sidemenu.messenger" },
+          },
+          {
             path: "settings",
             name: "settings",
             component: () => import("~/pages/manage/settings/Settings"),

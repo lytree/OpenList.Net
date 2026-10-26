@@ -30,6 +30,7 @@ import { availableLanguages, locale, setLocale, t } from "~/i18n"
 import { useSettingsStore } from "~/stores/settings"
 import { useUserStore } from "~/stores/user"
 import { useTheme } from "~/composables/useTheme"
+import InboxBell from "~/components/InboxBell"
 
 /**
  * 基础外壳：侧边导航 + 顶部栏 + 内容区。
@@ -123,6 +124,9 @@ export default defineComponent({
           <ElHeader class="ol-header" height="56px">
             <div class="ol-header-title">{pageTitle.value}</div>
             <div class="ol-header-actions">
+              {/* 站内信铃铛：未登录时组件自身返回 null，不占位 */}
+              <InboxBell />
+
               <ElDropdown
                 trigger="click"
                 onCommand={(code: string) => setLocale(code)}
