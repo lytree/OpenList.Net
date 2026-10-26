@@ -1462,15 +1462,15 @@ CI 不走 Cake 这条路（workflow 里分别 `dotnet publish` 两次），所�
 
 | 类 | 脚本 | 项数 | 结果 |
 |---|---|---|---|
-| A 认证与初始化 | `verify-common.mjs`（**新增**） | 7 | ✅ |
+| A 认证与初始化 | `verify-common.mjs`（**新增**）：游客守卫 / 登录 / 刷新 / 退出 / 零控制台错误 | 9 | ✅ |
 | B 文件管理 | `verify-v2.mjs` 18 + `verify-ops.mjs` 24 + `verify-rename.mjs` 12 | 54 | ✅ |
 | C 上传管线 | `e2e-upload.mjs`（改造为可打外部后端） | 22 | ✅ |
 | D 预览器 | `verify-preview.mjs` 18 + `verify-preview-extra.mjs` 15 + `verify-editor.mjs` 11 + `verify-torrent.mjs` 15 | 59 | ✅ |
-| E 管理台 | `verify-common.mjs` 8 页 + `verify-media-manage.mjs` 20 | 36 | ✅ |
+| E 管理台 | `verify-common.mjs` 8 页 + `verify-media-manage.mjs` 20 | 28 | ✅ |
 | F 媒体域 | `verify-media.mjs` 20 + `verify-media-dimensions.mjs` 34 | 54 | ✅ |
-| G 通用 | `verify-common.mjs`（主题 / 语言控件） | 5 | ✅ |
-| H 桌面端 | bundle 布局 + 服务端核心托管 SPA（见 32.4） | 4 | ✅ |
-| **合计** | **11 轮** | **231** | **全绿** |
+| G 通用 | `verify-common.mjs`：暗色主题 3 + 语言控件 2 | 5 | ✅ |
+| **脚本小计** | **11 轮** | **231** | **全绿** |
+| H 桌面端 | bundle 布局 + 服务端核心托管 SPA（见 32.4，人工/curl 验证，不进脚本计数） | 4 | ✅ |
 
 `verify-common.mjs` 是这轮补的：此前 B/C/D/F 都有专门脚本，而「游客能不能进管理台」
 「管理台 8 个页签是否都能打开」「暗色主题刷新后还在不在」只能靠人手点，A–H 就只能算口头承诺。
