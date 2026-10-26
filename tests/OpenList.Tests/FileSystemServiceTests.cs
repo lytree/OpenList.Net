@@ -272,24 +272,45 @@ public class FileSystemServiceTests
     }
 
     [Test]
-    public async Task RemoveEmptyDirectoryAsync_Removes_Empty_Dir()
+    public async Task RemoveEmptyDirectoryAsync_Removes_Empty_SubDirs_Keeps_Parent()
     {
         var (mount, svc, _) = Setup();
-        mount.Root.CreateDirectory("/test/empty");
-        var r = await svc.RemoveEmptyDirectoryAsync("/test/empty", TestUser);
+        mount.Root.CreateDirectory("/test/keep");
+        mount.Root.CreateDirectory("/test/keep/emptyA");
+        mount.Root.CreateDirectory("/test/keep/nested");
+        mount.Root.CreateDirectory("/test/keep/nested/emptyB");
+        await WriteFileAsync(mount, "/test/keep/nested/file.txt", new byte[] { 1 });
+
+        var r = await svc.RemoveEmptyDirectoryAsync("/test/keep", TestUser);
+
         await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(mount.Root.DirectoryExists("/test/empty")).IsFalse();
+        // 对齐 Go：清空的是「空子目录」，传入的目录本身要保留。
+        await Assert.That(mount.Root.DirectoryExists("/test/keep")).IsTrue();
+        await Assert.That(mount.Root.DirectoryExists("/test/keep/emptyA")).IsFalse();
+        await Assert.That(mount.Root.DirectoryExists("/test/keep/nested")).IsTrue();
+        await Assert.That(mount.Root.DirectoryExists("/test/keep/nested/emptyB")).IsFalse();
     }
 
     [Test]
-    public async Task RemoveEmptyDirectoryAsync_Rejects_NonEmpty_Dir()
+    public async Task RemoveEmptyDirectoryAsync_Keeps_NonEmpty_Dir()
     {
         var (mount, svc, _) = Setup();
         mount.Root.CreateDirectory("/test/notempty");
         await WriteFileAsync(mount, "/test/notempty/file.txt", new byte[] { 1 });
 
         var r = await svc.RemoveEmptyDirectoryAsync("/test/notempty", TestUser);
-        await Assert.That(r.Code).IsEqualTo(400);
+
+        // 非空目录不报错也不再删它 —— 语义是「清理空目录」，不是「删除目录」。
+        await Assert.That(r.Code).IsEqualTo(200);
+        await Assert.That(mount.Root.DirectoryExists("/test/notempty")).IsTrue();
+    }
+
+    [Test]
+    public async Task RemoveEmptyDirectoryAsync_NotFound_When_Path_Missing()
+    {
+        var (_, svc, _) = Setup();
+        var r = await svc.RemoveEmptyDirectoryAsync("/test/nope", TestUser);
+        await Assert.That(r.Code).IsEqualTo(404);
     }
 
     [Test]

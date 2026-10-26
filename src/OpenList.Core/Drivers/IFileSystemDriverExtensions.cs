@@ -81,11 +81,25 @@ public interface IFileSystemWithDetails
     Task<Dictionary<string, object?>> GetDetailsAsync(string path, CancellationToken ct = default);
 }
 
-/// <summary>驱动可读取归档内容（列出条目）。</summary>
+/// <summary>驱动可读取归档内容（列出条目 + 读取单个条目）。</summary>
 public interface IFileSystemArchiveReader
 {
     /// <summary>列出归档内的全部条目。</summary>
     Task<IReadOnlyList<ArchiveEntry>> ListArchiveEntriesAsync(string path, CancellationToken ct = default);
+
+    /// <summary>
+    /// 打开归档内单个条目，返回<b>可 Seek</b> 的只读流（调用方负责 Dispose，释放时清理临时文件）。
+    /// 找不到条目（或路径不安全）返回 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 必须可 Seek：内联预览要支持 HTTP Range（拖动视频进度条、分段读取文本），
+    /// 而压缩流的条目是前向只读的。实现因此把条目落到临时文件再返回 <see cref="FileStream"/>。
+    /// </remarks>
+    Task<Stream?> OpenArchiveEntryAsync(
+        string archivePath,
+        string entryPath,
+        string? password = null,
+        CancellationToken ct = default);
 }
 
 /// <summary>驱动可原地解压归档。</summary>

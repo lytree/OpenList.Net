@@ -45,6 +45,11 @@ public interface IFileSystemService
     Task<Resp> PutStreamAsync(string path, Stream stream, User user, CancellationToken ct = default);
     /// <summary>以表单形式上传（带文件名）。</summary>
     Task<Resp> PutFormAsync(string path, Stream stream, string fileName, User user, CancellationToken ct = default);
+    /// <summary>
+    /// 读取小文件的全部内容（元数据解析用：NFO、海报等）。
+    /// 文件超过 <paramref name="maxBytes"/> 时返回失败，避免误读大文件整段进内存。
+    /// </summary>
+    Task<Resp<byte[]>> ReadFileAsync(string path, long maxBytes, User user, CancellationToken ct = default);
     /// <summary>获取直传（客户端侧上传）所需的信息。</summary>
     Task<Resp<DirectUploadInfo>> GetDirectUploadInfoAsync(string path, long size, User user, CancellationToken ct = default);
     /// <summary>生成文件的下载链接。</summary>
@@ -55,6 +60,11 @@ public interface IFileSystemService
     Task<Resp<ArchiveMetaResp>> ArchiveMetaAsync(string path, User user, CancellationToken ct = default);
     /// <summary>列出归档内的条目。</summary>
     Task<Resp<ArchiveListResp>> ArchiveListAsync(string path, string? password, User user, CancellationToken ct = default);
+    /// <summary>
+    /// 打开归档内的单个条目做内联预览，返回可 Seek 的只读流（调用方 Dispose）。
+    /// 驱动不支持或条目不存在时返回失败。
+    /// </summary>
+    Task<Resp<Stream>> OpenArchiveEntryAsync(string archivePath, string entryPath, string? password, User user, CancellationToken ct = default);
     /// <summary>将归档解压到目标路径。</summary>
     Task<Resp> ArchiveDecompressAsync(string archivePath, string destPath, string? password, User user, CancellationToken ct = default);
     /// <summary>列出某路径下的所有子目录。</summary>
@@ -206,6 +216,9 @@ public sealed class ArchiveEntry
     /// <summary>大小（字节）。</summary>
     public long Size { get; set; }
     /// <summary>是否为目录。</summary>
+    // 全局 JSON 策略是 camelCase，会把 IsDir 输出成 `isDir`；
+    // 而其余对象（Obj、FsListResp）都用 `is_dir`，前端按同一套字段名读取。
+    [System.Text.Json.Serialization.JsonPropertyName("is_dir")]
     public bool IsDir { get; set; }
     /// <summary>修改时间。</summary>
     public DateTimeOffset Modified { get; set; }

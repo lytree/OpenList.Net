@@ -676,10 +676,62 @@ public sealed class FileSystemService : IFileSystemService
         var upath = Normalize(path);
         if (!_mount.Root.DirectoryExists(upath))
             return Task.FromResult(Resp.Fail("not found", RespCodes.NotFound));
-        if (_mount.Root.EnumeratePaths(upath).Any())
-            return Task.FromResult(Resp.Fail("directory not empty", RespCodes.BadRequest));
-        _mount.Root.DeleteDirectory(upath, false);
+
+        // 对齐 Go `FsRemoveEmptyDirectory`（前端文案：*delete all its empty subfolders*）：
+        // 自底向上清掉 path 下的空子目录，**path 本身保留**。
+        //
+        // 旧实现只判断 path 自身是否为空再删 path，有两个问题：
+        // 1. 语义不符 —— 当前目录非空时直接回 `directory not empty`，「整理下载目录」形同虚设；
+        // 2. 假成功 —— path 是挂载点根时 `DeleteDirectory` 在 MountFileSystem 上不生效，
+        //    却仍然返回 200，用户以为清理过了。
+        RemoveEmptySubdirectories(upath, 0);
         return Task.FromResult(Resp.Ok());
+    }
+
+    /// <summary>
+    /// 自底向上删除空子目录，返回删除数量。
+    ///
+    /// 单个目录删除失败（只读挂载、驱动拒绝、占用）时**跳过而不是抛**：
+    /// 清理动作本身就是尽力而为，删到一半报错会让用户不知道哪部分生效了。
+    /// </summary>
+    private int RemoveEmptySubdirectories(UPath dir, int depth)
+    {
+        // 防御性上限：某些驱动的 EnumeratePaths 可能返回包含自身的路径，避免无限递归。
+        if (depth > 64) return 0;
+
+        List<UPath> children;
+        try
+        {
+            children = _mount.Root.EnumeratePaths(dir).ToList();
+        }
+        catch
+        {
+            return 0;
+        }
+
+        var removed = 0;
+        foreach (var child in children)
+        {
+            bool isDir;
+            try { isDir = _mount.Root.DirectoryExists(child); }
+            catch { continue; }
+            if (!isDir) continue;
+
+            removed += RemoveEmptySubdirectories(child, depth + 1);
+            try
+            {
+                if (!_mount.Root.EnumeratePaths(child).Any())
+                {
+                    _mount.Root.DeleteDirectory(child, isRecursive: false);
+                    removed++;
+                }
+            }
+            catch
+            {
+                // 保留：驱动不允许删除时，空目录留在原地比中断整轮清理更好。
+            }
+        }
+        return removed;
     }
 
     /// <summary>
@@ -706,6 +758,26 @@ public sealed class FileSystemService : IFileSystemService
             return Resp.Ok();
         }
         catch (Exception ex) { return Resp.Fail(ex.Message, RespCodes.InternalError); }
+    }
+
+    /// <inheritdoc />
+    public Task<Resp<byte[]>> ReadFileAsync(string path, long maxBytes, User user, CancellationToken ct = default)
+    {
+        var upath = Normalize(path);
+        try
+        {
+            if (!_mount.Root.FileExists(upath))
+                return Task.FromResult(Resp<byte[]>.Fail("file not found", RespCodes.NotFound));
+            var entry = _mount.Root.GetFileEntry(upath);
+            if (entry.Length > maxBytes)
+                return Task.FromResult(Resp<byte[]>.Fail($"file exceeds {maxBytes} bytes", RespCodes.BadRequest));
+
+            using var stream = _mount.Root.OpenFile(upath, FileMode.Open, FileAccess.Read);
+            using var ms = new MemoryStream((int)Math.Min(entry.Length, int.MaxValue));
+            stream.CopyTo(ms, 81920);
+            return Task.FromResult(Resp<byte[]>.Ok(ms.ToArray()));
+        }
+        catch (Exception ex) { return Task.FromResult(Resp<byte[]>.Fail(ex.Message, RespCodes.InternalError)); }
     }
 
     /// <summary>
@@ -802,6 +874,25 @@ public sealed class FileSystemService : IFileSystemService
             catch (Exception ex) { return Task.FromResult(Resp<ArchiveListResp>.Fail(ex.Message, RespCodes.InternalError)); }
         }
         return Task.FromResult(Resp<ArchiveListResp>.Fail("driver does not support archive reading", RespCodes.NotImplemented));
+    }
+
+    /// <summary>打开归档内的单个条目做内联预览（要求驱动实现归档读取接口）。</summary>
+    public Task<Resp<Stream>> OpenArchiveEntryAsync(string archivePath, string entryPath, string? password, User user, CancellationToken ct = default)
+    {
+        var driver = _mount.FindDriverForPath(archivePath);
+        if (driver is IFileSystemArchiveReader reader)
+        {
+            try
+            {
+                var relArchive = _mount.ToDriverRelativePath(archivePath);
+                var stream = reader.OpenArchiveEntryAsync(relArchive, entryPath, password, ct).GetAwaiter().GetResult();
+                return Task.FromResult(stream is null
+                    ? Resp<Stream>.Fail("entry not found in archive", RespCodes.NotFound)
+                    : Resp<Stream>.Ok(stream));
+            }
+            catch (Exception ex) { return Task.FromResult(Resp<Stream>.Fail(ex.Message, RespCodes.InternalError)); }
+        }
+        return Task.FromResult(Resp<Stream>.Fail("driver does not support archive reading", RespCodes.NotImplemented));
     }
 
     /// <summary>把归档文件解压到目标目录（要求驱动实现归档解压接口）。</summary>

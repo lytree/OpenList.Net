@@ -52,6 +52,58 @@ internal static class SharpCompressArchiveSupport
     }
 
     /// <summary>
+    /// 打开归档内的单个条目，返回<b>可 Seek</b> 的只读流；找不到返回 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 压缩流的条目是前向只读的，而内联预览要支持 HTTP Range（视频拖动、文本分段），
+    /// 所以先把条目落到临时文件（<see cref="FileOptions.DeleteOnClose"/>，句柄关闭即删），
+    /// 再以 <see cref="FileStream"/> 交出去。代价是打开时要把该条目解压一遍 —— 与「先解压再预览」同量级。
+    /// </remarks>
+    public static Stream? OpenEntry(IFileSystem fs, string archivePath, string entryPath, string? password = null)
+    {
+        var target = (entryPath ?? string.Empty).Replace('\\', '/').Trim('/');
+        if (target.Length == 0 || IsUnsafePath(target)) return null;
+
+        var upath = new UPath(archivePath.StartsWith('/') ? archivePath : "/" + archivePath);
+        using var stream = fs.OpenFile(upath, FileMode.Open, FileAccess.Read);
+        var options = new ReaderOptions
+        {
+            Password = password ?? string.Empty,
+            LeaveStreamOpen = false,
+        };
+        using var reader = ReaderFactory.OpenReader(stream, options);
+        while (reader.MoveToNextEntry())
+        {
+            var entry = reader.Entry;
+            if (entry.IsDirectory) continue;
+            var key = (entry.Key ?? string.Empty).Replace('\\', '/').Trim('/');
+            if (!string.Equals(key, target, StringComparison.Ordinal)) continue;
+
+            var temp = Path.Combine(Path.GetTempPath(), "openlist-arc-" + Guid.NewGuid().ToString("N"));
+            var file = new FileStream(
+                temp,
+                FileMode.CreateNew,
+                FileAccess.ReadWrite,
+                FileShare.Read,
+                bufferSize: 81920,
+                FileOptions.DeleteOnClose);
+            try
+            {
+                using (var entryStream = reader.OpenEntryStream()) entryStream.CopyTo(file);
+                // 交给调用方前归零：Read 从头部开始，Media/文本预览才能正常工作。
+                file.Position = 0;
+                return file;
+            }
+            catch
+            {
+                file.Dispose();
+                throw;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// 将压缩包解压到目标目录（含 ZipSlip 路径穿越防护）。
     /// </summary>
     /// <param name="fs">承载压缩包的 虚拟文件系统。</param>

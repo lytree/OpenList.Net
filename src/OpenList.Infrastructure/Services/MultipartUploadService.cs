@@ -175,35 +175,56 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
     /// <summary>
     /// 上传单个分片：写入临时文件并登记已收到的分片编号。受缓冲窗口流控（满则返回 429）。
     /// </summary>
+    /// <remarks>
+    /// 读取请求体必须是异步的：body 在 Kestrel 下是 <c>RateLimitedReadStream</c> 包装的请求流，
+    /// 同步 Read 会触发 Kestrel 的 AllowSynchronousIO 异常。因此校验（持锁）→ 异步拷贝（不持锁）
+    /// → 登记（持锁）三段式：拷贝期间不占用会话锁，避免并发分片互相阻塞。
+    /// </remarks>
     /// <param name="uploadId">上传会话 ID。</param>
     /// <param name="chunkIndex">分片在文件中的序号（从 0 开始）。</param>
     /// <param name="body">分片内容流。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>当前上传快照；会话不存在、窗口已满或分片越界时返回对应错误。</returns>
-    public Task<Resp<MultipartSnapshot>> UploadChunkAsync(string uploadId, int chunkIndex, Stream body, CancellationToken ct = default)
+    public async Task<Resp<MultipartSnapshot>> UploadChunkAsync(string uploadId, int chunkIndex, Stream body, CancellationToken ct = default)
     {
         if (!_sessions.TryGetValue(uploadId, out var session))
-            return Task.FromResult(Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound));
+            return Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound);
 
+        // 第一段（持锁）：前置校验 + 流控。
         lock (session.Sync)
         {
             if (session.State == "aborted")
-                return Task.FromResult(Resp<MultipartSnapshot>.Fail("session aborted", RespCodes.Conflict));
+                return Resp<MultipartSnapshot>.Fail("session aborted", RespCodes.Conflict);
             if (session.State == "completed")
-                return Task.FromResult(Resp<MultipartSnapshot>.Ok(ToSnapshot(session)));
+                return Resp<MultipartSnapshot>.Ok(ToSnapshot(session));
             if (chunkIndex < 0 || chunkIndex >= session.TotalChunks)
-                return Task.FromResult(Resp<MultipartSnapshot>.Fail("chunk index out of range", RespCodes.Conflict));
+                return Resp<MultipartSnapshot>.Fail("chunk index out of range", RespCodes.Conflict);
 
             // 流控：服务端窗口在“连续前沿”之外最多缓冲 WindowSize 个分片 ——
             // 前端对 429 会耐心重试。
             if (session.Received.Count - session.Frontier >= WindowSize)
-                return Task.FromResult(Resp<MultipartSnapshot>.Fail("upload window full, retry later", 429));
+                return Resp<MultipartSnapshot>.Fail("upload window full, retry later", 429);
+        }
 
-            var partFile = PartFile(session, chunkIndex);
-            Directory.CreateDirectory(session.TempDir);
-            using (var outStream = new FileStream(partFile, FileMode.Create, FileAccess.Write, FileShare.None))
+        // 第二段（不持锁）：异步落临时文件。
+        var partFile = PartFile(session, chunkIndex);
+        Directory.CreateDirectory(session.TempDir);
+        await using (var outStream = new FileStream(
+            partFile, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+        {
+            await body.CopyToAsync(outStream, 81920, ct).ConfigureAwait(false);
+        }
+
+        // 第三段（持锁）：登记。会话可能在拷贝期间被 abort/完成，重新检查；
+        // 已终结则丢弃刚写的临时分片。
+        lock (session.Sync)
+        {
+            if (session.State is "aborted" or "completed")
             {
-                body.CopyTo(outStream, 81920);
+                TryDeleteQuietly(partFile);
+                return session.State == "aborted"
+                    ? Resp<MultipartSnapshot>.Fail("session aborted", RespCodes.Conflict)
+                    : Resp<MultipartSnapshot>.Ok(ToSnapshot(session));
             }
             if (session.Received.Add(chunkIndex))
             {
@@ -212,8 +233,13 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
             }
             session.Error = null;
             session.LastActive = _time.GetUtcNow();
-            return Task.FromResult(Resp<MultipartSnapshot>.Ok(ToSnapshot(session)));
+            return Resp<MultipartSnapshot>.Ok(ToSnapshot(session));
         }
+    }
+
+    private static void TryDeleteQuietly(string path)
+    {
+        try { File.Delete(path); } catch { /* 尽力而为 */ }
     }
 
     /// <summary>

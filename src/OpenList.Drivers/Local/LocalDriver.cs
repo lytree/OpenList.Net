@@ -34,6 +34,24 @@ public sealed class LocalDriver : DriverBase, IFileSystemArchiveReader, IFileSys
     }
 
     /// <summary>
+    /// 打开归档内的单个条目（内联预览用）。
+    /// </summary>
+    /// <param name="archivePath">压缩包路径。</param>
+    /// <param name="entryPath">归档内条目的相对路径（<c>/</c> 分隔，不含前导斜杠）。</param>
+    /// <param name="password">可选的加密压缩包密码。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>可 Seek 的只读流；条目不存在时为 <c>null</c>。</returns>
+    public Task<Stream?> OpenArchiveEntryAsync(
+        string archivePath,
+        string entryPath,
+        string? password = null,
+        CancellationToken ct = default)
+    {
+        if (System is null) throw new InvalidOperationException("driver not initialized");
+        return Task.FromResult(SharpCompressArchiveSupport.OpenEntry(System, archivePath, entryPath, password));
+    }
+
+    /// <summary>
     /// 将压缩包解压到目标目录。
     /// </summary>
     /// <param name="archivePath">压缩包在挂载文件系统中的路径。</param>

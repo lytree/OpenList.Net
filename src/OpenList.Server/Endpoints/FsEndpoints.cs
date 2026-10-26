@@ -33,10 +33,15 @@ public static class FsEndpoints
         // Go registers these via g.Any(...) — accept GET or POST for third-party
         // clients that follow the Go convention (the frontend itself uses POST).
         // POST binds the JSON body; GET binds the DTO from query params.
-        g.MapMethods("/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
+        g.MapMethods("/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ISharingService shares, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsListReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
+            // 分享码鉴权：匿名 + Authorization 为分享码时，换成 BasePath=分享路径 的受限访客。
+            var (shareError, shareUser) = await ShareAccess.ResolveAsync(
+                ctx, shares, user.Identity?.IsAuthenticated == true, req.Password, ct);
+            if (shareError is not null) return shareError;
+            if (shareUser is not null) u = shareUser;
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
             req.Path = path;
             // 镜像 Go FsList：CanAccess(user, meta, path, req.Password)。
@@ -44,10 +49,14 @@ public static class FsEndpoints
             return Results.Ok(await svc.ListAsync(req, u));
         }).AllowAnonymous();
 
-        g.MapMethods("/get", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
+        g.MapMethods("/get", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ISharingService shares, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsGetReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
+            var (shareError, shareUser) = await ShareAccess.ResolveAsync(
+                ctx, shares, user.Identity?.IsAuthenticated == true, req.Password, ct);
+            if (shareError is not null) return shareError;
+            if (shareUser is not null) u = shareUser;
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
             req.Path = path;
             // 镜像 Go FsGet：CanAccess(user, meta, path, req.Password)。
@@ -57,10 +66,14 @@ public static class FsEndpoints
             return Results.Ok(await svc.GetAsync(req, u));
         }).AllowAnonymous();
 
-        g.MapMethods("/dirs", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
+        g.MapMethods("/dirs", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ISharingService shares, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<DirsReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
+            var (shareError, shareUser) = await ShareAccess.ResolveAsync(
+                ctx, shares, user.Identity?.IsAuthenticated == true, req.Password, ct);
+            if (shareError is not null) return shareError;
+            if (shareUser is not null) u = shareUser;
             // Go FsDirs：force_root 仅管理员可用且不做 BasePath 拼接；否则套 BasePath。
             string path;
             if (req.ForceRoot)
@@ -213,12 +226,14 @@ public static class FsEndpoints
             return Results.Ok(await svc.RemoveAsync(JoinPaths(dir, req.Names), u));
         });
 
-        g.MapPost("/remove_empty_directory", async (PathReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
+        g.MapPost("/remove_empty_directory", async (RemoveEmptyDirectoryReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
             // 镜像 Go FsRemoveEmptyDirectory：CanRemove + src_dir 的 meta 写入校验。
             if (PermissionGuard(u.CanRemove()) is { } denied) return denied;
-            if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            // Go 的请求字段叫 `src_dir`，本仓库早期用的是 `path`；两者都接受，
+            // 否则按上游契约调用的客户端会拿到默认值 `/` —— 那会去扫整个站点根目录。
+            if (JoinGuard(u, string.IsNullOrEmpty(req.Path) ? req.SrcDir ?? "/" : req.Path, out var path) is { } fail) return fail;
             if (await MetaWriteGateAsync(metaSvc, u, path, ct) is { } metaDenied) return metaDenied;
             return Results.Ok(await svc.RemoveEmptyDirectoryAsync(path, u));
         });
@@ -302,13 +317,18 @@ public static class FsEndpoints
             return Results.Ok(await svc.ArchiveMetaAsync(path, u));
         });
 
-        g.MapMethods("/archive/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, ClaimsPrincipal user) =>
+        // 归档条目列表：与 /list、/get 同级，是**只读浏览**能力，匿名访客也要能用
+        // （否则公开目录里点开压缩包会 401 把人踢去登录页）。
+        // 访问控制交给 meta 门禁：目录密码/白名单/隐藏条目与 /list 完全一致。
+        // 注意区分两个密码：`password` 是目录密码（走门禁），`archive_pass` 才是压缩包密码。
+        g.MapMethods("/archive/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<ArchiveListReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
-            return Results.Ok(await svc.ArchiveListAsync(path, req.ArchivePass ?? req.Password, u));
-        });
+            if (await AccessGateAsync(metaSvc, u, path, req.Password, ct) is { } denied) return denied;
+            return Results.Ok(await svc.ArchiveListAsync(path, req.ArchivePass, u));
+        }).AllowAnonymous();
 
         // POST /fs/archive/decompress — body: { src_dir, dst_dir, name, archive_pass, ... }.
         // archivePath = join(src_dir + name[0]); destPath = join(dst_dir) (+ name folder if put_into_new_dir).
@@ -320,7 +340,11 @@ public static class FsEndpoints
             if (JoinGuard(u, req.DstDir, out var destDir) is { } f2) return f2;
             if (req.PutIntoNewDir && req.Name.Count > 0)
             {
-                var folder = req.Name[0].TrimEnd('/').Split('/').Last();
+                // 对齐 Go：新目录名要**去掉扩展名**（bundle.zip → bundle/）。
+                // 用完整文件名会把目标目录建成 `bundle.zip`，与归档文件本身同名，
+                // 驱动的 CreateDirectory 必然冲突（表现为 500 "already exists"）。
+                var fileName = req.Name[0].TrimEnd('/').Split('/').Last();
+                var folder = Path.GetFileNameWithoutExtension(fileName);
                 destDir = destDir.TrimEnd('/') + "/" + folder;
             }
             return Results.Ok(await svc.ArchiveDecompressAsync(archivePath, destDir, req.ArchivePass, u));
@@ -515,8 +539,19 @@ public static class FsEndpoints
 // --- 请求 DTO ---
 // 字段名通过 [JsonPropertyName] 使用 snake_case 以匹配前端 api.ts 的请求体。
 
-/// <summary>通用路径请求体（/mkdir、/remove_empty_directory、/link 等）。</summary>
+/// <summary>通用路径请求体（/mkdir、/link 等）。</summary>
 public sealed class PathReq { public string Path { get; set; } = "/"; }
+
+/// <summary>
+/// 删除空目录请求体（<c>/fs/remove_empty_directory</c>）。
+/// 同时接受 `path`（本仓库约定）与 `src_dir`（Go 上游约定）；都不传才回落到 `/`。
+/// </summary>
+public sealed class RemoveEmptyDirectoryReq
+{
+    public string Path { get; set; } = "";
+    [JsonPropertyName("src_dir")]
+    public string? SrcDir { get; set; }
+}
 
 /// <summary>目录列取请求体（<c>/dirs</c>）。</summary>
 public sealed class DirsReq

@@ -215,11 +215,13 @@ public class MultipartUploadServiceTests
         public Task<Resp> RemoveAsync(IReadOnlyList<string> paths, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> RemoveEmptyDirectoryAsync(string path, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> PutFormAsync(string path, Stream stream, string fileName, User user, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Resp<byte[]>> ReadFileAsync(string path, long maxBytes, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp<DirectUploadInfo>> GetDirectUploadInfoAsync(string path, long size, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp<LinkResp>> LinkAsync(string path, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> AddOfflineDownloadAsync(OfflineDownloadReq req, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp<ArchiveMetaResp>> ArchiveMetaAsync(string path, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp<ArchiveListResp>> ArchiveListAsync(string path, string? password, User user, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Resp<Stream>> OpenArchiveEntryAsync(string archivePath, string entryPath, string? password, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> ArchiveDecompressAsync(string archivePath, string destPath, string? password, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp<DirsResp>> DirsAsync(string path, User user, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Resp> OtherAsync(string path, string action, User user, CancellationToken ct = default) => throw new NotSupportedException();
