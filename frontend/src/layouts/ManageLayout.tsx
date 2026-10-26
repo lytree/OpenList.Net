@@ -6,11 +6,15 @@ import { t } from "~/i18n"
 /**
  * 管理台外壳（M2）。
  *
- * 左侧 12 模块子导航（仅 Storages 已实现，其余标 `soon` 并禁用），右侧渲染
- * 嵌套路由（`/@manage/storages`、`/@manage/storages/edit/:id`）。整体仍套在
- * `BasicLayout` 之外壳内，故这里只是二级内容区布局。
+ * 左侧模块子导航（`ready: false` 的仍标 `(soon)` 并禁用），右侧渲染嵌套路由
+ * （`/@manage/dashboard`、`/@manage/storages`、`/@manage/storages/edit/:id`）。
+ * 整体仍套在 `BasicLayout` 之外壳内，故这里只是二级内容区布局。
+ *
+ * `plugins` 已从导航移除（承方案 §35）：Go 版插件是进程内加载的 `.so`，.NET 侧没有
+ * 对应宿主，留一个永远 `(soon)` 的入口只会让人误以为「这块还没做完」。
  */
 const MODULES: { labelKey: string; path: string; ready: boolean }[] = [
+  { labelKey: "dashboard", path: "/@manage/dashboard", ready: true },
   { labelKey: "storages", path: "/@manage/storages", ready: true },
   { labelKey: "users", path: "/@manage/users", ready: true },
   { labelKey: "tasks", path: "/@manage/tasks", ready: true },
@@ -19,10 +23,8 @@ const MODULES: { labelKey: string; path: string; ready: boolean }[] = [
   { labelKey: "metas", path: "/@manage/metas", ready: true },
   { labelKey: "indexes", path: "/@manage/indexes", ready: true },
   { labelKey: "messenger", path: "/@manage/messenger", ready: true },
-  { labelKey: "plugins", path: "/@manage/plugins", ready: false },
   { labelKey: "settings", path: "/@manage/settings", ready: true },
   { labelKey: "backup-restore", path: "/@manage/backup-restore", ready: false },
-  { labelKey: "dashboard", path: "/@manage/dashboard", ready: false },
   { labelKey: "about", path: "/@manage/about", ready: false },
 ]
 

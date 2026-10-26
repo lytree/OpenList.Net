@@ -110,6 +110,12 @@ const routes: RouteRecordRaw[] = [
         children: [
           { path: "", redirect: { name: "storages" } },
           {
+            path: "dashboard",
+            name: "dashboard",
+            component: () => import("~/pages/manage/dashboard/Dashboard"),
+            meta: { title: "manage.sidemenu.dashboard" },
+          },
+          {
             path: "storages",
             name: "storages",
             component: () => import("~/pages/manage/storages/Storages"),

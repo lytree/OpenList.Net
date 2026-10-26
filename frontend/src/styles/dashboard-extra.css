@@ -1,0 +1,188 @@
+/* ============================================================================
+ * 管理台仪表盘（§35）
+ * 命名统一 ol-dash-*，避免与媒体域 ol-media-*、站内信 ol-msg-* 串味。
+ * 只有计数与条形分布，不引图表库 —— 为一张分布图拉 echarts 不划算（见页面注释）。
+ * ========================================================================== */
+
+.ol-dash-alert {
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-dash-stamp {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+/* ---- 顶部指标卡 ---- */
+/* 140px 的最小宽度是量出来的：内容区约 940px，6 张卡 + 5 个间隙需要 ≤ 940，
+   用 170px 会排成 5+1（最后一张孤零零一行）。 */
+.ol-dash-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--ol-space-3);
+  margin-bottom: var(--ol-space-4);
+}
+
+.ol-dash-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-dash-card-label {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-dash-card-value {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ol-text);
+}
+
+.ol-dash-card-sub {
+  font-size: 12px;
+  color: var(--ol-text-secondary);
+}
+
+/* ---- 面板 ---- */
+.ol-dash-panel {
+  padding: var(--ol-space-3);
+  margin-bottom: var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-dash-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ol-space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--ol-space-2);
+}
+
+.ol-dash-panel-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-dash-panel-note {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--ol-space-3);
+}
+
+/* ---- 条形分布 ---- */
+.ol-dash-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ol-dash-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  font-size: 12px;
+}
+
+.ol-dash-bar-label {
+  width: 104px;
+  flex: none;
+  color: var(--ol-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-dash-bar-value {
+  width: 40px;
+  flex: none;
+  text-align: right;
+  color: var(--ol-text-muted);
+}
+
+/* 进度/占比条：表格里的匹配率与分布条共用一套轨道 */
+.ol-dash-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ol-dash-meter-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+  overflow: hidden;
+}
+
+.ol-dash-meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--el-color-primary);
+}
+
+.ol-dash-meter-value {
+  width: 38px;
+  flex: none;
+  text-align: right;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+/* ---- 系统状态 ---- */
+.ol-dash-sys-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed var(--ol-border);
+}
+
+.ol-dash-sys-row:last-child {
+  border-bottom: none;
+}
+
+.ol-dash-sys-label {
+  width: 96px;
+  flex: none;
+  color: var(--ol-text-secondary);
+}
+
+.ol-dash-sys-note {
+  color: var(--ol-text-muted);
+  font-size: 12px;
+}
+
+.ol-dash-err {
+  font-size: 12px;
+  color: var(--el-color-danger);
+  cursor: help;
+}
+
+.ol-dash-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ol-dash-state-note {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}

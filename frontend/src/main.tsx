@@ -9,6 +9,7 @@ import "./styles/layout.css"
 import "./styles/media-extra.css"
 import "./styles/preview-extra.css"
 import "./styles/messenger-extra.css"
+import "./styles/dashboard-extra.css"
 import "./style.css"
 
 import App from "./App"
