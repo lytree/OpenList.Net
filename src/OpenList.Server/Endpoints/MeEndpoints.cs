@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Core.Security;
 using OpenList.Server.Models;
 
 namespace OpenList.Server.Endpoints;

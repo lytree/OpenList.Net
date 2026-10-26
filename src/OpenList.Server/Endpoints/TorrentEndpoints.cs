@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Json;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Core.Security;
 
 namespace OpenList.Server.Endpoints;
 

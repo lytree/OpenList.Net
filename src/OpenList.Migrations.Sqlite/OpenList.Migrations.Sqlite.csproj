@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OpenList.Infrastructure\OpenList.Infrastructure.csproj" />
+    <ProjectReference Include="..\OpenList.Media.Domain\OpenList.Media.Domain.csproj" />
   </ItemGroup>
 
 </Project>

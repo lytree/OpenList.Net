@@ -25,5 +25,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
+    <ProjectReference Include="..\OpenList.Media.Domain\OpenList.Media.Domain.csproj" />
   </ItemGroup>
 </Project>

@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using OpenList.Core.Interfaces;
 using OpenList.Server.Models;
+using OpenList.Core.Security;
 
 namespace OpenList.Server.Endpoints;
 

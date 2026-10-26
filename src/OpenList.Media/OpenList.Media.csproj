@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    媒体域「实现层」：服务、元数据/字幕 provider、HTTP 端点与后台扫描宿主。
+
+    依赖方向：OpenList.Media → OpenList.Media.Domain + OpenList.Infrastructure + OpenList.Core。
+    Infrastructure 只依赖 Domain（用于 EF 映射），不反向依赖本程序集 —— 媒体域因此成为
+    可整体裁剪的模块：只要 Server 不调用 AddMediaModule()/MapMediaEndpoints()，
+    其余功能完全不受影响，媒体表也不会出现在模型里。
+
+    FrameworkReference 提供 IEndpointRouteBuilder / Results / BackgroundService / DI，
+    无需再引入 ASP.NET Core 单包（版本跟随 SDK）。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>OpenList.Media</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <!-- 本程序集输出的是 HTTP 端点（与 Web SDK 的隐式 using 对齐），
+       避免每个端点文件各写一遍 Microsoft.AspNetCore.Builder/Http/Routing。 -->
+  <ItemGroup>
+    <Using Include="Microsoft.AspNetCore.Builder" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="Microsoft.AspNetCore.Routing" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 命名规则（MediaNaming）是 internal 纯函数，仅供测试工程直连。 -->
+    <InternalsVisibleTo Include="OpenList.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
+    <ProjectReference Include="..\OpenList.Media.Domain\OpenList.Media.Domain.csproj" />
+    <ProjectReference Include="..\OpenList.Infrastructure\OpenList.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

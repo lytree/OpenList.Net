@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    媒体域「契约层」：实体、枚举、查询/请求 DTO 与全部服务接口。
+    只依赖 OpenList.Core（User / Resp / PageResp 等公共约定），不引用 EF Core、
+    不引用 Infrastructure —— 因此 EF 映射（Infrastructure/Data/MediaModelConfiguration.cs）
+    与实现（OpenList.Media）都可以依赖本程序集，不会形成环。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>OpenList.Media.Domain</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
+  </ItemGroup>
+</Project>

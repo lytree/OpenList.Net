@@ -26,6 +26,7 @@
     <ProjectReference Include="..\OpenList.Core\OpenList.Core.csproj" />
     <ProjectReference Include="..\OpenList.Infrastructure\OpenList.Infrastructure.csproj" />
     <ProjectReference Include="..\OpenList.Drivers\OpenList.Drivers.csproj" />
+    <ProjectReference Include="..\OpenList.Media\OpenList.Media.csproj" />
     <!-- Migration assemblies: Program.cs picks one at runtime via MigrationsAssembly().
          Both are referenced so the deployable carries whichever provider is configured,
          and so `dotnet ef` (which uses this as startup-project) can locate them. -->

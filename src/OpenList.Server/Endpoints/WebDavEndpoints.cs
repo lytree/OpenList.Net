@@ -5,6 +5,7 @@ using System.Xml.Serialization;
 using Microsoft.AspNetCore.Http;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Core.Security;
 using OpenList.Infrastructure.Services;
 using OpenList.Vfs;
 
