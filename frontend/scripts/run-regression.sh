@@ -263,6 +263,20 @@ round_scrape() {
   finish_round "E/scrape" $?
 }
 
+round_dashboard() {
+  say "round: dashboard (E 管理台仪表盘)"
+  local dir; dir="$(round_dir dashboard)"; mkdir -p "$dir"
+  # 装置用 media 那份：Budapest 带 NFO（已匹配）、NoSidecar 只有 mp4（待刮削），
+  # 于是匹配率正好 50%，题材分布有 Comedy/Drama —— 断言才有可区分的真数字。
+  local root; root="$(fixture_root dash)"
+  "$PY" "$GEN" media "$root" >/dev/null || return 1
+  begin_round "$dir" || return 1
+  # 挂载由脚本自建（它自己会先查一遍 storage/list，已存在则复用）
+  export FIXTURE="$root"
+  run_node "$dir/run.log" "$FE/scripts/verify-dashboard.mjs"
+  finish_round "E/dashboard" $?
+}
+
 round_common() {
   say "round: common (A 认证与守卫 / E 管理台 / G 外观)"
   local dir; dir="$(round_dir common)"; mkdir -p "$dir"
@@ -286,7 +300,7 @@ round_upload() {
 # --------------------------------------------------------------------------- 入口
 
 WANT=("$@")
-[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage dimensions scrape messenger)
+[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage dimensions scrape dashboard messenger)
 
 for name in "${WANT[@]}"; do
   # 轮次名用连字符（preview-extra），函数名用下划线 —— 这里做一次映射

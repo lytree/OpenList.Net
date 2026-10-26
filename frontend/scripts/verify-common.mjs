@@ -70,9 +70,11 @@ await page.reload({ waitUntil: "networkidle" })
 await page.waitForTimeout(1200)
 check("刷新后保持登录", (await page.locator(".ol-login-page").count()) === 0, page.url())
 
-// ---------- E. 管理台 9 个已就绪模块都能打开 ----------
-// （plugins / backup-restore / dashboard / about 仍是 (soon) 禁用态，不在断言范围内）
+// ---------- E. 管理台 10 个已就绪模块都能打开 ----------
+// （backup-restore / about 仍是 (soon) 禁用态，不在断言范围内；
+//   plugins 已于 §35 从导航移除 —— .NET 侧没有 .so 插件宿主，留着只会误导）
 const ADMIN_PAGES = [
+  ["#/@manage/dashboard", "Dashboard"],
   ["#/@manage/storages", "Storages"],
   ["#/@manage/users", "Users"],
   ["#/@manage/metas", "Metas"],
