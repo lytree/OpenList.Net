@@ -63,20 +63,6 @@ jobs:
       - id: gv
         uses: ./.github/actions/resolve-version
 
-  resolve-frontend:
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.resolve.outputs.tag }}
-    steps:
-      - id: resolve
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="$(gh release view --repo OpenListTeam/OpenList-Frontend --json tagName -q .tagName)"
-          echo "Resolved frontend tag: $TAG"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
   # Gate: never publish a tag whose commit does not build or pass tests.
   build-test:
     needs: resolve-version
@@ -114,11 +100,10 @@ jobs:
   # 8 self-contained server bundles + 6 desktop bundles (matrix lives in the
   # reusable workflow, shared with ci.yml).
   bundles:
-    needs: [resolve-frontend, resolve-version, build-test]
+    needs: [resolve-version, build-test]
     uses: ./.github/workflows/build-bundles.yml
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
-      frontend-tag: ${{ needs.resolve-frontend.outputs.tag }}
       semver: ${{ needs.resolve-version.outputs.semver }}
       assembly-ver: ${{ needs.resolve-version.outputs.assemblyVer }}
       file-ver: ${{ needs.resolve-version.outputs.fileVer }}
@@ -129,7 +114,7 @@ jobs:
 
   # Attach every binary archive (plus checksums) to the GitHub Release.
   release:
-    needs: [resolve-frontend, resolve-version, bundles]
+    needs: [resolve-version, bundles]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -163,9 +148,9 @@ jobs:
             ## Version
             `${{ needs.resolve-version.outputs.semver }}` (sha `${{ needs.resolve-version.outputs.shortSha }}`)
 
-            ## Bundled frontend
-            Upstream non-lite OpenList-Frontend `${{ needs.resolve-frontend.outputs.tag }}`
-            (fetched from https://github.com/OpenListTeam/OpenList-Frontend/releases)
+            ## Frontend
+            Built from this repository (`frontend/`, Vue 3 + TSX + Element Plus) as part of
+            this release — the bundle and the API it ships with always come from the same commit.
 
             ## Downloads
             Headless server, self-contained builds for Linux (glibc / musl),
@@ -184,7 +169,7 @@ jobs:
   # Multi-arch container image (amd64 + arm64). Unlike ci.yml's `:edge`, this
   # workflow owns `:latest` — it always means "newest formal release".
   docker:
-    needs: [resolve-frontend, resolve-version, build-test]
+    needs: [resolve-version, build-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -211,7 +196,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            FRONTEND_VERSION=${{ needs.resolve-frontend.outputs.tag }}
             VERSION=${{ needs.resolve-version.outputs.semver }}
             ASSEMBLY_VERSION=${{ needs.resolve-version.outputs.assemblyVer }}
             FILE_VERSION=${{ needs.resolve-version.outputs.fileVer }}

@@ -1,19 +1,22 @@
 # syntax=docker/dockerfile:1.7
 
-# === Stage 1: Fetch pre-built non-lite frontend dist from upstream OpenList-Frontend ===
-# The upstream release ships a ready-to-serve dist tarball (index.html at root), so no
-# Node.js toolchain is needed. Default FRONTEND_VERSION pins a known-good tag; CI passes
-# the resolved latest tag via --build-arg FRONTEND_VERSION=...
-FROM alpine:3.20 AS frontend-dist
-ARG FRONTEND_VERSION=v4.2.2
+# === Stage 1: Build the SPA from source ===
+# The frontend lives in this repository since M5 (Vue 3 + TSX + Element Plus). `pnpm build`
+# also runs scripts/copy-ruffle.mjs, which stages the Ruffle WASM runtime (~28 MB) into
+# public/ruffle — that directory is gitignored, so it only ever exists after a build.
+FROM node:24-alpine AS frontend-build
+ARG PNPM_VERSION=12.15.0
 WORKDIR /fe
-RUN apk add --no-cache curl tar \
- && curl -fsSL -o dist.tar.gz \
-      "https://github.com/OpenListTeam/OpenList-Frontend/releases/download/${FRONTEND_VERSION}/openlist-frontend-dist-${FRONTEND_VERSION}.tar.gz" \
- && mkdir -p /dist \
- && tar -xzf dist.tar.gz -C /dist \
- && rm dist.tar.gz \
- && printf '%s' "${FRONTEND_VERSION}" > /dist/VERSION
+RUN npm i -g pnpm@${PNPM_VERSION}
+
+# Manifests first: keeps the install layer cached across source-only edits.
+# pnpm-workspace.yaml carries the `overrides` that pin a single Vue runtime plus the
+# `allowBuilds` whitelist — without it pnpm 12 refuses to run esbuild's postinstall.
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY frontend/ ./
+RUN pnpm build
 
 # === Stage 2: Restore + publish .NET server ===
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -77,7 +80,7 @@ COPY --from=build /app/publish .
 # Frontend dist → /frontend/dist.
 # DistDir default ("../../frontend/dist" relative to /app) resolves here, but we
 # also set it explicitly via env to be unambiguous.
-COPY --from=frontend-dist /dist /frontend/dist
+COPY --from=frontend-build /fe/dist /frontend/dist
 
 RUN mkdir -p /app/data
 

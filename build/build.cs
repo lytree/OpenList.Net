@@ -20,8 +20,8 @@
 //                              requires --rid (GUI is always self-contained)
 //   --rid=<rid>                Target runtime; empty = framework-dependent (server only)
 //   --self-contained=true      Self-contained publish (only meaningful with --rid)
-//   --frontend-dist=<path>     Frontend dist source (skip upstream fetch if it exists)
-//   --frontend-version=<tag>   Pin upstream frontend tag (default: latest release)
+//   --frontend-dist=<path>     Frontend dist source (default: frontend/dist, built from this repo)
+//   --frontend-version=<tag>   Legacy escape hatch: download an upstream OpenList-Frontend release
 //   --archive=zip|tar.gz       Package format (Package target)
 //   --semver=<x.y.z>           Pre-computed semver (skips local GitVersion; CI uses this)
 
@@ -48,13 +48,17 @@ const string ServerProject   = "src/OpenList.Server/OpenList.Server.csproj";
 const string CliProject      = "src/OpenList.Cli/OpenList.Cli.csproj";
 const string DesktopProject  = "src/OpenList.Desktop/OpenList.Desktop.csproj";
 const string UpstreamRepo    = "OpenListTeam/OpenList-Frontend";
+// The SPA is ours since M5: it is built from `frontend/` (Vue 3) and lands in `frontend/dist`.
+const string RepoFrontendDist = "frontend/dist";
 
 // Desktop publish (Avalonia GUI managing the server as a child process) is always
 // self-contained — there is no meaningful framework-dependent GUI bundle.
 bool IsDesktopApp() => app.Equals("desktop", StringComparison.OrdinalIgnoreCase);
 
-// When --frontend-dist is given, use it; otherwise stage the upstream fetch under <output>/frontend-dist.
-string FeDistDir() => string.IsNullOrEmpty(frontendDist) ? $"{output}/frontend-dist" : frontendDist;
+// Where the SPA dist comes from. Default is the in-repo build output (`frontend/dist`), because
+// since M5 the frontend ships from this repository. `--frontend-dist` points elsewhere;
+// `--frontend-version` opts into the legacy behaviour of downloading an upstream release tarball.
+string FeDistDir() => string.IsNullOrEmpty(frontendDist) ? RepoFrontendDist : frontendDist;
 
 // Computed by the Version task. Empty until that task runs; consumers (Build/Publish/Bundle/Package)
 // treat empty as "no versioning" so local dev builds don't require GitVersion to be installed.
@@ -217,6 +221,7 @@ void CopyTree(string src, string dst)
 }
 
 // Resolve the latest non-prerelease frontend tag from the upstream GitHub API.
+// Only used by the `--frontend-version=latest` legacy path; normal builds never hit the network.
 string ResolveLatestFrontendVersion()
 {
     using var http = new HttpClient();
@@ -303,7 +308,7 @@ void WriteReadme(string bundleRoot)
         "Layout:",
         "  app/            .NET server (publish output)",
         "  cli/            Ops CLI (openlist) — password recovery, storage admin",
-        "  frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)",
+        "  frontend/dist/   OpenList SPA (Vue 3, built from this repo)",
         "  run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server",
         "  README.txt       This file",
         "",
@@ -343,7 +348,7 @@ void WriteDesktopReadme(string bundleRoot)
         $"  {exeName,-14} Avalonia desktop control app (start this)",
         $"  {coreName,-14} Self-contained server (managed child process)",
         "  cli/            Ops CLI (openlist) — password recovery, storage admin",
-        "  frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)",
+        "  frontend/dist/   OpenList SPA (Vue 3, built from this repo)",
         "  README.txt       This file",
         "",
         "Run:",
@@ -446,19 +451,32 @@ Task("Test")
 });
 
 Task("Frontend")
-    .Description("Fetch the latest non-lite OpenList-Frontend dist from upstream GitHub releases")
+    .Description("Stage the SPA dist (default: frontend/dist, built from this repo)")
     .Does(() =>
 {
-    // Skip the upstream fetch when an explicit, existing frontend-dist is provided.
-    if (!string.IsNullOrEmpty(frontendDist) && DirectoryExists(frontendDist))
+    var dest = FeDistDir();
+    if (FileExists($"{dest}/index.html"))
     {
-        Information($"Using explicit frontend-dist='{frontendDist}' (skipping upstream fetch).");
+        Information($"Using frontend dist '{dest}'.");
         return;
     }
 
-    var ver = string.IsNullOrEmpty(frontendVer) ? ResolveLatestFrontendVersion() : frontendVer;
-    Information($"Frontend version: {ver}");
-    FetchFrontend(ver, FeDistDir());
+    // Legacy escape hatch: bundle an upstream OpenList-Frontend release instead of ours.
+    // Kept because it is the only way to A/B a regression against the old SPA, but it is
+    // never the default — silently downloading someone else's dist is how the bundle ends
+    // up serving a frontend that does not match the backend it ships with.
+    if (!string.IsNullOrEmpty(frontendVer))
+    {
+        var ver = frontendVer == "latest" ? ResolveLatestFrontendVersion() : frontendVer;
+        Information($"'{dest}/index.html' missing — downloading upstream frontend release {ver}.");
+        FetchFrontend(ver, dest);
+        return;
+    }
+
+    throw new InvalidOperationException(
+        $"'{dest}/index.html' not found. Build the SPA first:\n" +
+        "  pnpm -C frontend install && pnpm -C frontend build\n" +
+        "(or pass --frontend-version=<upstream tag> to bundle an upstream OpenList-Frontend release)");
 });
 
 // Server publish: self-contained when --rid is set, framework-dependent otherwise.
@@ -544,7 +562,19 @@ Task("Publish")
     .IsDependentOn("Version")
     .Does(() =>
 {
-    if (IsDesktopApp()) PublishDesktop(); else PublishServer();
+    if (IsDesktopApp())
+    {
+        // 桌面包 = GUI（bundle 根） + 服务端核心（server/）。Bundle 的桌面分支两个都要拷，
+        // 所以这里必须两边都发布：只发 GUI 的话 `--app=desktop --target=Bundle/Package`
+        // 会在拷 `publish/` 时直接抛 DirectoryNotFoundException。
+        // （CI 不走这条路 —— 它在 workflow 里分别 publish 两次，所以这个洞一直没被发现。）
+        PublishDesktop();
+        PublishServer();
+    }
+    else
+    {
+        PublishServer();
+    }
 });
 
 // CLI ships with the server bundle. It is the recovery path for a locked-out admin, so it

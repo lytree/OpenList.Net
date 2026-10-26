@@ -52,22 +52,6 @@ jobs:
       - id: gv
         uses: ./.github/actions/resolve-version
 
-  # Resolve the latest non-lite frontend release tag from the upstream repo once,
-  # so every downstream job bundles the same frontend version.
-  resolve-frontend:
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.resolve.outputs.tag }}
-    steps:
-      - id: resolve
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="$(gh release view --repo OpenListTeam/OpenList-Frontend --json tagName -q .tagName)"
-          echo "Resolved frontend tag: $TAG"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
   build-test:
     needs: resolve-version
     runs-on: ubuntu-latest
@@ -109,11 +93,10 @@ jobs:
   # Skipped on pull_request — PRs only need to prove build + test pass.
   bundles:
     if: github.event_name != 'pull_request'
-    needs: [resolve-frontend, resolve-version, build-test]
+    needs: [resolve-version, build-test]
     uses: ./.github/workflows/build-bundles.yml
     with:
       ref: ${{ github.ref }}
-      frontend-tag: ${{ needs.resolve-frontend.outputs.tag }}
       semver: ${{ needs.resolve-version.outputs.semver }}
       assembly-ver: ${{ needs.resolve-version.outputs.assemblyVer }}
       file-ver: ${{ needs.resolve-version.outputs.fileVer }}
@@ -129,31 +112,37 @@ jobs:
   # Skipped on pull_request — PRs only need to prove build + test pass.
   bundle:
     if: github.event_name != 'pull_request'
-    needs: [resolve-frontend, resolve-version, build-test]
+    needs: [resolve-version, build-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # The SPA ships from this repo (M5). It is rebuilt here rather than downloaded from
+      # an artifact so this job has no ordering dependency on the reusable bundle workflow.
+      - name: Build SPA
+        working-directory: frontend
+        run: |
+          npm i -g pnpm@12.15.0
+          pnpm install --frozen-lockfile
+          pnpm build
 
       # Directory + archive are version-suffixed, e.g.
       # openlist-net-framework-dependent-0.1.0-42
-      - name: Download upstream frontend dist (non-lite)
+      - name: Stage SPA into bundle
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
           SEMVER: ${{ needs.resolve-version.outputs.semver }}
         run: |
           set -euo pipefail
           BUNDLE="${BUNDLE_NAME}-${SEMVER}"
           echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
-          mkdir -p fe "$BUNDLE/frontend/dist"
-          # Exact tag-qualified asset name avoids matching the -lite- variant.
-          gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
-            --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
-          tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" -C "$BUNDLE/frontend/dist"
-          printf '%s' "$FE_TAG" > "$BUNDLE/frontend/dist/VERSION"
+          mkdir -p "$BUNDLE/frontend/dist"
+          cp -a frontend/dist/. "$BUNDLE/frontend/dist/"
 
       - name: Publish server (framework-dependent)
         run: |
@@ -180,7 +169,6 @@ jobs:
 
       - name: Write launchers and README
         env:
-          FE_TAG: ${{ needs.resolve-frontend.outputs.tag }}
           SEMVER: ${{ needs.resolve-version.outputs.semver }}
           SHA: ${{ needs.resolve-version.outputs.sha }}
         run: |
@@ -207,11 +195,11 @@ jobs:
           ================================
 
           Build: $SEMVER (sha $SHA)
-          Frontend: $FE_TAG
+          Frontend: built from source in this repo (frontend/)
 
           Layout:
             app/             .NET server (framework-dependent publish output; needs the .NET 10 runtime)
-            frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)
+            frontend/dist/   OpenList SPA (Vue 3, built from this repo)
             run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
             README.txt       This file
 
@@ -242,7 +230,7 @@ jobs:
   # reserved for release.yml so it always means "newest formal release".
   docker:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [resolve-frontend, resolve-version, build-test]
+    needs: [resolve-version, build-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -267,7 +255,6 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            FRONTEND_VERSION=${{ needs.resolve-frontend.outputs.tag }}
             VERSION=${{ needs.resolve-version.outputs.semver }}
             ASSEMBLY_VERSION=${{ needs.resolve-version.outputs.assemblyVer }}
             FILE_VERSION=${{ needs.resolve-version.outputs.fileVer }}

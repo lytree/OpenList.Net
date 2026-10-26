@@ -19,10 +19,6 @@ on:
         required: false
         type: string
         default: ''
-      frontend-tag:
-        description: 'Upstream OpenList-Frontend release tag to bundle.'
-        required: true
-        type: string
       semver:
         description: 'SemVer, e.g. 1.2.3 or 0.1.0-beta.4'
         required: true
@@ -55,9 +51,46 @@ env:
   CONFIGURATION: Release
 
 jobs:
+  # The SPA ships from this repo since M5, so it is built here once and handed to every
+  # platform job as an artifact. Building it inside each matrix leg would repeat the same
+  # pnpm install 14 times and, worse, let one leg quietly bundle a stale dist.
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # pnpm is pinned by frontend/package.json → packageManager. Installing it
+      # explicitly (instead of corepack) keeps the version identical to local dev.
+      - name: Install pnpm
+        run: npm i -g pnpm@12.15.0
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      # There is no other job that runs the frontend suite — if these skip here,
+      # a broken SPA would ship with green .NET tests.
+      - name: Typecheck + unit tests
+        working-directory: frontend
+        run: |
+          pnpm typecheck
+          pnpm test
+      - name: Build SPA
+        working-directory: frontend
+        run: pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention-days }}
+
   # Self-contained headless server for 8 runtime identifiers (glibc / musl / Windows / macOS).
   # Bundle name is version-suffixed, e.g. openlist-net-1.2.3-linux-x64.
   binaries:
+    needs: frontend
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -87,7 +120,6 @@ jobs:
       FILE_VER: ${{ inputs.file-ver }}
       INFO_VER: ${{ inputs.info-ver }}
       SHA: ${{ inputs.sha }}
-      FE_TAG: ${{ inputs.frontend-tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -135,17 +167,17 @@ jobs:
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA"
 
-      - name: Download upstream frontend dist (non-lite)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download SPA dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: fe-dist
+
+      - name: Stage SPA into bundle
         run: |
           set -euo pipefail
-          mkdir -p fe "$BUNDLE/frontend/dist"
-          # Exact tag-qualified asset name avoids matching the -lite- variant.
-          gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
-            --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
-          tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" -C "$BUNDLE/frontend/dist"
-          printf '%s' "$FE_TAG" > "$BUNDLE/frontend/dist/VERSION"
+          mkdir -p "$BUNDLE/frontend/dist"
+          cp -a fe-dist/. "$BUNDLE/frontend/dist/"
 
       - name: Write launchers and README
         env:
@@ -179,14 +211,14 @@ jobs:
           =========================
 
           Build: $SEMVER (sha $SHA)
-          Frontend: $FE_TAG
+          Frontend: built from source in this repo (frontend/)
 
           Self-contained build — no .NET runtime required on the host.
 
           Layout:
             app/             .NET server (self-contained publish output)
             cli/             Ops CLI (openlist) — password recovery, storage admin
-            frontend/dist/   OpenList SPA (pre-built, upstream non-lite release)
+            frontend/dist/   OpenList SPA (Vue 3, built from this repo)
             run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
             README.txt       This file
 
@@ -239,6 +271,7 @@ jobs:
   # (injected as OpenList__DistDir at launch).
   # No musl RIDs — the GUI targets glibc desktops.
   binaries-desktop:
+    needs: frontend
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -264,7 +297,6 @@ jobs:
       FILE_VER: ${{ inputs.file-ver }}
       INFO_VER: ${{ inputs.info-ver }}
       SHA: ${{ inputs.sha }}
-      FE_TAG: ${{ inputs.frontend-tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -327,16 +359,17 @@ jobs:
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA"
 
-      - name: Download upstream frontend dist (non-lite)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download SPA dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: fe-dist
+
+      - name: Stage SPA into bundle
         run: |
           set -euo pipefail
-          mkdir -p fe "$BUNDLE/frontend/dist"
-          gh release download "$FE_TAG" --repo OpenListTeam/OpenList-Frontend \
-            --pattern "openlist-frontend-dist-${FE_TAG}.tar.gz" --dir fe
-          tar -xzf "fe/openlist-frontend-dist-${FE_TAG}.tar.gz" -C "$BUNDLE/frontend/dist"
-          printf '%s' "$FE_TAG" > "$BUNDLE/frontend/dist/VERSION"
+          mkdir -p "$BUNDLE/frontend/dist"
+          cp -a fe-dist/. "$BUNDLE/frontend/dist/"
 
       - name: Write README
         run: |
@@ -346,7 +379,7 @@ jobs:
           =========================
 
           Build: $SEMVER (sha $SHA)
-          Frontend: $FE_TAG
+          Frontend: built from source in this repo (frontend/)
 
           Self-contained build — no .NET runtime required on the host.
 
@@ -354,7 +387,7 @@ jobs:
             OpenList.Desktop[.exe]  Avalonia desktop control app (start this)
             server/OpenList.Server  Self-contained server (managed child process)
             cli/openlist[.exe]      Ops CLI — password recovery, storage admin
-            frontend/dist/          OpenList SPA (pre-built, upstream non-lite release)
+            frontend/dist/          OpenList SPA (Vue 3, built from this repo)
             README.txt              This file
 
           Run:
