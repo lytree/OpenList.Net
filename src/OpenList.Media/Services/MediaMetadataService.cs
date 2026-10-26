@@ -31,6 +31,7 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
     private readonly IMetadataProvider? _codeProvider;
     private readonly ISettingService _settings;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly MediaScrapeCoordinator _scrape;
     private readonly TimeProvider _time;
 
     /// <summary>创建元数据服务实例。</summary>
@@ -40,6 +41,7 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
     /// <param name="providers">全部已注册 provider（默认取 Name=tmdb 的那个，code 按名解析）。</param>
     /// <param name="settings">设置服务。</param>
     /// <param name="scopeFactory">作用域工厂（批量刮削后台任务）。</param>
+    /// <param name="scrape">整库刮削运行态（单例；本服务是 Scoped，持有不了跨请求状态）。</param>
     /// <param name="time">时间源。</param>
     public MediaMetadataService(
         OpenListDbContext db,
@@ -48,6 +50,7 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
         IEnumerable<IMetadataProvider> providers,
         ISettingService settings,
         IServiceScopeFactory scopeFactory,
+        MediaScrapeCoordinator scrape,
         TimeProvider? time = null)
     {
         _db = db;
@@ -58,6 +61,7 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
         _codeProvider = all.FirstOrDefault(p => string.Equals(p.Name, "code", StringComparison.OrdinalIgnoreCase));
         _settings = settings;
         _scopeFactory = scopeFactory;
+        _scrape = scrape;
         _time = time ?? TimeProvider.System;
     }
 
@@ -159,61 +163,144 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
         if (!await _provider.IsConfiguredAsync(ct))
             return Resp.Fail("metadata provider is not configured (set media_tmdb_api_key)", RespCodes.BadRequest);
 
+        var startPending = await _db.MediaItems
+            .CountAsync(i => i.LibraryId == libraryId && i.Status == MediaItemStatus.Pending, ct);
+
+        // 空批次早退：没有待刮削条目时启动一轮「什么都不做」的任务，界面会显示
+        // 「已在刮削」却永远不动。管理台据此把按钮置灰，这里是服务端兜底。
+        if (startPending == 0)
+            return Resp.Fail("no pending items to scrape", RespCodes.BadRequest);
+
+        // 守卫必须**同步**登记在返回之前：放到 Task.Run 里的话，两个并发请求都能通过。
+        if (!_scrape.TryBegin(libraryId, startPending))
+            return Resp.Fail("scrape already running", RespCodes.Conflict);
+
+        var run = _scrape.Get(libraryId);
+
         // 后台批量刮削：每条之间留出间隔，避免触发 provider 频率限制。
         // 批量任务固定走默认 provider（TMDB）；番号内容请对单条目调用
         // POST /items/{id}/scrape?provider=code，或保持 local 元数据不被覆盖。
         _ = Task.Run(async () =>
         {
-            using var scope = _scopeFactory.CreateScope();
-            var sp = scope.ServiceProvider;
-            var db = sp.GetRequiredService<OpenListDbContext>();
-            var fs = sp.GetRequiredService<IFileSystemService>();
-            // 批量任务固定走 TMDB：多 provider 注册后单个解析会取到最后一个，必须按名挑。
-            var provider = sp.GetServices<IMetadataProvider>()
-                .FirstOrDefault(p => string.Equals(p.Name, "tmdb", StringComparison.OrdinalIgnoreCase))
-                ?? sp.GetRequiredService<IMetadataProvider>();
-            var settings = sp.GetRequiredService<ISettingService>();
-
-            var pending = await db.MediaItems
-                .Where(i => i.LibraryId == libraryId && i.Status == MediaItemStatus.Pending)
-                .OrderBy(i => i.Id)
-                .Take(2000)
-                .ToListAsync(CancellationToken.None);
-
-            var language = library.MetadataLanguage;
-            if (string.IsNullOrWhiteSpace(language))
+            try
             {
-                var langResp = await settings.GetAsync("media_metadata_language", CancellationToken.None);
-                language = langResp.Code == 200 && !string.IsNullOrWhiteSpace(langResp.Data?.Value) ? langResp.Data!.Value : "zh-CN";
-            }
+                using var scope = _scopeFactory.CreateScope();
+                var sp = scope.ServiceProvider;
+                var db = sp.GetRequiredService<OpenListDbContext>();
+                var fs = sp.GetRequiredService<IFileSystemService>();
+                // 批量任务固定走 TMDB：多 provider 注册后单个解析会取到最后一个，必须按名挑。
+                var provider = sp.GetServices<IMetadataProvider>()
+                    .FirstOrDefault(p => string.Equals(p.Name, "tmdb", StringComparison.OrdinalIgnoreCase))
+                    ?? sp.GetRequiredService<IMetadataProvider>();
+                var settings = sp.GetRequiredService<ISettingService>();
 
-            foreach (var item in pending)
-            {
-                try
+                var pending = await db.MediaItems
+                    .Where(i => i.LibraryId == libraryId && i.Status == MediaItemStatus.Pending)
+                    .OrderBy(i => i.Id)
+                    .Take(MediaScrapeCoordinator.MaxBatch)
+                    .ToListAsync(CancellationToken.None);
+
+                var language = library.MetadataLanguage;
+                if (string.IsNullOrWhiteSpace(language))
                 {
-                    var results = await provider.SearchAsync(item.Title, item.Year, item.Type, language, CancellationToken.None);
-                    var best = PickBest(item, results);
-                    if (best is null)
+                    var langResp = await settings.GetAsync("media_metadata_language", CancellationToken.None);
+                    language = langResp.Code == 200 && !string.IsNullOrWhiteSpace(langResp.Data?.Value) ? langResp.Data!.Value : "zh-CN";
+                }
+
+                foreach (var item in pending)
+                {
+                    // 连续失败达到阈值就收工：API key 失效时每条都会抛，不熔断的话整批
+                    // 会在 8 分钟里静默跑完，什么都没写，界面还以为在正常推进。
+                    if (run is not null && run.ShouldAbort) break;
+
+                    try
                     {
-                        item.Status = MediaItemStatus.Unmatched;
-                        await db.SaveChangesAsync(CancellationToken.None);
-                        continue;
-                    }
-                    var meta = await provider.GetAsync(best.Id, item.Type, language, CancellationToken.None);
-                    if (meta is null) continue;
+                        var results = await provider.SearchAsync(item.Title, item.Year, item.Type, language, CancellationToken.None);
+                        var best = PickBest(item, results);
+                        if (best is null)
+                        {
+                            // provider 正常响应、只是没有匹配项 —— 这不算失败，
+                            // 否则冷门库连撞 5 条不匹配就会被误伤熔断。
+                            item.Status = MediaItemStatus.Unmatched;
+                            await db.SaveChangesAsync(CancellationToken.None);
+                            run?.RecordSuccess();
+                            await Task.Delay(250, CancellationToken.None);
+                            continue;
+                        }
+                        var meta = await provider.GetAsync(best.Id, item.Type, language, CancellationToken.None);
+                        if (meta is null)
+                        {
+                            run?.RecordFailure($"provider returned no detail for {best.Id}");
+                            await Task.Delay(250, CancellationToken.None);
+                            continue;
+                        }
 
-                    // 批量刮削只挑 Pending 条目（local 条目已是 Matched 不会进来），按覆盖处理。
-                    await ApplyCoreAsync(db, fs, provider, _time, item, meta, overwrite: true, CancellationToken.None);
+                        // 批量刮削只挑 Pending 条目（local 条目已是 Matched 不会进来），按覆盖处理。
+                        await ApplyCoreAsync(db, fs, provider, _time, item, meta, overwrite: true, CancellationToken.None);
+                        run?.RecordSuccess();
+                    }
+                    catch (Exception ex)
+                    {
+                        // 单条失败不影响整批；条目保持 Pending 以便下次重试。
+                        run?.RecordFailure(ex.Message);
+                    }
+                    await Task.Delay(250, CancellationToken.None);
                 }
-                catch (Exception)
-                {
-                    // 单条失败不影响整批；条目保持 Pending 以便下次重试。
-                }
-                await Task.Delay(250, CancellationToken.None);
+            }
+            finally
+            {
+                // 无论如何都要摘掉守卫，否则这一库会永远停在「正在刮削」。
+                _scrape.End(libraryId);
             }
         }, CancellationToken.None);
 
         return Resp.Ok();
+    }
+
+    /// <inheritdoc />
+    public async Task<Resp<List<MediaScrapeStatus>>> ListScrapeTasksAsync(User user, CancellationToken ct = default)
+    {
+        if (!user.CanManageMediaLibrary()) return Resp<List<MediaScrapeStatus>>.Fail("permission denied", 403);
+
+        var libraries = await _db.MediaLibraries.AsNoTracking().OrderBy(l => l.Id).ToListAsync(ct);
+
+        // 一次 GROUP BY 取全部库的三种状态计数，避免逐库查询。
+        var counts = await _db.MediaItems.AsNoTracking()
+            .GroupBy(i => new { i.LibraryId, i.Status })
+            .Select(g => new { g.Key.LibraryId, g.Key.Status, Count = g.Count() })
+            .ToListAsync(ct);
+        var byLibrary = counts.GroupBy(c => c.LibraryId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var result = new List<MediaScrapeStatus>(libraries.Count);
+        foreach (var lib in libraries)
+        {
+            // 有 manage_media 但 BasePath 受限的委派管理员只能看到自己管得到的库。
+            if (!_libraries.CanSeeLibrary(user, lib)) continue;
+
+            var rows = byLibrary.GetValueOrDefault(lib.Id) ?? [];
+            int CountOf(MediaItemStatus status) => rows.Where(r => r.Status == status).Sum(r => r.Count);
+
+            var pending = CountOf(MediaItemStatus.Pending);
+            var run = _scrape.Get(lib.Id);
+            // 结束的一轮会保留记录（为了带上失败原因），所以「在跑」看的是 Running 而不是记录是否存在。
+            var running = run?.Running == true;
+            result.Add(new MediaScrapeStatus
+            {
+                LibraryId = lib.Id,
+                LibraryName = lib.Name,
+                Pending = pending,
+                Unmatched = CountOf(MediaItemStatus.Unmatched),
+                Matched = CountOf(MediaItemStatus.Matched),
+                Running = running,
+                // 批次数只在运行中有意义：结束后 pending 还会被别的路径改动，
+                // 继续算差值会让进度在界面上倒着走。
+                BatchSize = running ? run!.BatchSize : 0,
+                BatchDone = running ? run!.DoneOf(pending) : 0,
+                Failed = run?.Failed ?? 0,
+                Error = run?.Error,
+            });
+        }
+        return Resp<List<MediaScrapeStatus>>.Ok(result);
     }
 
     /// <inheritdoc />

@@ -113,6 +113,14 @@ internal static class ItemEndpoints
             return Results.Ok(await metadata.MatchItemAsync(id, providerId, principal.ToUser()));
         });
 
+        // GET /api/media/scrape/tasks — 各库刮削状态（管理台「整库刮削」按钮的数据源）
+        //
+        // 与 GET /media/tasks（扫描任务）分开而不是合并：扫描状态回答「文件发现了多少」，
+        // 刮削状态回答「元数据还差多少」，两者的生命周期与轮询用途都不同。
+        // 路径挂 /scrape/tasks 而不是 /libraries/scrape，避免与 /libraries/{id} 系列混淆。
+        g.MapGet("/scrape/tasks", async (ClaimsPrincipal principal, IMediaMetadataService metadata) =>
+            Results.Ok(await metadata.ListScrapeTasksAsync(principal.ToUser())));
+
         // POST /api/media/libraries/{id}/scrape — 批量刮削整库（后台）
         g.MapPost("/libraries/{id:long}/scrape", async (long id, ClaimsPrincipal principal, IMediaMetadataService metadata) =>
             Results.Ok(await metadata.ScrapeLibraryAsync(id, principal.ToUser())));

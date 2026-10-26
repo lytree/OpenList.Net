@@ -53,6 +53,9 @@ public static class MediaModule
         // 扫描执行器是 transient：无可释放资源，只借用调用方传入的 DbContext。
         services.AddTransient<MediaLibraryScanner>();
         services.AddSingleton<IMediaScanService, MediaScanService>();
+        // 整库刮削的运行态必须单例：IMediaMetadataService 是 Scoped，
+        // 把守卫放它身上等于每次请求一个新锁，双击并发照进不误。
+        services.AddSingleton<MediaScrapeCoordinator>();
 
         // 定时增量扫描：间隔取自设置项 media_auto_scan_interval_hours，0 表示关闭（默认）。
         services.AddHostedService<MediaAutoScanHostedService>();
