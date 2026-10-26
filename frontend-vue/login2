@@ -1,0 +1,23 @@
+- generic [ref=e136]:
+  - generic [ref=e137]: Login to the OpenList
+  - generic [ref=e142]:
+    - generic [ref=e143]:
+      - generic [ref=e144]: "*Input your username"
+      - textbox "*Input your username" [ref=e152]:
+        - /placeholder: Input your username
+    - generic [ref=e154]:
+      - generic [ref=e155]: "*Input your password"
+      - textbox "*Input your password" [ref=e164]:
+        - /placeholder: Input your password
+    - generic [ref=e165]:
+      - generic [ref=e166]: Input your OTP Code
+      - textbox "Input your OTP Code" [ref=e170]
+    - generic [ref=e172] [cursor=pointer]:
+      - generic [ref=e173]:
+        - checkbox "Remember me"
+      - generic [ref=e175]: Remember me
+    - button "Login" [ref=e176] [cursor=pointer]
+    - generic [ref=e178]:
+      - generic [ref=e179] [cursor=pointer]: Browse as a guest
+      - link "Forget password?" [ref=e181] [cursor=pointer]:
+        - /url: https://doc.oplist.org/faq/howto#how-to-get-password-if-i-forget-it

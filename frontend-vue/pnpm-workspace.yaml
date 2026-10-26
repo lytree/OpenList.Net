@@ -1,0 +1,25 @@
+allowBuilds:
+  esbuild: true
+  vue-demi: true
+
+# 强制整个依赖树共用同一份 Vue 运行时。
+#
+# 为什么必须锁：`element-plus` 的 peer 是 `vue: ^3.3.7`，当应用依赖是
+# `3.6.0-rc.12` 这类 prerelease 时，pnpm 的 semver 解析**不匹配**（prerelease
+# 不在 `^3.3.7` 范围内），于是给 EP 另装一份 `vue@3.5.x`。
+# 结果是一个页面里跑着两份 runtime-core：EP 内部的响应式与渲染器不认识应用侧
+# 的 vnode，表现为 `TypeError: e.scope.on is not a function`、组件渲染成空注释、
+# 点击按钮状态不更新 —— 报错信息完全指不到"双运行时"这个真实原因。
+#
+# Vue 3.6 正式版发布后，把这里与 `dependencies.vue` 一起升到 3.6.x 并全量回归；
+# Vapor 实验也据此推迟（见 docs/unified-media-product-plan.md 第 21 节）。
+overrides:
+  vue: 3.5.22
+  "@vue/runtime-core": 3.5.22
+  "@vue/runtime-dom": 3.5.22
+  "@vue/reactivity": 3.5.22
+  "@vue/shared": 3.5.22
+  "@vue/compiler-core": 3.5.22
+  "@vue/compiler-dom": 3.5.22
+  "@vue/compiler-sfc": 3.5.22
+  "@vue/server-renderer": 3.5.22

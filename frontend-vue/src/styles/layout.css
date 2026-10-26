@@ -1,0 +1,2190 @@
+/* 外壳布局样式。
+ *
+ * 只放「EP 组件属性表达不了」的结构性样式（高度、粘性、间距）。
+ * 颜色一律走 tokens.css 的 --ol-* / --el-*，保证深浅色自动跟随。 */
+
+.ol-layout {
+  height: 100vh;
+}
+
+.ol-aside {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--ol-border);
+  transition: width 0.2s ease;
+  overflow: hidden;
+}
+
+.ol-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  height: var(--ol-header-height);
+  padding: 0 var(--ol-space-4);
+  border-bottom: 1px solid var(--ol-border);
+  flex: none;
+  white-space: nowrap;
+}
+
+.ol-brand-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex: none;
+}
+
+.ol-brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ol-radius-md);
+  background: var(--el-color-primary);
+  color: #fff;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.ol-brand-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ol-menu {
+  flex: 1;
+  border-right: none;
+  overflow-y: auto;
+}
+
+.ol-aside-footer {
+  flex: none;
+  padding: var(--ol-space-2);
+  border-top: 1px solid var(--ol-border);
+}
+
+.ol-collapse-btn {
+  width: 100%;
+}
+
+.ol-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--ol-space-4);
+  border-bottom: 1px solid var(--ol-border);
+  background: var(--ol-bg-surface);
+}
+
+.ol-header-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+.ol-user {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  cursor: pointer;
+  padding: 0 var(--ol-space-1);
+  border-radius: var(--ol-radius-sm);
+}
+
+.ol-user:hover {
+  background: var(--ol-bg-hover);
+}
+
+.ol-user-name {
+  font-size: 13px;
+  color: var(--ol-text-secondary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-main {
+  padding: var(--ol-space-5);
+  overflow-y: auto;
+  background: var(--ol-bg-page);
+}
+
+/* 登录页：无外壳，铺满视口 */
+.ol-login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ol-bg-page);
+  padding: var(--ol-space-4);
+}
+
+.ol-login-card {
+  width: 100%;
+  max-width: 380px;
+}
+
+/* ---------------------------------------------------------------------------
+ * 文件浏览器
+ * ------------------------------------------------------------------------- */
+.ol-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+}
+
+.ol-files-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-4);
+  flex-wrap: wrap;
+}
+
+.ol-crumb {
+  cursor: pointer;
+  color: var(--ol-text-secondary);
+  font-size: 13px;
+}
+
+.ol-crumb:hover {
+  color: var(--el-color-primary);
+}
+
+.ol-crumb-current {
+  cursor: default;
+  color: var(--ol-text);
+  font-weight: 600;
+}
+
+.ol-crumb-current:hover {
+  color: var(--ol-text);
+}
+
+.ol-files-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ol-space-2);
+  padding: var(--ol-space-8) 0;
+}
+
+.ol-file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.ol-file-name:hover span:last-child {
+  color: var(--el-color-primary);
+  text-decoration: underline;
+}
+
+.ol-file-name span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--ol-text-secondary);
+}
+
+/* 目标目录选择器 */
+.ol-picker-list {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.ol-picker-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ol-picker-item:hover {
+  background: var(--el-fill-color-light);
+}
+
+/* 上传面板 */
+.ol-upload-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ol-space-4);
+  padding: 32px 20px;
+  min-height: 180px;
+  justify-content: center;
+  border: 2px dashed var(--el-border-color);
+  border-radius: 10px;
+  transition: border-color 0.15s ease;
+}
+
+.ol-upload-hint {
+  margin: 0;
+  color: var(--ol-text-secondary);
+  font-size: 14px;
+}
+
+.ol-upload-options {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-4);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.ol-upload-list {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.ol-upload-row {
+  padding: 8px 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.ol-upload-row:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+
+.ol-upload-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-2);
+  margin-bottom: 6px;
+}
+
+.ol-upload-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.ol-upload-speed,
+.ol-upload-size {
+  font-size: 12px;
+  color: var(--ol-text-secondary);
+  white-space: nowrap;
+}
+
+.ol-upload-err {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-color-danger);
+  word-break: break-all;
+}
+
+/* 右键菜单（FileContextMenu，Teleport 到 body） */
+.ol-ctx-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  box-shadow: var(--el-box-shadow-light);
+  user-select: none;
+}
+
+.ol-ctx-item {
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ol-ctx-item:hover {
+  background: var(--el-fill-color);
+}
+
+.ol-ctx-danger {
+  color: var(--el-color-danger);
+}
+
+.ol-ctx-divided {
+  margin-top: 4px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  padding-top: 8px;
+}
+
+.ol-ctx-disabled {
+  color: var(--el-text-color-placeholder);
+  cursor: not-allowed;
+}
+
+.ol-ctx-disabled:hover {
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+ * 管理台（M2）
+ * ------------------------------------------------------------------------- */
+.ol-manage {
+  height: 100%;
+}
+
+.ol-manage-aside {
+  border-right: 1px solid var(--ol-border);
+  background: var(--ol-bg-surface);
+}
+
+.ol-manage-menu {
+  border-right: none;
+}
+
+.ol-manage-main {
+  padding: var(--ol-space-5);
+  overflow-y: auto;
+  background: var(--ol-bg-page);
+}
+
+.ol-manage-page {
+  /* 表格类页面（users/metas）固定列宽合计约 1150px，980 会横向截断；1280 兼顾留白。 */
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.ol-manage-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-4);
+  margin-bottom: var(--ol-space-4);
+}
+
+.ol-manage-h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-manage-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+.ol-manage-row-ops {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ol-manage-section {
+  margin: var(--ol-space-5) 0 var(--ol-space-3);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ol-text-secondary);
+  border-bottom: 1px solid var(--ol-border);
+  padding-bottom: 6px;
+}
+
+.ol-manage-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ol-space-3);
+  margin-top: var(--ol-space-6);
+}
+
+/* 驱动动态表单字段 */
+.ol-driver-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 460px;
+}
+
+.ol-field-help {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  line-height: 1.4;
+}
+
+/* 管理台通用小组件（M2 第二批：users / metas / indexes / tasks） */
+.ol-manage-card-gap {
+  margin-top: var(--ol-space-4);
+}
+
+.ol-manage-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ol-manage-tip {
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-manage-bulk {
+  margin-bottom: var(--ol-space-3);
+  justify-content: flex-end;
+}
+
+.ol-muted {
+  color: var(--ol-text-muted);
+}
+
+.ol-text-danger {
+  color: var(--el-color-danger);
+}
+
+/* 权限位复选框：两列，避免 9 个权限把对话框撑得太长 */
+.ol-perm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 12px;
+}
+
+/* 「开关 + 说明」一行（meta 的各 sub 开关） */
+.ol-sub-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ol-field-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 460px;
+}
+
+.ol-stat-row {
+  display: flex;
+  gap: var(--ol-space-6);
+  flex-wrap: wrap;
+  margin-bottom: var(--ol-space-4);
+}
+
+.ol-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ol-stat-label {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-task-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ol-task-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 站点设置：左侧标签 + 右侧控件，长表单靠分隔线保持可扫读 */
+.ol-settings-tabs {
+  margin-bottom: var(--ol-space-2);
+}
+
+.ol-settings-count {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--ol-text-muted);
+}
+
+.ol-setting-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ol-setting-row {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--ol-space-4);
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--ol-border);
+}
+
+.ol-setting-row:last-child {
+  border-bottom: none;
+}
+
+.ol-setting-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+  font-size: 13px;
+  color: var(--ol-text-secondary);
+  word-break: break-word;
+}
+
+.ol-setting-key {
+  font-size: 11px;
+  color: var(--ol-text-muted);
+}
+
+.ol-setting-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* 输入控件不铺满整行：1200px 宽下铺满会让单行输入显得空洞 */
+.ol-setting-control .el-input,
+.ol-setting-control .el-select,
+.ol-setting-control .el-input-number {
+  max-width: 520px;
+}
+
+.ol-setting-control .el-textarea {
+  max-width: 720px;
+}
+
+.ol-settings-footer {
+  justify-content: space-between;
+  margin-top: var(--ol-space-4);
+  padding-top: var(--ol-space-3);
+  border-top: 1px solid var(--ol-border);
+}
+
+/* ==========================================================================
+ * 预览器（M3）
+ * 宿主只负责「工具栏 + 舞台」，各预览器在自己的舞台里排布。
+ * 高度统一用 `calc(100vh - …)` 减去顶栏/面包屑/工具栏，避免出现双层滚动条。
+ * ========================================================================== */
+
+.ol-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+}
+
+.ol-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-3);
+  flex-wrap: wrap;
+}
+
+.ol-preview-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ol-space-2);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.ol-preview-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ol-text);
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-preview-sub,
+.ol-preview-hint {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  flex-wrap: wrap;
+}
+
+.ol-preview-stage {
+  display: flex;
+  flex-direction: column;
+  min-height: 60vh;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  overflow: hidden;
+}
+
+.ol-preview-stage:fullscreen {
+  padding: var(--ol-space-4);
+  background: var(--ol-bg-surface);
+}
+
+/* 全屏后少掉页面顶栏与面包屑，高度上限要放宽，否则媒体只占半屏 */
+.ol-preview-stage:fullscreen .ol-frame-el {
+  height: calc(100vh - 130px);
+}
+
+.ol-preview-stage:fullscreen .ol-media-el,
+.ol-preview-stage:fullscreen .ol-image-canvas {
+  max-height: calc(100vh - 170px);
+}
+
+.ol-preview-stage:fullscreen .ol-text-scroll {
+  max-height: calc(100vh - 170px);
+}
+
+.ol-preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  padding: var(--ol-space-2) var(--ol-space-3);
+  border-bottom: 1px solid var(--ol-border);
+  background: var(--ol-bg-surface);
+  flex-wrap: wrap;
+}
+
+.ol-preview-toolbar-wrap {
+  justify-content: space-between;
+}
+
+.ol-preview-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+.ol-preview-empty {
+  margin: auto;
+  padding: var(--ol-space-8);
+  font-size: 13px;
+  color: var(--ol-text-muted);
+}
+
+.ol-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* ---- 图片 ---- */
+.ol-image-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ol-image-stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: 55vh;
+  background: var(--el-fill-color-light);
+}
+
+.ol-image-stage.is-dragging {
+  user-select: none;
+}
+
+.ol-image-canvas {
+  max-width: 100%;
+  max-height: calc(100vh - 300px);
+  object-fit: contain;
+  will-change: transform;
+}
+
+/* ---- 音视频 ---- */
+.ol-video-preview {
+  display: flex;
+  flex-direction: column;
+}
+
+.ol-media-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+.ol-media-el {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 280px);
+  background: #000;
+}
+
+.ol-playlist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ol-space-2);
+  padding: var(--ol-space-3);
+  border-top: 1px solid var(--ol-border);
+}
+
+.ol-playlist-item {
+  cursor: pointer;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ol-audio-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ol-space-3);
+  padding: var(--ol-space-8) var(--ol-space-4);
+}
+
+.ol-audio-cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 180px;
+  height: 180px;
+  overflow: hidden;
+  border-radius: var(--ol-radius-lg);
+  background: var(--el-fill-color-light);
+}
+
+.ol-audio-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ol-audio-cover-icon {
+  width: 72px;
+  height: 72px;
+  color: var(--ol-text-muted);
+}
+
+.ol-audio-title {
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  word-break: break-all;
+}
+
+.ol-audio-el {
+  width: min(560px, 100%);
+}
+
+/* ---- 文本 / Markdown ---- */
+.ol-text-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ol-text-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: var(--ol-space-4);
+  max-height: calc(100vh - 240px);
+}
+
+.ol-plain-text {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 4;
+  color: var(--ol-text);
+}
+
+.ol-plain-text.is-wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ol-markdown {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ol-text);
+  word-wrap: break-word;
+}
+
+.ol-markdown > :first-child {
+  margin-top: 0;
+}
+
+.ol-markdown h1,
+.ol-markdown h2,
+.ol-markdown h3,
+.ol-markdown h4,
+.ol-markdown h5,
+.ol-markdown h6 {
+  margin: 1.4em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ol-markdown h1 {
+  font-size: 1.6em;
+  border-bottom: 1px solid var(--ol-border);
+  padding-bottom: 0.3em;
+}
+
+.ol-markdown h2 {
+  font-size: 1.35em;
+  border-bottom: 1px solid var(--ol-border);
+  padding-bottom: 0.25em;
+}
+
+.ol-markdown h3 {
+  font-size: 1.15em;
+}
+
+.ol-markdown p,
+.ol-markdown ul,
+.ol-markdown ol,
+.ol-markdown blockquote,
+.ol-markdown table,
+.ol-markdown pre {
+  margin: 0 0 1em;
+}
+
+.ol-markdown ul,
+.ol-markdown ol {
+  padding-left: 1.6em;
+}
+
+.ol-markdown li + li {
+  margin-top: 0.25em;
+}
+
+.ol-markdown a {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+.ol-markdown a:hover {
+  text-decoration: underline;
+}
+
+.ol-markdown code {
+  padding: 0.15em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  border-radius: var(--ol-radius-sm);
+  background: var(--el-fill-color);
+}
+
+.ol-markdown pre {
+  padding: var(--ol-space-3);
+  overflow: auto;
+  border-radius: var(--ol-radius-sm);
+  background: var(--el-fill-color-light);
+}
+
+.ol-markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.ol-markdown blockquote {
+  padding: 0 1em;
+  color: var(--ol-text-secondary);
+  border-left: 4px solid var(--ol-border);
+}
+
+.ol-markdown table {
+  border-collapse: collapse;
+  display: block;
+  overflow: auto;
+}
+
+.ol-markdown th,
+.ol-markdown td {
+  padding: 6px 10px;
+  border: 1px solid var(--ol-border);
+}
+
+.ol-markdown th {
+  background: var(--el-fill-color-light);
+  font-weight: 600;
+}
+
+.ol-markdown img {
+  max-width: 100%;
+}
+
+.ol-markdown hr {
+  height: 1px;
+  border: 0;
+  background: var(--ol-border);
+  margin: 1.5em 0;
+}
+
+/* ---- iframe 类（pdf / html / 外部预览） ---- */
+.ol-html-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ol-frame-el {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 240px);
+  min-height: 480px;
+  border: 0;
+  background: var(--ol-bg-surface);
+}
+
+/* ---- 文件信息 / 下载兜底 ---- */
+.ol-info-preview {
+  padding: var(--ol-space-4);
+}
+
+.ol-download-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ol-space-3);
+  padding: var(--ol-space-8) var(--ol-space-4);
+}
+
+.ol-download-icon {
+  color: var(--ol-text-muted);
+}
+
+.ol-download-name {
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  word-break: break-all;
+  max-width: 70%;
+}
+
+.ol-download-actions {
+  display: flex;
+  gap: var(--ol-space-2);
+}
+
+
+/* ==========================================================================
+ * 公开分享页（#/s/:code）
+ * 不带应用外壳，独立成页；宽度收在 900px，避免大屏上表格拉得过长。
+ * ========================================================================== */
+.ol-share-page {
+  min-height: 100vh;
+  padding: var(--ol-space-6);
+  background: var(--ol-bg-page);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ol-share-topbar {
+  width: 100%;
+  max-width: 900px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--ol-space-4);
+}
+
+.ol-share-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-share-brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-brand);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+}
+
+.ol-share-card {
+  width: 100%;
+  max-width: 900px;
+}
+
+.ol-share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-share-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-share-crumbs {
+  margin-bottom: var(--ol-space-2);
+  font-size: 13px;
+  color: var(--ol-text-secondary);
+}
+
+.ol-share-crumbs a {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+.ol-share-entry {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.ol-share-entry:hover {
+  color: var(--el-color-primary);
+}
+
+.ol-share-empty {
+  padding: var(--ol-space-8) 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ol-text-muted);
+}
+
+.ol-share-gate {
+  max-width: 420px;
+  margin: var(--ol-space-4) auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+}
+
+.ol-share-gate-row {
+  display: flex;
+  gap: var(--ol-space-2);
+}
+
+.ol-share-error {
+  font-size: 13px;
+  color: var(--el-color-danger);
+}
+
+.ol-share-single {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: var(--ol-space-2) 0;
+}
+
+.ol-share-file-name {
+  font-weight: 600;
+  color: var(--ol-text);
+  word-break: break-all;
+}
+
+.ol-share-footer {
+  margin-top: var(--ol-space-4);
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+/* ==========================================================================
+ * 目录树 + 网格视图 + 分页 + README（M1 浏览体验收尾）
+ * ========================================================================== */
+
+/* 左树右列表：树是 sticky 的，列表在右侧独立滚动（页面滚动条只有一个）。 */
+.ol-home-split {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ol-space-3);
+}
+
+.ol-home-aside {
+  flex: none;
+  width: 228px;
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 150px);
+  overflow: auto;
+  padding: 6px;
+  background: var(--ol-bg-surface);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+}
+
+.ol-home-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+}
+
+/* 窄屏（平板竖屏 / 手机）收起目录树：横向空间不够时，列表优先。 */
+@media (max-width: 900px) {
+  .ol-home-aside {
+    display: none;
+  }
+}
+
+.ol-tree .el-tree {
+  background: transparent;
+  font-size: 13px;
+  --el-tree-node-hover-bg-color: var(--el-fill-color-light);
+}
+
+.ol-tree .el-tree-node__content {
+  height: 30px;
+  border-radius: var(--ol-radius-sm);
+}
+
+.ol-tree-error {
+  margin: 6px 4px 0;
+  font-size: 12px;
+  color: var(--el-color-danger);
+  word-break: break-all;
+}
+
+.ol-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* ---- 网格 / 图墙 ---- */
+.ol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--ol-space-3);
+  padding: var(--ol-space-3);
+}
+
+.ol-grid-image {
+  grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+}
+
+.ol-grid-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ol-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--ol-bg-surface);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.ol-grid-card:hover {
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: var(--el-box-shadow-light);
+  transform: translateY(-1px);
+}
+
+.ol-grid-card.is-selected {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 2px var(--el-color-primary-light-8);
+}
+
+.ol-grid-thumb {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  background: var(--el-fill-color-light);
+  overflow: hidden;
+}
+
+.ol-grid-image .ol-grid-thumb {
+  aspect-ratio: 4 / 3;
+}
+
+.ol-grid-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 勾选框默认隐形，hover / 已选中才出现：不给每一格都挂一个常驻控件的视觉噪音。 */
+.ol-grid-check {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  display: inline-flex;
+  padding: 0 2px;
+  border-radius: var(--ol-radius-sm);
+  background: rgba(255, 255, 255, 0.88);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+html.dark .ol-grid-check {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.ol-grid-card:hover .ol-grid-check,
+.ol-grid-card.is-selected .ol-grid-check {
+  opacity: 1;
+}
+
+.ol-grid-badge {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 1px 5px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: var(--ol-radius-sm);
+}
+
+.ol-grid-name {
+  padding: 6px 8px 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ol-text);
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ol-grid-image .ol-grid-name {
+  font-size: 12px;
+  -webkit-line-clamp: 1;
+}
+
+.ol-grid-empty {
+  padding: 48px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ol-text-muted);
+}
+
+/* ---- 分页 ---- */
+.ol-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-3);
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-top: 1px solid var(--ol-border);
+}
+
+.ol-pager-total {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-pager-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ol-pager-gap {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-pager-current {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* ---- 目录 README ---- */
+.ol-readme {
+  padding: 14px 18px;
+  background: var(--ol-bg-surface);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+}
+
+.ol-readme-head {
+  margin-bottom: var(--ol-space-2);
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--ol-border);
+}
+
+.ol-readme-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-readme-body {
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+/* ==========================================================================
+ * 工具栏对话框（M1 操作集第二批）
+ * 统一「标签在上、控件在下」的窄栏排布，避免每个对话框各写一套间距。
+ * ========================================================================== */
+.ol-dialog-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+}
+
+.ol-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ol-dialog-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  min-width: 0;
+}
+
+.ol-dialog-label {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-dialog-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--ol-text-secondary);
+  word-break: break-all;
+  max-height: 66px;
+  overflow: auto;
+}
+
+.ol-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ol-space-2);
+}
+
+.ol-dialog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 110px;
+  overflow: auto;
+}
+
+.ol-dialog-hint {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  line-height: 1.5;
+}
+
+/* ==========================================================================
+ * 安装类预览（plist / ipa）与 .url 快捷方式
+ * ========================================================================== */
+.ol-install-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+  padding: var(--ol-space-4);
+  max-width: 720px;
+}
+
+.ol-install-actions {
+  display: flex;
+  gap: var(--ol-space-2);
+  flex-wrap: wrap;
+}
+
+.ol-url-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ol-url-target {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--el-color-primary);
+  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ==========================================================================
+ * 归档预览：条目列表 + 内联预览
+ * ========================================================================== */
+.ol-archive-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ol-archive-body {
+  padding: var(--ol-space-4);
+}
+
+.ol-archive-password {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+  padding: var(--ol-space-4);
+  max-width: 520px;
+}
+
+.ol-archive-list {
+  flex: 1;
+  overflow: auto;
+  max-height: calc(100vh - 260px);
+}
+
+.ol-archive-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  padding: 7px var(--ol-space-3);
+  border-bottom: 1px solid var(--ol-border);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ol-archive-row:hover {
+  background: var(--el-fill-color-light);
+}
+
+.ol-archive-icon {
+  flex: none;
+  color: var(--el-color-primary);
+}
+
+.ol-archive-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ol-text);
+}
+
+.ol-archive-size {
+  width: 88px;
+  text-align: right;
+  color: var(--ol-text-muted);
+  font-size: 12px;
+  flex: none;
+}
+
+.ol-archive-time {
+  width: 140px;
+  text-align: right;
+  color: var(--ol-text-muted);
+  font-size: 12px;
+  flex: none;
+}
+
+.ol-archive-inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ==========================================================================
+ * Office 预览（docx / xlsx / pptx）与 asciinema
+ * ========================================================================== */
+.ol-office-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ol-office-body {
+  padding: var(--ol-space-4);
+}
+
+.ol-office-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: var(--ol-space-3);
+  max-height: calc(100vh - 250px);
+  background: var(--el-fill-color-lighter);
+}
+
+/* docx-preview 的 wrapper：把它的白纸居中，并限制最大宽度 */
+.ol-office-doc {
+  transform-origin: top left;
+}
+
+.ol-office-doc .ol-docx-doc-wrapper {
+  margin: 0 auto;
+}
+
+.ol-sheet-table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  background: var(--el-bg-color);
+}
+
+.ol-sheet-table td,
+.ol-sheet-table th {
+  border: 1px solid var(--ol-border);
+  padding: 4px 8px;
+  min-width: 64px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.ol-sheet-gutter {
+  background: var(--el-fill-color-light);
+  color: var(--ol-text-muted);
+  font-weight: 400;
+  text-align: right;
+  position: sticky;
+  left: 0;
+}
+
+.ol-pptx-host {
+  display: flex;
+  justify-content: center;
+}
+
+.ol-asciinema-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ol-asciinema-host {
+  padding: var(--ol-space-2);
+}
+
+/* ==========================================================================
+ * 批量重命名：规则表单 + 实时预览
+ * ========================================================================== */
+.ol-rename-preview {
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  overflow: hidden;
+}
+
+.ol-rename-head,
+.ol-rename-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ol-space-2);
+  padding: 6px var(--ol-space-3);
+  font-size: 12.5px;
+}
+
+.ol-rename-head {
+  background: var(--el-fill-color-light);
+  color: var(--ol-text-muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--ol-border);
+}
+
+.ol-rename-row {
+  border-bottom: 1px solid var(--ol-border);
+  color: var(--ol-text);
+}
+
+.ol-rename-row:last-child {
+  border-bottom: none;
+}
+
+/* 未变化的条目压暗：一眼能看出「这次只会动这几条」 */
+.ol-rename-row.is-same {
+  color: var(--ol-text-muted);
+}
+
+.ol-rename-row.is-error {
+  background: var(--el-color-danger-light-9);
+}
+
+.ol-rename-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-rename-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+/* ==========================================================================
+ * 文本编辑器（CodeMirror 6）
+ * ========================================================================== */
+.ol-editor-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ol-editor-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--ol-border);
+}
+
+.ol-editor-host .cm-editor {
+  height: 100%;
+  min-height: 56vh;
+  font-size: 13px;
+}
+
+.ol-editor-host .cm-scroller {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  line-height: 1.6;
+}
+
+.ol-editor-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* ==========================================================================
+ * 文本编辑器（CodeMirror 6）
+ * ========================================================================== */
+.ol-editor-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ol-editor-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--ol-border);
+}
+
+.ol-editor-host .cm-editor {
+  height: 100%;
+  min-height: 56vh;
+  font-size: 13px;
+}
+
+.ol-editor-host .cm-scroller {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  line-height: 1.6;
+}
+
+.ol-editor-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* ==========================================================================
+ * 种子预览（torrent）
+ * ========================================================================== */
+.ol-torrent-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+  padding: var(--ol-space-4);
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ol-torrent-state {
+  padding: var(--ol-space-2) 0;
+  color: var(--ol-text-muted);
+  font-size: 13px;
+}
+
+.ol-torrent-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+}
+
+.ol-torrent-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ol-text);
+  word-break: break-all;
+}
+
+.ol-torrent-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ol-torrent-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--ol-space-2) var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--el-fill-color-lighter);
+  font-size: 12.5px;
+}
+
+.ol-torrent-meta-row {
+  display: flex;
+  gap: var(--ol-space-3);
+  min-width: 0;
+}
+
+.ol-torrent-meta-label {
+  flex: none;
+  width: 96px;
+  color: var(--ol-text-muted);
+}
+
+.ol-torrent-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--ol-text-secondary);
+}
+
+.ol-torrent-comment {
+  word-break: break-word;
+  color: var(--ol-text-secondary);
+}
+
+.ol-torrent-actions {
+  display: flex;
+  gap: var(--ol-space-2);
+  flex-wrap: wrap;
+}
+
+/* ---- 文件树 ---- */
+.ol-torrent-tree {
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  overflow: auto;
+  /* 不撑满整个预览区：3 个文件的种子配一块到屏幕底的边框只会显得空。
+     大种子靠 max-height 内部滚动，仍然不会把页面顶长。 */
+  flex: 0 1 auto;
+  max-height: 50vh;
+}
+
+.ol-torrent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px var(--ol-space-2);
+  border-bottom: 1px solid var(--ol-border);
+  font-size: 12.5px;
+  cursor: default;
+}
+
+.ol-torrent-row:hover {
+  background: var(--el-fill-color-light);
+}
+
+.ol-torrent-caret {
+  flex: none;
+  width: 12px;
+  color: var(--ol-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.ol-torrent-caret.is-open {
+  transform: rotate(90deg);
+}
+
+.ol-torrent-caret-dot {
+  display: block;
+  width: 12px;
+}
+
+.ol-torrent-icon {
+  flex: none;
+  color: var(--el-color-primary);
+}
+
+.ol-torrent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ol-text);
+}
+
+.ol-torrent-size {
+  flex: none;
+  width: 88px;
+  text-align: right;
+  color: var(--ol-text-muted);
+  font-size: 12px;
+}
+
+/* ==========================================================================
+ * 媒体库（M4）：浏览页 / 详情页 / 播放器
+ * ========================================================================== */
+.ol-media {
+  padding: var(--ol-space-4);
+}
+
+.ol-media-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--ol-space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--ol-space-4);
+}
+
+.ol-media-libs {
+  display: flex;
+  gap: var(--ol-space-2);
+  flex-wrap: wrap;
+}
+
+.ol-media-tools {
+  display: flex;
+  gap: var(--ol-space-2);
+  align-items: center;
+}
+
+.ol-media-section {
+  margin-bottom: var(--ol-space-4);
+}
+
+.ol-media-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ol-text);
+  margin-bottom: var(--ol-space-2);
+}
+
+/* ---- 继续观看横滑条 ---- */
+.ol-media-strip {
+  display: flex;
+  gap: var(--ol-space-3);
+  overflow-x: auto;
+  padding-bottom: var(--ol-space-2);
+}
+
+.ol-media-card {
+  width: 150px;
+  flex: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ol-media-strip .ol-media-card.is-strip {
+  width: 130px;
+}
+
+.ol-media-poster {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--ol-radius-md);
+  overflow: hidden;
+  background: var(--el-fill-color-light);
+}
+
+.ol-media-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ol-media-poster-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ol-text-muted);
+  font-size: 12px;
+}
+
+.ol-media-poster-fallback .el-icon {
+  font-size: 28px;
+}
+
+.ol-media-rating {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffd04b;
+  font-size: 12px;
+}
+
+.ol-media-fav {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  padding: 4px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 16px;
+}
+
+.ol-media-fav.is-on {
+  color: var(--el-color-warning);
+}
+
+.ol-media-card-title {
+  font-size: 13px;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-media-card-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  min-height: 20px;
+}
+
+/* ---- 网格 ---- */
+.ol-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--ol-space-4) var(--ol-space-3);
+}
+
+.ol-media-grid .ol-media-card {
+  width: auto;
+}
+
+/* ---- 详情页 ---- */
+.ol-media-detail {
+  padding: var(--ol-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-4);
+}
+
+.ol-media-detail-head {
+  position: relative;
+  border-radius: var(--ol-radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--ol-border);
+}
+
+.ol-media-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(2px) brightness(0.35);
+}
+
+.ol-media-detail-top {
+  position: relative;
+  padding: var(--ol-space-3);
+}
+
+.ol-media-detail-info {
+  position: relative;
+  display: flex;
+  gap: var(--ol-space-4);
+  padding: 0 var(--ol-space-4) var(--ol-space-4);
+}
+
+.ol-media-detail-poster {
+  width: 180px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: var(--ol-radius-md);
+  flex: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.ol-media-detail-meta {
+  flex: 1;
+  min-width: 0;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+}
+
+.ol-media-detail-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.ol-media-detail-year {
+  font-size: 15px;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.ol-media-detail-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ol-media-detail-overview {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  max-width: 720px;
+  opacity: 0.92;
+}
+
+.ol-media-detail-actions {
+  display: flex;
+  gap: var(--ol-space-2);
+  flex-wrap: wrap;
+}
+
+.ol-media-detail-progress {
+  font-size: 12.5px;
+  opacity: 0.85;
+}
+
+/* ---- 播放器 ---- */
+.ol-mediaplayer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+}
+
+.ol-mediaplayer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+.ol-mediaplayer-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-mediaplayer-video {
+  width: 100%;
+  max-height: 62vh;
+  background: #000;
+  border-radius: var(--ol-radius-md);
+}
+
+.ol-mediaplayer-failed {
+  padding: var(--ol-space-6);
+  text-align: center;
+  color: var(--ol-text-muted);
+  background: var(--el-fill-color-light);
+  border-radius: var(--ol-radius-md);
+}
+
+/* ---- 文件清单 ---- */
+.ol-media-detail-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+}
+
+.ol-media-file {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  padding: 8px var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+}
+
+.ol-media-file.is-active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.ol-media-file-icon {
+  color: var(--el-color-primary);
+  flex: none;
+}
+
+.ol-media-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ol-text);
+  font-size: 13px;
+}
+
+.ol-media-file-meta {
+  flex: none;
+  color: var(--ol-text-muted);
+  font-size: 12px;
+}
+
+.ol-media-detail-foot {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  word-break: break-all;
+}

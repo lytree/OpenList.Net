@@ -1,0 +1,10 @@
+node_modules
+dist
+*.local
+.DS_Store
+
+# 本地验收现场（playwright 页面快照 / 截图 / 临时登录态），非源码
+.playwright-cli/
+shot-*.png
+login*.yaml
+login2/

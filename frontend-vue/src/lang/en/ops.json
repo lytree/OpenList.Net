@@ -1,0 +1,22 @@
+{
+  "new_folder": "New folder",
+  "folder_name": "Folder name",
+  "rename": "Rename",
+  "move_to": "Move to",
+  "copy_to": "Copy to",
+  "delete": "Delete",
+  "delete_confirm": "Delete {{count}} selected item(s)? This cannot be undone.",
+  "select_target": "Select destination folder",
+  "choose_here": "Choose here",
+  "no_subfolder": "No subfolders",
+  "actions": "Actions",
+  "open": "Open",
+  "selected_count": "{{count}} selected",
+  "created": "Folder created",
+  "renamed": "Renamed",
+  "deleted": "Deleted",
+  "moved": "Moved",
+  "copied": "Copied",
+  "name_required": "Name cannot be empty",
+  "same_name": "Name unchanged"
+}

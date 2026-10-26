@@ -1,0 +1,77 @@
+/* ============================================================================
+ * 设计 token
+ * ----------------------------------------------------------------------------
+ * 旧前端用 hope-ui 的 token（$space-4 / $neutral-7 / $primary9 …），Element Plus
+ * 用 CSS 变量（--el-*）。这里的作用是**一层薄桥接**：
+ *   1. 保留 hope-ui 的语义 token 名，方便逐页翻译时对照，不用重新想命名；
+ *   2. 把品牌色锚定到 --el-color-primary，主题/换色只改一个变量；
+ *   3. 深浅色由 <html class="dark"> 驱动（EP 自带 dark/css-vars.css）。
+ *
+ * 约定：业务组件优先用 --el-* 与 EP 组件属性；只有 EP 覆盖不到的地方
+ *（自定义容器、间距节奏）才用下面的 --ol-* token。
+ * ========================================================================== */
+
+:root {
+  /* 间距节奏：与 hope-ui space 标度对齐（4px 基准） */
+  --ol-space-1: 4px;
+  --ol-space-2: 8px;
+  --ol-space-3: 12px;
+  --ol-space-4: 16px;
+  --ol-space-5: 20px;
+  --ol-space-6: 24px;
+  --ol-space-8: 32px;
+
+  /* 圆角：EP 默认 4px，页面容器略大 */
+  --ol-radius-sm: 4px;
+  --ol-radius-md: 8px;
+  --ol-radius-lg: 12px;
+
+  /* 布局尺寸 */
+  --ol-header-height: 56px;
+  --ol-aside-width: 220px;
+  --ol-aside-width-collapsed: 64px;
+
+  /* 语义色：默认指向 EP 的变量，深色模式自动跟随 */
+  --ol-bg-page: var(--el-bg-color-page);
+  --ol-bg-surface: var(--el-bg-color);
+  --ol-bg-hover: var(--el-fill-color-light);
+  --ol-border: var(--el-border-color-lighter);
+  --ol-text: var(--el-text-color-primary);
+  --ol-text-secondary: var(--el-text-color-regular);
+  --ol-text-muted: var(--el-text-color-secondary);
+
+  /* 品牌色默认值；运行时由 useBrandColor() 按站点设置覆盖 */
+  --ol-brand: #1890ff;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ol-bg-page);
+  color: var(--ol-text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 全局滚动条：与 EP 观感一致，避免长列表里出现系统级粗滚动条 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--el-border-color);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--el-border-color-darker);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
