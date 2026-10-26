@@ -191,6 +191,20 @@
     "field_auto_scan": "Auto scan",
     "field_auto_scan_hint": "Include this library in scheduled incremental scans",
     "field_language": "Metadata language",
-    "field_language_hint": "e.g. zh-CN; empty = use global setting"
+    "field_language_hint": "e.g. zh-CN; empty = use global setting",
+    "col_metadata": "Metadata",
+    "scrape": "Scrape metadata",
+    "scrape_hint": "Scrape metadata ({{count}} pending)",
+    "scrape_confirm": "Scrape metadata for \"{{name}}\"? {{count}} item(s) still have no metadata. They are searched one by one in the background at roughly 4 per second, so a large library takes a while; items that already matched are left untouched.",
+    "scrape_start": "Start scraping",
+    "scrape_started": "Scraping \"{{name}}\" in the background",
+    "scrape_running": "A scrape is already running for this library",
+    "scrape_nothing": "Nothing to scrape - every item already has metadata",
+    "scrape_left": "{{count}} left",
+    "scrape_matched": "{{count}} matched",
+    "scrape_pending": "{{count}} pending",
+    "scrape_unmatched": "{{count}} unmatched",
+    "scrape_unmatched_hint": "The provider returned no match. Batch scraping skips these - retry them one by one from the item page.",
+    "scrape_failed": "{{count}} failed"
   }
 }

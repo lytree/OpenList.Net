@@ -5,7 +5,7 @@
  * idle / running / completed / failed / cancelled（认不出的按 idle 处理，
  * 与后端 `ApplySort` 认不出排序字段按 title 处理的口径一致）。
  */
-import type { MediaScanLog, MediaScanTask } from "~/api/media"
+import type { MediaScanLog, MediaScanTask, MediaScrapeStatus } from "~/api/media"
 
 export type ScanState = "idle" | "running" | "completed" | "failed" | "cancelled"
 
@@ -73,4 +73,25 @@ export function scanLogSummary(log: Pick<MediaScanLog, "error" | "added" | "upda
  */
 export function taskOfLibrary(tasks: MediaScanTask[], libraryId: number): MediaScanTask | null {
   return tasks.find((t) => t.library_id === libraryId) ?? null
+}
+
+/** 从刮削状态列表里取指定库的状态；没有记录返回 null（非管理员或库不可见）。 */
+export function scrapeOfLibrary(
+  statuses: MediaScrapeStatus[],
+  libraryId: number,
+): MediaScrapeStatus | null {
+  return statuses.find((s) => s.library_id === libraryId) ?? null
+}
+
+/**
+ * 本轮批量刮削的完成百分比。
+ *
+ * `batch_size` 是「本轮计划处理数」，不是「库里总数」—— 后端把单轮上限定在 2000，
+ * 拿总数当分母的话，一个大库永远显示 3%。两者都为 0（未运行）时返回 0，
+ * 让进度条退回不显示的分支。
+ */
+export function scrapeProgress(status: MediaScrapeStatus | null): number {
+  if (!status || !status.running || status.batch_size <= 0) return 0
+  const done = Math.min(Math.max(status.batch_done, 0), status.batch_size)
+  return Math.round((done / status.batch_size) * 100)
 }

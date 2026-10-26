@@ -111,9 +111,15 @@ check("匿名访问图片 401", anon.status() === 401, `status=${anon.status()}`
 
 // ---------- 5. 播放 + 进度上报 ----------
 await page.locator(".ol-media-file button", { hasText: "Play" }).first().click()
-await page.waitForTimeout(2000)
+// 等元素出现而不是固定 sleep 2s：A–H 连跑时机器有负载，路由切换 + 建 video 元素
+// 可能超过 2s，`count()` 会当场返回 0 造成假红（断言内容没变，只是不再赌时序）。
 const video = page.locator(".ol-mediaplayer-video")
-check("内嵌播放器挂载", (await video.count()) === 1, "")
+const playerMounted = await video
+  .first()
+  .waitFor({ state: "visible", timeout: 15000 })
+  .then(() => true)
+  .catch(() => false)
+check("内嵌播放器挂载", playerMounted, "")
 
 // 真实 seek 到 15s：timeupdate 触发节流保存（10 秒粒度 + 首次立即保存）
 await video.evaluate((el) => {

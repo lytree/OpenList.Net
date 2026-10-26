@@ -126,7 +126,9 @@ check("UI 状态徽标最终 Completed", /completed/i.test(stateTag || ""), stat
 const items = await api("get", "/media/items?library_id=" + created.id + "&per_page=1")
 const itemCount = items.data?.total ?? items.data?.content?.length ?? 0
 check("扫描聚成 2 个条目（2001 个视频文件）", itemCount === 2, `items=${itemCount}`)
-const lastScanCell = await row.locator("td").nth(4).textContent().catch(() => "")
+// 列顺序：名称 0 / 路径 1 / 类型 2 / 扫描状态 3 / 元数据 4 / 最近扫描 5 / 操作 6
+// （「元数据」列是整库刮削按钮那一轮插进来的，最近扫描从 4 挪到 5）
+const lastScanCell = await row.locator("td").nth(5).textContent().catch(() => "")
 check("最近扫描时间列不再是 -", lastScanCell && !/^-$/.test(lastScanCell.trim()), lastScanCell?.trim() || "")
 
 // running 时应有进度数字（found 计数）；结束后显示结果摘要

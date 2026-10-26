@@ -245,6 +245,15 @@ round_dimensions() {
   finish_round "F/dimensions" $?
 }
 
+round_scrape() {
+  say "round: scrape (E 管理台整库刮削按钮)"
+  local dir; dir="$(round_dir scrape)"; mkdir -p "$dir"
+  # 装置与挂载都由脚本自建（3 个无 NFO 的视频 → 条目落 Pending + 1 个空库 → 按钮置灰）
+  begin_round "$dir" || return 1
+  run_node "$dir/run.log" "$FE/scripts/verify-scrape.mjs"
+  finish_round "E/scrape" $?
+}
+
 round_common() {
   say "round: common (A 认证与守卫 / E 管理台 / G 外观)"
   local dir; dir="$(round_dir common)"; mkdir -p "$dir"
@@ -268,7 +277,7 @@ round_upload() {
 # --------------------------------------------------------------------------- 入口
 
 WANT=("$@")
-[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage dimensions)
+[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage dimensions scrape)
 
 for name in "${WANT[@]}"; do
   # 轮次名用连字符（preview-extra），函数名用下划线 —— 这里做一次映射

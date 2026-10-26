@@ -216,6 +216,38 @@ export const mediaListScanLogs = (id: number, limit = 20): Promise<Resp<MediaSca
 export const mediaListScanTasks = (): Promise<Resp<MediaScanTask[]>> =>
   http.get<MediaScanTask[]>("/media/tasks") as Promise<Resp<MediaScanTask[]>>
 
+/**
+ * 单个库的刮削状态。
+ *
+ * 三个计数刻意分开返回：`pending` 会被批量任务消费，`unmatched` 是自动匹配失败过、
+ * 批量任务**不会**再碰的（重试只能逐条走详情页），`matched` 才是真正完成的。
+ * 只看总数的话，「点完没反应」与「早就刮完了」在界面上长得一模一样。
+ */
+export interface MediaScrapeStatus {
+  library_id: number
+  library_name: string
+  /** 等待刮削的条目数（批量任务的取数范围）。 */
+  pending: number
+  /** 自动匹配失败、批量任务不会再处理的条目数。 */
+  unmatched: number
+  /** 已写入元数据的条目数。 */
+  matched: number
+  /** 是否有批量刮削正在运行。 */
+  running: boolean
+  /** 本轮计划处理的条目数；未运行时为 0。 */
+  batch_size: number
+  /** 本轮已处理条目数；未运行时为 0。 */
+  batch_done: number
+  /** 本轮累计失败条目数。 */
+  failed: number
+  /** 本轮最近一次失败的错误信息。 */
+  error?: string | null
+}
+
+/** 各库刮削状态（一次取全部库，管理台 2.5s 轮询一次即可）。 */
+export const mediaListScrapeTasks = (): Promise<Resp<MediaScrapeStatus[]>> =>
+  http.get<MediaScrapeStatus[]>("/media/scrape/tasks") as Promise<Resp<MediaScrapeStatus[]>>
+
 // ---- 条目 ----------------------------------------------------------------
 
 export const mediaListItems = (query: MediaItemQuery): Promise<Resp<Page<MediaItem>>> =>

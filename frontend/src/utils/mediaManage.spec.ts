@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
-import type { MediaScanTask } from "~/api/media"
+import type { MediaScanTask, MediaScrapeStatus } from "~/api/media"
 import {
   formatScanCounts,
   libraryTypeKey,
   normalizeScanState,
   scanLogSummary,
   scanTagType,
+  scrapeOfLibrary,
+  scrapeProgress,
   taskOfLibrary,
 } from "./mediaManage"
 
@@ -89,5 +91,48 @@ describe("taskOfLibrary", () => {
     expect(taskOfLibrary(tasks, 7)?.library_name).toBe("L7")
     expect(taskOfLibrary(tasks, 3)).toBeNull()
     expect(taskOfLibrary([], 1)).toBeNull()
+  })
+})
+
+describe("scrapeOfLibrary / scrapeProgress", () => {
+  const status = (patch: Partial<MediaScrapeStatus> = {}): MediaScrapeStatus => ({
+    library_id: 3,
+    library_name: "L3",
+    pending: 0,
+    unmatched: 0,
+    matched: 0,
+    running: false,
+    batch_size: 0,
+    batch_done: 0,
+    failed: 0,
+    error: null,
+    ...patch,
+  })
+
+  it("按 library_id 命中，缺失返回 null", () => {
+    const list = [status({ library_id: 1 }), status({ library_id: 3 })]
+    expect(scrapeOfLibrary(list, 3)?.library_name).toBe("L3")
+    expect(scrapeOfLibrary(list, 9)).toBeNull()
+    expect(scrapeOfLibrary([], 1)).toBeNull()
+  })
+
+  it("未运行或批大小为 0 时进度为 0", () => {
+    expect(scrapeProgress(null)).toBe(0)
+    // 上一轮的 batch 字段后端会清零，此时不该残留一个 100%
+    expect(scrapeProgress(status({ batch_size: 0, batch_done: 0 }))).toBe(0)
+    expect(scrapeProgress(status({ running: true }))).toBe(0)
+  })
+
+  it("运行中按 batch_done / batch_size 算，且夹在 [0,100]", () => {
+    expect(scrapeProgress(status({ running: true, batch_size: 200, batch_done: 50 }))).toBe(25)
+    // 后端已夹取，这里再夹一次：脏数据不该让进度条溢出
+    expect(scrapeProgress(status({ running: true, batch_size: 100, batch_done: 250 }))).toBe(100)
+    expect(scrapeProgress(status({ running: true, batch_size: 100, batch_done: -5 }))).toBe(0)
+  })
+
+  it("分母是单轮上限而不是库里总数", () => {
+    // 3000 条待刮削、单轮只做 200 个：进度按 200 算，不会永远停在 6%
+    const s = status({ running: true, pending: 2800, batch_size: 200, batch_done: 100 })
+    expect(scrapeProgress(s)).toBe(50)
   })
 })

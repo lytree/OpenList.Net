@@ -528,3 +528,31 @@
 .ol-media-playlist-cover-cell {
   background: var(--el-fill-color);
 }
+
+/* 管理台「元数据」列的运行态。
+ * 该列被压到 150px（否则 7 列在 1440 宽窗口里会把「操作」列挤出可视区），
+ * 进度条与「56% · 618 left」必须上下叠放，并排会互相挤成一条缝。 */
+.ol-media-scrape-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ol-media-scrape-progress .el-progress {
+  width: 100%;
+}
+
+/* 管理台「元数据」列的运行态。
+ * 该列被压到 150px（否则 7 列在 1440 宽窗口里会把「操作」列挤出可视区），
+ * 进度条与「56% · 618 left」必须上下叠放，并排会互相挤成一条缝。 */
+.ol-media-scrape-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ol-media-scrape-progress .el-progress {
+  width: 100%;
+}
