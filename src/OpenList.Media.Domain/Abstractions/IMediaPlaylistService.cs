@@ -93,12 +93,35 @@ public sealed class MediaPlaylistSummary
     /// <summary>前若干个条目 id，供前端拼封面墙（最多 5 个）。</summary>
     [JsonPropertyName("preview_item_ids")]
     public List<long> PreviewItemIds { get; set; } = [];
+    /// <summary>
+    /// 封面预览（前几个条目的 id / 标题 / 海报路径，最多 5 个）。
+    /// <para>
+    /// 比 <see cref="PreviewItemIds"/> 多带 `poster_path` 的原因：列表页要拼四宫格，
+    /// 没有海报的条目去请求图片端点只会拿到 404 —— 页面能靠 onError 降级，但浏览器
+    /// 仍会为每次 404 打一条控制台错误。带上海报信息后前端就不发这些无用请求。
+    /// </para>
+    /// <para>仅列表接口（<c>GET /media/playlists</c>）填充；建/改接口返回的摘要为空。</para>
+    /// </summary>
+    [JsonPropertyName("preview_items")]
+    public List<MediaPlaylistPreviewItem> PreviewItems { get; set; } = [];
     /// <summary>创建时间。</summary>
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
     /// <summary>更新时间。</summary>
     [JsonPropertyName("updated_at")]
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>播放列表封面预览项。</summary>
+public sealed class MediaPlaylistPreviewItem
+{
+    /// <summary>条目 id。</summary>
+    public long Id { get; set; }
+    /// <summary>标题。</summary>
+    public string Title { get; set; } = string.Empty;
+    /// <summary>海报路径；为空表示该条目没有海报，前端不该发图片请求。</summary>
+    [JsonPropertyName("poster_path")]
+    public string? PosterPath { get; set; }
 }
 
 /// <summary>播放列表详情（含条目实体）。</summary>

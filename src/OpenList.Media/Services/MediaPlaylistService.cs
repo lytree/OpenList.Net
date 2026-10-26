@@ -64,9 +64,33 @@ public sealed class MediaPlaylistService : IMediaPlaylistService
             .GroupBy(m => m.PlaylistId)
             .ToDictionary(g => g.Key, g => g.Select(x => x.ItemId).ToList());
 
+        // 封面预览要带 poster_path：没海报的条目让前端发图片请求只会换来 404
+        //（页面能降级，但浏览器会为每次 404 打控制台错误）。
+        var previewIds = grouped.Values
+            .SelectMany(ids => ids.Take(PreviewCount))
+            .Distinct()
+            .ToList();
+        var previewById = previewIds.Count == 0
+            ? new Dictionary<long, MediaPlaylistPreviewItem>()
+            : (await _db.MediaItems.AsNoTracking()
+                    .Where(i => previewIds.Contains(i.Id))
+                    .Select(i => new MediaPlaylistPreviewItem
+                    {
+                        Id = i.Id,
+                        Title = i.Title,
+                        PosterPath = i.PosterPath,
+                    })
+                    .ToListAsync(ct))
+                .ToDictionary(p => p.Id);
+
         var summaries = playlists.Select(p =>
         {
             var itemIds = grouped.GetValueOrDefault(p.Id) ?? [];
+            var preview = itemIds.Take(PreviewCount)
+                .Select(id => previewById.GetValueOrDefault(id))
+                .Where(entry => entry is not null)
+                .Select(entry => entry!)
+                .ToList();
             return new MediaPlaylistSummary
             {
                 Id = p.Id,
@@ -74,6 +98,7 @@ public sealed class MediaPlaylistService : IMediaPlaylistService
                 Description = p.Description,
                 ItemCount = itemIds.Count,
                 PreviewItemIds = itemIds.Take(PreviewCount).ToList(),
+                PreviewItems = preview,
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt,
             };
