@@ -9,12 +9,19 @@
  *   4) 分片续传：init 后丢弃一个分片再 complete 之外的补发
  * → fs/get 校验大小 → 清理隔离目录 → 杀后端。
  *
- * 用法：node scripts/e2e-upload.mjs
+ * 用法：
+ *   node scripts/e2e-upload.mjs                      # 自起后端（CWD=src/OpenList.Server，用其 data/data.db）
+ *   BASE=http://127.0.0.1:5055 node scripts/e2e-upload.mjs   # 打一个已在跑的隔离后端（M5 回归用这条）
+ *
+ * 给了 BASE 就**不再自己起后端**：回归编排器每个轮次都有自己的临时库，
+ * 这个脚本若照旧 `spawn` 一个 5244，会写进开发库（src/OpenList.Server/data）。
  */
 import { spawn } from "node:child_process"
 import crypto from "node:crypto"
 
-const BASE = "http://127.0.0.1:5244"
+const EXTERNAL_BASE = process.env.BASE || ""
+const BASE = EXTERNAL_BASE || "http://127.0.0.1:5244"
+const ADMIN_PASS = process.env.ADMIN_PASS || "admin"
 const SERVER_DIR = "F:/Code/Dotnet/OpenList.Net/src/OpenList.Server"
 
 let failures = 0
@@ -59,25 +66,32 @@ async function waitBackend(proc) {
 }
 
 async function main() {
-  // ---- 启动后端 ----
+  // ---- 启动后端（除非调用方已经给了一个）----
   // 直接跑 DLL 不读 launchSettings，必须显式给 URL（dotnet run 才会用 5244）
-  const backend = spawn("dotnet", ["bin/Debug/net10.0/OpenList.Server.dll"], {
-    cwd: SERVER_DIR,
-    env: {
-      ...process.env,
-      ASPNETCORE_ENVIRONMENT: "Development",
-      ASPNETCORE_URLS: "http://127.0.0.1:5244",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  })
-  backend.stdout.on("data", (d) => process.stdout.write(`[be] ${d}`))
-  backend.stderr.on("data", (d) => process.stderr.write(`[be] ${d}`))
+  const backend = EXTERNAL_BASE
+    ? null
+    : spawn("dotnet", ["bin/Debug/net10.0/OpenList.Server.dll"], {
+        cwd: SERVER_DIR,
+        env: {
+          ...process.env,
+          ASPNETCORE_ENVIRONMENT: "Development",
+          ASPNETCORE_URLS: "http://127.0.0.1:5244",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+  backend?.stdout.on("data", (d) => process.stdout.write(`[be] ${d}`))
+  backend?.stderr.on("data", (d) => process.stderr.write(`[be] ${d}`))
   try {
-    await waitBackend(backend)
+    if (backend) {
+      await waitBackend(backend)
+    } else {
+      const r = await fetch(`${BASE}/api/public/settings`)
+      ok(r.ok, `external backend reachable at ${BASE}`)
+    }
 
     // ---- 登录 ----
     const login = await api("POST", "/auth/login", {
-      body: JSON.stringify({ username: "admin", password: "admin" }),
+      body: JSON.stringify({ username: "admin", password: ADMIN_PASS }),
     })
     ok(login.code === 200 && login.data?.token, "login admin")
     const token = login.data.token
@@ -233,7 +247,7 @@ async function main() {
     })
     ok(rm.code === 200, "cleanup test dir")
   } finally {
-    backend.kill()
+    backend?.kill()
   }
 
   console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURES`)

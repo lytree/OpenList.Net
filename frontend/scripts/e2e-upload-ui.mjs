@@ -16,7 +16,7 @@ import { chromium } from "playwright"
 const BASE = "http://127.0.0.1:5244"
 const DEV = "http://localhost:5173"
 const SERVER_DIR = "F:/Code/Dotnet/OpenList.Net/src/OpenList.Server"
-const FRONTEND_DIR = "F:/Code/Dotnet/OpenList.Net/frontend-vue"
+const FRONTEND_DIR = "F:/Code/Dotnet/OpenList.Net/frontend"
 
 let failures = 0
 const ok = (cond, label) => {

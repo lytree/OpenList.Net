@@ -9,7 +9,7 @@ import { join } from "node:path"
  * 用法：
  *   BASE=http://127.0.0.1:5012 ADMIN_PASS=e2e12345 node scripts/verify-preview-extra.mjs
  *
- * 前置：隔离后端（临时库 + AdminPassword + DistDir=frontend-vue/dist）。
+ * 前置：隔离后端（临时库 + AdminPassword + DistDir=frontend/dist）。
  * 装置：脚本自建 `.e2e/preview-extra`：
  * - `pano_360.mp4`：ffmpeg 生成的 8 秒 2:1 视频（等距柱状投影的典型宽高比；
  *   内容是不是真全景不重要，球面贴图只关心「有没有画面」）；

@@ -94,7 +94,11 @@ const title = (await page.locator(".ol-torrent-title").textContent().catch(() =>
 check("种子名称", title === expected.multi.name, `title="${title}"`)
 
 const tags = await page.locator(".ol-torrent-tags .el-tag").allTextContents()
-const sizeTag = `${(expected.multi.total / 1024).toFixed(2)} KB`
+// 体积按 UI 的 humanSize 口径算：<1 KB 时单位是 B 且不留小数。
+// （原先这里写死 `${total/1024} KB`，装置一小就永远对不上 —— 80 B 会渲染成 "80 B"。）
+const KB = 1024
+const sizeTag =
+  expected.multi.total < KB ? `${expected.multi.total} B` : `${(expected.multi.total / KB).toFixed(2)} KB`
 check(
   "标签含体积 / 文件数 / 私有",
   tags.some((tag) => tag.replace(/\s+/g, " ").trim() === sizeTag) &&
