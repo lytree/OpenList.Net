@@ -4,7 +4,7 @@
 >
 > 本备忘录所有数字均来自 2026-10-25 实测：本地前端 236 个 TS/TSX 文件、31,869 行；上游与 Peach 仓库逐一核对。
 >
-> **⚖️ 决策记录（2026-10-25 定稿）**：触发第 0 节「React 仍然正确的三种情形」第二项——团队长期主栈为 React/Vue（主要），SolidJS 成为协作与招聘瓶颈。**最终决定：改用 Vue 3 + TSX（vue-jsx）+ Element Plus，渲染以 VDOM 优先**（中途曾定 React，随后按团队主栈与 UI 库选型改为 Vue；Peach 为 React，故代码复用为零，许可证收敛为 MIT 单一路径）。执行方案见 `docs/unified-media-product-plan.md` **v3**，脚手架见 `frontend-vue/`（已通过构建与真实渲染验证）。本备忘录保留为决策依据存档，第 0 节「建议维持 SolidJS」已失效。
+> **⚖️ 决策记录（2026-10-25 定稿）**：触发第 0 节「React 仍然正确的三种情形」第二项——团队长期主栈为 React/Vue（主要），SolidJS 成为协作与招聘瓶颈。**最终决定：改用 Vue 3 + TSX（vue-jsx）+ Element Plus，渲染以 VDOM 优先**（中途曾定 React，随后按团队主栈与 UI 库选型改为 Vue；Peach 为 React，故代码复用为零，许可证收敛为 MIT 单一路径）。执行方案见 `docs/unified-media-product-plan.md` **v3**，脚手架见 `frontend/`（已通过构建与真实渲染验证；M5 前名为 `frontend-vue/`）。本备忘录保留为决策依据存档，第 0 节「建议维持 SolidJS」已失效。
 
 ## 0. 结论与建议（已被 2026-10-25 决策覆盖，见顶部决策记录）
 

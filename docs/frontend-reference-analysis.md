@@ -1,7 +1,7 @@
 # 参考仓库分析整理 + Vue 3 落地路线
 
 > 分析对象：`OpenListTeam/OpenList-Frontend`（下称 **OLF**）与 `peach-mitao/peach` 的 `frontend/`（下称 **Peach**）。
-> 目标：把两者对「当前项目 `frontend-vue/`（Vue 3 + TSX + Element Plus）」真正有用的东西分离出来 ——
+> 目标：把两者对「当前项目 `frontend/`（Vue 3 + TSX + Element Plus）」真正有用的东西分离出来 ——
 > 哪些能抄实现、哪些只能抄结构、哪些压根不该碰。
 >
 > 所有数字为 2026-10-26 实测（GitHub Trees API + 本地 `wc -l`）。
@@ -96,7 +96,7 @@ frontend/src/
 
 ## 4. OLF 功能矩阵 → 我们 Vue 版的覆盖状态
 
-（「✅」= `frontend-vue/` 已实现并真机验证；「—」= 未做；「⌛」= 后端无接口/依赖未接）
+（「✅」= `frontend/` 已实现并真机验证；「—」= 未做；「⌛」= 后端无接口/依赖未接）
 
 | 域 | 子项 | Vue 版 |
 |---|---|---|
@@ -152,7 +152,7 @@ M4 的墙按「骨架网格 → 真实卡面」两步走，Peach 就是现成范
 ### 5.5 e2e 是交付物的一部分：90 个用例
 
 Peach 的 `e2e/` 有 90 个 `node --test` + `playwright-core` 用例，命名直接对应体验承诺（`design-fidelity`、`sidebar-motion`、`player-subtitles`、`loading-fidelity`）。
-我们的验证一直靠一次性脚本。本轮把它沉淀成 `frontend-vue/scripts/verify-v2.mjs`（可重复跑），
+我们的验证一直靠一次性脚本。本轮把它沉淀成 `frontend/scripts/verify-v2.mjs`（可重复跑），
 **下一步：把这些断言并入 `pnpm verify`，作为每个切片完成的门禁。**
 
 ## 6. 许可证边界（必须遵守）

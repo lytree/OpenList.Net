@@ -5,6 +5,10 @@
 > **后端方案不受影响**：`/api/media` 媒体域建设（第 7 节）可并行推进。
 >
 > **M0 已验证**：`frontend-vue/` 可构建、类型检查零错误、无头浏览器真实渲染通过（Element Plus 表格/表单项/右键菜单全部正常，控制台零告警）。
+>
+> **路径说明（M5 之后）**：`frontend-vue/` 已改名为 `frontend/`，旧 SolidJS 子模块退到 `frontend-legacy/`（见第 32 节）。
+> 第 11–31 节写于改名之前，正文里出现的 `frontend-vue/` 均指今天的 `frontend/`；可执行的命令路径已统一改过。
+
 
 ## 0. 决策定案
 
@@ -75,7 +79,7 @@ frontend-vue/
     styles/               # tokens.css（--ol-* 桥接 --el-*）、layout.css
 ```
 
-切换动作（达标后）：`git mv frontend frontend-legacy` → `git mv frontend-vue frontend`，输出仍为 `frontend/dist`。
+切换动作（✅ 已于 2026-10-26 执行，见第 32 节）：`git mv frontend frontend-legacy` → `git mv frontend-vue frontend`，输出仍为 `frontend/dist`。
 
 ## 3. 渲染模式：VDOM 优先（实测依据）
 
@@ -176,7 +180,7 @@ Element Plus 是 VDOM 组件库，性能热点（el-table 内部）也在 VDOM �
 | M2 | 管理台 12 模块（storages 动态表单优先原型） | 18 | 进行中（7 个模块 ✅：storages/users/metas/indexes/tasks/settings/shares；剩余 4 个后端无接口，见第 16–19 节） |
 | M3 | 预览器 27 项 | 13 | ✅ **完成**：registry 现覆盖 **22 个注册预览器**（第 16/23/25/26 节 + 第 31 节 video360/flash）；`aliyun_video` 与 `video_box` 按 §397/§398 结论不做 |
 | M4 | 媒体域（wall 可评估 Vapor 加速）+ 对接后端新增能力 | 14 | ✅ **前端全部接上**：浏览/详情/播放/进度（27）+ 管理台（28）+ 人物/片商/系列/口味/播放列表/字幕（30）；剩「整库刮削」按钮 |
-| M5 | 切换发布 + A–H 全量回归 + 桌面打包验证 | 5 | |
+| M5 | 切换发布 + A–H 全量回归 + 桌面打包验证 | 5 | ✅ **完成**：`frontend/` 已是自有 Vue 应用（第 32 节），构建链路改源码构建、A–H **11 轮 231 项全绿**、server/desktop 两个 bundle 实测可跑 |
 | **合计** | | **80** | |
 
 ## 9. 风险与对策
@@ -367,7 +371,7 @@ Element Plus 是 VDOM 组件库，性能热点（el-table 内部）也在 VDOM �
 - svg 归到图片（`<img>` 渲染不执行脚本）而不是 HTML；
 - 文本取数用 `ReadableStream` 读到上限即 `cancel()`，即使后端忽略 Range 也不会把几百 MB 日志拉进内存；>64 MB 直接提示下载；切换编码只重新 decode（字节缓存），不重复请求。
 
-**实测（后端 `localhost:5244` 直接托管 `frontend-vue/dist`，与生产同源；Playwright + Chromium）**：
+**实测（后端 `localhost:5244` 直接托管 `frontend/dist`，与生产同源；Playwright + Chromium）**：
 
 | 项 | 结果 |
 |---|---|
@@ -400,7 +404,7 @@ Element Plus 是 VDOM 组件库，性能热点（el-table 内部）也在 VDOM �
 **本轮踩坑（固化）**：
 
 1. **`/tmp` 在 Git Bash 与 Node 里不是同一个路径**：bash 的 `/tmp` 是 `C:\Users\<user>\AppData\Local\Temp`，Node 的 `/tmp` 解析成 `F:\tmp` —— 跨语言传文件路径必须用 Windows 绝对路径或环境变量。
-2. **`node_modules/.vite` 被 safe-delete 保护卡住**：新增依赖后 Vite 要重建依赖缓存（内部 `rm` 69 项 > 阈值 50），dev server 直接退出。绕过：改用「后端托管 `dist`」做同源联调（`DistDir=<repo>/frontend-vue/dist dotnet run`），顺带把生产同源路径也验了。
+2. **`node_modules/.vite` 被 safe-delete 保护卡住**：新增依赖后 Vite 要重建依赖缓存（内部 `rm` 69 项 > 阈值 50），dev server 直接退出。绕过：改用「后端托管 `dist`」做同源联调（`DistDir=<repo>/frontend/dist dotnet run`），顺带把生产同源路径也验了。
 3. **同 URL hash 导航后 `waitForSelector` 会命中上一次的 DOM**：`page.goto('#/?path=...')` 不重新加载文档，断言会抢跑到旧目录。e2e 里先 `goto('about:blank')` 再进目标 hash。
 4. **后端把 `pdf` 判成 `type=0`（UNKNOWN）**：预览器不能只依赖 `ObjType`，扩展名兜底是必需的（`registry` 里每个定义同时声明 `type` 与 `exts`）。
 
@@ -788,7 +792,7 @@ Element Plus 是 VDOM 组件库，性能热点（el-table 内部）也在 VDOM �
 
 ### 22.4 验证
 
-**环境**：隔离后端（临时 SQLite + `AdminPassword` + 独立端口 5001 + `DistDir=frontend-vue/dist`），
+**环境**：隔离后端（临时 SQLite + `AdminPassword` + 独立端口 5001 + `DistDir=frontend/dist`），
 不触碰仓库现有数据；测试挂载 `/e2e` → `G:\Share\ol-v2-ops`（44 项固定装置，脚本自建自删）。
 
 | 用例（verify-ops，24 项全绿） | 结果 |
@@ -813,7 +817,7 @@ Element Plus 是 VDOM 组件库，性能热点（el-table 内部）也在 VDOM �
 ```bash
 # 隔离后端：临时库 + 独立端口（不碰现有数据）
 cd .e2e && AdminPassword=e2e12345 ASPNETCORE_URLS=http://127.0.0.1:5001 \
-  DistDir=$PWD/../frontend-vue/dist dotnet ../src/OpenList.Server/bin/Debug/net10.0/OpenList.Server.dll
+  DistDir=$PWD/../frontend/dist dotnet ../src/OpenList.Server/bin/Debug/net10.0/OpenList.Server.dll
 
 # 首次需要建挂载：POST /api/admin/storage/create {mount_path:"/e2e", driver:"Local", addition:{root_folder_path}}
 node scripts/verify-v2.mjs      # 先跑（要求干净装置 44 项）
@@ -878,7 +882,7 @@ node scripts/verify-ops.mjs     # 后跑（会重建装置并改数据）
 
 ### 23.5 验证
 
-隔离后端（临时库 + 5001 端口 + `DistDir=frontend-vue/dist`，挂载 `/e2e` → `G:\Share\ol-v2-prev`）：
+隔离后端（临时库 + 5001 端口 + `DistDir=frontend/dist`，挂载 `/e2e` → `G:\Share\ol-v2-prev`）：
 
 - `scripts/verify-preview.mjs` **18/18**：归档根层 4 项且目录优先、隐式目录逐层展开、
   归档内 PNG 经 `/ae?inner` 渲染成功（`naturalWidth > 0`）、面包屑回根、
@@ -1297,9 +1301,9 @@ stats 数字、首页 facets 条与 5 个维度入口、年份筛选后网格从
 ```bash
 # 隔离后端（临时库 + 独立端口 + 指向新构建的 dist）
 cd .e2e && rm -rf data && AdminPassword=e2e12345 ASPNETCORE_URLS=http://127.0.0.1:5011 \
-  DistDir=$PWD/../frontend-vue/dist dotnet ../src/OpenList.Server/bin/Debug/net10.0/OpenList.Server.dll
+  DistDir=$PWD/../frontend/dist dotnet ../src/OpenList.Server/bin/Debug/net10.0/OpenList.Server.dll
 # 另一个终端
-cd frontend-vue && BASE=http://127.0.0.1:5011 ADMIN_PASS=e2e12345 node scripts/verify-media-dimensions.mjs
+cd frontend && BASE=http://127.0.0.1:5011 ADMIN_PASS=e2e12345 node scripts/verify-media-dimensions.mjs
 ```
 
 `pnpm typecheck` 0 错误 · `pnpm test` 135 用例（新增 13）· `pnpm build` 通过 ·
@@ -1362,7 +1366,7 @@ cd frontend-vue && BASE=http://127.0.0.1:5011 ADMIN_PASS=e2e12345 node scripts/v
 - 5 个文件合计 **27.9 MB**，由 `scripts/copy-ruffle.mjs` 从 node_modules 复制，
   `dev`/`build` 前置执行（pnpm 默认不跑 `preDev`/`preBuild` 钩子，所以显式串在命令里）；
 - `public/ruffle/` 已 gitignore —— 二进制不该进版本库，文件名带 hash，随依赖版本重建；
-- **桌面打包注意**：`dotnet run build/build.cs -- --app=desktop` 会带 `frontend-vue/dist`，
+- **桌面打包注意**：`dotnet run build/build.cs -- --app=desktop` 会带 `frontend/dist`，
   `public/ruffle` 在构建时已进 dist，无需额外步骤；反过来只拷源码不给 dist 就会缺资源
   （此时页面会显示可操作的报错文案，而不是白屏）。
 
@@ -1387,9 +1391,9 @@ Ruffle 的 14 MB wasm 只在打开 `.swf` 时请求，首屏零负担。
 
 ```bash
 cd .e2e/pv && AdminPassword=e2e12345 ASPNETCORE_URLS=http://127.0.0.1:5012 \
-  DistDir=$PWD/../../frontend-vue/dist dotnet ../../src/OpenList.Server/bin/Debug/net10.0/OpenList.Server.dll
+  DistDir=$PWD/../../frontend/dist dotnet ../../src/OpenList.Server/bin/Debug/net10.0/OpenList.Server.dll
 # 另一个终端
-cd frontend-vue && BASE=http://127.0.0.1:5012 node scripts/verify-preview-extra.mjs
+cd frontend && BASE=http://127.0.0.1:5012 node scripts/verify-preview-extra.mjs
 ```
 
 `pnpm typecheck` 0 错误 · `pnpm test` 139 用例（+4）· `pnpm build` 通过。
@@ -1407,3 +1411,141 @@ cd frontend-vue && BASE=http://127.0.0.1:5012 node scripts/verify-preview-extra.
 
 1. 管理台「整库刮削」按钮（承 §28.5）。
 2. **M5**：`frontend-vue` 切换发布 + A–H 全量回归 + 桌面打包验证。
+
+## 32. M5：切换发布 + A–H 全量回归 + 桌面打包（2026-10-27）
+
+第 31.6 节的第 2 项。`frontend-vue/` 转正为 `frontend/`，构建链路从「拉上游 dist」改为
+「从本仓库源码构建」，A–H 逐类跑真机验收，两个发布形态都实际打出来跑过。
+
+### 32.1 切换动作
+
+```bash
+git mv frontend frontend-legacy      # 旧 SolidJS 子模块（.gitmodules 同步改名）
+git mv frontend-vue frontend         # 新前端转正
+```
+
+**输出路径仍是 `frontend/dist`**，所以 Dockerfile 的 `COPY --from=frontend-build /fe/dist`、
+`build.cs` 的 `../frontend/dist`、桌面端注入的 `OpenList__DistDir` 三处**路径零改动** ——
+这正是第 2 节当初把「输出路径必须保持 `frontend/dist`」写成硬约束的原因。
+
+`frontend-legacy/` 保留为 submodule（`OpenListTeam/Openlist-Frontend`，含此前在 SolidJS 上
+做媒体页留下的未提交改动）。**不参与任何构建**，CI 也不 checkout 它：它的唯一用途是
+「某个功能要移植时，能直接 diff 上游怎么写的」（见 32.8 第 2 项）。
+
+### 32.2 构建链路（切换真正的成本）
+
+| 位置 | 之前 | 现在 |
+|---|---|---|
+| `Dockerfile` | stage1 从 GitHub Releases 下上游 dist tarball（`FRONTEND_VERSION` 参数） | stage1 用 `node:24-alpine` + `pnpm@12.15.0` 源码构建；`--frozen-lockfile`；`COPY --from=frontend-build /fe/dist` |
+| `.dockerignore` | 只排除 `bin/obj/data/.git/tests/*.md` | 追加 `frontend/node_modules`、`frontend/dist`、`frontend-legacy`、`artifacts` |
+| `build.cs` | 默认去上游 API 查最新 tag 并下载 tarball | 默认用仓库内 `frontend/dist`，缺失**直接报错**并打印 `pnpm -C frontend install && pnpm -C frontend build`；上游 tarball 降级为 `--frontend-version=<tag>` 显式开关 |
+| `ci.yml` | `resolve-frontend` 查上游 tag；FDD bundle 下 tarball | 删 `resolve-frontend`；FDD bundle 自己 `pnpm install && build` |
+| `build-bundles.yml` | 每个 bundle job 各自 `gh release download` | 新增 `frontend` job（install → typecheck → test → build → 上传 artifact），8+6 个 bundle `needs: frontend` 后下载 artifact |
+| `release.yml` | notes 里写「Upstream non-lite OpenList-Frontend v4.2.x」 | 「Built from this repository」，与 API 同一 commit |
+
+为什么在 `build-bundles.yml` 里单独起一个 `frontend` job、而不是每个矩阵腿各建一次：
+14 个腿各跑一遍 `pnpm install` 既慢，更糟的是**任何一条腿都可能悄悄用上一份旧 dist**。
+一个 job 出产物、其余腿只消费，版本就不可能分叉。
+
+顺带补了 CI 的一个缺口：**此前没有任何 job 跑前端单测**。现在 `frontend` job 里
+`pnpm typecheck && pnpm test` 会挡住「.NET 测试全绿但 SPA 已经编译不过」这种情况。
+
+**同时修掉一个一直在的 bug**：`build/build.cs` 的 `Publish` 在 `--app=desktop` 下只发布
+GUI（`publish-desktop`），而 `Bundle` 的桌面分支要拷 `publish/`（服务端核心）—— 于是
+`--app=desktop --target=Bundle` 必然在 `DirectoryNotFoundException: .../publish` 上失败。
+CI 不走 Cake 这条路（workflow 里分别 `dotnet publish` 两次），所以这个洞一直没暴露。
+现在 `Publish` 在桌面形态下两个都发。
+
+### 32.3 A–H 全量回归
+
+每轮独立数据库 + 独立后端进程 + 独立装置，`frontend/scripts/run-regression.sh` 一把跑完：
+
+| 类 | 脚本 | 项数 | 结果 |
+|---|---|---|---|
+| A 认证与初始化 | `verify-common.mjs`（**新增**） | 7 | ✅ |
+| B 文件管理 | `verify-v2.mjs` 18 + `verify-ops.mjs` 24 + `verify-rename.mjs` 12 | 54 | ✅ |
+| C 上传管线 | `e2e-upload.mjs`（改造为可打外部后端） | 22 | ✅ |
+| D 预览器 | `verify-preview.mjs` 18 + `verify-preview-extra.mjs` 15 + `verify-editor.mjs` 11 + `verify-torrent.mjs` 15 | 59 | ✅ |
+| E 管理台 | `verify-common.mjs` 8 页 + `verify-media-manage.mjs` 20 | 36 | ✅ |
+| F 媒体域 | `verify-media.mjs` 20 + `verify-media-dimensions.mjs` 34 | 54 | ✅ |
+| G 通用 | `verify-common.mjs`（主题 / 语言控件） | 5 | ✅ |
+| H 桌面端 | bundle 布局 + 服务端核心托管 SPA（见 32.4） | 4 | ✅ |
+| **合计** | **11 轮** | **231** | **全绿** |
+
+`verify-common.mjs` 是这轮补的：此前 B/C/D/F 都有专门脚本，而「游客能不能进管理台」
+「管理台 8 个页签是否都能打开」「暗色主题刷新后还在不在」只能靠人手点，A–H 就只能算口头承诺。
+它同时纠正了一个**一开始写错的假设**：首页没有 `requiresAuth`，游客浏览是既定语义
+（与 Go 版一致），所以断言不该是「未登录被踢去登录页」，而是「游客拿不到管理台 + 退出后回游客态」。
+
+### 32.4 打包验证
+
+| 形态 | 产物 | 实测 |
+|---|---|---|
+| `--app=server --rid=win-x64` | `app/` + `cli/` + `frontend/dist/` + `run.bat`（288 MB） | 起 `app/OpenList.Server.exe` 并注入 `OpenList__DistDir=../frontend/dist`：`/ping` → pong、`/` → 200（1517 B）、主 JS 200（204 KB）、`/ruffle/core.ruffle.*.js` 200（108 KB） |
+| `--app=desktop --rid=win-x64` | GUI 在根 + `server/` + `cli/` + `frontend/dist/` | `OpenList.Desktop.exe` / `server/OpenList.Server.exe` / `cli/openlist.exe` 三个入口齐全；起 `server/` 里的核心同样托管出 SPA |
+
+两份 README 里的 `frontend/dist/   OpenList SPA (Vue 3, built from this repo)` 是构建时生成的，
+不是手改的 —— 顺带把「upstream non-lite release」这类会误导人的描述清掉了。
+
+`src/OpenList.Desktop` **零改动**（`git status` 干净）：M5 只换了它旁边那份 dist 的来源。
+
+### 32.5 装置脚本入库，编排器成型
+
+此前每个 `verify-*.mjs` 的装置都是「某台机器上的 `G:\Share\ol-v2-*`」，文档里只有一句
+「装置由生成脚本创建」—— 脚本本身没入库（§26 遗留 4 记过这笔账）。这轮补上：
+
+- `frontend/scripts/fixtures/gen_fixtures.py`：`preview`（zip/xlsx/docx/cast/.url）、
+  `torrent`（bencode 编码器 + 独立算 info_hash + expected.json）、`media`（NFO/海报/30s mp4）、
+  `media-manage`、`ops` 五套装置，一条命令重建。
+- `frontend/scripts/fixtures/setup.mjs`：幂等建挂载 / 建媒体库并等扫描结束。
+- `frontend/scripts/run-regression.sh`：11 轮编排，失败只影响对应轮次，末尾打汇总。
+
+编排器踩到的五个环境坑（都表现为「莫名挂住」或「明明 200 却说失败」，记下来省下次的时间）：
+
+1. **每轮不能 `rm -rf` 装置目录**：受保护环境对「一次删除 >50 项」会 fail-closed 拦下，
+   于是「跑第二遍」会静悄悄死在建装置那一步。改成**每轮一个时间戳目录**，不删只建。
+2. **`pwd` 给 `/f/...`，node/dotnet 要 `F:/...`**：混用会拼出 `F:\f\Code\...` 这种鬼路径。
+   统一 `abspath()` = `cd && pwd -W`。
+3. **`MSYS_NO_PATHCONV` 不能全局导出**：它会让 `tasklist //FI ...` 的 `//FI` 不再转成 `/FI`，
+   端口占用检测直接失效，表现为「端口被非 dotnet 进程占用，拒绝处理」。只在跑 node 时用 `env` 前缀给。
+4. **`/e2e` 这类值会被 MSYS 当路径改写**（变成 `E:/e2e`），服务端回
+   `mount path must start with '/'`。同样只在 node 调用处关转换。
+5. **`( cd dir && cmd & echo $! > pid )` 的 pid 文件写在父目录**：`&` 把 `cd && cmd` 整段
+   放进后台，`echo` 仍在调用者的 cwd 里。结果 stop_server 拿不到 PID，服务一轮轮泄漏，
+   下一轮只剩「端口被旧进程占着」这一种症状。改成 `pushd` + `$!` + `popd`。
+
+另外 `setup.mjs` 里所有请求都带 `Connection: close`：Windows 上 undici 的 keep-alive 句柄
+若在进程退出时还挂着，会撞 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`，
+进程带非 0 退出码结束 —— 调用方会以为「建挂载失败」，而实际上一切正常。
+
+### 32.6 回归暴露的问题：两个脚本 bug、一个产品 bug
+
+1. `verify-torrent.mjs` 的体积断言写死 `total/1024 KB`，装置一小就永远对不上
+   （80 B 会渲染成 `80 B`）。改成按 UI 的 `humanSize` 口径算 —— 这是脚本的 bug，不是产品的。
+2. 同一脚本假设「折叠任一目录只少 1 行」，而原装置每个目录放 2 个文件。装置调整为
+   `pics/`（1 个）+ `sub/`（2 个），断言不动 —— 断言本身是对的。
+3. `build.cs` 桌面发布缺服务端（见 32.2 末）。
+
+**产品代码（`src/` 下的 C#、`frontend/src/` 下的 TS/TSX）本轮零改动**：A–H 全绿是
+「Vue 前端达到对齐」的证据，不是靠改产品凑出来的。
+
+### 32.7 遗留
+
+1. **桌面 GUI 没有自动化**：Avalonia 窗口喂不进 Playwright，H 只验证到「包布局 + 服务端核心
+   托管 SPA + 桌面端零改动」。设置页/日志页需要人手点一次。
+2. **语言只有 `en`**：G 的「语言切换」只验证到控件存在且显示当前语言，没有第二份字典可切。
+3. **管理台 12 模块里只自动化了 8 个**：`plugins` / `messenger` / `backup-restore` /
+   `dashboard` / `about` 后端没有接口，UI 是 `(soon)` 禁用态（承 §16–19、§28）。
+4. `aliyun_video` / `video_box` 仍未做（承 §31.5，需要专用 SDK 或线上环境才能验）。
+5. C 的 **direct 模式**未覆盖：需要配置 `direct_upload_tools` 才能走，脚本覆盖了
+   stream / form / chunked（含跳片续传）三条主干。
+6. 装置目录会累积（`G:/Share/ol-v2-*-<时间戳>`，含一份 2000 filler 的目录，约几 MB），
+   需要定期手动清；没有自动清理是刻意为之 —— 排查失败时现场比干净更有价值。
+
+### 32.8 下一步（M0–M5 之后）
+
+1. 管理台「整库刮削」按钮（承 §28.5，端点一直就绪）。
+2. **上游功能移植清单**：`frontend-legacy/` 里还有 plugins / messenger / backup-restore
+   等模块，等后端补齐接口后逐个移植。
+3. 媒体域剩余项按 §30.5 / §31.5 的遗留清单推进（人物头像端点、片商/系列详情接口、
+   播放列表整单连播、口味页时间维度）。
