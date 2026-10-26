@@ -6,5 +6,5 @@ dist
 # 本地验收现场（playwright 页面快照 / 截图 / 临时登录态），非源码
 .playwright-cli/
 shot-*.png
-login*.yaml
-login2/
+# 只忽略本目录下的 login* 现场文件（login.yaml / login2 快照），别误伤 src/lang/en/login.json
+/login*

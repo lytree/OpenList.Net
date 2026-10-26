@@ -492,3 +492,6 @@ $RECYCLE.BIN/
 
 # WorkBuddy 工作目录（本地验证脚本与截图，非项目源码）
 .workbuddy/
+
+# e2e 现场截图等临时产物
+.e2e/
