@@ -1,8 +1,19 @@
 import { computed, defineComponent, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ElButton, ElIcon, ElMessage, ElTag } from "element-plus"
+import {
+  ElButton,
+  ElDialog,
+  ElEmpty,
+  ElIcon,
+  ElInput,
+  ElMessage,
+  ElOption,
+  ElSelect,
+  ElTag,
+} from "element-plus"
 import {
   ArrowLeft,
+  Plus,
   Refresh,
   Star,
   StarFilled,
@@ -11,14 +22,20 @@ import {
 } from "@element-plus/icons-vue"
 import {
   MediaItemStatus,
+  mediaAddToPlaylist,
+  mediaApplySubtitle,
   mediaGetItem,
   mediaGetState,
   mediaImageLink,
   mediaListItemFiles,
+  mediaListPlaylists,
   mediaScrapeItem,
+  mediaSearchSubtitles,
   mediaUpdateState,
   type MediaFile,
   type MediaItem,
+  type MediaPlaylistSummary,
+  type SubtitleCandidate,
   type UserMediaState,
 } from "~/api/media"
 import { fsGet } from "~/api/fs"
@@ -192,6 +209,115 @@ export default defineComponent({
       }
     }
 
+    // ---- 加入播放列表 ------------------------------------------------------
+
+    const playlistDialog = ref(false)
+    const playlists = ref<MediaPlaylistSummary[]>([])
+    /** 选中的已有列表 id；0 表示「新建一个」。 */
+    const pickedPlaylistId = ref(0)
+    const newPlaylistName = ref("")
+    const addingToPlaylist = ref(false)
+
+    async function openPlaylistDialog() {
+      pickedPlaylistId.value = 0
+      newPlaylistName.value = ""
+      playlistDialog.value = true
+      const resp = await mediaListPlaylists()
+      playlists.value = resp.code === 200 ? (resp.data ?? []) : []
+    }
+
+    /**
+     * 提交「加入播放列表」。
+     *
+     * 走 `/media/playlists/add` 而不是「先建列表再追加」：后端在这个端点里
+     * 一次完成「没有目标列表就新建」，前端少一次往返，也少一个「建好了但没加进去」的中间态。
+     */
+    async function confirmAddToPlaylist() {
+      const current = item.value
+      if (!current) return
+      const name = newPlaylistName.value.trim()
+      if (pickedPlaylistId.value === 0 && !name) {
+        ElMessage.warning(t("media.playlist_name_required"))
+        return
+      }
+      addingToPlaylist.value = true
+      try {
+        const resp = await mediaAddToPlaylist({
+          item_id: current.id,
+          playlist_id: pickedPlaylistId.value || undefined,
+          name: pickedPlaylistId.value ? undefined : name,
+        })
+        if (resp.code !== 200) {
+          ElMessage.error(resp.message || t("global.failed"))
+          return
+        }
+        ElMessage.success(
+          t("media.added_to_playlist_named", { name: resp.data?.name ?? name }),
+        )
+        playlistDialog.value = false
+      } finally {
+        addingToPlaylist.value = false
+      }
+    }
+
+    // ---- 字幕 --------------------------------------------------------------
+
+    const SUBTITLE_LANGS = [
+      { value: "zh-cn", label: "简体中文" },
+      { value: "zh-tw", label: "繁體中文" },
+      { value: "en", label: "English" },
+      { value: "ja", label: "日本語" },
+    ]
+
+    const subtitleDialog = ref(false)
+    const subtitleLang = ref("zh-cn")
+    const subtitleLoading = ref(false)
+    const subtitleCandidates = ref<SubtitleCandidate[]>([])
+    /** 是否已搜过：区分「还没搜」与「搜了但没结果」两种空态。 */
+    const subtitleSearched = ref(false)
+    const applyingSubtitleId = ref("")
+
+    async function searchSubtitles() {
+      const current = item.value
+      if (!current) return
+      subtitleLoading.value = true
+      try {
+        const resp = await mediaSearchSubtitles(current.title, current.year, subtitleLang.value)
+        if (resp.code === 200) {
+          subtitleCandidates.value = resp.data ?? []
+        } else {
+          subtitleCandidates.value = []
+          // 未配置 provider 时后端返回非 200，这里如实提示，不要伪装成「没有字幕」
+          ElMessage.error(resp.message || t("media.subtitle_not_configured"))
+        }
+        subtitleSearched.value = true
+      } finally {
+        subtitleLoading.value = false
+      }
+    }
+
+    function openSubtitleDialog() {
+      subtitleDialog.value = true
+      subtitleCandidates.value = []
+      subtitleSearched.value = false
+      void searchSubtitles()
+    }
+
+    async function applySubtitle(candidate: SubtitleCandidate) {
+      applyingSubtitleId.value = candidate.id
+      try {
+        const resp = await mediaApplySubtitle(itemId.value, candidate)
+        if (resp.code !== 200) {
+          ElMessage.error(resp.message || t("global.failed"))
+          return
+        }
+        ElMessage.success(t("media.subtitle_applied", { path: resp.data ?? "" }))
+        subtitleDialog.value = false
+      } finally {
+        applyingSubtitleId.value = ""
+      }
+    }
+
     const statusText = () => {
       switch (item.value?.status) {
         case MediaItemStatus.Pending:
@@ -273,6 +399,13 @@ export default defineComponent({
                   <ElButton size="small" type={state.value?.watch_later ? "primary" : "default"} onClick={toggleLater}>
                     {t("media.watch_later")}
                   </ElButton>
+                  <ElButton size="small" onClick={openPlaylistDialog}>
+                    <ElIcon style={{ marginRight: "4px" }}><Plus /></ElIcon>
+                    {t("media.add_to_playlist")}
+                  </ElButton>
+                  <ElButton size="small" onClick={openSubtitleDialog}>
+                    {t("media.subtitles")}
+                  </ElButton>
                   {canManage.value && (
                     <ElButton size="small" loading={scraping.value} onClick={scrape}>
                       <ElIcon style={{ marginRight: "4px" }}><Refresh /></ElIcon>
@@ -336,6 +469,120 @@ export default defineComponent({
             {t("media.last_scan")}: {formatTime(current.updatedAt)} ·{" "}
             {current.directory_path}
           </div>
+
+          {/* 加入播放列表：选已有列表，或直接填名字让后端新建 */}
+          <ElDialog
+            modelValue={playlistDialog.value}
+            title={t("media.add_to_playlist")}
+            width="420px"
+            onUpdate:modelValue={(value: boolean) => (playlistDialog.value = value)}
+          >
+            {{
+              default: () => (
+                <div class="ol-dialog-stack">
+                  <ElSelect
+                    modelValue={pickedPlaylistId.value}
+                    style={{ width: "100%" }}
+                    onUpdate:modelValue={(value: number) => (pickedPlaylistId.value = Number(value))}
+                  >
+                    <ElOption label={t("media.new_playlist")} value={0} />
+                    {playlists.value.map((playlist) => (
+                      <ElOption
+                        key={playlist.id}
+                        label={`${playlist.name} (${playlist.item_count})`}
+                        value={playlist.id}
+                      />
+                    ))}
+                  </ElSelect>
+                  {pickedPlaylistId.value === 0 ? (
+                    <ElInput
+                      modelValue={newPlaylistName.value}
+                      placeholder={t("media.playlist_name_placeholder")}
+                      onUpdate:modelValue={(value: string) => (newPlaylistName.value = value)}
+                    />
+                  ) : (
+                    <div class="ol-dialog-hint">{t("media.pick_playlist_hint")}</div>
+                  )}
+                </div>
+              ),
+              footer: () => (
+                <div class="ol-manage-form-actions">
+                  <ElButton onClick={() => (playlistDialog.value = false)}>{t("media.cancel")}</ElButton>
+                  <ElButton type="primary" loading={addingToPlaylist.value} onClick={confirmAddToPlaylist}>
+                    {pickedPlaylistId.value === 0 ? t("media.create_and_add") : t("media.add_to_playlist")}
+                  </ElButton>
+                </div>
+              ),
+            }}
+          </ElDialog>
+
+          {/* 字幕：按标题 + 年份搜，选中即写回媒体文件同目录 */}
+          <ElDialog
+            modelValue={subtitleDialog.value}
+            title={t("media.subtitle_search")}
+            width="620px"
+            onUpdate:modelValue={(value: boolean) => (subtitleDialog.value = value)}
+          >
+            {{
+              default: () => (
+                <div class="ol-dialog-stack">
+                  <div class="ol-dialog-hint">{t("media.subtitle_search_hint")}</div>
+                  <div class="ol-media-tools">
+                    <ElSelect
+                      modelValue={subtitleLang.value}
+                      size="small"
+                      style={{ width: "140px" }}
+                      onUpdate:modelValue={(value: string) => {
+                        subtitleLang.value = value
+                        void searchSubtitles()
+                      }}
+                    >
+                      {SUBTITLE_LANGS.map((lang) => (
+                        <ElOption key={lang.value} label={lang.label} value={lang.value} />
+                      ))}
+                    </ElSelect>
+                    <ElButton size="small" loading={subtitleLoading.value} onClick={() => void searchSubtitles()}>
+                      {t("media.search")}
+                    </ElButton>
+                  </div>
+                  {subtitleCandidates.value.length === 0 ? (
+                    subtitleSearched.value && !subtitleLoading.value ? (
+                      <ElEmpty description={t("media.subtitle_empty")} />
+                    ) : null
+                  ) : (
+                    <div class="ol-subtitle-list">
+                      {subtitleCandidates.value.map((candidate) => (
+                        <div key={candidate.id} class="ol-subtitle-row">
+                          <div class="ol-subtitle-name" title={candidate.name}>
+                            {candidate.name}
+                          </div>
+                          <ElTag size="small" type="info">{candidate.format.toUpperCase()}</ElTag>
+                          <ElTag size="small">{candidate.language}</ElTag>
+                          <span class="ol-media-file-meta">
+                            {t("media.subtitle_downloads", { count: candidate.downloads })}
+                          </span>
+                          <ElButton
+                            size="small"
+                            type="primary"
+                            plain={true}
+                            loading={applyingSubtitleId.value === candidate.id}
+                            onClick={() => void applySubtitle(candidate)}
+                          >
+                            {t("media.subtitle_apply")}
+                          </ElButton>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ),
+              footer: () => (
+                <div class="ol-manage-form-actions">
+                  <ElButton onClick={() => (subtitleDialog.value = false)}>{t("media.close")}</ElButton>
+                </div>
+              ),
+            }}
+          </ElDialog>
         </div>
       )
     }

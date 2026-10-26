@@ -4,11 +4,13 @@ import { ElButton, ElEmpty, ElIcon, ElInput, ElOption, ElSelect, ElTag } from "e
 import { Search, Star, StarFilled, VideoCamera } from "@element-plus/icons-vue"
 import {
   MediaItemStatus,
+  mediaFacets,
   mediaHome,
   mediaImageLink,
   mediaListItems,
   mediaListLibraries,
   mediaUpdateState,
+  type MediaFacets,
   type MediaItem,
   type MediaLibrary,
 } from "~/api/media"
@@ -52,6 +54,12 @@ export default defineComponent({
     const total = ref(0)
     const loading = ref(false)
     const continueWatching = ref<MediaItem[]>([])
+    /** 筛选条数据源（题材/年份聚合，只取可见库）。 */
+    const facets = ref<MediaFacets | null>(null)
+    /** 当前筛选：空串/0 表示不筛。年份精确匹配靠 year_from = year_to。 */
+    const genre = ref("")
+    const year = ref(0)
+    const ratingMin = ref(0)
     /** 收藏态缓存：网格卡片上直接点星切换，不用进详情页。 */
     const favorites = ref<Set<number>>(new Set())
     /** 海报加载失败的条目：换成占位块而不是裂图。 */
@@ -73,6 +81,7 @@ export default defineComponent({
       if (resp.code === 200) libraries.value = resp.data ?? []
       const fromUrl = Number(route.query.library ?? 0)
       libraryId.value = libraries.value.some((lib) => lib.id === fromUrl) ? fromUrl : 0
+      void loadFacets()
       void loadItems()
     }
 
@@ -86,6 +95,11 @@ export default defineComponent({
           keyword: keyword.value.trim() || undefined,
           sort: sort.value,
           desc: SORTS.find((item) => item.value === sort.value)?.desc,
+          genre: genre.value || undefined,
+          // 年份是精确匹配：后端只有区间参数，两端设成同一年即可
+          year_from: year.value || undefined,
+          year_to: year.value || undefined,
+          rating_min: ratingMin.value || undefined,
         })
         if (resp.code === 200) {
           items.value = resp.data?.content ?? []
@@ -97,6 +111,12 @@ export default defineComponent({
       } finally {
         loading.value = false
       }
+    }
+
+    /** facets 跟着库切换刷新：换了库，题材/年份的可选项本来就不同。 */
+    async function loadFacets() {
+      const resp = await mediaFacets(libraryId.value || undefined)
+      if (resp.code === 200) facets.value = resp.data
     }
 
     onMounted(() => {
@@ -115,7 +135,11 @@ export default defineComponent({
 
     watch([libraryId, sort], () => {
       page.value = 1
+      // 换库时清掉库相关的筛选：上一个库才有的题材留在 URL 里会得到空结果
+      genre.value = ""
+      year.value = 0
       syncQuery()
+      void loadFacets()
       void loadItems()
     })
     // 关键词防抖：输入停顿后才真正发请求
@@ -126,6 +150,10 @@ export default defineComponent({
         page.value = 1
         void loadItems()
       }, 350)
+    })
+    watch([genre, year, ratingMin], () => {
+      page.value = 1
+      void loadItems()
     })
     watch(page, () => void loadItems())
 
@@ -251,6 +279,92 @@ export default defineComponent({
             </ElSelect>
           </div>
         </div>
+
+        {/*
+          维度入口：人物 / 片商 / 系列 / 口味 / 播放列表各自独立成页。
+          做成按钮而不是 tab，是因为它们是**浏览视图**而不是库内筛选；
+          tab 会让人以为切换后还在同一个列表里。
+        */}
+        <div class="ol-media-dim-nav">
+          {[
+            { name: "media-persons", label: t("media.persons") },
+            { name: "media-studios", label: t("media.studios") },
+            { name: "media-series", label: t("media.series") },
+            { name: "media-playlists", label: t("media.tab_playlists") },
+            { name: "media-taste", label: t("media.tab_taste") },
+          ].map((entry) => (
+            <ElButton
+              key={entry.name}
+              size="small"
+              plain={true}
+              onClick={() => router.push({ name: entry.name })}
+            >
+              {entry.label}
+            </ElButton>
+          ))}
+        </div>
+
+        {/* 筛选条：数据来自 /media/facets（只含当前库可见条目的聚合） */}
+        {facets.value && (facets.value.genres.length > 0 || facets.value.years.length > 0) ? (
+          <div class="ol-media-facets">
+            <div class="ol-media-facet-row">
+              <span class="ol-media-facet-label">{t("media.filter_genre")}</span>
+              <ElTag
+                size="small"
+                class={genre.value === "" ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
+                onClick={() => (genre.value = "")}
+              >
+                {t("media.filter_all")}
+              </ElTag>
+              {facets.value.genres.slice(0, 16).map((bucket) => (
+                <ElTag
+                  key={bucket.value}
+                  size="small"
+                  class={genre.value === bucket.value ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
+                  onClick={() => (genre.value = genre.value === bucket.value ? "" : bucket.value)}
+                >
+                  {bucket.value} <span class="ol-media-facet-count">{bucket.count}</span>
+                </ElTag>
+              ))}
+            </div>
+            <div class="ol-media-facet-row">
+              <span class="ol-media-facet-label">{t("media.filter_year")}</span>
+              <ElTag
+                size="small"
+                class={year.value === 0 ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
+                onClick={() => (year.value = 0)}
+              >
+                {t("media.filter_all")}
+              </ElTag>
+              {facets.value.years.slice(0, 16).map((bucket) => {
+                const value = Number(bucket.value)
+                return (
+                  <ElTag
+                    key={bucket.value}
+                    size="small"
+                    class={year.value === value ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
+                    onClick={() => (year.value = year.value === value ? 0 : value)}
+                  >
+                    {bucket.value} <span class="ol-media-facet-count">{bucket.count}</span>
+                  </ElTag>
+                )
+              })}
+              <span class="ol-media-facet-label" style={{ marginLeft: "12px" }}>
+                {t("media.filter_rating")}
+              </span>
+              <ElSelect
+                modelValue={ratingMin.value}
+                size="small"
+                style={{ width: "90px" }}
+                onUpdate:modelValue={(value: number) => (ratingMin.value = Number(value))}
+              >
+                {[0, 6, 7, 8, 9].map((value) => (
+                  <ElOption key={value} label={value === 0 ? t("media.filter_all") : `≥ ${value}`} value={value} />
+                ))}
+              </ElSelect>
+            </div>
+          </div>
+        ) : null}
 
         {libraries.value.length === 0 && !loading.value ? (
           <ElEmpty description={t("media.no_libraries")} />

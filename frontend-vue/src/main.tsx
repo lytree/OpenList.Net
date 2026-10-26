@@ -6,6 +6,7 @@ import { VueQueryPlugin } from "@tanstack/vue-query"
 import "element-plus/theme-chalk/dark/css-vars.css"
 import "./styles/tokens.css"
 import "./styles/layout.css"
+import "./styles/media-extra.css"
 import "./style.css"
 
 import App from "./App"

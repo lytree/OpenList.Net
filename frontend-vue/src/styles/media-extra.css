@@ -1,0 +1,530 @@
+
+/* ============================================================================
+ * 媒体域维度页（M4 第三片）：人物 / 片商 / 系列 / 口味 / 播放列表
+ * 这条分割线之后的所有类都属于媒体域，命名统一 ol-media-* 前缀，
+ * 避免和首页文件浏览的 ol-* 规则串味。
+ * ========================================================================== */
+
+.ol-media-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-3);
+  flex-wrap: wrap;
+}
+
+.ol-media-page-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-media-page-sub {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+/* ---- 维度入口 ---- */
+.ol-media-dim-nav {
+  display: flex;
+  gap: var(--ol-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--ol-space-3);
+}
+
+/* ---- 筛选条 ---- */
+.ol-media-facets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--ol-space-3);
+  margin-bottom: var(--ol-space-4);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-media-facet-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ol-media-facet-label {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  margin-right: 2px;
+}
+
+.ol-media-chip-tag {
+  cursor: pointer;
+  user-select: none;
+}
+
+.ol-media-chip-tag.is-on {
+  background: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+  color: #fff;
+}
+
+.ol-media-facet-count {
+  opacity: 0.65;
+  margin-left: 2px;
+}
+
+/* ---- 人物 ---- */
+.ol-media-person-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--ol-space-4) var(--ol-space-3);
+  margin-bottom: var(--ol-space-4);
+}
+
+.ol-media-person-card {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: var(--ol-space-3) var(--ol-space-2);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+  transition: border-color 0.15s ease;
+}
+
+.ol-media-person-card:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+
+.ol-media-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--el-fill-color-light);
+  color: var(--ol-text-secondary);
+  font-size: 22px;
+  font-weight: 600;
+  flex: none;
+}
+
+.ol-media-avatar.is-lg {
+  width: 84px;
+  height: 84px;
+  font-size: 32px;
+}
+
+.ol-media-person-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ol-text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-media-person-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-media-person-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-4);
+  padding: var(--ol-space-4);
+  margin-bottom: var(--ol-space-4);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-lg);
+  background: var(--ol-bg-surface);
+}
+
+.ol-media-person-head-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+  min-width: 0;
+}
+
+.ol-media-detail-title-plain {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+/* ---- 片商 / 系列（标签云） ---- */
+.ol-media-tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ol-space-2);
+  margin-bottom: var(--ol-space-4);
+}
+
+.ol-media-taxonomy-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: 999px;
+  background: var(--ol-bg-surface);
+  cursor: pointer;
+  max-width: 260px;
+}
+
+.ol-media-taxonomy-chip:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+
+.ol-media-taxonomy-name {
+  font-size: 13px;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-media-taxonomy-count {
+  font-size: 11px;
+  color: var(--ol-text-muted);
+  background: var(--el-fill-color-light);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+/* ---- 口味画像 ---- */
+.ol-media-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--ol-space-3);
+  margin-bottom: var(--ol-space-4);
+}
+
+.ol-media-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-media-stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-media-stat-label {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-media-two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--ol-space-3);
+}
+
+.ol-media-panel {
+  padding: var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-media-bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ol-media-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  font-size: 12px;
+}
+
+.ol-media-bar-label {
+  width: 96px;
+  flex: none;
+  color: var(--ol-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-media-bar-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+  overflow: hidden;
+}
+
+.ol-media-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--el-color-primary);
+}
+
+.ol-media-bar-value {
+  width: 40px;
+  flex: none;
+  text-align: right;
+  color: var(--ol-text-muted);
+}
+
+.ol-media-taste-summary {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-media-person-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ol-media-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 3px;
+  border: 1px solid var(--ol-border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--ol-text);
+  cursor: pointer;
+}
+
+.ol-media-chip:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+
+.ol-media-chip-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--el-fill-color);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ol-media-chip-count {
+  color: var(--ol-text-muted);
+}
+
+/* ---- 播放列表 ---- */
+.ol-media-playlist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--ol-space-3);
+}
+
+.ol-media-playlist-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  overflow: hidden;
+  background: var(--ol-bg-surface);
+}
+
+.ol-media-playlist-cover {
+  display: grid;
+  gap: 1px;
+  height: 116px;
+  background: var(--el-fill-color-light);
+  cursor: pointer;
+}
+
+.ol-media-playlist-cover.cols-1 {
+  grid-template-columns: 1fr;
+}
+
+.ol-media-playlist-cover.cols-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.ol-media-playlist-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ol-media-playlist-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--ol-space-3);
+}
+
+.ol-media-playlist-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-media-playlist-desc {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  min-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-media-playlist-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--ol-text-muted);
+}
+
+.ol-media-playlist-ops {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.ol-media-playlist-detail-desc {
+  margin: 0 0 var(--ol-space-3);
+  font-size: 13px;
+  color: var(--ol-text-secondary);
+}
+
+/* ---- 播放列表队列 ---- */
+.ol-media-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+}
+
+.ol-media-queue-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-3);
+  padding: 8px var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-media-queue-index {
+  width: 24px;
+  flex: none;
+  text-align: right;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-media-queue-poster {
+  width: 40px;
+  height: 56px;
+  flex: none;
+  border-radius: var(--ol-radius-sm);
+  overflow: hidden;
+  background: var(--el-fill-color-light);
+  cursor: pointer;
+}
+
+.ol-media-queue-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ol-media-queue-meta {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.ol-media-queue-title {
+  font-size: 13px;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-media-queue-sub {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-media-queue-ops {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.ol-media-code {
+  font-family: var(--ol-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--el-color-warning);
+}
+
+/* ---- 字幕对话框 ---- */
+.ol-subtitle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.ol-subtitle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  padding: 6px var(--ol-space-2);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-sm);
+}
+
+.ol-subtitle-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-dialog-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+}
+
+.ol-media-playlist-cover-cell {
+  background: var(--el-fill-color);
+}

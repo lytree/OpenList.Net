@@ -175,7 +175,7 @@ Element Plus 是 VDOM 组件库，性能热点（el-table 内部）也在 VDOM �
 | M1 | 文件管理全量 + 上传管线 5 模式 | 22 | ✅ **完成**：浏览体验（21）+ 操作集 7 项（22）+ 预览器第二批（23）+ 批量重命名（24）+ 上传 + 分享 |
 | M2 | 管理台 12 模块（storages 动态表单优先原型） | 18 | 进行中（7 个模块 ✅：storages/users/metas/indexes/tasks/settings/shares；剩余 4 个后端无接口，见第 16–19 节） |
 | M3 | 预览器 27 项 | 13 | 进行中（**20 项 ✅**：第 16 节 10 + 第 23 节 8 + 第 25 节编辑器 + 第 26 节种子；剩 video360 / flash） |
-| M4 | 媒体域（wall 可评估 Vapor 加速）+ 对接后端新增能力 | 14 | 进行中：浏览/详情/播放/进度（第 27 节）+ 管理台（第 28 节）已交付；**后端已补齐播放列表/人物/片商/系列/口味/番号/字幕（第 29 节），前端未接** |
+| M4 | 媒体域（wall 可评估 Vapor 加速）+ 对接后端新增能力 | 14 | ✅ **前端全部接上**：浏览/详情/播放/进度（27）+ 管理台（28）+ 人物/片商/系列/口味/播放列表/字幕（30）；剩「整库刮削」按钮 |
 | M5 | 切换发布 + A–H 全量回归 + 桌面打包验证 | 5 | |
 | **合计** | | **80** | |
 
@@ -1222,8 +1222,104 @@ node scripts/verify-ops.mjs     # 后跑（会重建装置并改数据）
 
 ### 29.7 下一步
 
-1. **M4 第三片**：前端接 §29.2 的端点 —— 播放列表（CRUD + 详情页「加入播放列表」+ 重排）、
-   人物页、片商/系列页、口味画像（stats）、facets 筛选侧栏、字幕搜索。这是 M4 唯一未收口的部分。
+1. ~~**M4 第三片**：前端接 §29.2 的端点~~ ✅ 已交付（第 30 节）。
+   播放列表（CRUD + 详情页「加入播放列表」+ 重排）、人物页、片商/系列页、口味画像（stats）、
+   facets 筛选侧栏、字幕搜索全部接上。
 2. **M3 收尾**：video360 / flash 两个预览器（27 项目标里只剩这两个）。
 3. 管理台「整库刮削」按钮（端点 `POST /libraries/{id}/scrape` 已有，见 28.5）。
 4. **M5**：`frontend-vue` 切换发布 + A–H 全量回归 + 桌面打包验证。切换前置条件是 1–3 收口。
+
+## 30. M4 第三片：人物 / 片商 / 系列 / 口味 / 播放列表 / 字幕（2026-10-26）
+
+§29.7 第 1 项。至此 §29.2 列出的 8 组后端端点全部接上，M4 只差「整库刮削」按钮。
+
+### 30.1 交付清单
+
+| 文件 | 内容 |
+|---|---|
+| `api/media.ts` | facets / stats / taste / persons(+items) / studios / series / playlists 全家桶 / subtitles 的类型与封装（+230 行） |
+| `components/MediaGrid.tsx` | 条目海报网格（复用）；与首页 `GridView` 的区别是前者渲染**条目**（海报/评分/收藏/状态），后者渲染**文件**（图标/大小/时间/右键） |
+| `pages/media/PersonList.tsx` | 人物列表：关键词防抖 + 角色筛选 + 分页；后端固定「关联条目数降序」 |
+| `pages/media/PersonDetail.tsx` | 人物详情：聚合接口取头部（角色标签/作品数），网格走分页接口 |
+| `pages/media/TaxonomyList.tsx` | 片商 / 系列列表（**共用**，靠路由 `meta.kind` 区分） |
+| `pages/media/TaxonomyDetail.tsx` | 片商 / 系列作品页（共用） |
+| `pages/media/Playlists.tsx` | 播放列表：建 / 改名改描述 / 删除 / 四宫格封面 |
+| `pages/media/PlaylistDetail.tsx` | 队列：上移 / 下移 / 移除 / 跳详情 |
+| `pages/media/Taste.tsx` | 口味画像：库级统计（可切库）+ 个人口味（跨库） |
+| `pages/media/ItemDetail.tsx` | ＋「加入播放列表」对话框、「字幕」搜索对话框 |
+| `pages/media/index.tsx` | ＋ 5 个维度入口、facets 筛选条（题材 / 年份 / 评分≥） |
+| `utils/mediaCatalog.ts` + spec | 纯函数：`moveInArray` / `moveIdBy` / `percentOf` / `hoursOf` / `minutesOf` / `nameInitial` / `topBuckets`（13 用例） |
+| `styles/media-extra.css` | 本片全部新样式（独立文件，不往 2200 行的 layout.css 里继续堆） |
+| `scripts/verify-media-dimensions.mjs` | 真机验收 **34 项**（装置自生成） |
+| `IMediaPlaylistService.cs` + `MediaPlaylistService.cs` | 摘要新增 `preview_items`（见 30.2） |
+
+### 30.2 唯一一处后端改动：播放列表摘要带封面信息
+
+`MediaPlaylistSummary` 原来只给 `preview_item_ids`。前端拼四宫格只能盲发
+`/items/{id}/image`，**没有海报的条目必然 404** —— 画面靠 onError 降级成空块，
+但浏览器会为每次 404 记一条控制台错误，`verify` 的「零错误」断言过不了。
+
+改法是让摘要多带一组 `preview_items: [{id, title, poster_path}]`（列表接口填充）。
+前端据此**只给真有海报的条目发请求**，`preview_item_ids` 保留给只认 id 的客户端。
+这比在验收脚本里过滤 404 更诚实：请求根本不该发。
+
+### 30.3 五个设计决策
+
+1. **片商与系列共用一个组件**：两者数据同构（`{id, name, item_count}` + 同名 items 端点），
+   差别只有文案。复制两份只改 i18n 键的页面 = 两处要同步修的 bug。
+   维度由路由 `meta.kind` 决定，切换维度时组件实例会被复用，所以 `watch(kind)` 必须重新取数。
+2. **人物详情分两次请求**：聚合接口 `GET /persons/{id}` 不分页，作品上千的演员一次全返回不划算；
+   只拿它算头部（角色标签、作品数），网格走 `GET /persons/{id}/items` 分页。两者口径一致。
+3. **重排传完整顺序 + 乐观更新**：`reorder` 接口吃完整 id 数组（后端把未列出的成员按相对顺序追加到末尾），
+   前端只需「挪一格」→ `moveIdBy` 算出新数组。首尾边界由纯函数收敛成「原样返回」，
+   调用方不用先判断是否真的移动。连点用 `busy` 串行化，否则后到的请求会用旧顺序覆盖。
+4. **换库清筛选**：facets 跟着 `library_id` 变，上一个库才有的题材留在 URL 里会得到空结果，
+   所以在 `watch([libraryId, sort])` 里一并清 `genre/year`。
+5. **口味页两套数据别混**：`GET /stats` 是**库的客观统计**（全体用户同一库看到相同数字），
+   `GET /taste` 是**本人的主观偏好**（收藏/看过/评分加权）。因此只有 stats 支持切库，
+   taste 不支持 —— 偏好是跨库累积的，按库切就变成另一个问题。
+
+### 30.4 验收
+
+`scripts/verify-media-dimensions.mjs` **34/34**，装置由脚本自生成到 `.e2e/dim-fixture`：
+三个条目（Blade Runner 1982 / Blade Runner 2049 / Arrival），每目录一个占位 `.mp4` + Kodi NFO，
+刻意构成 系列×2、片商×2（Warner）、导演×2（Denis Villeneuve，跨片商）、演员×2（Harrison Ford）。
+**用 NFO 而不是 TMDB**：人物/片商/系列只有刮削后才有数据，离线装置走 local 才能稳定复现。
+
+覆盖：建库→扫描→按目录聚合 3 条目、facets 聚合计数、persons/studios/series 计数、
+stats 数字、首页 facets 条与 5 个维度入口、年份筛选后网格从 3 条变 1 条、
+人物列表 5 卡 / 详情标题+2 作品+Director 标签、片商页与详情 2 部、系列页、
+口味页 6 张统计卡 + 11 行条形图、播放列表建卡→详情页加入 2 条→上移重排→移除、
+摘要 `preview_items` 契约、字幕对话框打开、**零控制台错误**。
+
+用法：
+
+```bash
+# 隔离后端（临时库 + 独立端口 + 指向新构建的 dist）
+cd .e2e && rm -rf data && AdminPassword=e2e12345 ASPNETCORE_URLS=http://127.0.0.1:5011 \
+  DistDir=$PWD/../frontend-vue/dist dotnet ../src/OpenList.Server/bin/Debug/net10.0/OpenList.Server.dll
+# 另一个终端
+cd frontend-vue && BASE=http://127.0.0.1:5011 ADMIN_PASS=e2e12345 node scripts/verify-media-dimensions.mjs
+```
+
+`pnpm typecheck` 0 错误 · `pnpm test` 135 用例（新增 13）· `pnpm build` 通过 ·
+`dotnet test` 464 通过 / 1 跳过（无回退）。
+
+### 30.5 遗留
+
+1. **人物头像显示不了**：后端只给条目图做了「可见性校验 + 读取」的端点，人物没有。
+   `profile_path` 是 VFS 路径，网格里逐张取签名不可接受，目前统一用姓名首字占位。
+   要补需要 `GET /media/persons/{id}/image`（与条目图同款实现即可）。
+2. **片商/系列没有单条详情接口**：只有 `/studios/{id}/items`，拿不到名称。
+   跳转时把列表里的 `name` 塞进 query 顶着，直接输 URL 进来会退化成 `Studio #id`。
+3. **字幕只能在详情页按标题搜**：provider 未配置时如实报错，但 UI 里没有配置入口
+   （设置在管理台 settings 的 `media_opensubtitles_*` 项）。
+4. **播放列表不能整单连播**：只能逐条进详情页播。要做需要播放器维护队列与「下一集」语义。
+5. **口味页无时间维度**：stats 是全量聚合，没有「最近 30 天」这类滑动窗口。
+6. **整库刮削按钮仍未做**（承 §28.5）：端点 `POST /libraries/{id}/scrape` 一直就绪。
+
+### 30.6 下一步
+
+1. **M3 收尾**：video360 / flash 两个预览器（27 项目标里只剩这两个）。
+2. 管理台「整库刮削」按钮。
+3. **M5**：`frontend-vue` 切换发布 + A–H 全量回归 + 桌面打包验证。

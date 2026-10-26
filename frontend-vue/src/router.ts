@@ -47,6 +47,62 @@ const routes: RouteRecordRaw[] = [
         component: () => import("~/pages/media/ItemDetail"),
         meta: { title: "media.title" },
       },
+      // ---- 媒体域维度页（M4 第三片）----
+      // 片商/系列共用一个列表组件与一个详情组件，靠 meta.kind 区分维度
+      {
+        path: "media/persons",
+        name: "media-persons",
+        component: () => import("~/pages/media/PersonList"),
+        meta: { title: "media.persons" },
+      },
+      {
+        path: "media/persons/:id(\\d+)",
+        name: "media-person",
+        component: () => import("~/pages/media/PersonDetail"),
+        meta: { title: "media.persons" },
+      },
+      {
+        path: "media/studios",
+        name: "media-studios",
+        component: () => import("~/pages/media/TaxonomyList"),
+        meta: { title: "media.studios", kind: "studios" },
+      },
+      {
+        path: "media/studios/:id(\\d+)",
+        name: "media-studio",
+        component: () => import("~/pages/media/TaxonomyDetail"),
+        meta: { title: "media.studios", kind: "studios" },
+      },
+      {
+        path: "media/series",
+        name: "media-series",
+        component: () => import("~/pages/media/TaxonomyList"),
+        meta: { title: "media.series", kind: "series" },
+      },
+      {
+        path: "media/series/:id(\\d+)",
+        name: "media-series-detail",
+        component: () => import("~/pages/media/TaxonomyDetail"),
+        meta: { title: "media.series", kind: "series" },
+      },
+      {
+        path: "media/playlists",
+        name: "media-playlists",
+        component: () => import("~/pages/media/Playlists"),
+        meta: { title: "media.tab_playlists" },
+      },
+      {
+        path: "media/playlists/:id(\\d+)",
+        name: "media-playlist",
+        component: () => import("~/pages/media/PlaylistDetail"),
+        meta: { title: "media.tab_playlists" },
+      },
+      {
+        path: "media/taste",
+        name: "media-taste",
+        component: () => import("~/pages/media/Taste"),
+        meta: { title: "media.tab_taste" },
+      },
       {
         path: "@manage",
         component: () => import("~/layouts/ManageLayout"),
