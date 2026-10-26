@@ -174,7 +174,7 @@ Element Plus 是 VDOM 组件库，性能热点（el-table 内部）也在 VDOM �
 | M0 | 脚手架 + 渲染基线 + 主题 token + API 客户端 + i18n + 登录/鉴权 + 外壳布局 | 8 | ✅ 完成（2026-10-25，见第 11 节） |
 | M1 | 文件管理全量 + 上传管线 5 模式 | 22 | ✅ **完成**：浏览体验（21）+ 操作集 7 项（22）+ 预览器第二批（23）+ 批量重命名（24）+ 上传 + 分享 |
 | M2 | 管理台 12 模块（storages 动态表单优先原型） | 18 | 进行中（7 个模块 ✅：storages/users/metas/indexes/tasks/settings/shares；剩余 4 个后端无接口，见第 16–19 节） |
-| M3 | 预览器 27 项 | 13 | 进行中（**20 项 ✅**：第 16 节 10 + 第 23 节 8 + 第 25 节编辑器 + 第 26 节种子；剩 video360 / flash） |
+| M3 | 预览器 27 项 | 13 | ✅ **完成**：registry 现覆盖 **22 个注册预览器**（第 16/23/25/26 节 + 第 31 节 video360/flash）；`aliyun_video` 与 `video_box` 按 §397/§398 结论不做 |
 | M4 | 媒体域（wall 可评估 Vapor 加速）+ 对接后端新增能力 | 14 | ✅ **前端全部接上**：浏览/详情/播放/进度（27）+ 管理台（28）+ 人物/片商/系列/口味/播放列表/字幕（30）；剩「整库刮削」按钮 |
 | M5 | 切换发布 + A–H 全量回归 + 桌面打包验证 | 5 | |
 | **合计** | | **80** | |
@@ -1320,6 +1320,90 @@ cd frontend-vue && BASE=http://127.0.0.1:5011 ADMIN_PASS=e2e12345 node scripts/v
 
 ### 30.6 下一步
 
-1. **M3 收尾**：video360 / flash 两个预览器（27 项目标里只剩这两个）。
+1. ~~**M3 收尾**：video360 / flash 两个预览器~~ ✅ 已交付（第 31 节）。
 2. 管理台「整库刮削」按钮。
 3. **M5**：`frontend-vue` 切换发布 + A–H 全量回归 + 桌面打包验证。
+
+## 31. M3 收尾：video360 / flash（2026-10-26）
+
+§30.6 第 1 项。registry 里最后两个空缺补上，至此 **22 个注册预览器**全部可用。
+
+### 31.1 交付清单
+
+| 文件 | 内容 |
+|---|---|
+| `previews/Video360Preview.tsx` | 360°/VR 全景视频：three.js 球面 + `VideoTexture`，拖动转视角、滚轮缩放、重置视角；WebGL 不可用时退回普通播放器 |
+| `previews/FlashPreview.tsx` | `.swf` 用 Ruffle（WASM）播放，按需加载 `ruffle.js`，失败给出可操作的排查提示 |
+| `scripts/copy-ruffle.mjs` | 从 `node_modules/@ruffle-rs/ruffle` 复制 5 个运行时文件到 `public/ruffle/`（幂等） |
+| `package.json` | `dev` / `build` 前置执行复制；另留 `prepare:ruffle` 手动入口 |
+| `styles/preview-extra.css` | 两个预览器的样式（独立文件，不挤进 2700 行的 layout.css） |
+| `registry.ts` + spec | 新增两条定义 + 4 个匹配用例（`video360` 只对带全景标记的视频出现；`swf` 压过 image） |
+| `scripts/verify-preview-extra.mjs` | 真机验收 **15 项**（装置自生成） |
+
+### 31.2 四个坑（都表现为「黑屏」，原因各不相同）
+
+| 现象 | 真因 | 修法 |
+|---|---|---|
+| `.swf` 默认打开的是「图片查看器」 | 后端扩展名表沿袭 Go 的 `GetObjType`，**swf 归 IMAGE**，image 预览器同样命中且 order 相同 | flash 的 `order: 19` 压过 image(20) |
+| Ruffle 挂上了但黑屏、停在「点击取消静音」遮罩后面 | `RufflePlayer.config` 的赋值**必须在脚本执行前**。脚本跑完再改属性，`createPlayer()` 早读过默认值 | 先把配置挂到 `window.RufflePlayer`，再插 script |
+| 同上，且元素上没有 `src` 属性 | selfhosted 版的 `src` 是「反射属性」，元素尚未被 `customElements` 升级时赋值会变成普通 JS 属性，**既不加载也不报错** | 改用官方方法 `player.load(url)` |
+| 360 canvas 有尺寸但全黑 | 相机在球心，能看到的只有球体**内表面**；`MeshBasicMaterial` 默认 `FrontSide` 把内表面全剔除了 | `side: THREE.BackSide`（`scale.x = -1` 只负责不镜像） |
+
+后两条都值得写进验收断言：前者靠「元素存在」看不出来，后者靠「canvas 尺寸」也看不出来。
+脚本因此额外断言 **视频源 `currentTime` 在前进**（纹理侧真拿到帧），并断言切走后 canvas 已销毁
+（three 的渲染循环不外泄）。
+
+### 31.3 Ruffle 资源为什么自托管、为什么不进 git
+
+`@ruffle-rs/ruffle` 是 **selfhosted** 包：`ruffle.js` 是个 IIFE，运行时按
+`document.currentScript` 的目录去加载 `core.ruffle.<hash>.js` 与 ~14 MB 的 wasm。
+交给打包器 import 会被改写路径，所以只能当静态资源放在 web 根下。
+
+- 5 个文件合计 **27.9 MB**，由 `scripts/copy-ruffle.mjs` 从 node_modules 复制，
+  `dev`/`build` 前置执行（pnpm 默认不跑 `preDev`/`preBuild` 钩子，所以显式串在命令里）；
+- `public/ruffle/` 已 gitignore —— 二进制不该进版本库，文件名带 hash，随依赖版本重建；
+- **桌面打包注意**：`dotnet run build/build.cs -- --app=desktop` 会带 `frontend-vue/dist`，
+  `public/ruffle` 在构建时已进 dist，无需额外步骤；反过来只拷源码不给 dist 就会缺资源
+  （此时页面会显示可操作的报错文案，而不是白屏）。
+
+体积影响：`three` 是懒加载 chunk（720 KB / gzip ~185 KB），只在打开 360 视频时下载；
+Ruffle 的 14 MB wasm 只在打开 `.swf` 时请求，首屏零负担。
+
+### 31.4 验收
+
+`scripts/verify-preview-extra.mjs` **15/15**。装置由脚本自生成到 `.e2e/preview-extra`：
+
+- `pano_360.mp4`：ffmpeg 生成的 8 秒 **1280×640（2:1）** 视频 —— 等距柱状投影的典型宽高比。
+  内容是不是真全景不重要，验证的是「纹理链路上有没有画面」；
+- `legacy.swf`：脚本里**手工拼的最小合法 SWF**（FWS 头 + RECT + 12fps + 单帧 ShowFrame，30 字节）。
+  为什么不用无效字节：Ruffle 会直接弹解析错误，那样只验证了「错误 UI 能显示」，验证不到播放链路。
+
+覆盖：默认选中普通播放器 → 下拉出现 Video360 → canvas 尺寸 → 拖动后仍在 → 未走降级 →
+`currentTime` 前进（4.7s/1280×640/未暂停）→ 切走后 canvas 销毁 → swf 默认选中 Flash →
+`ruffle-player` 挂载 → 穿透两层 shadow root 找到 canvas(1136×630) → 无失败提示 → 零控制台错误。
+
+无头浏览器必须显式开 SwiftShader（`--use-gl=angle --use-angle=swiftshader
+--enable-unsafe-swiftshader`），否则拿不到 WebGL 上下文，测到的是降级分支而不是全景渲染。
+
+```bash
+cd .e2e/pv && AdminPassword=e2e12345 ASPNETCORE_URLS=http://127.0.0.1:5012 \
+  DistDir=$PWD/../../frontend-vue/dist dotnet ../../src/OpenList.Server/bin/Debug/net10.0/OpenList.Server.dll
+# 另一个终端
+cd frontend-vue && BASE=http://127.0.0.1:5012 node scripts/verify-preview-extra.mjs
+```
+
+`pnpm typecheck` 0 错误 · `pnpm test` 139 用例（+4）· `pnpm build` 通过。
+
+### 31.5 遗留
+
+1. **360 只能靠文件名识别**：`360 / VR / pano / equirect` 这类标记命中才提供入口。
+   视频容器里的投影信息（SV3D / equirect 元数据）目前没人解析，误判率取决于命名习惯。
+2. **无热键与陀螺仪**：桌面端拖动 + 滚轮够用；移动端没有 deviceorientation 支持。
+3. **Flash 的播放控制交给 Ruffle 自带右键菜单**：音量/画质/存档都在里面，我们没做外层控件。
+4. `aliyun_video`（需阿里云盘播放器 SDK + provider 身份）与 `video_box`（artplayer + ASS 字幕）
+   按 §397/§398 的结论仍未做 —— 它们需要专用运行时或线上环境才能验证，不是工作量问题。
+
+### 31.6 下一步
+
+1. 管理台「整库刮削」按钮（承 §28.5）。
+2. **M5**：`frontend-vue` 切换发布 + A–H 全量回归 + 桌面打包验证。

@@ -73,6 +73,26 @@ const defs: PreviewDef[] = [
     component: defineAsyncComponent(() => import("./VideoPreview")),
   },
   {
+    key: "video360",
+    // 只对**文件名里带全景标记**的视频额外提供，且排在普通播放器之后（order 21）：
+    // 全景片名不写 360/VR/pano 的极少，用「按类型全给」会污染所有视频的预览下拉。
+    // 文件名命中仍是普通视频，默认选中 video，想看球面投影的人自己切过来。
+    match: (ctx) =>
+      ctx.type === ObjType.VIDEO &&
+      /(^|[^a-z0-9])(360|vr|pano|panorama|equirect|equirectangular)([^a-z0-9]|$)/i.test(ctx.name),
+    order: 21,
+    component: defineAsyncComponent(() => import("./Video360Preview")),
+  },
+  {
+    key: "flash",
+    // .swf 在后端扩展名表里归 IMAGE（沿袭 Go 的 GetObjType：Flash 动画当图片看），
+    // 所以 image 预览器也会命中它 —— 用 order 19 压过 image(20)，
+    // 否则默认选中的是「图片查看器」，只会显示一个裂图。
+    exts: ["swf"],
+    order: 19,
+    component: defineAsyncComponent(() => import("./FlashPreview")),
+  },
+  {
     key: "audio",
     type: ObjType.AUDIO,
     exts: ["mp3", "flac", "wav", "aac", "m4a", "ogg", "opus", "wma", "ape", "alac"],

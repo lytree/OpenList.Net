@@ -8,3 +8,7 @@ dist
 shot-*.png
 # 只忽略本目录下的 login* 现场文件（login.yaml / login2 快照），别误伤 src/lang/en/login.json
 /login*
+
+# Ruffle 运行时资源：由 scripts/copy-ruffle.mjs 从 node_modules 复制，
+# dev/build 前置执行。~28 MB 的 wasm 不进版本库（见 docs §31）。
+public/ruffle/

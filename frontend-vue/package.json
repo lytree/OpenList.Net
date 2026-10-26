@@ -8,8 +8,9 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "prepare:ruffle": "node scripts/copy-ruffle.mjs",
+    "dev": "node scripts/copy-ruffle.mjs && vite",
+    "build": "node scripts/copy-ruffle.mjs && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -26,6 +27,7 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@element-plus/icons-vue": "^2.3.1",
+    "@ruffle-rs/ruffle": "0.7.1",
     "@tanstack/vue-query": "^5.62.0",
     "@vueuse/core": "^12.0.0",
     "asciinema-player": "^3.17.0",
@@ -40,6 +42,7 @@
     "marked": "^18.1.1",
     "pinia": "^3.0.0",
     "pptx-preview": "^1.0.7",
+    "three": "0.186.1",
     "vue": "3.5.22",
     "vue-echarts": "^7.0.3",
     "vue-router": "^4.5.0",
@@ -47,6 +50,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/three": "0.186.0",
     "@vue/test-utils": "^2.4.6",
     "jsdom": "^25.0.1",
     "playwright": "1.64.1",

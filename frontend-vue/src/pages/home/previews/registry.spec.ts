@@ -76,6 +76,41 @@ describe("resolvePreviews", () => {
     expect(keys(resolvePreviews(file("a.plist", ObjType.UNKNOWN)))[0]).toBe("plist")
     expect(keys(resolvePreviews(file("a.ipa", ObjType.UNKNOWN)))[0]).toBe("ipa")
   })
+
+  it("swf 走 Flash 预览器，且不会掉进「按文本打开」", () => {
+    const result = keys(resolvePreviews(file("legacy.swf", ObjType.UNKNOWN)))
+    expect(result[0]).toBe("flash")
+    expect(result).not.toContain("text")
+  })
+
+  it("swf 被后端归为 IMAGE 时仍默认选 Flash（否则只会显示裂图）", () => {
+    // 后端扩展名表沿袭 Go：swf 在 image 里。image 预览器会命中它，
+    // 必须靠 order(19 < 20) 压过去。
+    const entries = keys(resolvePreviews(file("legacy.swf", ObjType.IMAGE)))
+    expect(entries[0]).toBe("flash")
+    expect(entries).toContain("image")
+  })
+
+  it("video360 只对带全景标记的视频出现，且默认仍选普通播放器", () => {
+    for (const name of [
+      "pano_360.mp4",
+      "VR-Concert.mp4",
+      "equirect-demo.mp4",
+      "demo panorama.mp4",
+    ]) {
+      const entries = resolvePreviews(file(name, ObjType.VIDEO))
+      expect(entries[0].key).toBe("video")
+      expect(keys(entries)).toContain("video360")
+    }
+  })
+
+  it("没有全景标记的视频不出现 video360（避免污染所有视频的预览下拉）", () => {
+    for (const name of ["Blade Runner 2049.mp4", "vroom.mp4", "vr5.mp4", "movie.mp4"]) {
+      expect(keys(resolvePreviews(file(name, ObjType.VIDEO)))).not.toContain("video360")
+    }
+    // 非视频类型即使名字带 360 也不该出现
+    expect(keys(resolvePreviews(file("pano_360.jpg", ObjType.IMAGE)))).not.toContain("video360")
+  })
 })
 
 describe("parseIframePreviews", () => {
