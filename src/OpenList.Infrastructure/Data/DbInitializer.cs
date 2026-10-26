@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OpenList.Core.Configuration;
@@ -70,10 +71,15 @@ public static class DbInitializer
         if (!migrated)
         {
             // Legacy path: create schema directly from the model (no-op if the
-            // database already exists) then patch additive columns.
+            // database already exists).
             await db.Database.EnsureCreatedAsync(ct);
-            await MigrateSchemaAsync(db, isPostgres, ct);
         }
+
+        // 追加式补列对两条路径都要跑：迁移文件是某一时刻的模型快照，模型后来新增的
+        // 列未必有对应迁移（例如 Meta 的 4 个 WebDAV 兼容列），缺列时 EF 的
+        // SELECT / INSERT 会直接报 "no such column" 或 "NOT NULL constraint failed"。
+        // 函数内部逐个做「列/表是否存在」判断，幂等，可安全重复执行。
+        await MigrateSchemaAsync(db, isPostgres, ct);
 
         // Seed on BOTH paths — previously the MigrateAsync path skipped
         // SeedDefaultSettingsAsync, leaving fresh databases without defaults.
@@ -93,8 +99,10 @@ public static class DbInitializer
     {
         // Columns to add: (table, column, sqlite declaration, postgres declaration).
         // Only additive changes are safe with ALTER TABLE ADD COLUMN.
-        // SsoID already exists as INTEGER (from bool); SQLite's dynamic typing
-        // allows TEXT values in INTEGER columns, so no change is needed there.
+        // SsoID 在旧库里是 INTEGER NOT NULL（当年从 bool 演进而来），模型现在是 string?。
+        // SQLite 的亲和性只影响存储类，不影响 NOT NULL 约束 —— 写 null 照样报
+        // SQLite Error 19。列类型无法用 ALTER 修改，因此改由写入侧兜底：
+        // User.SsoID 默认空串、所有赋值点都不再写入 null（见 User.SsoID 与 UserService）。
         var additions = new (string Table, string Column, string SqliteDecl, string PgDecl)[]
         {
             ("x_users", "AllowLdap", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
@@ -135,6 +143,13 @@ public static class DbInitializer
             ("x_metas", "HideSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
             ("x_metas", "RSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
             ("x_metas", "HeaderSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            // Meta: OpenList Go 时期的按路径 WebDAV 策略列。C# 实现暂未提供该功能，
+            // 但旧库把这些列建成 NOT NULL 且无默认值，模型不映射就会让 INSERT 直接
+            // 撞 "NOT NULL constraint failed"。补列（带默认 0）后映射进模型即可写库。
+            ("x_metas", "WebdavPolicy", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "WebdavRead", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "WebdavWrite", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+            ("x_metas", "WebdavManagement", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
         };
 
         foreach (var (table, column, sqliteDecl, pgDecl) in additions)
@@ -158,6 +173,11 @@ public static class DbInitializer
         // row (the one the old SeedAdminAsync maintained) as built-in. Runs on both
         // providers and is idempotent.
         await BackfillBuiltInAdminAsync(db, ct);
+
+        // 媒体域的建表/补列只由 EF 迁移负责（AddMediaSchema / AddMediaCollections）。
+        // 这条 fallback 路径面向的是 Go 时代遗留库，媒体域不承诺兼容它们：
+        // 表结构一旦演进，手写 DDL 与模型会持续漂移（历史上就漏过 WatchLater/Flagged
+        // 三列，导致首次升级必须再补一遍）。需要媒体功能的旧库按 README 重建即可。
 
         // Ensure whole tables introduced after the initial EnsureCreated run exist.
         // EnsureCreatedAsync only creates tables on a fresh database; for databases
@@ -243,18 +263,29 @@ public static class DbInitializer
     /// </remarks>
     internal static async Task BackfillBuiltInAdminAsync(OpenListDbContext db, CancellationToken ct)
     {
-        if (await db.Users.AnyAsync(u => u.IsBuiltIn, ct))
-            return;
+        try
+        {
+            if (await db.Users.AnyAsync(u => u.IsBuiltIn, ct))
+                return;
 
-        var admin = await db.Users
-            .Where(u => u.Role == UserRole.Admin)
-            .OrderBy(u => u.Id)
-            .FirstOrDefaultAsync(ct);
-        if (admin is null)
-            return; // 全新库，交给 SeedAdminAsync 创建。
+            var admin = await db.Users
+                .Where(u => u.Role == UserRole.Admin)
+                .OrderBy(u => u.Id)
+                .FirstOrDefaultAsync(ct);
+            if (admin is null)
+                return; // 全新库，交给 SeedAdminAsync 创建。
 
-        admin.IsBuiltIn = true;
-        await db.SaveChangesAsync(ct);
+            admin.IsBuiltIn = true;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbException)
+        {
+            // 全新库上 `MigrateSchemaAsync` 会在建表 (EnsureTableAsync) **之前**调用本方法，
+            // 此时 `x_users` 还不存在，查询直接抛 `no such table: x_users`
+            // （22 个 BuiltInAdminTests 就是被这条打断的）。
+            // 那个时间点也不可能有「历史管理员」需要回填 —— 跳过即可。
+            // 旧库在调用本方法时表一定已存在，真正的回填不受影响。
+        }
     }
 
     /// <summary>

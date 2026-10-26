@@ -109,7 +109,9 @@ public sealed class UserService : IUserService
         if (!string.IsNullOrWhiteSpace(req.Username)) u.Username = req.Username;
         if (!string.IsNullOrWhiteSpace(req.Password)) u.PasswordHash = HashPassword(req.Password);
         if (req.Disabled.HasValue) u.Disabled = req.Disabled.Value;
-        if (req.SsoID is not null) u.SsoID = string.IsNullOrWhiteSpace(req.SsoID) ? null : req.SsoID;
+        // 空串而非 null：旧库 SsoID 列是 INTEGER NOT NULL，写 null 会让保存抛
+        // SQLite Error 19（见 User.SsoID 注释）。空串即"未绑定"。
+        if (req.SsoID is not null) u.SsoID = string.IsNullOrWhiteSpace(req.SsoID) ? string.Empty : req.SsoID;
         u.UpdatedAt = _time.GetUtcNow();
         await _db.SaveChangesAsync(ct);
         return Resp.Ok();
@@ -254,7 +256,9 @@ public sealed class UserService : IUserService
         if (req.Disabled.HasValue) u.Disabled = req.Disabled.Value;
         if (req.TwoFactorEnabled.HasValue) u.TwoFactorEnabled = req.TwoFactorEnabled.Value;
         if (req.AllowLdap.HasValue) u.AllowLdap = req.AllowLdap.Value;
-        if (req.SsoID is not null) u.SsoID = string.IsNullOrWhiteSpace(req.SsoID) ? null : req.SsoID;
+        // 空串而非 null：旧库 SsoID 列是 INTEGER NOT NULL，写 null 会让保存抛
+        // SQLite Error 19（见 User.SsoID 注释）。空串即"未绑定"。
+        if (req.SsoID is not null) u.SsoID = string.IsNullOrWhiteSpace(req.SsoID) ? string.Empty : req.SsoID;
         u.UpdatedAt = _time.GetUtcNow();
         await _db.SaveChangesAsync(ct);
 

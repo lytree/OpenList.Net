@@ -105,9 +105,13 @@ public sealed class User
     public bool TwoFactorEnabled { get; set; }
     /// <summary>两步验证密钥。</summary>
     public string? TwoFactorSecret { get; set; }
-    /// <summary>SSO 身份标识。</summary>
+    /// <summary>
+    /// SSO 身份标识。默认空串而非 null：旧版 EnsureCreated 建的库把该列声明成
+    /// <c>INTEGER NOT NULL</c>，写入 null 会触发 SQLite Error 19 让服务启动即崩。
+    /// 空串在语义上等价于"未绑定"（Go 那边用 0 表示），且 TEXT/INTEGER 亲和列都能容纳。
+    /// </summary>
     [JsonPropertyName("sso_id")]
-    public string? SsoID { get; set; }
+    public string? SsoID { get; set; } = string.Empty;
     /// <summary>是否允许 LDAP 登录。</summary>
     [JsonPropertyName("allow_ldap")]
     public bool AllowLdap { get; set; }
@@ -144,9 +148,13 @@ public sealed class UserPublic
     /// <summary>是否开启两步验证。</summary>
     [JsonPropertyName("otp")]
     public bool TwoFactorEnabled { get; set; }
-    /// <summary>SSO 身份标识。</summary>
+    /// <summary>
+    /// SSO 身份标识。默认空串而非 null：旧版 EnsureCreated 建的库把该列声明成
+    /// <c>INTEGER NOT NULL</c>，写入 null 会触发 SQLite Error 19 让服务启动即崩。
+    /// 空串在语义上等价于"未绑定"（Go 那边用 0 表示），且 TEXT/INTEGER 亲和列都能容纳。
+    /// </summary>
     [JsonPropertyName("sso_id")]
-    public string? SsoID { get; set; }
+    public string? SsoID { get; set; } = string.Empty;
     /// <summary>是否允许 LDAP 登录。</summary>
     [JsonPropertyName("allow_ldap")]
     public bool AllowLdap { get; set; }

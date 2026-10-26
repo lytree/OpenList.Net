@@ -424,7 +424,14 @@ public class BuiltInAdminTests
 
     private static OpenListDbContext BuildContext()
     {
-        var conn = new SqliteConnection("DataSource=:memory:");
+        // 为什么要用一次性**文件**库而不是 `:memory:`：
+        // SQLite 的 `SqliteDatabaseCreator.Exists()` 对内存库恒为 true（能连即视为存在），
+        // `EnsureCreated()` 于是直接跳过建表；随后 DbInitializer 一查 `x_users` 就报
+        // `no such table`（本类 22 个用例此前全红就是这个原因）。
+        // 换成临时文件后 Exists() 能正确返回 false，建表才会真正发生。
+        // 文件留在系统 temp 目录（每个用例一个 GUID，互不冲突），由操作系统回收。
+        var path = Path.Combine(Path.GetTempPath(), $"openlist-tests-{Guid.NewGuid():N}.db");
+        var conn = new SqliteConnection($"Data Source={path}");
         conn.Open();
         var opts = new DbContextOptionsBuilder<OpenListDbContext>()
             .UseSqlite(conn)

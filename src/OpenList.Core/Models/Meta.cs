@@ -84,6 +84,21 @@ public sealed class Meta
     [JsonIgnore]
     public string WriteUsersJson { get; set; } = "[]";
 
+    // --- 兼容列（旧库 x_metas 已存在且为 NOT NULL 无默认值） ---
+    // 这 4 列是 OpenList Go 时期按路径配置 WebDAV 策略留下的，本仓库 C# 侧尚未提供
+    // 对应功能（全仓无读取点）。但旧库把它们建成 NOT NULL 且无默认值：只要 EF 的
+    // INSERT 不带这些列，SQLite 就会报 "NOT NULL constraint failed: x_metas.WebdavPolicy"，
+    // 整条 meta 都插不进去。这里映射进模型让 INSERT 带上 0；不参与 JSON 序列化，
+    // UpdateAsync 也不覆盖，避免抹掉旧库中的历史取值。
+    [JsonIgnore]
+    public int WebdavPolicy { get; set; }
+    [JsonIgnore]
+    public int WebdavRead { get; set; }
+    [JsonIgnore]
+    public int WebdavWrite { get; set; }
+    [JsonIgnore]
+    public int WebdavManagement { get; set; }
+
     /// <summary>将 <see cref="ReadUsers"/> 同步到 <see cref="ReadUsersJson"/>、<see cref="WriteUsers"/> 同步到 <see cref="WriteUsersJson"/>。</summary>
     public void SyncJson()
     {
