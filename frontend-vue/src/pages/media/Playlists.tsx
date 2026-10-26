@@ -157,7 +157,7 @@ export default defineComponent({
             </ElButton>
             <span class="ol-media-page-title">{t("media.tab_playlists")}</span>
             <span class="ol-media-page-sub">
-              {t("media.playlist_items", { count: playlists.value.length })}
+              {t("media.playlists_count", { count: playlists.value.length })}
             </span>
           </div>
           <div class="ol-media-tools">

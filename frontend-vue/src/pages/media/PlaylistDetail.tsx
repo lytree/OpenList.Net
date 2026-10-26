@@ -131,7 +131,9 @@ export default defineComponent({
               </ElButton>
               <span class="ol-media-page-title">{current?.name ?? t("media.tab_playlists")}</span>
               <ElTag size="small" type="info">
-                {t("media.playlist_items", { count: items.value.length })}
+                {items.value.length === 1
+                  ? t("media.playlist_item_one")
+                  : t("media.playlist_items", { count: items.value.length })}
               </ElTag>
             </div>
           </div>
