@@ -1,3 +1,3 @@
-[submodule "frontend"]
-	path = frontend
+[submodule "frontend-legacy"]
+	path = frontend-legacy
 	url = https://github.com/OpenListTeam/Openlist-Frontend.git
