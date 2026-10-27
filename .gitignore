@@ -265,7 +265,9 @@ Generated_Code/
 # to a newer Visual Studio version. Backup files are not needed,
 # because we have git ;-)
 _UpgradeReport_Files/
-Backup*/
+# 收窄成 VS 生成的 Backup1/ Backup2/：原来的 `Backup*/` 在 Windows（core.ignorecase）上
+# 会把 frontend/src/pages/manage/backup/ 一起忽略，整页代码会静默进不了提交。
+Backup[0-9]*/
 UpgradeLog*.XML
 UpgradeLog*.htm
 ServiceFabricBackup/
