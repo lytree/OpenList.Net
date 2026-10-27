@@ -1549,7 +1549,8 @@ CI 不走 Cake 这条路（workflow 里分别 `dotnet publish` 两次），所�
 2. **上游功能移植清单**：`frontend-legacy/` 里的模块逐个补。**messenger 已完成**（§34，
    后端本来就齐，还顺带修了一个越权）；~~`dashboard`（可纯前端聚合同类端点，无需后端）~~
    → 已由 §35 完成；~~`backup-restore`（需要后端先做库导出/导入）~~ → 已由 §37 完成；
-   剩 `about`（版本/许可/链接即可）。
+   ~~`about`（版本/许可/链接即可）~~ → 已由 §38 完成（另加了 `/admin/system/info`）。
+   **移植清单到此清空**，管理台 12 个模块全部就绪。
    ~~`plugins` 无 .NET 对应物，建议从导航移除而非实现~~ → 已由 §35 从导航移除。
 3. 媒体域剩余项按 §30.5 / §31.5 的遗留清单推进（人物头像端点、片商/系列详情接口、
    播放列表整单连播、口味页时间维度）。
@@ -2038,3 +2039,114 @@ A–H 全量 **14 轮全绿**。
    页面上给了「未加密备份含口令与分享密码，请妥善保存」的告警。
 5. **大文件一次性读入内存**（`file.text()`）：几十 MB 以上会卡主线程，目前没有流式处理。
 6. **`about` 仍是 `(soon)`**：管理台最后一个，版本/许可/运行环境，成本最低。
+
+## 38. 管理台收尾：关于页（2026-10-28）
+
+承 §32.8：`about` 是管理台最后一个 `(soon)`。做完这一节，12 个模块全部就绪，
+导航里不再有「等你做完」的占位。
+
+### 38.1 上游那一页不能照搬
+
+`frontend-legacy/src/pages/manage/about.tsx` 干的事是：
+
+```ts
+const fetchReadme = async () => await (await fetch(
+  "https://raw.githubusercontent.com/OpenListTeam/OpenList/main/README.md")).text()
+```
+
+也就是说，它把「关于」实现成**服务器进程去 GitHub 拉 README 再渲染 markdown**。三个问题：
+
+1. 离线 / 内网部署直接是一片空白（而且是在管理台里空白，最容易被当成前端坏了）；
+2. 服务器主动出网，在很多部署里是被策略禁掉的；
+3. 它回答不了运维真正会问的两个问题 ——「这台机器跑的是哪个版本」和
+   「这版前端配的是哪个后端」。
+
+所以这一页重写成「读本机状态」，README 换成 4 条外链（点开才出网，且是浏览器出网）。
+
+### 38.2 为什么这里必须新增后端端点
+
+§35 的仪表盘刻意**没有**新增接口，因为它要的数字都在既有端点里。这一页不一样：
+版本号、运行时、操作系统、进程启动时间、数据库文件位置、前端产物目录 —— 一个都没暴露过，
+前端编不出来，也不该编。
+
+`GET /api/admin/system/info` 放在 admin 组（`RequireAuthorization("admin")`）而不是公开端点：
+
+- 里面有数据库文件、日志、临时目录的**绝对路径**，对排障有用，对匿名访客只是免费情报；
+- 因此它**不返回** `cfg.Database.Password`（占位符都没有，字段压根不存在）。
+
+| 分组 | 字段 | 说明 |
+|---|---|---|
+| 版本 | `version` / `tag` / `commit` / `configuration` / `built_at` | 版本与提交取自 `AssemblyInformationalVersion`；`built_at` 是程序集文件写入时间 |
+| 运行时 | `runtime` / `os` / `architecture` / `processor_count` | `RuntimeInformation` + `Environment` |
+| 进程 | `started_at` / `uptime_seconds` / `server_time` | 取不到启动时间时 `started_at=""`、`uptime_seconds=-1`（前端显示 `-`） |
+| 数据库 | `database.{type,file,host,port,name}` | SQLite 给文件绝对路径，Postgres 给 `host:port/name`；**没有 password** |
+| 路径 | `paths.{data_dir,dist_dir,dist_built_at,temp_dir,log_file,log_enabled}` | `dist_built_at` 是 `dist/index.html` 的 mtime |
+| 能力 | `features.{s3,ftp,sftp,ldap,mcp,search_index,max_connections}` | 只报「开没开」，不回配置细节 |
+
+字段名用 snake_case：与紧邻的 `/admin/index/progress`、`/admin/scan/progress` 同一族。
+（全局 `JsonNamingPolicy.CamelCase` 只处理首字母大写的情形，对已是小写开头的键是空操作，
+所以 `obj_count` 这类键能原样出去 —— 这条不是巧合，是有意在同一个文件里复用的约定。）
+
+路径一律过一层 `TryFullPath`：`Path.GetFullPath` 会对非法字符/超长路径抛异常，
+「关于」页只是展示信息，不该因为一个配错的 `TempDir` 整页 500。
+
+### 38.3 三条展示口径
+
+1. **取不到就显示 `-`，绝不编**：单文件发布时程序集在包内、`Assembly.Location` 为空；
+   Postgres 没有「数据目录」；未启用文件日志时没有日志路径。这些在页面上都是 `-`，
+   而不是 `1970-01-01` 或 `NaN`。
+2. **`max_connections = 0` 显示 `∞`**：0 的语义是「不限制」，显示成 `0` 会被读成
+   「一个连接都不许」，正好反了。
+3. **时钟偏差是页面现算的**：`server_time` 减本机 `Date.now()`，只做一次性提示，
+   不轮询 —— 它回答的是「两台机器的钟差多少」，不是实时监控。
+
+### 38.4 只靠真机才看得出来的两处
+
+1. **顶部横幅已经给了版本与提交，Runtime 块里再列一遍是错的**。
+   第一版两处都列，页面看起来「版本号出现两次」，人会以为有两套版本（比如前端版本与后端版本）。
+   现在 Runtime 块从 Framework 开始，提交号只在横幅出现一次（`title` 挂完整 40 位）。
+2. **路径块必须整行**。第一版和 Runtime 并排放在两列（各 340px）里，Windows 绝对路径
+   只露出 `F:\Code\Dotnet\OpenList.Net...` —— 等于没给信息。完整的值虽然在 `title` 里，
+   但排障时不该要求用户先学会悬停。改成整行后 1440 下能看到完整路径，1280 下也能看到
+   `...\.e2e\runs\...` 这种足以定位的片段。
+
+`main` 的 `scrollWidth == clientWidth`（1440 与 1280 都验过），暗色下标签/表头/等宽路径都可读。
+
+### 38.5 关于页不单独开一轮 e2e
+
+它只有 16 行字段、零写操作，为一个纯读页面单独起一遍后端 + 数据库不划算。
+断言挂在 `verify-common.mjs`（本来就是「管理台每个页签都打开」的那一轮）里，新增 F 段：
+
+- 横幅的 tag / 短 commit 与 `GET /api/admin/system/info` 逐个比对（**不写死版本号** ——
+  版本随构建变、路径随部署变，写死必然假失败，这条和 §35.4 是同一个教训）；
+- 键值行摊平成字典后比对 Framework / OS / Architecture / Database / Data directory /
+  Frontend assets / Log file；
+- Uptime 与 Clock skew 只验**格式**（`22s`、`0s`），数值每次刷新都在变；
+- 内置服务 5 个标签（**关闭的也要列出** —— 「什么没开」同样是信息）、`max_connections=0 → ∞`；
+- 4 条外链都指向 GitHub 且 `target="_blank"` + `rel` 含 `noopener`（管理台页面别把站内导航带走）；
+- 导航 12 项、**没有 `(soon)`、没有禁用项**；
+- 点刷新会重新打一次 `system/info`（不是只改本地状态）。
+
+顺带把 `verify-dashboard` / `verify-backup` 里「还剩 N 个未就绪」的旧断言改成「0 个」——
+这类断言每到收尾阶段就会假失败一次，是设计如此（它想说「现在还有哪些没做完」）。
+
+### 38.6 验证
+
+`verify-common.mjs` **48 项**（+25，仍是 15 轮里的同一轮）
+· `dotnet test` **493 通过 / 1 跳过**（+6：版本解析的三种形态、`+` 后缀为空、tag 与版本同源）
+· `pnpm test` **204**（+16：`utils/about.spec.ts`）
+· `pnpm typecheck` 0 错误 · `pnpm build` ok · A–H 全量 **15 轮全绿**。
+
+### 38.7 遗留
+
+1. **开发态版本号是 `1.0.0`**：只有走 cake / CI 注入 `--semver` 才会是真实版本；
+   同时 `commit` 反映的是**上次构建时的源码**，不是当前工作区（改完代码没重编译时会对不上）。
+2. **没有「检查更新」**：桌面端有（`AppInfo.ReleasesApi`），服务端故意不做 ——
+   服务器进程主动出网在不少部署里被禁，而且集群里每台都去查一次是浪费。
+3. **`dist_built_at` 只能当参考**：CI 打包/解压、`docker cp` 都可能改 mtime。
+   它足够回答「大概是哪次构建的前端」，不足以当证据。
+4. **不显示数据库体积 / 磁盘占用**：要跨库做（SQLite 是文件、Postgres 要查 pg_database_size），
+   收益不如直接 `du` 一下。
+5. **本仓库根目录没有 LICENSE 文件**（上游 OpenList 是 AGPL-3.0）。页脚只陈述
+   「上游以 AGPL-3.0 发布」，不代本仓库声明许可 —— 这是法务决定，不是前端能补的。
+6. **语言只有 en**：`about.json` 只建了英文，补中文需要先有第二份字典（承 §35 的 i18n 现状）。
