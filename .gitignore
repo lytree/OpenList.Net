@@ -492,6 +492,9 @@ $RECYCLE.BIN/
 *.db-shm
 *.db-wal
 
+# Local dev database (runtime artifact — never commit; keep file on disk)
+src/OpenList.Server/data/data.db
+
 # WorkBuddy 工作目录（本地验证脚本与截图，非项目源码）
 .workbuddy/
 
