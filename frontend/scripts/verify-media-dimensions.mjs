@@ -69,7 +69,7 @@ const ITEMS = [
   <series>Blade Runner</series>
   <director>Denis Villeneuve</director>
   <actor><name>Ryan Gosling</name><role>K</role><order>0</order></actor>
-  <actor><name>Harrison Ford</name><role>Rick Deckard</role><order>1</order></actor>
+  <actor><name>Harrison Ford</name><role>Rick Deckard</role><order>1</order><thumb>harrison.png</thumb></actor>
 </movie>`,
   },
   {
@@ -98,14 +98,28 @@ for (const item of ITEMS) {
   writeFileSync(join(dir, item.file), "0".repeat(1024))
   writeFileSync(join(dir, `${item.dir}.nfo`), item.nfo)
 }
+
+// 人物头像：1×1 的合法 PNG（70 字节）。用真图而不是空文件 —— 断言要看
+// `naturalWidth > 0`，浏览器对坏图会给 0，那样"渲染成功"就验不出来。
+const PX_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+)
+writeFileSync(join(FIXTURE_ROOT, "Blade Runner 2049 (2017)", "harrison.png"), PX_PNG)
 log("fixture:", FIXTURE_ROOT)
 
 // ---------- 1. 浏览器与登录 ----------
 const browser = await chromium.launch({ channel: "msedge", headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errors = []
+// 脚本会故意访问不存在的维度 id 来验 404 语义，浏览器必然为那两次请求记 error。
+// 只放行这两条 URL，其它一律算缺陷（零错误断言不能变成「什么都放行」）。
+const EXPECTED_404 = [/\/api\/media\/studios\/999(\?|$)/, /\/api\/media\/series\/999(\?|$)/]
 page.on("console", (msg) => {
-  if (msg.type() === "error") errors.push(msg.text())
+  if (msg.type() !== "error") return
+  const url = msg.location()?.url ?? ""
+  if (EXPECTED_404.some((re) => re.test(url))) return
+  errors.push(`${msg.text()} @ ${url}`)
 })
 page.on("pageerror", (e) => errors.push(String(e)))
 
@@ -185,6 +199,47 @@ const series = await api("get", "/media/series?per_page=50")
 const bladeRunner = (series.data?.content ?? []).find((s) => s.name === "Blade Runner")
 check("series：Blade Runner 关联 2 部", bladeRunner?.item_count === 2, JSON.stringify(bladeRunner))
 
+// 单条详情接口：详情页标题的真源（此前列表接口不带单条，标题只能靠 ?name= 传）
+const studioDetail = await api("get", `/media/studios/${warner?.id}`)
+check(
+  "studios/{id}：名称 + 条目数",
+  studioDetail.code === 200 && studioDetail.data?.name === "Warner Bros." && studioDetail.data?.item_count === 2,
+  JSON.stringify(studioDetail.data ?? studioDetail.message),
+)
+const seriesDetail = await api("get", `/media/series/${bladeRunner?.id}`)
+check(
+  "series/{id}：名称 + 条目数",
+  seriesDetail.code === 200 && seriesDetail.data?.name === "Blade Runner" && seriesDetail.data?.item_count === 2,
+  JSON.stringify(seriesDetail.data ?? seriesDetail.message),
+)
+const missingStudio = await api("get", "/media/studios/999")
+check("studios/999 → 404", missingStudio.code === 404, JSON.stringify(missingStudio.code))
+
+// 人物头像端点：Harrison Ford 的头像写在**第二部**片子的 NFO 里，第一次入库时还没有 ——
+// 所以这条断言同时钉住「已存在人物补写空头像」的合并逻辑。
+const ford = personRows.find((p) => p.name === "Harrison Ford")
+const gosling = personRows.find((p) => p.name === "Ryan Gosling")
+check("Harrison Ford 头像已落库", Boolean(ford?.profile_path), JSON.stringify(ford?.profile_path))
+check(
+  "头像路径按条目目录解析成 VFS 绝对路径",
+  typeof ford?.profile_path === "string" && ford.profile_path.startsWith("/e2e/") && ford.profile_path.endsWith("harrison.png"),
+  JSON.stringify(ford?.profile_path),
+)
+const fordImg = await page.request.get(`${BASE}/api/media/persons/${ford?.id}/image`, {
+  headers: { Authorization: token },
+})
+check(
+  "人物头像端点 200 + image/png",
+  fordImg.status() === 200 && fordImg.headers()["content-type"] === "image/png",
+  `status=${fordImg.status()} type=${fordImg.headers()["content-type"]}`,
+)
+const goslingImg = await page.request.get(`${BASE}/api/media/persons/${gosling?.id}/image`, {
+  headers: { Authorization: token },
+})
+check("无头像人物 → 404", goslingImg.status() === 404, `status=${goslingImg.status()}`)
+const anonImg = await page.request.get(`${BASE}/api/media/persons/${ford?.id}/image`)
+check("匿名访问人物头像 → 401", anonImg.status() === 401, `status=${anonImg.status()}`)
+
 const stats = await api("get", `/media/stats?library_id=${libId}`)
 check("stats：条目数 3", stats.data?.item_count === 3, JSON.stringify(stats.data?.item_count))
 check(
@@ -219,6 +274,39 @@ await page.waitForSelector(".ol-media-person-card", { timeout: 10000 })
 const personCards = await page.locator(".ol-media-person-card").count()
 check("人物列表 5 张卡片", personCards === 5, `${personCards}`)
 
+// 有头像的人物走图片端点；没有的必须回退姓名首字，且**不**发请求（否则一页 30 条 404）
+const fordCard = page.locator(".ol-media-person-card", { hasText: "Harrison Ford" }).first()
+const fordLoaded = await fordCard
+  .locator("img.ol-person-avatar-img")
+  .first()
+  .evaluate((img) => img.complete && img.naturalWidth > 0)
+  .catch(() => false)
+check("人物列表渲染真实头像", fordLoaded === true, "")
+const goslingCard = page.locator(".ol-media-person-card", { hasText: "Ryan Gosling" }).first()
+const goslingImgs = await goslingCard.locator("img").count()
+const goslingInitial = (await goslingCard.locator(".ol-media-avatar").innerText()).trim()
+check("无头像人物回退姓名首字且不发图片请求", goslingImgs === 0 && goslingInitial === "R", `imgs=${goslingImgs} text=${goslingInitial}`)
+
+// 人物详情的大号头像
+await page.goto(`${BASE}/#/media/persons/${ford?.id}`, { waitUntil: "networkidle" })
+await page
+  .waitForFunction(
+    () => (document.querySelector(".ol-media-detail-title-plain")?.textContent ?? "").includes("Harrison"),
+    null,
+    { timeout: 10000 },
+  )
+  .catch(() => {})
+const detailAvatar = await page
+  .locator(".ol-media-person-head img.ol-person-avatar-img")
+  .first()
+  .evaluate((img) => img.complete && img.naturalWidth > 0)
+  .catch(() => false)
+check("人物详情大号头像渲染", detailAvatar === true, "")
+
+// 回到列表继续原来的流程（上面为了验大号头像离开了列表页）
+await page.goto(`${BASE}/#/media/persons`, { waitUntil: "networkidle" })
+await page.waitForSelector(".ol-media-person-card", { timeout: 10000 })
+
 await page.locator(".ol-media-person-card", { hasText: "Denis Villeneuve" }).first().click()
 await page.waitForSelector(".ol-media-person-head", { timeout: 10000 })
 // 头部容器先渲染、聚合数据后到（两个请求并行），必须等标题真的变成人名再断言
@@ -251,10 +339,45 @@ await page.waitForSelector(".ol-media-grid .ol-media-card", { timeout: 10000 })
 const studioItems = await page.locator(".ol-media-grid .ol-media-card").count()
 check("片商详情显示 Warner 名下 2 部", studioItems === 2, `${studioItems}`)
 
+// 深链（**不带** ?name=）：标题必须来自详情接口。旧实现直接输地址会显示「Studio #2」。
+await page.goto(`${BASE}/#/media/studios/${warner?.id}`, { waitUntil: "networkidle" })
+await page
+  .waitForFunction(
+    () => (document.querySelector(".ol-media-page-title")?.textContent ?? "").includes("Warner"),
+    null,
+    { timeout: 10000 },
+  )
+  .catch(() => {})
+const deepStudioTitle = ((await page.locator(".ol-media-page-title").textContent()) ?? "").trim()
+check("片商深链标题 = 真实名称（不再退化 Studio #id）", deepStudioTitle === "Warner Bros.", deepStudioTitle)
+
 await page.goto(`${BASE}/#/media/series`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-taxonomy-chip", { timeout: 10000 })
 const seriesChips = await page.locator(".ol-media-taxonomy-chip").allInnerTexts()
 check("系列页含 Blade Runner", seriesChips.some((t) => t.includes("Blade Runner")), seriesChips.join("|"))
+
+await page.goto(`${BASE}/#/media/series/${bladeRunner?.id}`, { waitUntil: "networkidle" })
+await page
+  .waitForFunction(
+    () => (document.querySelector(".ol-media-page-title")?.textContent ?? "").includes("Blade Runner"),
+    null,
+    { timeout: 10000 },
+  )
+  .catch(() => {})
+const deepSeriesTitle = ((await page.locator(".ol-media-page-title").textContent()) ?? "").trim()
+check("系列深链标题 = 真实名称", deepSeriesTitle === "Blade Runner", deepSeriesTitle)
+
+// 不存在的 id：显示 Not found，而不是编一个「Studio #999」出来
+await page.goto(`${BASE}/#/media/studios/999`, { waitUntil: "networkidle" })
+await page
+  .waitForFunction(
+    () => (document.querySelector(".ol-media-page-title")?.textContent ?? "").includes("Not found"),
+    null,
+    { timeout: 10000 },
+  )
+  .catch(() => {})
+const missingTitle = ((await page.locator(".ol-media-page-title").textContent()) ?? "").trim()
+check("不存在的片商显示 Not found", missingTitle === "Not found", missingTitle)
 
 // ---------- 7. 口味画像 ----------
 await page.goto(`${BASE}/#/media/taste`, { waitUntil: "networkidle" })
