@@ -24,7 +24,7 @@ const MODULES: { labelKey: string; path: string; ready: boolean }[] = [
   { labelKey: "indexes", path: "/@manage/indexes", ready: true },
   { labelKey: "messenger", path: "/@manage/messenger", ready: true },
   { labelKey: "settings", path: "/@manage/settings", ready: true },
-  { labelKey: "backup-restore", path: "/@manage/backup-restore", ready: false },
+  { labelKey: "backup-restore", path: "/@manage/backup-restore", ready: true },
   { labelKey: "about", path: "/@manage/about", ready: false },
 ]
 

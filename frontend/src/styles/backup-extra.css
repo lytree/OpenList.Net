@@ -1,0 +1,190 @@
+/* ============================================================================
+ * 管理台备份 / 恢复（§37）
+ * 命名统一 ol-br-*，与媒体域、站内信、仪表盘的前缀区分开。
+ * 卡片头部不用 ElCard 的 header 插槽（vue-jsx 里 `v-slots` 撞上 ElCard 的
+ * `header` prop 会报 TS2710），改为卡片内第一个 div + 这条下边框来还原观感。
+ * ========================================================================== */
+
+.ol-br-alert {
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-br-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  align-items: start; /* 两张卡内容长短不一，别互相拉齐（备份卡会被撑出大片空白） */
+  gap: var(--ol-space-3);
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-br-card {
+  min-width: 0;
+}
+
+.ol-br-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ol-space-3);
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  margin-bottom: var(--ol-space-3);
+  border-bottom: 1px solid var(--ol-border);
+}
+
+.ol-br-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-br-card-note {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
+.ol-br-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-br-label {
+  font-size: 13px;
+  color: var(--ol-text-secondary);
+}
+
+.ol-br-inline-alert {
+  margin-bottom: var(--ol-space-3);
+}
+
+/* ---- 拖放区 ---- */
+.ol-br-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ol-space-2);
+  padding: var(--ol-space-4);
+  margin-bottom: var(--ol-space-3);
+  border: 1px dashed var(--el-border-color-darker);
+  border-radius: var(--ol-radius-md);
+  text-align: center;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.ol-br-drop.is-dragging {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.ol-br-drop-text {
+  font-size: 13px;
+  color: var(--ol-text-secondary);
+  word-break: break-all;
+}
+
+.ol-br-drop-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+/* 原生 input 只当"选文件"的触发器，界面元素是上面的拖放区 */
+.ol-br-file-input {
+  display: none;
+}
+
+/* ---- 覆盖开关 ---- */
+.ol-br-switch {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ol-space-2);
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-br-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ---- 恢复汇总 ---- */
+.ol-br-summary {
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-br-summary-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ol-br-summary-row {
+  display: grid;
+  grid-template-columns: 132px repeat(4, minmax(72px, 1fr));
+  gap: var(--ol-space-2);
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed var(--ol-border);
+}
+
+.ol-br-summary-row:last-child {
+  border-bottom: none;
+}
+
+.ol-br-summary-name {
+  color: var(--ol-text-secondary);
+}
+
+.ol-br-summary-cell {
+  color: var(--ol-text-muted);
+}
+
+.ol-br-summary-cell.is-bad {
+  color: var(--el-color-danger);
+  font-weight: 600;
+}
+
+/* ---- 日志 ---- */
+.ol-br-log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.ol-br-log-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.ol-br-log-icon {
+  flex: none;
+}
+
+.ol-br-log-msg {
+  word-break: break-word;
+  color: var(--ol-text-secondary);
+}
+
+.ol-br-log-row.is-error .ol-br-log-msg {
+  color: var(--el-color-danger);
+}
+
+.ol-br-log-row.is-warn .ol-br-log-msg {
+  color: var(--el-color-warning);
+}
+
+.ol-br-log-row.is-success .ol-br-log-msg {
+  color: var(--el-color-success);
+}
+
+.ol-br-log-placeholder {
+  padding: var(--ol-space-3) 0;
+  text-align: center;
+  color: var(--ol-text-muted);
+}

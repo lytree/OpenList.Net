@@ -174,6 +174,12 @@ const routes: RouteRecordRaw[] = [
             component: () => import("~/pages/manage/settings/Settings"),
             meta: { title: "manage.sidemenu.settings" },
           },
+          {
+            path: "backup-restore",
+            name: "backup-restore",
+            component: () => import("~/pages/manage/backup/BackupRestore"),
+            meta: { title: "manage.sidemenu.backup-restore" },
+          },
         ],
       },
       {
