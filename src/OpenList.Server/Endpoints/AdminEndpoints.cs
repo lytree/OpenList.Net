@@ -4,9 +4,11 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
+using OpenList.Server.Hosting;
 using OpenList.Server.Models;
 
 namespace OpenList.Server.Endpoints;
@@ -350,6 +352,83 @@ public static class AdminEndpoints
             }));
         });
 
+        // GET /admin/system/info — 管理台「关于」页的数据源（见 docs §38）。
+        //
+        // 放在 admin 组里而不是公开端点：里面有数据库文件路径、日志路径、挂载目录这类
+        // 内部布局信息，对排查「前端是不是旧产物」「连的是哪个库」有用，但对匿名访客只是
+        // 免费的情报。也因此**不返回**数据库口令（cfg.Database.Password 一个字节都不出去）。
+        //
+        // 字段名用 snake_case：与紧邻的 /index/progress、/scan/progress 同一族，前端
+        // 直接照抄键名。注意全局 JsonNamingPolicy.CamelCase 对已是小写开头的键是**空操作**
+        //（它只处理首字母大写的情况），所以 snake_case 能原样出去。
+        g.MapGet("/system/info", (AppConfiguration cfg) =>
+        {
+            var distDir = TryFullPath(cfg.DistDir);
+            DateTimeOffset? distBuiltAt = null;
+            if (distDir is not null)
+            {
+                try
+                {
+                    var index = new FileInfo(Path.Combine(distDir, "index.html"));
+                    if (index.Exists) distBuiltAt = new DateTimeOffset(index.LastWriteTimeUtc, TimeSpan.Zero);
+                }
+                catch (IOException) { /* 路径存在但读不了：当作「没有产物」处理 */ }
+                catch (UnauthorizedAccessException) { }
+            }
+
+            var isSqlite = !cfg.Database.Type.Equals("postgres", StringComparison.OrdinalIgnoreCase)
+                           && !cfg.Database.Type.Equals("postgresql", StringComparison.OrdinalIgnoreCase);
+            var dbFile = isSqlite ? TryFullPath(cfg.Database.DBFile) : null;
+            var startedAt = BuildInfo.ProcessStartedAtUtc();
+            var now = DateTimeOffset.UtcNow;
+
+            return Results.Ok(Resp<object>.Ok(new
+            {
+                version = BuildInfo.Version,
+                tag = BuildInfo.Tag,
+                commit = BuildInfo.Commit,
+                configuration = BuildInfo.Configuration,
+                built_at = BuildInfo.AssemblyBuiltAtUtc()?.ToString("O") ?? "",
+                runtime = BuildInfo.Framework,
+                os = BuildInfo.Os,
+                architecture = BuildInfo.Architecture,
+                processor_count = Environment.ProcessorCount,
+                started_at = startedAt?.ToString("O") ?? "",
+                uptime_seconds = startedAt is null ? -1 : (long)(now - startedAt.Value).TotalSeconds,
+                server_time = now.ToString("O"),
+                database = new
+                {
+                    type = isSqlite ? "sqlite" : "postgres",
+                    // 口令绝不外泄；其余字段只用于回答「这台机器连的是哪个库」
+                    file = dbFile ?? "",
+                    host = isSqlite ? "" : cfg.Database.Host,
+                    port = isSqlite ? 0 : cfg.Database.Port,
+                    name = isSqlite ? "" : cfg.Database.Name,
+                },
+                paths = new
+                {
+                    data_dir = dbFile is null ? "" : (Path.GetDirectoryName(dbFile) ?? ""),
+                    dist_dir = distDir ?? "",
+                    // index.html 的写入时间 ≈ 前端产物的构建时间；与 built_at 一起看就能
+                    // 判断「后端换了、前端还是旧的」这种最常见的部署事故
+                    dist_built_at = distBuiltAt?.ToString("O") ?? "",
+                    temp_dir = TryFullPath(cfg.TempDir) ?? "",
+                    log_file = cfg.Log.Enable ? TryFullPath(cfg.Log.Name) ?? "" : "",
+                    log_enabled = cfg.Log.Enable,
+                },
+                features = new
+                {
+                    s3 = cfg.S3.Enable,
+                    ftp = cfg.FTP.Enable,
+                    sftp = cfg.SFTP.Enable,
+                    ldap = !string.IsNullOrWhiteSpace(cfg.Ldap.Url),
+                    mcp = cfg.MCP.Enable,
+                    search_index = cfg.SearchIndex,
+                    max_connections = cfg.MaxConnections,
+                },
+            }));
+        });
+
         // --- Search index management ---
         // POST /admin/index/build — body { paths, max_depth }. Full rebuild.
         g.MapPost("/index/build", async (IndexBuildReq req, ISearchService svc) =>
@@ -388,6 +467,21 @@ public static class AdminEndpoints
         g.MapGroup("/task").MapTaskRoutes();
 
         return app;
+    }
+
+    /// <summary>
+    /// 把配置里的相对路径解析成绝对路径，失败返回 <c>null</c>。
+    ///
+    /// 存在的意义是 <see cref="Path.GetFullPath(string)"/> 会对非法字符/超长路径抛异常 ——
+    /// 「关于」页只是展示信息，不该因为一个配错的 <c>TempDir</c> 让整页 500。
+    /// </summary>
+    private static string? TryFullPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try { return Path.GetFullPath(path); }
+        catch (ArgumentException) { return null; }
+        catch (NotSupportedException) { return null; }
+        catch (PathTooLongException) { return null; }
     }
 }
 
