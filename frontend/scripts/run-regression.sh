@@ -245,6 +245,15 @@ round_dimensions() {
   finish_round "F/dimensions" $?
 }
 
+round_backup() {
+  say "round: backup (E 管理台备份 / 恢复)"
+  local dir; dir="$(round_dir backup)"; mkdir -p "$dir"
+  # 装置自建（探针用户 + 探针挂载），不需要挂载点
+  begin_round "$dir" || return 1
+  run_node "$dir/run.log" "$FE/scripts/verify-backup.mjs"
+  finish_round "E/backup" $?
+}
+
 round_messenger() {
   say "round: messenger (E 管理台站内信 + 用户侧收件箱)"
   local dir; dir="$(round_dir messenger)"; mkdir -p "$dir"
@@ -300,7 +309,7 @@ round_upload() {
 # --------------------------------------------------------------------------- 入口
 
 WANT=("$@")
-[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage dimensions scrape dashboard messenger)
+[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage dimensions scrape dashboard backup messenger)
 
 for name in "${WANT[@]}"; do
   # 轮次名用连字符（preview-extra），函数名用下划线 —— 这里做一次映射
