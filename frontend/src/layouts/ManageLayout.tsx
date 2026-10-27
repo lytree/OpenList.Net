@@ -6,12 +6,16 @@ import { t } from "~/i18n"
 /**
  * 管理台外壳（M2）。
  *
- * 左侧模块子导航（`ready: false` 的仍标 `(soon)` 并禁用），右侧渲染嵌套路由
+ * 左侧模块子导航（`ready: false` 的标 `(soon)` 并禁用），右侧渲染嵌套路由
  * （`/@manage/dashboard`、`/@manage/storages`、`/@manage/storages/edit/:id`）。
  * 整体仍套在 `BasicLayout` 之外壳内，故这里只是二级内容区布局。
  *
  * `plugins` 已从导航移除（承方案 §35）：Go 版插件是进程内加载的 `.so`，.NET 侧没有
  * 对应宿主，留一个永远 `(soon)` 的入口只会让人误以为「这块还没做完」。
+ *
+ * 12 个模块**全部就绪**（`about` 是最后一个，见 §38）。`ready` 字段保留着 ——
+ * 它表达的是「这个入口现在能不能点」，将来真要加半成品模块时还得用它，
+ * 但当前没有任何一项是 false，所以页面上不会再出现 `(soon)`。
  */
 const MODULES: { labelKey: string; path: string; ready: boolean }[] = [
   { labelKey: "dashboard", path: "/@manage/dashboard", ready: true },
@@ -25,7 +29,7 @@ const MODULES: { labelKey: string; path: string; ready: boolean }[] = [
   { labelKey: "messenger", path: "/@manage/messenger", ready: true },
   { labelKey: "settings", path: "/@manage/settings", ready: true },
   { labelKey: "backup-restore", path: "/@manage/backup-restore", ready: true },
-  { labelKey: "about", path: "/@manage/about", ready: false },
+  { labelKey: "about", path: "/@manage/about", ready: true },
 ]
 
 export default defineComponent({

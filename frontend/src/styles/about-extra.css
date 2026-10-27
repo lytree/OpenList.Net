@@ -1,0 +1,156 @@
+/* ============================================================================
+ * 管理台「关于」页（§38）
+ * 命名统一 ol-about-*，与仪表盘 ol-dash-*、备份 ol-br-* 分开。
+ * 全部颜色走 --ol-* / --el-* 变量，深浅色跟随主题，不写死色值。
+ * ========================================================================== */
+
+.ol-about-alert {
+  margin-bottom: var(--ol-space-3);
+}
+
+/* ---- 版本横幅：页面上最先要看到的两个数字（版本号、提交） ---- */
+.ol-about-hero {
+  padding: var(--ol-space-4) var(--ol-space-5);
+  margin-bottom: var(--ol-space-4);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--el-fill-color-lighter);
+}
+
+.ol-about-hero-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ol-space-3);
+}
+
+.ol-about-tag {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.3px;
+  color: var(--ol-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 提交号用等宽字体：一串看不出结构的 hex，等宽更好逐个字符对照 release */
+.ol-about-commit {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: var(--ol-radius-sm);
+  color: var(--ol-text-secondary);
+  background: var(--el-fill-color);
+}
+
+.ol-about-sub {
+  margin: var(--ol-space-3) 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ol-text-muted);
+}
+
+/* ---- 两块并排（运行环境 / 存储与路径）：340px 是路径列不被挤成省略号的下限 ---- */
+.ol-about-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  align-items: start;
+  gap: var(--ol-space-3);
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-about-block {
+  padding: var(--ol-space-3) var(--ol-space-4) var(--ol-space-4);
+  margin-bottom: var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+/* 并排的两块自己带外边距，外层由 grid 的 gap 负责间距（否则会叠加成双倍） */
+.ol-about-grid > .ol-about-block {
+  margin-bottom: 0;
+}
+
+.ol-about-h3 {
+  margin: 0 0 var(--ol-space-2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ol-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ---- 键值行：键固定宽，值占满剩余并允许换行/省略 ---- */
+.ol-about-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: var(--ol-space-3);
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--ol-border);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ol-about-row:last-child {
+  border-bottom: none;
+}
+
+.ol-about-key {
+  color: var(--ol-text-muted);
+}
+
+.ol-about-val {
+  min-width: 0;
+  color: var(--ol-text);
+  /* 长 commit / 长 OS 描述可能没有空格，必须允许任意处断行，否则会顶破卡片 */
+  overflow-wrap: anywhere;
+}
+
+/* 路径：等宽 + 单行省略（完整值在 title 里），一眼看出目录层级 */
+.ol-about-val.is-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- 能力标签 ---- */
+.ol-about-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ol-space-2);
+  margin-bottom: var(--ol-space-2);
+}
+
+/* ---- 链接与页脚 ---- */
+.ol-about-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ol-space-4);
+  font-size: 13px;
+}
+
+.ol-about-links a {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+.ol-about-links a:hover {
+  text-decoration: underline;
+}
+
+.ol-about-foot {
+  margin: var(--ol-space-3) 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ol-text-muted);
+}
+
+/* 窄屏：键列缩到 96px，否则值只剩两三个字符 */
+@media (max-width: 720px) {
+  .ol-about-row {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+}

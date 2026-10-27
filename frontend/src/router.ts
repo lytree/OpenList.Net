@@ -180,6 +180,12 @@ const routes: RouteRecordRaw[] = [
             component: () => import("~/pages/manage/backup/BackupRestore"),
             meta: { title: "manage.sidemenu.backup-restore" },
           },
+          {
+            path: "about",
+            name: "about",
+            component: () => import("~/pages/manage/about/About"),
+            meta: { title: "manage.sidemenu.about" },
+          },
         ],
       },
       {

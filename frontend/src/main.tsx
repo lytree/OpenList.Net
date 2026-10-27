@@ -11,6 +11,7 @@ import "./styles/preview-extra.css"
 import "./styles/messenger-extra.css"
 import "./styles/backup-extra.css"
 import "./styles/dashboard-extra.css"
+import "./styles/about-extra.css"
 import "./style.css"
 
 import App from "./App"
