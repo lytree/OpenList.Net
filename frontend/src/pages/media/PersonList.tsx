@@ -3,8 +3,8 @@ import { useRouter } from "vue-router"
 import { ElButton, ElEmpty, ElIcon, ElInput, ElOption, ElSelect, ElTag } from "element-plus"
 import { ArrowLeft, Search } from "@element-plus/icons-vue"
 import { mediaListPersons, type MediaPersonSummary } from "~/api/media"
+import PersonAvatar from "~/components/PersonAvatar"
 import FilePager from "~/pages/home/Pager"
-import { nameInitial } from "~/utils/mediaCatalog"
 import { t } from "~/i18n"
 
 /**
@@ -128,14 +128,15 @@ export default defineComponent({
                   class="ol-media-person-card"
                   onClick={() => openPerson(person)}
                 >
-                  <div class="ol-media-avatar">
-                    {/*
-                      头像占位：人物头像没有专用图片端点（后端只对条目图做了可见性校验 + 读取），
-                      `profile_path` 是 VFS 路径，直连要逐张取签名，网格里不可接受。
-                      因此统一用姓名首字占位，见 docs §30「遗留」。
-                    */}
-                    <span>{nameInitial(person.name)}</span>
-                  </div>
+                  {/*
+                    有头像（NFO 的 <thumb> 或 TMDB 外链）才请求图片；没有就用姓名首字。
+                    列表常驻 30 张卡片，无头像的盲请求会换来 30 条 404（见 PersonAvatar）。
+                  */}
+                  <PersonAvatar
+                    personId={person.id}
+                    name={person.name}
+                    profilePath={person.profile_path}
+                  />
                   <div class="ol-media-person-name" title={person.name}>
                     {person.name}
                   </div>

@@ -11,8 +11,8 @@ import {
   type PersonAggregate,
 } from "~/api/media"
 import MediaGrid from "~/components/MediaGrid"
+import PersonAvatar from "~/components/PersonAvatar"
 import FilePager from "~/pages/home/Pager"
-import { nameInitial } from "~/utils/mediaCatalog"
 import { t } from "~/i18n"
 
 /**
@@ -138,7 +138,12 @@ export default defineComponent({
           </div>
 
           <div class="ol-media-person-head">
-            <div class="ol-media-avatar is-lg">{nameInitial(current?.name)}</div>
+            <PersonAvatar
+              personId={personId.value}
+              name={person.value?.name ?? ""}
+              profilePath={person.value?.profile_path}
+              large={true}
+            />
             <div class="ol-media-person-head-meta">
               <h2 class="ol-media-detail-title-plain">{current?.name ?? t("media.no_person")}</h2>
               <div class="ol-media-detail-tags">

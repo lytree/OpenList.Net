@@ -121,6 +121,7 @@
   "no_persons": "No people yet. Scrape some items to build the cast list.",
   "no_person": "Person not found",
   "no_person_items": "No visible item for this person.",
+  "not_found": "Not found",
   "back_to_persons": "Back to people",
   "role_all": "All roles",
   "role_director": "Director",

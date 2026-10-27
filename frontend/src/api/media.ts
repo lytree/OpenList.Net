@@ -448,6 +448,19 @@ export const mediaListTaxonomyItems = (
     params: { page, per_page: perPage },
   }) as Promise<Resp<Page<MediaItem>>>
 
+/**
+ * 单个片商/系列（详情页标题与条目数）。
+ *
+ * 之前详情页只能靠列表页跳转时塞进 URL 的 `?name=` 显示标题，直接输地址就退化成
+ * 「片商 #3」；有了这个接口，标题不再依赖来源，`item_count` 也不必再从分页 total 猜。
+ * 不存在时后端给 404（`code === 404`），前端按「找不到」渲染而不是编个名字出来。
+ */
+export const mediaTaxonomyDetail = (
+  kind: MediaTaxonomyKind,
+  id: number,
+): Promise<Resp<MediaTaxonomySummary>> =>
+  http.get<MediaTaxonomySummary>(`/media/${kind}/${id}`) as Promise<Resp<MediaTaxonomySummary>>
+
 // ---- 播放列表 ------------------------------------------------------------
 
 /** 播放列表封面预览项。`poster_path` 为空表示没有海报，不要发图片请求。 */
@@ -584,4 +597,17 @@ export function mediaImageLink(itemId: number, kind: "poster" | "backdrop" = "po
   // `<img>` 发不了 Authorization 头，令牌走查询参数（后端在 header 缺失时才读它）
   const auth = token ? `&access_token=${encodeURIComponent(token)}` : ""
   return `${location.origin}/api/media/items/${itemId}/image?kind=${kind}${auth}`
+}
+
+/**
+ * 人物头像直链（`/media/persons/{id}/image`）。
+ *
+ * 与条目图同一套：专用端点做可见性校验后直读，外链头像后端 302 转出去。
+ * 没有头像的人物会 404 —— 调用方必须**先看 `profile_path` 是否为空**再决定要不要请求，
+ * 否则一页 30 张占位头像就是 30 条 404（浏览器会把它记进控制台）。
+ */
+export function mediaPersonImageLink(personId: number): string {
+  const token = getToken()
+  const auth = token ? `?access_token=${encodeURIComponent(token)}` : ""
+  return `${location.origin}/api/media/persons/${personId}/image${auth}`
 }
