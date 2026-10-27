@@ -1,10 +1,14 @@
 import { chromium } from "playwright"
 
 /**
- * A / E / G 的自动化回归：认证与守卫、管理台模块、通用外观。
+ * A / E / F / G 的自动化回归：认证与守卫、管理台模块、关于页、通用外观。
  *
- * 这三块此前没有脚本 —— B/C/D/F 都有专门的真机验收，而「登录会不会放错人进去」
- * 「管理台 8 个页签是不是都能打开」只能靠人手点，M5 的 A–H 就只能算口头承诺。
+ * 这几块此前没有脚本 —— 其余轮次各有专门的真机验收，而「登录会不会放错人进去」
+ * 「管理台每个页签是不是都能打开」「关于页报的版本与接口是否一致」只能靠人手点，
+ * M5 的 A–H 就只能算口头承诺。
+ *
+ * 关于页没有单独一轮：它只有 10 来个字段、没有写操作，为一个纯读页面单独起一遍
+ * 后端 + 数据库不划算，所以挂在「管理台页签全开」这一轮里（见 F 段）。
  *
  * 用法：`BASE=http://127.0.0.1:5055 ADMIN_PASS=e2e12345 node scripts/verify-common.mjs`
  * 前置：隔离后端托管 dist（临时库），无需任何挂载/装置。
@@ -70,9 +74,9 @@ await page.reload({ waitUntil: "networkidle" })
 await page.waitForTimeout(1200)
 check("刷新后保持登录", (await page.locator(".ol-login-page").count()) === 0, page.url())
 
-// ---------- E. 管理台 11 个已就绪模块都能打开 ----------
-// （about 仍是 (soon) 禁用态，不在断言范围内；
-//   plugins 已于 §35 从导航移除 —— .NET 侧没有 .so 插件宿主，留着只会误导）
+// ---------- E. 管理台 12 个模块都能打开 ----------
+// （12 个全部就绪：about 是最后一个，见 §38；plugins 已于 §35 从导航移除 ——
+//   .NET 侧没有 .so 插件宿主，留着只会误导）
 const ADMIN_PAGES = [
   ["#/@manage/dashboard", "Dashboard"],
   ["#/@manage/storages", "Storages"],
@@ -85,6 +89,7 @@ const ADMIN_PAGES = [
   ["#/@manage/messenger", "Messages"],
   ["#/@manage/backup-restore", "Backup"],
   ["#/@manage/settings", "Settings"],
+  ["#/@manage/about", "About"],
 ]
 for (const [hash, label] of ADMIN_PAGES) {
   const before = errors.length
@@ -98,6 +103,107 @@ for (const [hash, label] of ADMIN_PAGES) {
     `surface=${hasSurface} newErrors=${errors.length - before}`,
   )
 }
+
+// ---------- F. 关于页：每个数字都要和接口对得上 ----------
+// 这一页不放任何写死的期望值（版本号随构建变、路径随部署变，写死必然假失败），
+// 断言的是「界面 == GET /api/admin/system/info」。
+await goto("#/@manage/about")
+await page.waitForSelector(".ol-about-hero", { timeout: 15000 })
+const info = await page.request
+  .get(`${BASE}/api/admin/system/info`, { headers: { Authorization: token } })
+  .then((r) => r.json())
+  .then((b) => b.data)
+check("system/info 返回版本", Boolean(info?.version) && Boolean(info?.tag), JSON.stringify(info?.tag))
+
+const heroTag = (await page.locator(".ol-about-tag").innerText()).trim()
+check("横幅版本号 == 接口 tag", heroTag === info.tag, `${heroTag} vs ${info.tag}`)
+const heroCommit = ((await page.locator(".ol-about-commit").innerText()) || "").trim()
+check(
+  "横幅提交号 == 接口 commit 前 7 位",
+  heroCommit === `#${(info.commit || "").slice(0, 7)}`,
+  `${heroCommit} vs #${(info.commit || "").slice(0, 7)}`,
+)
+
+// 键值行摊平成字典：键是文案、值是展示值，逐行比对（顺序变也不影响）
+const rowMap = await page.evaluate(() => {
+  const out = {}
+  for (const el of document.querySelectorAll(".ol-about-row")) {
+    const k = el.querySelector(".ol-about-key")?.textContent?.trim() ?? ""
+    const v = el.querySelector(".ol-about-val")?.textContent?.trim() ?? ""
+    if (k) out[k] = v
+  }
+  return out
+})
+const rows = Object.keys(rowMap).length
+check("至少 14 行键值（运行环境 + 数据库 + 路径 + 服务）", rows >= 14, `rows=${rows}`)
+check("Framework == 接口 runtime", rowMap["Framework"] === info.runtime, `${rowMap["Framework"]}`)
+check("Operating system == 接口 os", rowMap["Operating system"] === info.os, `${rowMap["Operating system"]}`)
+check(
+  "Architecture 以接口的架构开头",
+  (rowMap["Architecture"] || "").startsWith(info.architecture),
+  rowMap["Architecture"],
+)
+check("Database == 接口 type", rowMap["Database"] === info.database.type, rowMap["Database"])
+check(
+  "Data directory == 接口 data_dir",
+  rowMap["Data directory"] === info.paths.data_dir,
+  `${rowMap["Data directory"]} vs ${info.paths.data_dir}`,
+)
+check(
+  "Frontend assets == 接口 dist_dir",
+  rowMap["Frontend assets"] === info.paths.dist_dir,
+  `${rowMap["Frontend assets"]} vs ${info.paths.dist_dir}`,
+)
+check(
+  "Log file == 接口 log_file（本实例启用了文件日志）",
+  info.paths.log_enabled ? rowMap["Log file"] === info.paths.log_file : true,
+  `${rowMap["Log file"]}`,
+)
+
+// 运行时长与时钟偏差是现算的：只验格式，不验数值（数值每刷新一次都在变）
+check("Uptime 是格式化后的时长（不是 -1s 那种原始值）", /^\d+[dhms]/.test(rowMap["Uptime"] || ""), rowMap["Uptime"])
+check("Clock skew 带符号秒", /^[+-]?\d+s$/.test(rowMap["Clock skew"] || ""), rowMap["Clock skew"])
+
+// 内置服务：5 个标签（关闭的也要列出 —— 「什么没开」同样是信息）
+const capTexts = await page.locator(".ol-about-tags .el-tag").allInnerTexts()
+check("内置服务 5 个标签", capTexts.length === 5, capTexts.join("|"))
+check(
+  "S3 标签状态 == 接口 features.s3",
+  (capTexts[0] || "").includes(info.features.s3 ? "on" : "off"),
+  capTexts[0],
+)
+check(
+  "Max connections 为 0 时显示 ∞",
+  info.features.max_connections === 0 ? rowMap["Max connections"] === "∞" : true,
+  rowMap["Max connections"],
+)
+
+// 链接：4 条外链，必须带 target=_blank + rel=noopener（后台页面别把站内导航带走）
+const links = await page.locator(".ol-about-links a").evaluateAll((els) =>
+  els.map((a) => ({ href: a.getAttribute("href"), target: a.getAttribute("target"), rel: a.getAttribute("rel") })),
+)
+check("4 条外链", links.length === 4, links.map((l) => l.href).join(" "))
+check(
+  "外链都指向 GitHub 且新窗口打开",
+  links.every((l) => l.href?.startsWith("https://github.com/") && l.target === "_blank" && (l.rel || "").includes("noopener")),
+  JSON.stringify(links[0]),
+)
+
+// 导航：12 项、全部可点（about 就绪后不该再有 (soon)）
+const navTexts = await page.locator(".ol-manage-menu .el-menu-item").allInnerTexts()
+const navDisabled = await page.locator(".ol-manage-menu .el-menu-item.is-disabled").count()
+check("导航 12 项", navTexts.length === 12, navTexts.join("|"))
+check("没有 (soon) 条目", !navTexts.some((t) => t.includes("(soon)")), navTexts.filter((t) => t.includes("soon")).join("|"))
+check("没有禁用项", navDisabled === 0, `disabled=${navDisabled}`)
+
+// 刷新会重新打接口（不是只改了本地状态）
+let infoCalls = 0
+page.on("request", (r) => {
+  if (r.url().includes("/api/admin/system/info")) infoCalls += 1
+})
+await page.locator(".ol-manage-toolbar button.el-button").last().click()
+await page.waitForTimeout(1200)
+check("点刷新重新请求 system/info", infoCalls >= 1, `calls=${infoCalls}`)
 
 // ---------- G. 外观：暗色主题 + 语言控件 ----------
 await goto("#/")

@@ -109,9 +109,10 @@ check(
   navTexts.some((t) => t === "Backup & Restore"),
   navTexts.find((t) => t.includes("Backup")) ?? "",
 )
+// about 在 §38 放开后导航已无禁用项（本轮的旧断言曾是「只剩 About 一个」）
 check(
-  "仍未就绪的只剩 About",
-  (await page.locator(".el-menu-item.is-disabled").count()) === 1,
+  "导航已无禁用项（about 也已放开）",
+  (await page.locator(".el-menu-item.is-disabled").count()) === 0,
   `${await page.locator(".el-menu-item.is-disabled").count()}`,
 )
 

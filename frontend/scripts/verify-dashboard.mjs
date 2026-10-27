@@ -222,8 +222,8 @@ check("导航无 Plugins", !navTexts.some((t) => /Plugins/i.test(t)), navTexts.j
 check("导航首项为 Dashboard", navTexts[0] === "Dashboard", navTexts[0])
 check("Dashboard 未标 (soon)", !navTexts[0].includes("soon"), navTexts[0])
 const disabledCount = await page.locator(".ol-manage-menu .el-menu-item.is-disabled").count()
-// backup-restore 已在 §37 放开，现在只剩 About 一个 (soon)
-check("仅 About 仍未就绪", disabledCount === 1, `disabled=${disabledCount}`)
+// about 在 §38 放开后，导航里没有任何 (soon) —— 12 项全部可点
+check("导航无未就绪项", disabledCount === 0, `disabled=${disabledCount}`)
 
 check("零控制台错误", errors.length === 0, errors.slice(0, 3).join(" | "))
 
