@@ -30,7 +30,9 @@ public sealed record MediaNfo(
 /// <param name="Role">角色类型：director / creator / actor。</param>
 /// <param name="Character">演员饰演的角色名。</param>
 /// <param name="Order">演员表排序。</param>
-public sealed record MediaNfoPerson(string Name, string Role, string? Character, int Order);
+/// <param name="ProfilePath">头像（<c>&lt;thumb&gt;</c> 原值：相对文件名或绝对 URL），可为空。</param>
+public sealed record MediaNfoPerson(
+    string Name, string Role, string? Character, int Order, string? ProfilePath = null);
 
 /// <summary>
 /// Kodi 兼容 NFO 的解析器（纯函数，无 IO）。
@@ -162,7 +164,14 @@ internal static class MediaNfoReader
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
-    /// <summary>演职员：director / credits(creator) / actor 三类。</summary>
+    /// <summary>
+    /// 演职员：director / credits(creator) / actor 三类。
+    /// <para>
+    /// 演员的 <c>&lt;thumb&gt;</c> 一并解析：Kodi / Jellyfin / Emby 都用它挂头像，
+    /// 值可能是同目录的文件名，也可能是 TMDB 的绝对 URL（两种都由
+    /// <see cref="MediaPersonImage"/> 归一化，这里只负责原样取出）。
+    /// </para>
+    /// </summary>
     private static List<MediaNfoPerson> Persons(XElement root)
     {
         var persons = new List<MediaNfoPerson>();
@@ -181,9 +190,10 @@ internal static class MediaNfoReader
             var name = Text(a, "name");
             if (string.IsNullOrWhiteSpace(name)) continue;
             var role = Text(a, "role");
+            var thumb = Text(a, "thumb");
             var ord = a.Elements("order").FirstOrDefault()?.Value;
             var parsed = int.TryParse(ord, out var o) && o >= 0 ? o : order;
-            persons.Add(new MediaNfoPerson(name, "actor", role, parsed));
+            persons.Add(new MediaNfoPerson(name, "actor", role, parsed, thumb));
             order++;
         }
         return persons;

@@ -50,6 +50,13 @@ internal static class MediaPersonSync
                 db.MediaPersons.Add(person);
                 await db.SaveChangesAsync(ct);
             }
+            else if (string.IsNullOrWhiteSpace(person.ProfilePath) && !string.IsNullOrWhiteSpace(p.ProfilePath))
+            {
+                // 只补空、不覆盖已有值：同一人物可能出现在多部片子里，先入库的那条
+                // 未必带头像（NFO 里 <thumb> 是可选字段）。补写后重新扫描就能显示出来了。
+                person.ProfilePath = p.ProfilePath;
+                person.UpdatedAt = time.GetUtcNow();
+            }
             db.MediaItemPersons.Add(new MediaItemPerson
             {
                 ItemId = itemId,

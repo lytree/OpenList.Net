@@ -186,6 +186,35 @@ public class MediaSidecarSelectionTests
     }
 
     [Test]
+    public async Task Parse_Actor_Thumb_Is_Kept_Verbatim()
+    {
+        // thumb 可能是同目录文件名，也可能是 TMDB 的绝对 URL —— 解析器只负责原样取出，
+        // 归一化交给 MediaPersonImage（见 MediaPersonImageTests）。
+        var nfo = MediaNfoReader.Parse("""
+            <movie>
+              <title>Blade Runner</title>
+              <actor>
+                <name>Harrison Ford</name>
+                <role>Rick Deckard</role>
+                <order>0</order>
+                <thumb>harrison.jpg</thumb>
+              </actor>
+              <actor>
+                <name>Ridley Scott</name>
+                <thumb>https://image.tmdb.org/t/p/w185/rs.jpg</thumb>
+              </actor>
+              <actor><name>No Thumb</name></actor>
+            </movie>
+            """);
+
+        await Assert.That(nfo).IsNotNull();
+        var actors = nfo!.Persons.Where(p => p.Role == "actor").ToList();
+        await Assert.That(actors[0].ProfilePath).IsEqualTo("harrison.jpg");
+        await Assert.That(actors[1].ProfilePath).IsEqualTo("https://image.tmdb.org/t/p/w185/rs.jpg");
+        await Assert.That(actors[2].ProfilePath).IsNull();
+    }
+
+    [Test]
     public async Task ClassifyImageFile_Distinguishes_Posters_Backdrops_And_Others()
     {
         await Assert.That(MediaNaming.ClassifyImageFile("poster.jpg")).IsEqualTo("poster");

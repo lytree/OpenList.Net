@@ -54,6 +54,7 @@ internal static class ItemEndpoints
         // 海报/背景图的专用读端点。前端网格**不能**自己拼 /d 链接或逐条 fs/get：
         // 一页 30 张海报就是 30 次带签名的元数据往返，而媒体页关心的只有「这张图」。
         // 可见性由 GetItemAsync 的 BasePath 过滤兜底 —— 拿不到条目就拿不到图。
+        // 三种形态（404 / 302 外链 / 直读）见 MediaImages。
         g.MapGet("/items/{id:long}/image", async (
             long id,
             HttpContext ctx,
@@ -63,34 +64,13 @@ internal static class ItemEndpoints
         {
             var user = principal.ToUser();
             var item = await libraries.GetItemAsync(id, user);
-            if (item.Code != 200 || item.Data is null) return Results.Ok(item);
+            if (item.Code != 200 || item.Data is null) return Results.NotFound();
 
             var kind = MediaQuery.Text(ctx.Request.Query, "kind") ?? "poster";
             var path = kind.Equals("backdrop", StringComparison.OrdinalIgnoreCase)
                 ? item.Data.BackdropPath
                 : item.Data.PosterPath;
-            if (string.IsNullOrWhiteSpace(path)) return Results.NotFound();
-
-            // TMDB 刮削的图是外链：直接 302，不在服务器上转一手
-            if (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-                || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                return Results.Redirect(path, permanent: false);
-            }
-
-            // 海报是单张图，整读比开流简单；上限挡住把视频文件误配成海报的情况
-            var read = await fs.ReadFileAsync(path, 8 * 1024 * 1024, user);
-            if (read.Code != 200 || read.Data is null) return Results.NotFound();
-
-            var contentType = System.IO.Path.GetExtension(path).ToLowerInvariant() switch
-            {
-                ".png" => "image/png",
-                ".webp" => "image/webp",
-                ".gif" => "image/gif",
-                ".svg" => "image/svg+xml",
-                _ => "image/jpeg",
-            };
-            return Results.File(read.Data, contentType);
+            return await MediaImages.ServeAsync(path, user, fs, ctx.RequestAborted);
         });
 
         // GET /api/media/items/{id}/credits — 创作者列表

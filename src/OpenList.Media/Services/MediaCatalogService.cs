@@ -256,6 +256,11 @@ public sealed class MediaCatalogService : IMediaCatalogService
         => await ListTaxonomyAsync(_db.MediaStudios, i => i.StudioId, keyword, page, perPage, user, ct);
 
     /// <inheritdoc />
+    public async Task<Resp<MediaTaxonomySummary>> GetStudioAsync(
+        long studioId, User user, CancellationToken ct = default)
+        => await GetTaxonomyAsync(_db.MediaStudios, i => i.StudioId, studioId, "studio", user, ct);
+
+    /// <inheritdoc />
     public async Task<Resp<PageResp<MediaItem>>> ListStudioItemsAsync(
         long studioId, int page, int perPage, User user, CancellationToken ct = default)
         => await ListTaxonomyItemsAsync(i => i.StudioId == studioId, studioId, "studio", page, perPage, user, ct);
@@ -266,9 +271,44 @@ public sealed class MediaCatalogService : IMediaCatalogService
         => await ListTaxonomyAsync(_db.MediaSeries, i => i.SeriesId, keyword, page, perPage, user, ct);
 
     /// <inheritdoc />
+    public async Task<Resp<MediaTaxonomySummary>> GetSeriesAsync(
+        long seriesId, User user, CancellationToken ct = default)
+        => await GetTaxonomyAsync(_db.MediaSeries, i => i.SeriesId, seriesId, "series", user, ct);
+
+    /// <inheritdoc />
     public async Task<Resp<PageResp<MediaItem>>> ListSeriesItemsAsync(
         long seriesId, int page, int perPage, User user, CancellationToken ct = default)
         => await ListTaxonomyItemsAsync(i => i.SeriesId == seriesId, seriesId, "series", page, perPage, user, ct);
+
+    /// <summary>
+    /// 单条片商/系列的通用实现。
+    /// <para>
+    /// 为什么需要它：详情页原先只能靠列表页跳转时塞进 URL 的 <c>?name=</c> 显示标题，
+    /// 直接输地址（或刷新后从历史记录回来）就退化成「片商 #3」。补上这个查询后，
+    /// 页面标题不再依赖来源，条目数也顺手由后端给（前端不用再从分页的 <c>total</c> 猜）。
+    /// </para>
+    /// <para>
+    /// <c>item_count</c> 与列表口径一致：只数当前用户可见的条目。因此「存在但名下没有
+    /// 可见条目」的维度行会返回 <c>count = 0</c> —— 这是对的（行本身是真实存在的），
+    /// 与列表接口「无关联行不返回」的取舍不同：那里是推荐列表，这里是直接访问。
+    /// </para>
+    /// </summary>
+    private async Task<Resp<MediaTaxonomySummary>> GetTaxonomyAsync(
+        IQueryable<IMediaTaxonomyEntity> set,
+        Func<MediaItem, long?> keyOf,
+        long id, string kind, User user, CancellationToken ct)
+    {
+        var row = await set.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (row is null) return Resp<MediaTaxonomySummary>.Fail($"{kind} not found", RespCodes.NotFound);
+
+        var items = await LoadVisibleItemsAsync(null, user, ct);
+        return Resp<MediaTaxonomySummary>.Ok(new MediaTaxonomySummary
+        {
+            Id = row.Id,
+            Name = row.Name,
+            ItemCount = items.Count(i => keyOf(i) == id),
+        });
+    }
 
     /// <summary>
     /// 片商/系列列表的通用实现：与 <see cref="ListPersonsAsync"/> 同口径 ——

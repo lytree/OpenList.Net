@@ -301,6 +301,58 @@ public class MediaCodeDomainTests
         await Assert.That(missing.Code).IsEqualTo(404);
     }
 
+    /// <summary>
+    /// 单条片商/系列：详情页靠它取标题，所以「有名字 + 可见条目数」两件事必须一起给。
+    /// 「行存在但名下没有条目」返回 200 + 0，与「行不存在」返回 404 要分得清 ——
+    /// 前者是合法的空维度（用户可能刚删掉最后一条片子），后者是地址错了。
+    /// </summary>
+    [Test]
+    public async Task Catalog_GetTaxonomy_Returns_Name_With_Visible_Count()
+    {
+        await using var ctx = BuildContext();
+        var now = DateTimeOffset.UtcNow;
+        var studioId = await MediaTaxonomySync.ResolveStudioAsync(ctx, now, "Prestige", default);
+        var emptyStudioId = await MediaTaxonomySync.ResolveStudioAsync(ctx, now, "Empty Studio", default);
+        var seriesId = await MediaTaxonomySync.ResolveSeriesAsync(ctx, now, "Collectors", default);
+        ctx.MediaItems.AddRange(
+            new MediaItem
+            {
+                LibraryId = 1, Type = MediaLibraryType.Movie, Title = "A",
+                StudioId = studioId, SeriesId = seriesId, Status = MediaItemStatus.Matched,
+                DirectoryPath = "/f/a", CreatedAt = now, UpdatedAt = now,
+            },
+            new MediaItem
+            {
+                LibraryId = 1, Type = MediaLibraryType.Movie, Title = "B",
+                StudioId = studioId, SeriesId = seriesId, Status = MediaItemStatus.Matched,
+                DirectoryPath = "/f/b", CreatedAt = now, UpdatedAt = now,
+            });
+        await ctx.SaveChangesAsync();
+
+        var catalog = new MediaCatalogService(ctx, new FakeLibraryService());
+
+        var studio = await catalog.GetStudioAsync(studioId, AdminUser);
+        await Assert.That(studio.Code).IsEqualTo(200);
+        await Assert.That(studio.Data!.Id).IsEqualTo(studioId);
+        await Assert.That(studio.Data.Name).IsEqualTo("Prestige");
+        await Assert.That(studio.Data.ItemCount).IsEqualTo(2);
+
+        var series = await catalog.GetSeriesAsync(seriesId, AdminUser);
+        await Assert.That(series.Code).IsEqualTo(200);
+        await Assert.That(series.Data!.Name).IsEqualTo("Collectors");
+        await Assert.That(series.Data.ItemCount).IsEqualTo(2);
+
+        var empty = await catalog.GetStudioAsync(emptyStudioId, AdminUser);
+        await Assert.That(empty.Code).IsEqualTo(200);
+        await Assert.That(empty.Data!.Name).IsEqualTo("Empty Studio");
+        await Assert.That(empty.Data.ItemCount).IsEqualTo(0);
+
+        var missingStudio = await catalog.GetStudioAsync(999, AdminUser);
+        await Assert.That(missingStudio.Code).IsEqualTo(404);
+        var missingSeries = await catalog.GetSeriesAsync(999, AdminUser);
+        await Assert.That(missingSeries.Code).IsEqualTo(404);
+    }
+
     private static readonly User AdminUser = new() { Id = 1, Username = "admin", Role = UserRole.Admin };
 
     private static OpenListDbContext BuildContext()

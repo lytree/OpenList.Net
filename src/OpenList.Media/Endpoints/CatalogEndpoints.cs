@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using OpenList.Core.Interfaces;
 using OpenList.Core.Security;
 using OpenList.Media.Domain.Abstractions;
 
@@ -61,6 +62,24 @@ internal static class CatalogEndpoints
         g.MapGet("/persons/{id:long}", async (long id, ClaimsPrincipal principal, IMediaMetadataService metadata) =>
             Results.Ok(await metadata.GetPersonAsync(id, principal.ToUser())));
 
+        // GET /api/media/persons/{id}/image — 人物头像
+        //
+        // 与条目图同款（见 MediaImages）：TMDB 给的是外链 → 302；本地 NFO 的 <thumb>
+        // 落到 VFS 路径 → 直读。没有头像（本地 NFO 常见）给 404，前端据此回退姓名首字。
+        // 可见性靠 GetPersonAsync：它按「名下是否有可见条目」判定，越权同样 404。
+        g.MapGet("/persons/{id:long}/image", async (
+            long id,
+            HttpContext ctx,
+            ClaimsPrincipal principal,
+            IMediaMetadataService metadata,
+            IFileSystemService fs) =>
+        {
+            var user = principal.ToUser();
+            var person = await metadata.GetPersonAsync(id, user, ctx.RequestAborted);
+            if (person.Code != 200 || person.Data is null) return Results.NotFound();
+            return await MediaImages.ServeAsync(person.Data.Person.ProfilePath, user, fs, ctx.RequestAborted);
+        });
+
         // ---------- 片商/系列聚合（番号域） ----------
 
         // GET /api/media/studios?keyword=&page=&per_page= — 片商列表（按条目数降序）
@@ -70,6 +89,10 @@ internal static class CatalogEndpoints
             var (page, perPage) = MediaQuery.Paging(q);
             return Results.Ok(await catalog.ListStudiosAsync(MediaQuery.Text(q, "keyword"), page, perPage, principal.ToUser()));
         });
+
+        // GET /api/media/studios/{id} — 单条片商（详情页标题用，别再靠 query 传名字）
+        g.MapGet("/studios/{id:long}", async (long id, ClaimsPrincipal principal, IMediaCatalogService catalog) =>
+            Results.Ok(await catalog.GetStudioAsync(id, principal.ToUser())));
 
         // GET /api/media/studios/{id}/items — 该片商名下的条目
         g.MapGet("/studios/{id:long}/items", async (long id, HttpContext ctx, ClaimsPrincipal principal, IMediaCatalogService catalog) =>
@@ -85,6 +108,10 @@ internal static class CatalogEndpoints
             var (page, perPage) = MediaQuery.Paging(q);
             return Results.Ok(await catalog.ListSeriesAsync(MediaQuery.Text(q, "keyword"), page, perPage, principal.ToUser()));
         });
+
+        // GET /api/media/series/{id}
+        g.MapGet("/series/{id:long}", async (long id, ClaimsPrincipal principal, IMediaCatalogService catalog) =>
+            Results.Ok(await catalog.GetSeriesAsync(id, principal.ToUser())));
 
         // GET /api/media/series/{id}/items — 该系列名下的条目
         g.MapGet("/series/{id:long}/items", async (long id, HttpContext ctx, ClaimsPrincipal principal, IMediaCatalogService catalog) =>

@@ -462,6 +462,10 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
         {
             var actor = new XElement("actor", new XElement("name", a.Name), new XElement("order", a.Order));
             if (!string.IsNullOrWhiteSpace(a.Character)) actor.Add(new XElement("role", a.Character));
+            // 头像只写文件名（外链原样）：NFO 要能拿到别的机器上用，写绝对 VFS 路径
+            // 会把文件绑死在这台服务器的挂载布局上（见 MediaPersonImage）。
+            var thumb = MediaPersonImage.ToNfoValue(a.ProfilePath);
+            if (thumb is not null) actor.Add(new XElement("thumb", thumb));
             root.Add(actor);
         }
 

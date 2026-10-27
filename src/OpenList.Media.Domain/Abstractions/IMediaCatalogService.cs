@@ -23,11 +23,17 @@ public interface IMediaCatalogService
     /// <summary>片商列表（按关联条目数降序，番号域聚合维度）。</summary>
     Task<Resp<PageResp<MediaTaxonomySummary>>> ListStudiosAsync(string? keyword, int page, int perPage, User user, CancellationToken ct = default);
 
+    /// <summary>单个片商（详情页标题/条目数；不存在时 <c>404</c>）。</summary>
+    Task<Resp<MediaTaxonomySummary>> GetStudioAsync(long studioId, User user, CancellationToken ct = default);
+
     /// <summary>某片商名下的条目（分页）。</summary>
     Task<Resp<PageResp<MediaItem>>> ListStudioItemsAsync(long studioId, int page, int perPage, User user, CancellationToken ct = default);
 
     /// <summary>系列列表（按关联条目数降序，番号域聚合维度）。</summary>
     Task<Resp<PageResp<MediaTaxonomySummary>>> ListSeriesAsync(string? keyword, int page, int perPage, User user, CancellationToken ct = default);
+
+    /// <summary>单个系列（详情页标题/条目数；不存在时 <c>404</c>）。</summary>
+    Task<Resp<MediaTaxonomySummary>> GetSeriesAsync(long seriesId, User user, CancellationToken ct = default);
 
     /// <summary>某系列名下的条目（分页）。</summary>
     Task<Resp<PageResp<MediaItem>>> ListSeriesItemsAsync(long seriesId, int page, int perPage, User user, CancellationToken ct = default);

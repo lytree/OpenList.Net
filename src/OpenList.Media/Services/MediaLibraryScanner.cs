@@ -279,7 +279,11 @@ public sealed class MediaLibraryScanner
             {
                 await MediaPersonSync.ReplaceAsync(db, TimeProvider.System, item.Id,
                     nfo.Persons.Select(p => new MediaPersonSync.Entry(
-                        p.Name, null, p.Role, p.Character, null, p.Order)), ct);
+                        p.Name, null, p.Role, p.Character,
+                        // NFO 里的 thumb 是相对条目目录的文件名（或 TMDB 的绝对 URL），
+                        // 落库前统一换成可直接读取的路径
+                        MediaPersonImage.ToVfsPath(p.ProfilePath, item.DirectoryPath),
+                        p.Order)), ct);
             }
         }
 
