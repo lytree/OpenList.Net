@@ -11,8 +11,7 @@ tests/
 !README.md
 
 # SPA build inputs are copied explicitly by the frontend-build stage; never ship the
-# local node_modules / stale dist / the legacy submodule into the build context.
+# local node_modules / stale dist into the build context.
 frontend/node_modules/
 frontend/dist/
-frontend-legacy/
 artifacts/

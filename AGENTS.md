@@ -30,7 +30,6 @@
 | `src/OpenList.Cli` | Ops CLI (`openlist`, System.CommandLine): `admin info/set/random`, `storage list/disable/delete`, `cancel2fa <user>`. Talks straight to the DB — the recovery path when the web layer is down. Bundled as `cli/` next to the server |
 | `tests/OpenList.Tests` | TUnit tests for Core + Infrastructure services |
 | `frontend/` | **Vue 3 + TSX (`vue-jsx`) + Element Plus SPA** (pnpm, output `frontend/dist`, proxies `/api` to `localhost:5244` — this is the shipped frontend since M5). Build it before any bundling: `pnpm -C frontend install && pnpm -C frontend build`. **Vue version is pinned via `pnpm-workspace.yaml` → `overrides`** — `element-plus`'s peer range rejects prereleases, so a non-pinned Vue silently installs a second `runtime-core` and EP components render empty without errors (see `docs/unified-media-product-plan.md` §21.3) |
-| `frontend-legacy/` | The upstream SolidJS frontend, kept as a **git submodule** (`OpenListTeam/Openlist-Frontend`) for reference when porting a feature that is still missing. Nothing builds or serves it; CI does not check it out |
 | `src/OpenList.Desktop` | AvaloniaUI 12 desktop app (mirrors OpenList-Desktop): manages the OpenList core as a child process (`ASPNETCORE_URLS` overrides port), rclone WebDAV mounts, tray icon, live log viewer. No file-management UI (removed; fs API methods dropped from `OpenListApiClient`). Settings persisted to `%APPDATA%/OpenList.Desktop/settings.json` |
 
 ## API Patterns
@@ -215,7 +214,7 @@ Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3, AliyundriveOpen),
 - **`/debug/*`**：`DebugEndpoints`（`gc`/`hide_privacy`/`path/{**path}`），仅 Development 注册。
 - **`set_guangyapan`**：`POST /admin/setting/set_guangyapan`（存 `guangyapan_temp_dir`）。
 
-**前端关联**：`frontend/` 自 M5（2026-10-26）起是本仓库自有的 Vue 3 SPA，`pnpm build` 产出 `frontend/dist`，后端 `DistDir=../../frontend/dist` 天然匹配。此前的上游 SolidJS 子模块（`OpenListTeam/Openlist-Frontend`，v4.2.5 / commit `feae2d0`）已退到 `frontend-legacy/`，只作移植参考，不参与构建。`src/Example.Tests` 残留工程已删除。
+**前端关联**：`frontend/` 自 M5（2026-10-26）起是本仓库自有的 Vue 3 SPA，`pnpm build` 产出 `frontend/dist`，后端 `DistDir=../../frontend/dist` 天然匹配。此前的上游 SolidJS 子模块（`OpenListTeam/Openlist-Frontend`，v4.2.5 / commit `feae2d0`）曾在 `frontend-legacy/` 留作移植参考；**2026-10-29 已连同 `.gitmodules` 一起删除**（移植清单已清空，不再需要对照）。`src/Example.Tests` 残留工程已删除。
 
 ## 安全修复对齐（2026-10-17，对照 Go v4.2.7）
 
