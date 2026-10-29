@@ -496,6 +496,15 @@ void PublishServer()
     WithVersionProps(msbuild);
 
     var publishDir = $"{output}/publish";
+
+    // 先清空——`dotnet publish` 到固定目录是增量复制：它只覆盖"有变化"的文件，
+    // 从不删除上一次发布留下的东西。于是同一个 artifacts/publish 目录里一旦跑过
+    // 一次 --rid（自包含）发布，之后所有框架依赖发布都会把整套运行时装进包里：
+    // 实测 415 个文件里 330+ 个是几个月前的 coreclr / System.Private.CoreLib，
+    // 一个本该 ~40 MB 的 FDD 包被撑到 166 MB，而且这些文件不属于本次构建。
+    // （CI 每次都是干净工作区，所以这个问题只在本地反复构建时暴露。）
+    if (DirectoryExists(publishDir)) CleanDirectory(publishDir);
+
     DotNetPublish(ServerProject, new DotNetPublishSettings
     {
         Configuration = configuration,
@@ -526,10 +535,14 @@ void PublishCli()
     }
     WithVersionProps(msbuild);
 
+    // 同 PublishServer：固定输出目录 + 增量复制 ⇒ 上一次自包含发布的运行时会残留。
+    var cliDir = $"{output}/publish-cli";
+    if (DirectoryExists(cliDir)) CleanDirectory(cliDir);
+
     DotNetPublish(CliProject, new DotNetPublishSettings
     {
         Configuration = configuration,
-        OutputDirectory = $"{output}/publish-cli",
+        OutputDirectory = cliDir,
         MSBuildSettings = msbuild,
     });
 }
