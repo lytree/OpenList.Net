@@ -60,8 +60,22 @@ const routes: RouteRecordRaw[] = [
     path: "/",
     component: () => import("~/layouts/BasicLayout"),
     children: [
+      // 站点默认落地页是**媒体库**；文件浏览（首页）降级成独立页面 `/files`。
+      // 但旧书签/文档里的文件深链是 `/?path=/a/b`（没有 /files 前缀），这里按
+      // 「带 path 就等于要去浏览文件」把这类地址转给首页，否则一刷新就被甩到媒体页。
       {
         path: "",
+        // 落地页对**已登录**用户是媒体库；访客留在文件浏览。
+        // 媒体域（/api/media/**）全部需要登录，把未登录访客送到 /media 只会让页面挂载时
+        // 连发几个 401、被全局 401 处理踢回登录页 —— 而登录页的「以访客身份浏览」又回到
+        // `/`，形成「点游客 → 登录页 → 点游客」的死循环。
+        redirect: (to) => {
+          if (to.query.path) return { name: "home", query: to.query }
+          return useUserStore(pinia).isLogin ? { name: "media" } : { name: "home" }
+        },
+      },
+      {
+        path: "files",
         name: "home",
         component: () => import("~/pages/home"),
         meta: { title: "global.nav_home" },
@@ -70,13 +84,13 @@ const routes: RouteRecordRaw[] = [
         path: "media",
         name: "media",
         component: () => import("~/pages/media"),
-        meta: { title: "media.title", wide: true },
+        meta: { title: "media.title", wide: true, requiresAuth: true },
       },
       {
         path: "media/item/:id",
         name: "media-item",
         component: () => import("~/pages/media/ItemDetail"),
-        meta: { title: "media.title", wide: true },
+        meta: { title: "media.title", wide: true, requiresAuth: true },
       },
       // ---- 媒体域维度页（M4 第三片）----
       // 片商/系列共用一个列表组件与一个详情组件，靠 meta.kind 区分维度
@@ -84,55 +98,55 @@ const routes: RouteRecordRaw[] = [
         path: "media/persons",
         name: "media-persons",
         component: () => import("~/pages/media/PersonList"),
-        meta: { title: "media.persons", wide: true },
+        meta: { title: "media.persons", wide: true, requiresAuth: true },
       },
       {
         path: "media/persons/:id(\\d+)",
         name: "media-person",
         component: () => import("~/pages/media/PersonDetail"),
-        meta: { title: "media.persons", wide: true },
+        meta: { title: "media.persons", wide: true, requiresAuth: true },
       },
       {
         path: "media/studios",
         name: "media-studios",
         component: () => import("~/pages/media/TaxonomyList"),
-        meta: { title: "media.studios", kind: "studios", wide: true },
+        meta: { title: "media.studios", kind: "studios", wide: true, requiresAuth: true },
       },
       {
         path: "media/studios/:id(\\d+)",
         name: "media-studio",
         component: () => import("~/pages/media/TaxonomyDetail"),
-        meta: { title: "media.studios", kind: "studios", wide: true },
+        meta: { title: "media.studios", kind: "studios", wide: true, requiresAuth: true },
       },
       {
         path: "media/series",
         name: "media-series",
         component: () => import("~/pages/media/TaxonomyList"),
-        meta: { title: "media.series", kind: "series", wide: true },
+        meta: { title: "media.series", kind: "series", wide: true, requiresAuth: true },
       },
       {
         path: "media/series/:id(\\d+)",
         name: "media-series-detail",
         component: () => import("~/pages/media/TaxonomyDetail"),
-        meta: { title: "media.series", kind: "series", wide: true },
+        meta: { title: "media.series", kind: "series", wide: true, requiresAuth: true },
       },
       {
         path: "media/playlists",
         name: "media-playlists",
         component: () => import("~/pages/media/Playlists"),
-        meta: { title: "media.tab_playlists", wide: true },
+        meta: { title: "media.tab_playlists", wide: true, requiresAuth: true },
       },
       {
         path: "media/playlists/:id(\\d+)",
         name: "media-playlist",
         component: () => import("~/pages/media/PlaylistDetail"),
-        meta: { title: "media.tab_playlists", wide: true },
+        meta: { title: "media.tab_playlists", wide: true, requiresAuth: true },
       },
       {
         path: "media/taste",
         name: "media-taste",
         component: () => import("~/pages/media/Taste"),
-        meta: { title: "media.tab_taste", wide: true },
+        meta: { title: "media.tab_taste", wide: true, requiresAuth: true },
       },
     ],
   },

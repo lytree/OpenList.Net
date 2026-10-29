@@ -66,14 +66,17 @@ export default defineComponent({
             </RouterLink>
 
             <nav class="ol-view-links">
-              <RouterLink to="/" class={["ol-view-link", isHome.value && "is-active"]}>
-                {t("global.nav_home")}
-              </RouterLink>
+              {/* 媒体库是站点默认落地页（`/` 也指向它），排在前面；文件浏览挪到
+                  `/files`，作为一个独立入口保留 —— 它属于「管理/找文件」场景，
+                  不该和媒体库抢默认位。 */}
               <RouterLink
                 to="/media"
                 class={["ol-view-link", route.path.startsWith("/media") && "is-active"]}
               >
                 {t("global.nav_media")}
+              </RouterLink>
+              <RouterLink to="/files" class={["ol-view-link", isHome.value && "is-active"]}>
+                {t("global.nav_home")}
               </RouterLink>
             </nav>
 

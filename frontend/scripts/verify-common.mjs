@@ -38,9 +38,20 @@ const goto = async (hash) => {
   await page.waitForTimeout(800)
 }
 
-// ---------- A. 守卫：游客可浏览，但进不了管理台 ----------
-// 注意：首页**没有** requiresAuth —— 允许游客浏览是本产品的既定语义（与 Go 版一致），
-// 所以这里不假设「未登录会被踢到登录页」，只验证「游客拿不到管理台」。
+// ---------- A. 守卫：游客可浏览文件，但进不了媒体库 / 管理台 ----------
+// 允许游客浏览文件是本产品的既定语义（与 Go 版一致），所以不假设「未登录一律踢去登录页」。
+// 但媒体域（/api/media/**）全部需要登录，`/` 对游客必须落到文件浏览 —— 否则页面挂载时
+// 连发 401、被全局 401 处理弹回登录页，而登录页的「以访客身份浏览」又回到 `/`，来回死循环。
+await goto("#/")
+check(
+  "游客打开首页落在文件浏览",
+  /#\/files/.test(page.url()) && (await page.locator(".ol-auth").count()) === 0,
+  page.url(),
+)
+
+await goto("#/media")
+check("游客进媒体库被要求登录", /#\/@login/.test(page.url()), page.url())
+
 await goto("#/@manage/storages")
 check("游客访问管理台被弹回首页", !/#\/@manage/.test(page.url()), page.url())
 check(

@@ -2772,3 +2772,56 @@ catch → EnsureCreated（库已存在，no-op）+ MigrateSchemaAsync（补列 +
    "按 README 重建"，现在变成"升级即可用"。
 4. **两条路径仍并行**：接管失败的库依旧走 `EnsureCreated + MigrateSchemaAsync`。要彻底合并成
    一条，得先让接管在所有 provider / 所有历史库形态上都验过（见第 1 条）。
+
+## 45. 访客模式可用性修复（2026-10-29）
+
+### 45.1 症状与真因
+
+「以访客身份浏览」进不去：点完按钮又回到登录页，来回弹。
+
+链路是三步叠出来的：
+
+1. `/` 的落地页在媒体域上线时改成了 `{ name: "media" }`（见第 21 节后的导航调整）；
+2. 媒体域 `MediaEndpoints` 整组 `RequireAuthorization()`，**没有匿名端点**
+   （实测匿名 `GET /api/media/libraries` = 401，而 `POST /api/fs/list` = 200）；
+3. 媒体页 `onMounted` 无条件发 `libraries / facets / items / home` 四个请求 → 401 →
+   `onUnauthorized` 清 token 并 `replace("/@login?redirect=/media")`；
+   登录页的 `browseAsGuest()` 又 `replace("/")` → 再次落到媒体页 → 再次 401。
+
+`meta.requiresAuth` 一直没给媒体路由，所以守卫这一层也没能提前拦住。
+
+### 45.2 改动
+
+| 文件 | 改动 |
+|---|---|
+| `frontend/src/router.ts` | `/` 的重定向按登录态分流：未登录 → `home`（`/files`），已登录 → `media`；11 条媒体路由补 `meta.requiresAuth: true` |
+| `frontend/src/pages/login/index.tsx` | `browseAsGuest()` 落到 `/files`；`?redirect=` 指向 `/media` 时同样落回 `/files`，不再送回媒体页 |
+| `frontend/scripts/verify-common.mjs` | A 段新增 2 条断言：「游客打开首页落在文件浏览」「游客进媒体库被要求登录」 |
+
+后端未改：访客能不能看媒体库是**产品边界**，不是鉴权 bug —— 媒体库按 `BasePath` 隔离、
+带个人状态（收藏/观看进度/播放列表），匿名开放要另做一套只读投影。所以选择「访客留在文件浏览」，
+与 Go 版「首页即文件列表」的语义一致。
+
+### 45.3 验收
+
+隔离后端（临时库 + `DistDir=frontend/dist`）+ Edge 真实渲染：
+
+| 用例 | 结果 |
+|---|---|
+| 匿名打开 `#/` | 落在 `#/files`，无 401，无登录页 |
+| 匿名点「Browse as a guest」 | 落在 `#/files`，只发 `fs/get`、`fs/list` 三支 200 |
+| 匿名深链 `#/media` | 被守卫送到 `#/@login?redirect=/media`（登录后能回原处） |
+| 登录（admin）后打开 `#/` | 落在 `#/media` |
+| 控制台 | 零 error |
+
+回归：`verify-common.mjs` **50/50 全绿**（原 48 + 新增 2），`tsc --noEmit` 0 错误，
+`vitest` 19 文件 / 216 用例全绿。
+
+### 45.4 遗留
+
+1. **未登录时顶栏仍显示「Media」入口**，点进去会跳登录页（带 `redirect`）。这是有意的：
+   「登录后能用」比「藏起来」更容易被发现；若产品上希望访客完全看不到媒体入口，
+   在 `BasicLayout` 按 `user.isLogin` 隐藏即可。
+2. **`guest` 内置账号仍默认 `Disabled=true`**（对齐 Go 的 `initGuest`），用 `guest/guest`
+   登录会被拒。访客浏览走的是匿名虚拟 Guest（`Id=0`），与这条记录无关 —— 若要让
+   `guest` 账号可登录，那是管理台里改用户状态的事，不是代码问题。

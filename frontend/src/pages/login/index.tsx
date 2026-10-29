@@ -120,7 +120,10 @@ export default defineComponent({
 
     async function browseAsGuest() {
       await user.logout()
-      await router.replace(targetAfterLogin())
+      // 访客能访问的是文件浏览（/files）；媒体库全部端点需要登录，把游客送回去只会
+      // 又被 401 弹回登录页。`?redirect=` 指向媒体页时同样落回 /files。
+      const target = targetAfterLogin()
+      await router.replace(target === "/" || target.startsWith("/media") ? "/files" : target)
     }
 
     return () => (

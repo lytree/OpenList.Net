@@ -119,7 +119,7 @@ export default defineComponent({
 
           <div class="ol-manage-header-right">
             <ElTooltip content={t("manage.sidemenu.home")} placement="bottom">
-              <ElButton text={true} circle={true} onClick={() => router.push("/")}>
+              <ElButton text={true} circle={true} onClick={() => router.push("/files")}>
                 <ElIcon>
                   <HomeFilled />
                 </ElIcon>
@@ -160,7 +160,7 @@ export default defineComponent({
                   <span>{t(`manage.sidemenu.${item.key}`)}</span>
                 </a>
               ))}
-              <RouterLink to="/" class="ol-manage-item">
+              <RouterLink to="/files" class="ol-manage-item">
                 <ElIcon class="ol-manage-item-icon">
                   <HomeFilled />
                 </ElIcon>
