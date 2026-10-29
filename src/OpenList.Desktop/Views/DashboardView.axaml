@@ -94,6 +94,50 @@
         </StackPanel>
       </Border>
 
+      <!-- ===== 登录凭据（首次启动自动建号 / 密码展示） ===== -->
+      <Border Classes="card" Padding="18">
+        <StackPanel Spacing="12">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Classes="icon accent" Data="{StaticResource I.Key}" Width="18" Height="18"
+                  VerticalAlignment="Center" />
+            <TextBlock Classes="card-title" Text="{DynamicResource L.dash.credTitle}"
+                       VerticalAlignment="Center" />
+          </StackPanel>
+
+          <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" ColumnSpacing="8">
+            <TextBlock Classes="muted" Text="{DynamicResource L.dash.credUser}"
+                       FontSize="12" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="{Binding AdminUsernameText}"
+                       FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Classes="btn btn-secondary"
+                    Command="{Binding CopyAdminUsernameCommand}"
+                    ToolTip.Tip="{DynamicResource L.dash.copyUsernameTip}" Padding="8,4"
+                    VerticalAlignment="Center">
+              <Path Classes="icon secondary" Data="{StaticResource I.Copy}" Width="13" Height="13" />
+            </Button>
+            <TextBlock Grid.Column="3" Classes="muted" Text="{DynamicResource L.dash.credPassword}"
+                       FontSize="12" VerticalAlignment="Center" Margin="14,0,0,0" />
+            <TextBlock Grid.Column="4" Text="{Binding AdminPasswordText}"
+                       FontSize="13" VerticalAlignment="Center" TextWrapping="NoWrap" />
+            <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="8">
+              <Button Classes="btn btn-secondary" Content="{Binding AdminPasswordToggleText}"
+                      Command="{Binding ToggleAdminPasswordCommand}"
+                      IsEnabled="{Binding HasAdminCredentials}" Padding="12,5" />
+              <Button Classes="btn btn-secondary" Command="{Binding CopyAdminPasswordCommand}"
+                      ToolTip.Tip="{DynamicResource L.dash.copyPasswordTip}" Padding="8,4"
+                      IsEnabled="{Binding HasAdminCredentials}">
+                <Path Classes="icon secondary" Data="{StaticResource I.Copy}" Width="13" Height="13" />
+              </Button>
+              <Button Classes="btn btn-secondary" Content="{DynamicResource L.dash.openInitPage}"
+                      Command="{Binding OpenInitPageCommand}" IsVisible="{Binding !HasAdminCredentials}"
+                      IsEnabled="{Binding IsRunning}" Padding="12,5" />
+            </StackPanel>
+          </Grid>
+
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding CredentialsHint}" />
+        </StackPanel>
+      </Border>
+
       <!-- ===== 核心监控 + 版本管理 ===== -->
       <Grid ColumnDefinitions="1.1,*" ColumnSpacing="14">
 

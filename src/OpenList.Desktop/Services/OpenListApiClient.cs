@@ -21,6 +21,12 @@ public sealed class RespDto<T>
 /// <summary>API 调用失败（业务 code != 200 或 HTTP 失败）。</summary>
 public sealed class ApiException(string message) : Exception(message);
 
+/// <summary><c>GET /api/public/init_status</c> 的 data 载荷。</summary>
+public sealed class InitStatusDto
+{
+    public bool Initialized { get; set; }
+}
+
 /// <summary>
 /// OpenList HTTP API 客户端：登录/登出。
 /// 鉴权用裸 token（服务端约定不带 Bearer 前缀）。
@@ -81,8 +87,36 @@ public sealed class OpenListApiClient : IDisposable
         AuthChanged?.Invoke();
     }
 
+    /// <summary>系统是否已有管理员账号（<c>GET /api/public/init_status</c>）。</summary>
+    public async Task<bool> IsInitializedAsync(CancellationToken ct = default)
+    {
+        using var resp = await _http.GetAsync($"{ServerUrl.TrimEnd('/')}/api/public/init_status", ct);
+        var data = await UnwrapAsync<InitStatusDto>(resp, ct);
+        return data?.Initialized ?? false;
+    }
+
     /// <summary>
-    /// 重置内置管理员密码（<c>POST /api/admin/user/reset_admin_password</c>）。
+    /// 创建系统首个管理员（<c>POST /api/public/init/setup</c>）。
+    /// 仅在尚无管理员时可用；已初始化时服务端返回 400（这里表现为 <see cref="ApiException"/>）。
+    /// </summary>
+    public async Task CreateInitialAdminAsync(
+        string username, string password, string? siteTitle = null, CancellationToken ct = default)
+    {
+        // 服务端 InitSetupReq 的站点名带 [JsonPropertyName("site_title")]，
+        // camelCase 策略不会转换这个显式名字，所以这里必须自己写 snake_case。
+        var body = new Dictionary<string, object?>
+        {
+            ["username"] = username,
+            ["password"] = password,
+        };
+        if (!string.IsNullOrWhiteSpace(siteTitle)) body["site_title"] = siteTitle;
+
+        using var resp = await _http.PostAsJsonAsync(
+            $"{ServerUrl.TrimEnd('/')}/api/public/init/setup", body, JsonOpts, ct);
+        await UnwrapAsync<JsonElement?>(resp, ct);
+    }
+
+    /// <summary>重置内置管理员密码（<c>POST /api/admin/user/reset_admin_password</c>）。
     /// 需要 admin 身份；服务端不要求旧密码 —— 内置admin 被刻意设为不可删除 / 不可改名，
     /// 若改密还要求旧密码，忘记密码就彻底失去管理入口。
     /// </summary>

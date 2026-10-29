@@ -63,6 +63,27 @@ public sealed class AppSettings
     /// <summary>核心就绪后自动用记住的凭据登录。</summary>
     public bool AutoLogin { get; set; } = true;
 
+    /// <summary>
+    /// 本机记住的管理员账号名。首次启动自动初始化时写入，也用于自动登录。
+    /// 与 <see cref="Username"/> 的区别：后者是「上次登录用的账号」，这里特指内置管理员。
+    /// </summary>
+    public string AdminUsername { get; set; } = "admin";
+
+    /// <summary>
+    /// 本机记住的管理员明文密码 —— <b>只为让用户看得见自己第一次的密码</b>。
+    ///
+    /// <para>
+    /// 数据库里只有哈希，所以「初始密码」一旦没人记下来就永久丢失：桌面端把核心当子进程
+    /// 拉起（GUI 无控制台），核心即便生成了密码也只会打在 stdout 里。因此桌面端在
+    /// 「首次自动建号」或「从核心日志里读到初始密码」时把它存在这里，主页据此展示、复制。
+    /// </para>
+    /// <para>
+    /// 它不是权威来源：用户在网页里改过密码后这里就过期了。改密入口见主页的「重置密码」。
+    /// 落盘位置是 <c>%APPDATA%/OpenList.Desktop/settings.json</c>（与挂载密码同档），仅本机。
+    /// </para>
+    /// </summary>
+    public string AdminPassword { get; set; } = "";
+
     private static string DirPath
     {
         get
