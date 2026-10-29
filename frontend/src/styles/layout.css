@@ -1,94 +1,159 @@
 /* 外壳布局样式。
  *
  * 只放「EP 组件属性表达不了」的结构性样式（高度、粘性、间距）。
- * 颜色一律走 tokens.css 的 --ol-* / --el-*，保证深浅色自动跟随。 */
+ * 颜色一律走 tokens.css 的 --ol-* / --el-*，保证深浅色自动跟随。
+ *
+ * 两套外壳都对齐 OpenList-Frontend：
+ * - 浏览侧（`.ol-view*`）：顶栏只有一条 logo 栏 + 居中定宽内容列（980px）+ 页脚。
+ *   旧前端没有左侧导航，导航/操作条都是浮在内容上的挂件。
+ * - 管理侧（`.ol-manage*`）：整页独立，64px 标题栏 + 224px 图标侧栏 + 内容区。
+ */
 
-.ol-layout {
-  height: 100vh;
-}
+/* ---------- 浏览侧 ---------- */
 
-.ol-aside {
+.ol-view {
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--ol-border);
-  transition: width 0.2s ease;
-  overflow: hidden;
+  min-height: 100vh;
+  background: var(--ol-bg-page);
 }
 
-.ol-brand {
+.ol-view-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  /* 参考前端的头部底色 == 页面底色（没有分隔线也没有卡片感），
+   * 靠 sticky 自身的背景遮住滚动内容即可。 */
+  background: var(--ol-bg-page);
+}
+
+.ol-view-header-inner {
+  width: min(99%, var(--ol-content-width));
+  margin: 0 auto;
+  height: var(--ol-header-height);
+  /* 参考前端头部水平内边距是 calc(2% + 0.5rem)：2% 跟随容器宽度，0.5rem 保证窄屏不贴边 */
+  padding: 0 calc(2% + 8px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-4);
+}
+
+.ol-view-brand {
   display: flex;
   align-items: center;
   gap: var(--ol-space-2);
-  height: var(--ol-header-height);
-  padding: 0 var(--ol-space-4);
-  border-bottom: 1px solid var(--ol-border);
   flex: none;
+  text-decoration: none;
+}
+
+.ol-view-site {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ol-text);
   white-space: nowrap;
 }
 
-.ol-brand-logo {
-  width: 28px;
-  height: 28px;
+.ol-view-logo {
+  height: 44px;
+  width: auto;
+  max-width: 180px;
   object-fit: contain;
-  flex: none;
+  display: block;
 }
 
-.ol-brand-mark {
-  width: 28px;
-  height: 28px;
+.ol-view-logo-mark {
+  width: 34px;
+  height: 34px;
   border-radius: var(--ol-radius-md);
   background: var(--el-color-primary);
   color: #fff;
   font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+.ol-view-links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ol-view-link {
+  padding: 4px 8px;
+  border-radius: var(--ol-radius-lg);
+  font-size: 15px;
+  color: var(--ol-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ol-view-link:hover {
+  background: var(--ol-bg-hover);
+}
+
+.ol-view-link.is-active {
+  color: var(--el-color-primary);
+  font-weight: 600;
+  background: var(--el-color-primary-light-9);
+}
+
+.ol-view-header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.ol-view-body {
+  width: min(99%, var(--ol-content-width));
+  margin: 0 auto;
+  flex: 1 0 auto;
+  min-width: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 参考前端的内容列：容器 980，内部再内缩 2%（=19.6px），顶部离头部 4px。
+ * 2% 必须挂在**定宽容器内部**才等于 19.6px —— 直接写在 .ol-view-body 上会按
+ * 1440 的视口算成 28.8px，内容列凭空窄了 20px。 */
+.ol-view-inner {
+  padding: 4px 2% 0;
+}
+
+/* 媒体库这类多列页面放宽到 1280px，否则 4 列海报会被压成 2 列 */
+.ol-view-body.is-wide {
+  width: min(99%, var(--ol-content-width-wide));
+}
+
+.ol-view-footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: none;
+  gap: 8px;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--ol-text-secondary);
 }
 
-.ol-brand-title {
-  font-weight: 600;
-  font-size: 15px;
-  color: var(--ol-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
+.ol-view-footer a {
+  color: inherit;
+  text-decoration: none;
 }
 
-.ol-menu {
-  flex: 1;
-  border-right: none;
-  overflow-y: auto;
+.ol-view-footer a:hover {
+  color: var(--el-color-primary);
 }
 
-.ol-aside-footer {
-  flex: none;
-  padding: var(--ol-space-2);
-  border-top: 1px solid var(--ol-border);
+.ol-view-footer-sep {
+  color: var(--ol-border);
 }
 
-.ol-collapse-btn {
-  width: 100%;
-}
-
-.ol-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 var(--ol-space-4);
-  border-bottom: 1px solid var(--ol-border);
-  background: var(--ol-bg-surface);
-}
-
-.ol-header-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ol-text);
-}
-
-.ol-header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--ol-space-2);
+.ol-view-footer-page {
+  margin-left: 6px;
+  opacity: 0.6;
 }
 
 .ol-user {
@@ -113,26 +178,302 @@
   white-space: nowrap;
 }
 
-.ol-main {
-  padding: var(--ol-space-5);
-  overflow-y: auto;
-  background: var(--ol-bg-page);
+/* ---------------------------------------------------------------------------
+ * 登录 / 安装页（复刻旧前端 LoginBg + 364px 卡片）
+ * ------------------------------------------------------------------------- */
+.ol-auth {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: var(--ol-space-4);
+  background: #a9c6ff;
 }
 
-/* 登录页：无外壳，铺满视口 */
-.ol-login-page {
-  min-height: 100vh;
+html.dark .ol-auth {
+  background: #062b74;
+}
+
+.ol-auth-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ol-auth-blob {
+  position: absolute;
+  display: block;
+}
+
+/* 位置取自旧前端的 `@sm` 断点：右上压一块、左下压一块，卡片正好落在中间的空隙里 */
+.ol-auth-blob-top {
+  right: -300px;
+  top: -900px;
+}
+
+.ol-auth-blob-bottom {
+  left: -200px;
+  bottom: -400px;
+}
+
+.ol-auth-card {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  width: min(90vw, 364px);
+  padding: 24px;
+  border-radius: var(--ol-radius-xl);
+  background: var(--ol-bg-surface);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-4);
+}
+
+/* 安装向导字段更多，稍微放宽 */
+.ol-auth-card.is-wide {
+  width: min(92vw, 420px);
+}
+
+.ol-auth-head {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: var(--ol-bg-page);
-  padding: var(--ol-space-4);
+  justify-content: space-around;
+  gap: var(--ol-space-2);
 }
 
-.ol-login-card {
-  width: 100%;
-  max-width: 380px;
+.ol-auth-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  flex: none;
 }
+
+.ol-auth-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--el-color-primary);
+}
+
+.ol-auth-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-2);
+  padding: 0 4px;
+  font-size: 14px;
+  color: var(--ol-text-muted);
+}
+
+.ol-auth-forget {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ol-auth-forget:hover {
+  color: var(--el-color-primary);
+}
+
+.ol-auth-actions {
+  display: flex;
+  gap: var(--ol-space-2);
+}
+
+.ol-auth-btn {
+  flex: 1;
+}
+
+/* 「以游客身份浏览」是次要动作：浅底、主色文字，别和 Login 抢注意力 */
+.ol-auth-btn.is-ghost {
+  --el-button-bg-color: var(--el-fill-color-light);
+  --el-button-border-color: transparent;
+  --el-button-hover-bg-color: var(--ol-bg-hover);
+  --el-button-hover-border-color: transparent;
+  --el-button-hover-text-color: var(--el-color-primary);
+  width: 100%;
+  color: var(--el-color-primary);
+}
+
+.ol-auth-ldap {
+  width: 100%;
+  font-size: 14px;
+}
+
+.ol-auth-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  margin-top: var(--ol-space-1);
+  color: var(--ol-text-muted);
+}
+
+/* 填充式输入框（参考前端的 Input 是浅灰底、无描边） */
+.ol-auth .el-input__wrapper {
+  background: var(--el-fill-color-light);
+  box-shadow: none;
+  border-radius: var(--ol-radius-md);
+  padding: 4px 12px;
+}
+
+.ol-auth .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.ol-auth .el-input__inner {
+  height: 30px;
+}
+
+.ol-init-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-3);
+}
+
+.ol-init-logo {
+  height: 44px;
+  width: auto;
+  max-width: 120px;
+  object-fit: contain;
+  flex: none;
+}
+
+.ol-init-head-text {
+  min-width: 0;
+}
+
+.ol-init-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+
+.ol-init-sub {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--ol-text-muted);
+}
+
+.ol-init-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-4);
+  margin: 0 0 var(--ol-space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.ol-init-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ol-text-muted);
+}
+
+.ol-init-step-no {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--el-fill-color);
+  color: var(--ol-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ol-init-step.is-active {
+  color: var(--el-color-primary);
+  font-weight: 600;
+}
+
+.ol-init-step.is-active .ol-init-step-no {
+  background: var(--el-color-primary);
+  color: #fff;
+}
+
+.ol-init-alert {
+  margin-bottom: var(--ol-space-3);
+}
+
+.ol-init-foot {
+  margin-top: var(--ol-space-3);
+  text-align: center;
+}
+
+.ol-init-hint {
+  margin: var(--ol-space-4) 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ol-text-muted);
+  text-align: center;
+}
+
+.ol-init-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ol-space-2);
+  text-align: center;
+}
+
+.ol-init-done-icon {
+  color: var(--el-color-success);
+}
+
+.ol-init-done-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-init-facts {
+  width: 100%;
+  margin: var(--ol-space-2) 0;
+  padding: var(--ol-space-3);
+  border-radius: var(--ol-radius-md);
+  background: var(--el-fill-color-lighter);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.ol-init-fact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-3);
+  font-size: 12.5px;
+  color: var(--ol-text-secondary);
+}
+
+.ol-init-fact code,
+.ol-init-fact a {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  word-break: break-all;
+  text-align: right;
+}
+
+.ol-init-done-actions {
+  display: flex;
+  gap: var(--ol-space-2);
+  width: 100%;
+}
+
+.ol-init-done-actions .el-button {
+  flex: 1;
+}
+
 
 /* ---------------------------------------------------------------------------
  * 文件浏览器
@@ -140,7 +481,15 @@
 .ol-files {
   display: flex;
   flex-direction: column;
-  gap: var(--ol-space-3);
+  gap: var(--ol-space-4);
+}
+
+/* 参考前端的列表/网格是一张浮在底色上的白卡片：无边框、圆角 8、极淡投影 */
+.ol-view-body .el-card {
+  border: none;
+  border-radius: var(--ol-radius-lg);
+  box-shadow: var(--ol-shadow-card);
+  background: var(--ol-bg-surface);
 }
 
 .ol-files-bar {
@@ -149,12 +498,45 @@
   justify-content: space-between;
   gap: var(--ol-space-4);
   flex-wrap: wrap;
+  min-height: 32px;
+  padding: 0;
 }
 
+/* 右侧控件组吃掉剩余宽度并靠右：控件多到换行时，第二行也是右对齐的，
+ * 不会像默认那样从左边重新开始（看起来像漏了一排按钮）。 */
+.ol-files-bar > .el-space {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+/* 批量选择条：浮在视口底部中间（旧前端 Center 工具条），不挤压列表高度 */
+.ol-batch-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 1800;
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-3);
+  padding: 8px 12px;
+  border-radius: var(--ol-radius-lg);
+  background: var(--ol-bg-surface);
+  border: 1px solid var(--ol-border);
+  box-shadow: var(--ol-shadow-md);
+}
+
+.ol-batch-count {
+  font-size: 13px;
+  color: var(--ol-text-secondary);
+  white-space: nowrap;
+}
+
+/* 面包屑：参考前端是 16px 的普通文本，当前层加粗，可点项 hover 只有浅底 */
 .ol-crumb {
   cursor: pointer;
-  color: var(--ol-text-secondary);
-  font-size: 13px;
+  color: var(--ol-text);
+  font-size: 15px;
 }
 
 .ol-crumb:hover {
@@ -169,6 +551,30 @@
 
 .ol-crumb-current:hover {
   color: var(--ol-text);
+}
+
+/* 表格排版对齐参考前端：行更高、正文更大、表头是小的灰色粗体、行 hover 用中性底色 */
+.ol-files .el-table {
+  --el-table-border-color: var(--ol-border);
+  --el-table-header-text-color: var(--ol-text-muted);
+  --el-table-row-hover-bg-color: var(--ol-bg-hover);
+  background: transparent;
+  font-size: 14.5px;
+}
+
+.ol-files .el-table th.el-table__cell {
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 0;
+}
+
+.ol-files .el-table td.el-table__cell {
+  padding: 10px 0;
+}
+
+.ol-files .el-table tr {
+  background: transparent;
 }
 
 .ol-files-center {
@@ -344,25 +750,205 @@
 }
 
 /* ---------------------------------------------------------------------------
- * 管理台（M2）
+ * 管理台（复刻 OpenList-Frontend pages/manage）
+ * 整页独立：64px 标题栏 + 224px 图标侧栏 + 独立滚动的内容区。
  * ------------------------------------------------------------------------- */
 .ol-manage {
-  height: 100%;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--ol-bg-page);
 }
 
-.ol-manage-aside {
-  border-right: 1px solid var(--ol-border);
+.ol-manage-header {
+  flex: none;
+  height: var(--ol-manage-header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-3);
+  padding: 0 var(--ol-space-4);
   background: var(--ol-bg-surface);
+  /* 参考前端管理台头部没有分隔线，只有一层 $md 阴影把头部"抬"起来 */
+  box-shadow: var(--ol-shadow-md);
+  z-index: 30;
+}
+
+.ol-manage-header-left,
+.ol-manage-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ol-manage-burger {
+  display: none;
+}
+
+.ol-manage-title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ol-manage-site {
+  font-size: 13px;
+  color: var(--ol-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-manage-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.ol-manage-side {
+  flex: none;
+  width: 224px;
+  display: flex;
+  flex-direction: column;
+  background: var(--ol-bg-surface);
+  border-right: 1px solid var(--ol-border);
+  overflow-y: auto;
 }
 
 .ol-manage-menu {
+  flex: none;
+  padding: 10px 8px;
   border-right: none;
+  background: transparent;
+  /* EP 的菜单默认 56px 行高 + 3px 左边框，在 224px 的侧栏里太重；
+   * 收成 36px、无边框，只靠圆角底色表达选中态（对齐旧前端的 SideMenu）。 */
+  --el-menu-item-height: 36px;
+  --el-menu-bg-color: transparent;
+  --el-menu-hover-bg-color: var(--ol-bg-hover);
+  --el-menu-text-color: var(--ol-text);
+  --el-menu-active-color: var(--el-color-primary);
+  --el-menu-item-font-size: 14.5px;
 }
 
-.ol-manage-main {
-  padding: var(--ol-space-5);
+.ol-manage-menu .el-menu-item {
+  border-radius: var(--ol-radius-md);
+  margin: 1px 0;
+  padding-left: 10px !important;
+  gap: 10px;
+}
+
+.ol-manage-menu .el-menu-item.is-active {
+  background: var(--el-color-primary-light-9);
+  font-weight: 600;
+}
+
+.ol-manage-menu .el-menu-item:hover {
+  color: var(--ol-text);
+}
+
+.ol-manage-extra {
+  flex: none;
+  padding: 0 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ol-manage-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--ol-radius-md);
+  font-size: 14.5px;
+  color: var(--ol-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ol-manage-item:hover {
+  background: var(--el-fill-color-light);
+  color: var(--ol-text);
+}
+
+.ol-manage-item.is-active {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-weight: 600;
+}
+
+.ol-manage-item-icon {
+  font-size: 15px;
+  flex: none;
+}
+
+.ol-manage-sep {
+  height: 1px;
+  margin: 8px 10px;
+  background: var(--ol-border);
+}
+
+.ol-manage-side-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 8px 10px;
+}
+
+.ol-manage-content {
+  flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  background: var(--ol-bg-page);
+  padding: var(--ol-space-4) var(--ol-space-4) var(--ol-space-8);
+}
+
+.ol-manage-scrim {
+  display: none;
+}
+
+/* 窄屏：侧栏改成抽屉，标题栏出现菜单按钮 */
+@media (max-width: 900px) {
+  .ol-manage-burger {
+    display: inline-flex;
+  }
+
+  .ol-manage-site {
+    display: none;
+  }
+
+  .ol-manage-side {
+    position: fixed;
+    top: 64px;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--el-box-shadow-light);
+  }
+
+  .ol-manage-side.is-open {
+    transform: none;
+  }
+
+  .ol-manage-scrim {
+    display: block;
+    position: fixed;
+    inset: 64px 0 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 35;
+  }
+
+  .ol-manage-content {
+    padding: var(--ol-space-4);
+  }
 }
 
 .ol-manage-page {
@@ -1128,24 +1714,28 @@ a.ol-share-entry:hover {
  * 目录树 + 网格视图 + 分页 + README（M1 浏览体验收尾）
  * ========================================================================== */
 
-/* 左树右列表：树是 sticky 的，列表在右侧独立滚动（页面滚动条只有一个）。 */
+/* 左树右列表：树是**浮在左侧空白里**的卡片（旧前端 Sidebar 也是这样，不占内容列宽度），
+ * 内容列仍然是居中的 980px。窗口不够宽时直接隐藏，避免盖住列表。 */
 .ol-home-split {
   display: flex;
   align-items: flex-start;
-  gap: var(--ol-space-3);
+  gap: 0;
 }
 
 .ol-home-aside {
-  flex: none;
-  width: 228px;
-  position: sticky;
-  top: 0;
-  max-height: calc(100vh - 150px);
+  position: fixed;
+  left: 4px;
+  top: 4px;
+  width: 196px;
+  height: calc(100vh - 8px);
   overflow: auto;
-  padding: 6px;
+  /* 旧前端的侧栏是浮在最上层的（zIndex $overlay），这里也必须压在 sticky 头部之上，
+   * 否则树的第一行会被头部底色切掉。 */
+  z-index: 200;
+  padding: 8px;
   background: var(--ol-bg-surface);
-  border: 1px solid var(--ol-border);
-  border-radius: var(--ol-radius-md);
+  border-radius: var(--ol-radius-lg);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
 }
 
 .ol-home-main {
@@ -1156,8 +1746,8 @@ a.ol-share-entry:hover {
   gap: var(--ol-space-3);
 }
 
-/* 窄屏（平板竖屏 / 手机）收起目录树：横向空间不够时，列表优先。 */
-@media (max-width: 900px) {
+/* 容器 980 + 两侧留白 < 196+20 时藏起目录树：宁可少一个面板，也不压住列表 */
+@media (max-width: 1239px) {
   .ol-home-aside {
     display: none;
   }

@@ -1,31 +1,15 @@
-import { computed, defineComponent, ref } from "vue"
-import { RouterView, useRoute, useRouter } from "vue-router"
+import { computed, defineComponent } from "vue"
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import {
   ElAvatar,
   ElButton,
-  ElContainer,
-  ElAside,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
-  ElHeader,
   ElIcon,
-  ElMain,
-  ElMenu,
-  ElMenuItem,
   ElTooltip,
 } from "element-plus"
-import {
-  ArrowDown,
-  Expand,
-  Fold,
-  HomeFilled,
-  Moon,
-  Setting,
-  Sunny,
-  SwitchButton,
-  VideoCamera,
-} from "@element-plus/icons-vue"
+import { ArrowDown, Moon, Sunny, SwitchButton } from "@element-plus/icons-vue"
 import { availableLanguages, locale, setLocale, t } from "~/i18n"
 import { useSettingsStore } from "~/stores/settings"
 import { useUserStore } from "~/stores/user"
@@ -33,10 +17,14 @@ import { useTheme } from "~/composables/useTheme"
 import InboxBell from "~/components/InboxBell"
 
 /**
- * 基础外壳：侧边导航 + 顶部栏 + 内容区。
+ * 浏览侧外壳（复刻 OpenList-Frontend 的 `pages/home` 布局）。
  *
- * 用 `el-container` 而不是自绘 flex 布局，是为了让内置的折叠/响应式行为受控于 EP，
- * 后续接入移动端断点时只需加 `el-drawer` 包裹侧栏，不动内容区结构。
+ * 旧前端没有左侧导航：顶部是一条约 44px 高的 logo 栏，下面是**居中定宽**的内容列
+ * （`min(99%, 980px)`），最后是 "Powered by OpenList | Manage" 页脚。导航（面包屑）、
+ * 操作按钮和批量选择条都是浮在内容之上的小挂件，不占版面。
+ *
+ * 这里的职责只有「顶栏 + 内容列 + 页脚」三件；面包屑与操作条在 `pages/home` 内部，
+ * 因为它们依赖文件列表状态。
  */
 export default defineComponent({
   name: "BasicLayout",
@@ -47,24 +35,8 @@ export default defineComponent({
     const user = useUserStore()
     const { isDark, toggle } = useTheme()
 
-    const collapsed = ref(false)
-
-    const activeMenu = computed(() => route.path)
-    const asideWidth = computed(() => (collapsed.value ? "64px" : "220px"))
-
-    // meta.title 存的是 i18n key（也可能是字面量，t() 找不到时原样返回）
-    const pageTitle = computed(() => (route.meta.title ? t(route.meta.title) : ""))
-
-    const navItems = computed(() => {
-      const items = [
-        { path: "/", label: t("global.nav_home"), icon: HomeFilled },
-        { path: "/media", label: t("global.nav_media"), icon: VideoCamera },
-      ]
-      if (user.isAdmin) {
-        items.push({ path: "/@manage", label: t("global.nav_manage"), icon: Setting })
-      }
-      return items
-    })
+    const isHome = computed(() => route.name === "home")
+    const wide = computed(() => route.meta.wide === true)
 
     async function onLogout() {
       await user.logout()
@@ -76,54 +48,36 @@ export default defineComponent({
       if (command === "manage") void router.push("/@manage")
     }
 
-    const renderNavItem = (item: { path: string; label: string; icon: unknown }) => {
-      const Icon = item.icon as typeof HomeFilled
-      return (
-        <ElMenuItem index={item.path}>
-          <ElIcon>
-            <Icon />
-          </ElIcon>
-          <span>{item.label}</span>
-        </ElMenuItem>
-      )
-    }
-
     return () => (
-      <ElContainer class="ol-layout" style={{ height: "100vh" }}>
-        <ElAside width={asideWidth.value} class="ol-aside">
-          <div class="ol-brand">
-            {settings.logo ? (
-              <img class="ol-brand-logo" src={settings.logo} alt={settings.siteTitle} />
-            ) : (
-              <div class="ol-brand-mark">{(settings.siteTitle || "O").slice(0, 1)}</div>
-            )}
-            {!collapsed.value && <span class="ol-brand-title">{settings.siteTitle}</span>}
-          </div>
+      <div class="ol-view">
+        <header class="ol-view-header el-header">
+          <div class="ol-view-header-inner">
+            <RouterLink to="/" class="ol-view-brand" title={settings.siteTitle}>
+              {settings.logo ? (
+                <img class="ol-view-logo" src={settings.logo} alt={settings.siteTitle} />
+              ) : (
+                // 没配 logo 时旧前端会渲染一个空的 <img>（页头一片空白）。这里退化成
+                // 「首字母方块 + 站点名」，至少有东西可点、站点身份也一目了然。
+                <>
+                  <span class="ol-view-logo-mark">{(settings.siteTitle || "O").slice(0, 1)}</span>
+                  <span class="ol-view-site">{settings.siteTitle}</span>
+                </>
+              )}
+            </RouterLink>
 
-          <ElMenu
-            defaultActive={activeMenu.value}
-            collapse={collapsed.value}
-            router={true}
-            class="ol-menu"
-          >
-            {navItems.value.map(renderNavItem)}
-          </ElMenu>
+            <nav class="ol-view-links">
+              <RouterLink to="/" class={["ol-view-link", isHome.value && "is-active"]}>
+                {t("global.nav_home")}
+              </RouterLink>
+              <RouterLink
+                to="/media"
+                class={["ol-view-link", route.path.startsWith("/media") && "is-active"]}
+              >
+                {t("global.nav_media")}
+              </RouterLink>
+            </nav>
 
-          <div class="ol-aside-footer">
-            <ElButton
-              text={true}
-              class="ol-collapse-btn"
-              onClick={() => (collapsed.value = !collapsed.value)}
-            >
-              <ElIcon>{collapsed.value ? <Expand /> : <Fold />}</ElIcon>
-            </ElButton>
-          </div>
-        </ElAside>
-
-        <ElContainer>
-          <ElHeader class="ol-header" height="56px">
-            <div class="ol-header-title">{pageTitle.value}</div>
-            <div class="ol-header-actions">
+            <div class="ol-view-header-right">
               {/* 站内信铃铛：未登录时组件自身返回 null，不占位 */}
               <InboxBell />
 
@@ -132,7 +86,7 @@ export default defineComponent({
                 onCommand={(code: string) => setLocale(code)}
                 v-slots={{
                   default: () => (
-                    <ElButton text={true}>
+                    <ElButton text={true} size="small">
                       {availableLanguages.find((l) => l.code === locale.value)?.name ?? locale.value}
                     </ElButton>
                   ),
@@ -161,7 +115,7 @@ export default defineComponent({
                   v-slots={{
                     default: () => (
                       <span class="ol-user">
-                        <ElAvatar size={28}>
+                        <ElAvatar size={26}>
                           {(user.username || "?").slice(0, 1).toUpperCase()}
                         </ElAvatar>
                         <span class="ol-user-name">{user.username}</span>
@@ -186,18 +140,30 @@ export default defineComponent({
                   }}
                 />
               ) : (
-                <ElButton type="primary" onClick={() => router.push("/@login")}>
+                <ElButton type="primary" size="small" onClick={() => router.push("/@login")}>
                   {t("login.login")}
                 </ElButton>
               )}
             </div>
-          </ElHeader>
+          </div>
+        </header>
 
-          <ElMain class="ol-main">
+        <main class={["ol-view-body", wide.value && "is-wide"]}>
+          <div class="ol-view-inner">
             <RouterView />
-          </ElMain>
-        </ElContainer>
-      </ElContainer>
+          </div>
+        </main>
+
+        <footer class="ol-view-footer">
+          <a href="https://github.com/OpenListTeam/OpenList" target="_blank" rel="noopener">
+            {t("home.footer.powered_by")}
+          </a>
+          <span class="ol-view-footer-sep">|</span>
+          <RouterLink to={user.isLogin ? "/@manage" : "/@login"}>
+            {user.isLogin ? t("home.footer.manage") : t("login.login")}
+          </RouterLink>
+        </footer>
+      </div>
     )
   },
 })

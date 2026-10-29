@@ -29,6 +29,7 @@ import {
   mediaImageLink,
   mediaListItemFiles,
   mediaListPlaylists,
+  mediaReportWatch,
   mediaScrapeItem,
   mediaSearchSubtitles,
   mediaUpdateState,
@@ -41,6 +42,7 @@ import {
 import { fsGet } from "~/api/fs"
 import { rawLink } from "~/utils/link"
 import { formatTime, humanSize } from "~/utils/format"
+import { createWatchTracker } from "~/utils/watchSession"
 import { useUserStore } from "~/stores/user"
 import { t } from "~/i18n"
 import MediaPlayer from "./MediaPlayer"
@@ -92,6 +94,9 @@ export default defineComponent({
     let lastSavedSeconds = 0
     let lastSavedAt = 0
 
+    /** 观看会话：起播/换文件各开一段，播完或关播放器收尾（口径见 utils/watchSession）。 */
+    const watchSession = createWatchTracker(mediaReportWatch)
+
     const itemId = computed(() => Number(route.params.id))
     const canManage = computed(() => user.can("manage_media"))
     const genres = computed<string[]>(() => {
@@ -136,9 +141,12 @@ export default defineComponent({
       playerSrc.value = rawLink(file.path, resp.data.raw_url, resp.data.sign)
       // 条目级进度：只在播第一个文件时续播，切集从 0 开始（否则每集都从头几秒看起）
       startAt.value = playing.value.id === files.value[0]?.id ? (state.value?.progress_seconds ?? 0) : 0
+      // 换文件就是新的一段会话：tracker 内部会先把上一段收尾
+      watchSession.start(itemId.value, file.id, startAt.value)
     }
 
     function closePlayer() {
+      watchSession.end(lastSavedSeconds)
       playing.value = null
       playerSrc.value = ""
     }
@@ -154,6 +162,8 @@ export default defineComponent({
     async function saveProgress(seconds: number) {
       lastSavedSeconds = seconds
       lastSavedAt = Date.now()
+      // 会话心跳与进度写回同频：一个记"看到哪"，一个记"看了多久"
+      watchSession.beat(seconds)
       const resp = await mediaUpdateState(itemId.value, {
         progress_seconds: Math.floor(seconds),
       })
@@ -162,7 +172,9 @@ export default defineComponent({
 
     function onEnded() {
       // 看完：标记 watched；进度清零，避免「看完了还从 47 分钟续播」
+      const endedAt = lastSavedSeconds
       lastSavedSeconds = 0
+      watchSession.end(endedAt, true)
       void mediaUpdateState(itemId.value, { watched: true, progress_seconds: 0 }).then((resp) => {
         if (resp.code === 200 && resp.data) state.value = resp.data
       })
@@ -175,6 +187,7 @@ export default defineComponent({
 
     onUnmounted(() => {
       // 离开页面兜底：播放器组件自己的 onUnmounted 也会 emit，双保险但不重复写
+      watchSession.end(lastSavedSeconds)
       if (playing.value && lastSavedSeconds > 0) {
         void mediaUpdateState(itemId.value, { progress_seconds: Math.floor(lastSavedSeconds) })
       }

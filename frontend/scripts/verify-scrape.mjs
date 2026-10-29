@@ -42,7 +42,7 @@ for (const dir of ["Movie One (2001)", "Movie Two (2002)", "Movie Three (2003)"]
 log("fixture ready:", ROOT, "-> 3 videos / 1 empty dir")
 
 const browser = await chromium.launch({ channel: "msedge", headless: true })
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: "en-US" })
 
 const errors = []
 page.on("console", (msg) => {

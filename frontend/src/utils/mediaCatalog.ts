@@ -67,6 +67,47 @@ export function nameInitial(name: string | null | undefined): string {
 }
 
 /**
+ * 播放队列里的一个位置：第 `item` 个条目（播放列表顺序）的第 `file` 个文件。
+ *
+ * 队列是**两层**的（条目 → 文件），因为一个条目可能是分片/DVD 多文件；
+ * 「下一集」在层的边界上语义不同（同条目内是下一片，跨条目是下一条），
+ * 所以位置必须带层级，不能只用一个自增序号。
+ */
+export interface QueuePos {
+  item: number
+  file: number
+}
+
+/**
+ * 队列里的下一个位置；已到队尾时返回 `null`。
+ *
+ * `fileCount` 是**当前条目**的文件数（跨条目前无法预知，只能按需拉取），
+ * `itemCount` 是播放列表条目数。两层都到头才是真正的结束 ——
+ * 只判断 `item + 1 < itemCount` 会在「当前条目还没播完」时提前跳下一条。
+ */
+export function nextQueuePos(
+  pos: QueuePos,
+  fileCount: number,
+  itemCount: number,
+): QueuePos | null {
+  if (pos.file + 1 < fileCount) return { item: pos.item, file: pos.file + 1 }
+  if (pos.item + 1 < itemCount) return { item: pos.item + 1, file: 0 }
+  return null
+}
+
+/**
+ * 队列里的上一个位置；已在队首时返回 `null`。
+ *
+ * 跨条目往前只落到**上一项的第 0 个文件**：上一个条目有几个文件此时并不知道
+ * （要再发一次请求），而「往前一集从头播」比「先查再跳」更符合直觉。
+ */
+export function prevQueuePos(pos: QueuePos, itemCount: number): QueuePos | null {
+  if (pos.file > 0) return { item: pos.item, file: pos.file - 1 }
+  if (pos.item > 0 && pos.item - 1 < itemCount) return { item: pos.item - 1, file: 0 }
+  return null
+}
+
+/**
  * 取权重最高的前 `n` 个桶。
  *
  * 后端已按 count 降序返回，这里仍重新排序 + 截断：统计页偶尔要把多个来源

@@ -11,6 +11,12 @@ public interface IUserMediaStateService
 {
     /// <summary>获取当前用户对某条目的状态（无记录时返回默认空状态）。</summary>
     Task<Resp<UserMediaState>> GetAsync(long itemId, User user, CancellationToken ct = default);
+    /// <summary>
+    /// 批量获取当前用户对多个条目的状态（无记录时返回默认空状态）。
+    /// 列表页/播放队列要打「已看」角标时用，避免逐条 <see cref="GetAsync"/> 打出 N 次请求。
+    /// 不可见的条目会被**静默剔除**（不报错，避免泄露"某 id 存在但你看不到"）。
+    /// </summary>
+    Task<Resp<List<UserMediaState>>> GetStatesAsync(IReadOnlyList<long> itemIds, User user, CancellationToken ct = default);
     /// <summary>更新当前用户对某条目的状态（upsert）。</summary>
     Task<Resp<UserMediaState>> UpdateAsync(long itemId, UpdateUserMediaStateReq req, User user, CancellationToken ct = default);
     /// <summary>分页列出当前用户收藏的条目。</summary>
@@ -26,13 +32,26 @@ public interface IUserMediaStateService
     /// 这是唯一一条<em>否定式</em>查询——其余状态都基于已有状态行，它基于"没有行"。
     /// </summary>
     Task<Resp<PageResp<MediaItem>>> ListUnseenAsync(int page, int perPage, long? libraryId, User user, CancellationToken ct = default);
-    /// <summary>当前用户的口味画像（基于收藏/评分/观看记录统计）。</summary>
-    Task<Resp<TasteProfile>> GetTasteProfileAsync(User user, CancellationToken ct = default);
+    /// <summary>
+    /// 当前用户的口味画像（基于收藏/评分/观看记录统计）。
+    /// <paramref name="days"/> 限定"最近 N 天内动过状态"的条目，<c>null</c> 或 ≤0 表示全量。
+    /// </summary>
+    Task<Resp<TasteProfile>> GetTasteProfileAsync(User user, int? days = null, CancellationToken ct = default);
+}
+
+/// <summary>批量取个人状态的请求体（列表页打角标用）。</summary>
+public sealed class BatchStatesReq
+{
+    /// <summary>单次请求允许的条目数上限。列表一页最多几百条，再多说明调用方没分页。</summary>
+    public const int MaxItems = 500;
+
+    /// <summary>要查询的条目 id 列表（重复的会被去重，顺序会保持）。</summary>
+    [JsonPropertyName("item_ids")]
+    public List<long> ItemIds { get; set; } = [];
 }
 
 /// <summary>更新个人媒体状态请求。字段为 null 表示不修改。</summary>
-public sealed class UpdateUserMediaStateReq
-{
+public sealed class UpdateUserMediaStateReq{
     /// <summary>收藏。</summary>
     public bool? Favorite { get; set; }
     /// <summary>看过。</summary>
@@ -57,6 +76,8 @@ public sealed class UpdateUserMediaStateReq
 /// <summary>用户口味画像。</summary>
 public sealed class TasteProfile
 {
+    /// <summary>统计窗口天数（<c>0</c> = 不限，即全量）。归一后的值，前端据此标注口径。</summary>
+    public int WindowDays { get; set; }
     /// <summary>收藏条目总数。</summary>
     public int FavoriteCount { get; set; }
     /// <summary>已看条目总数。</summary>

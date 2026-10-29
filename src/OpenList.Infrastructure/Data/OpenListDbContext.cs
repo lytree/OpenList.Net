@@ -55,6 +55,8 @@ public sealed class OpenListDbContext : DbContext
     public DbSet<MediaItemPerson> MediaItemPersons => Set<MediaItemPerson>();
     /// <summary>用户媒体状态表。</summary>
     public DbSet<UserMediaState> UserMediaStates => Set<UserMediaState>();
+    /// <summary>观看会话表（一次连续观看一行，供历史与时长曲线统计）。</summary>
+    public DbSet<MediaWatchSession> MediaWatchSessions => Set<MediaWatchSession>();
     /// <summary>用户播放列表表。</summary>
     public DbSet<MediaPlaylist> MediaPlaylists => Set<MediaPlaylist>();
     /// <summary>播放列表成员表。</summary>

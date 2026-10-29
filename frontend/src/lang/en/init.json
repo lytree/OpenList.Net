@@ -37,6 +37,8 @@
   "step_env": "Step 1 · Environment",
   "step_account": "Step 2 · Admin account",
   "step_done": "Step 3 · Finishing",
+  "step_admin": "Admin account",
+  "step_finish": "Finishing",
   "next": "Next",
   "back": "Back",
   "env_continue": "Continue",

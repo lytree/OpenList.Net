@@ -110,6 +110,18 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .HasColumnType("boolean")
                         .HasJsonPropertyName("w_sub");
 
+                    b.Property<int>("WebdavManagement")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("WebdavPolicy")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("WebdavRead")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("WebdavWrite")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("Write")
                         .HasColumnType("boolean")
                         .HasJsonPropertyName("write");
@@ -928,6 +940,74 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .IsUnique();
 
                     b.ToTable("x_media_studios", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Media.Domain.MediaWatchSession", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("Completed")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("ended_at");
+
+                    b.Property<long?>("FileId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("file_id");
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("item_id");
+
+                    b.Property<DateTimeOffset>("LastAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("last_at");
+
+                    b.Property<long>("LastPositionSeconds")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("last_position_seconds");
+
+                    b.Property<long>("MaxPositionSeconds")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("max_position_seconds");
+
+                    b.Property<long>("StartPositionSeconds")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("start_position_seconds");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("started_at");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("user_id");
+
+                    b.Property<long>("WatchedSeconds")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("watched_seconds");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("UserId", "StartedAt");
+
+                    b.HasIndex("UserId", "Token")
+                        .IsUnique();
+
+                    b.ToTable("x_media_watch_sessions", (string)null);
                 });
 
             modelBuilder.Entity("OpenList.Media.Domain.UserMediaState", b =>

@@ -40,6 +40,41 @@ public sealed class UserMediaStateService : IUserMediaStateService
     }
 
     /// <inheritdoc />
+    public async Task<Resp<List<UserMediaState>>> GetStatesAsync(
+        IReadOnlyList<long> itemIds, User user, CancellationToken ct = default)
+    {
+        if (itemIds.Count > BatchStatesReq.MaxItems)
+            return Resp<List<UserMediaState>>.Fail(
+                $"at most {BatchStatesReq.MaxItems} item_ids per request", RespCodes.BadRequest);
+
+        // 去重但保留请求顺序：调用方通常按自己的列表顺序渲染，乱序返回等于让前端再排一次。
+        var ids = itemIds.Distinct().ToList();
+        if (ids.Count == 0) return Resp<List<UserMediaState>>.Ok([]);
+
+        var items = await _db.MediaItems.AsNoTracking()
+            .Where(i => ids.Contains(i.Id))
+            .ToListAsync(ct);
+        var visible = items.Where(i => _libraries.CanSeeItem(user, i)).Select(i => i.Id).ToHashSet();
+        if (visible.Count == 0) return Resp<List<UserMediaState>>.Ok([]);
+
+        var states = await _db.UserMediaStates.AsNoTracking()
+            .Where(s => s.UserId == user.Id && visible.Contains(s.ItemId))
+            .ToDictionaryAsync(s => s.ItemId, ct);
+
+        // 没有状态行的条目也给一条默认值：前端拿到的永远是"每个可见 id 都有一份状态"，
+        // 不必在渲染路径上写 `state?.[id]?.watched ?? false` 这种二次判空。
+        var result = new List<UserMediaState>(visible.Count);
+        foreach (var id in ids)
+        {
+            if (!visible.Contains(id)) continue;
+            result.Add(states.TryGetValue(id, out var state)
+                ? state
+                : new UserMediaState { UserId = user.Id, ItemId = id });
+        }
+        return Resp<List<UserMediaState>>.Ok(result);
+    }
+
+    /// <inheritdoc />
     public async Task<Resp<UserMediaState>> UpdateAsync(long itemId, UpdateUserMediaStateReq req, User user, CancellationToken ct = default)
     {
         var item = await _db.MediaItems.AsNoTracking().FirstOrDefaultAsync(i => i.Id == itemId, ct);
@@ -122,16 +157,23 @@ public sealed class UserMediaStateService : IUserMediaStateService
     }
 
     /// <inheritdoc />
-    public async Task<Resp<TasteProfile>> GetTasteProfileAsync(User user, CancellationToken ct = default)
+    public async Task<Resp<TasteProfile>> GetTasteProfileAsync(User user, int? days = null, CancellationToken ct = default)
     {
         var rows = await (from s in _db.UserMediaStates.AsNoTracking()
                           join i in _db.MediaItems.AsNoTracking() on s.ItemId equals i.Id
                           where s.UserId == user.Id
                           select new { State = s, Item = i }).ToListAsync(ct);
 
-        var visible = rows.Where(r => _libraries.CanSeeItem(user, r.Item)).ToList();
+        // 窗口过滤在内存里做：行数上限是"这个用户动过的条目数"，与库大小同阶，
+        // 而判定要取 LastPlayedAt/UpdatedAt 的较晚者，SQL 侧翻译成 CASE 反而更难读。
+        var cutoff = TasteWindow.Cutoff(days, _time.GetUtcNow());
+        var visible = rows
+            .Where(r => _libraries.CanSeeItem(user, r.Item))
+            .Where(r => TasteWindow.InWindow(r.State.LastPlayedAt, r.State.UpdatedAt, cutoff))
+            .ToList();
         var profile = new TasteProfile
         {
+            WindowDays = TasteWindow.Normalize(days),
             FavoriteCount = visible.Count(r => r.State.Favorite),
             WatchedCount = visible.Count(r => r.State.Watched),
             TotalWatchSeconds = visible.Sum(r => r.State.ProgressSeconds),

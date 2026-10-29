@@ -489,12 +489,102 @@
   color: var(--ol-text-muted);
 }
 
+/*
+ * 「已看」角标。
+ *
+ * 底色刻意用 success 的浅色而不是主色：主色已经被「正在播放」那行的高亮占用，
+ * 两处都上主色会让"播着"和"看过"分不出来。
+ */
+.ol-media-queue-badge {
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ol-media-queue-badge.is-watched {
+  color: var(--el-color-success);
+  background: var(--el-color-success-light-9);
+}
+
+/* ---- 口味页：最近观看列表 ---- */
+.ol-media-watch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ol-media-watch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: var(--ol-radius-md);
+  cursor: pointer;
+}
+
+.ol-media-watch-row:hover {
+  background: var(--ol-bg-hover);
+}
+
+.ol-media-watch-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-media-watch-meta {
+  flex: none;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+}
+
 .ol-media-queue-ops {
   display: flex;
   align-items: center;
   gap: 2px;
   flex: none;
 }
+
+/* 正在播放的那一条：和条目详情页的文件行同一套高亮口径 */
+.ol-media-queue-row.is-playing {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+/* ---- 连播导航条（位置 + 上一集/下一集） ---- */
+.ol-media-queue-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  padding: 6px var(--ol-space-3);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-media-queue-pos {
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ol-text-muted);
+}
+
+.ol-media-queue-now {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ol-text);
+}
+
 
 .ol-media-code {
   font-family: var(--ol-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);

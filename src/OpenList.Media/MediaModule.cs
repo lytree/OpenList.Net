@@ -40,6 +40,7 @@ public static class MediaModule
         services.AddScoped<IMediaCatalogService, MediaCatalogService>();
         services.AddScoped<IMediaMetadataService, MediaMetadataService>();
         services.AddScoped<IUserMediaStateService, UserMediaStateService>();
+        services.AddScoped<IWatchSessionService, WatchSessionService>();
         services.AddScoped<IMediaPlaylistService, MediaPlaylistService>();
         // 两个元数据 provider：单例解析（GetRequiredService<IMetadataProvider>）回到 TMDB；
         // MediaMetadataService 注入 IEnumerable<IMetadataProvider> 拿到全部两个，按 Name 解析。

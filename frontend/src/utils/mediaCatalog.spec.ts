@@ -5,7 +5,9 @@ import {
   moveIdBy,
   moveInArray,
   nameInitial,
+  nextQueuePos,
   percentOf,
+  prevQueuePos,
   topBuckets,
 } from "./mediaCatalog"
 
@@ -47,6 +49,32 @@ describe("moveIdBy", () => {
   it("id 不存在同样返回副本", () => {
     expect(moveIdBy(ids, 999, 1)).toEqual(ids)
     expect(moveIdBy([], 1, 1)).toEqual([])
+  })
+})
+
+describe("nextQueuePos / prevQueuePos", () => {
+  it("同条目内先走文件，文件到头再走下一个条目", () => {
+    // 3 个条目、当前条目 2 个文件
+    expect(nextQueuePos({ item: 0, file: 0 }, 2, 3)).toEqual({ item: 0, file: 1 })
+    expect(nextQueuePos({ item: 0, file: 1 }, 2, 3)).toEqual({ item: 1, file: 0 })
+  })
+
+  it("当前条目还没播完就不能跳到下一条（itemCount 够也不行）", () => {
+    expect(nextQueuePos({ item: 0, file: 0 }, 3, 5)).toEqual({ item: 0, file: 1 })
+  })
+
+  it("队尾返回 null：最后一个条目的最后一个文件", () => {
+    expect(nextQueuePos({ item: 2, file: 1 }, 2, 3)).toBeNull()
+    expect(nextQueuePos({ item: 0, file: 0 }, 1, 1)).toBeNull()
+    // 条目索引越界（列表被删短了）也按到头处理，不要让播放器算出 undefined
+    expect(nextQueuePos({ item: 5, file: 0 }, 1, 3)).toBeNull()
+  })
+
+  it("往前：先退文件，退到 0 再退到上一项的第 0 个文件", () => {
+    expect(prevQueuePos({ item: 1, file: 2 }, 3)).toEqual({ item: 1, file: 1 })
+    expect(prevQueuePos({ item: 1, file: 0 }, 3)).toEqual({ item: 0, file: 0 })
+    expect(prevQueuePos({ item: 0, file: 0 }, 3)).toBeNull()
+    expect(prevQueuePos({ item: 0, file: 0 }, 0)).toBeNull()
   })
 })
 

@@ -273,6 +273,61 @@ export const mediaGetState = (id: number): Promise<Resp<UserMediaState | null>> 
 export const mediaUpdateState = (id: number, patch: MediaStatePatch): Promise<Resp<UserMediaState>> =>
   http.post<UserMediaState>(`/media/items/${id}/state`, patch) as Promise<Resp<UserMediaState>>
 
+/**
+ * 批量取个人状态（列表页/播放队列打「已看」角标用）。
+ *
+ * 返回里**每个请求过的可见 id 都有一条**（没有状态行的给默认值），
+ * 不可见的条目会被后端静默剔除 —— 所以渲染侧要按 `item_id` 建 map，而不是按下标对齐。
+ */
+export const mediaBatchStates = (itemIds: number[]): Promise<Resp<UserMediaState[]>> =>
+  http.post<UserMediaState[]>("/media/items/states", { item_ids: itemIds }) as Promise<Resp<UserMediaState[]>>
+
+// ---- 观看会话 ------------------------------------------------------------
+
+/** 一次播放心跳。`closing` 为真表示这次上报同时结束了会话（换文件 / 播完 / 关播放器）。 */
+export interface WatchReportPayload {
+  /** 客户端为这次播放生成的标识；一次播放一个，换文件换新的。 */
+  token: string
+  item_id: number
+  file_id?: number | null
+  position_seconds: number
+  closing?: boolean
+  completed?: boolean
+}
+
+export const mediaReportWatch = (payload: WatchReportPayload): Promise<Resp<unknown>> =>
+  http.post<unknown>("/media/watch/report", payload) as Promise<Resp<unknown>>
+
+export interface WatchHistoryEntry {
+  item_id: number
+  title: string
+  poster_path?: string | null
+  year?: number | null
+  last_at: string
+  watched_seconds: number
+  completed: boolean
+}
+
+export interface WatchDailyStat {
+  /** `yyyy-MM-dd`（UTC）。 */
+  date: string
+  seconds: number
+}
+
+export interface WatchStats {
+  window_days: number
+  total_seconds: number
+  days: WatchDailyStat[]
+}
+
+export const mediaWatchHistory = (days = 30, limit = 12): Promise<Resp<WatchHistoryEntry[]>> =>
+  http.get<WatchHistoryEntry[]>("/media/watch/history", { params: { days, limit } }) as Promise<
+    Resp<WatchHistoryEntry[]>
+  >
+
+export const mediaWatchStats = (days = 30): Promise<Resp<WatchStats>> =>
+  http.get<WatchStats>("/media/watch/stats", { params: { days } }) as Promise<Resp<WatchStats>>
+
 export const mediaListInProgress = (page = 1, perPage = 12): Promise<Resp<Page<MediaItem>>> =>
   http.get<Page<MediaItem>>("/media/in-progress", { params: { page, per_page: perPage } }) as Promise<
     Resp<Page<MediaItem>>
@@ -378,6 +433,8 @@ export interface TastePersonWeight {
 }
 
 export interface TasteProfile {
+  /** 统计窗口天数，`0` = 不限（全量）。由后端归一后回显，前端据此标注口径。 */
+  windowDays: number
   favoriteCount: number
   watchedCount: number
   totalWatchSeconds: number
@@ -395,8 +452,16 @@ export const mediaStats = (libraryId?: number): Promise<Resp<MediaStats>> =>
     params: { library_id: libraryId || undefined },
   }) as Promise<Resp<MediaStats>>
 
-export const mediaTaste = (): Promise<Resp<TasteProfile>> =>
-  http.get<TasteProfile>("/media/taste") as Promise<Resp<TasteProfile>>
+/**
+ * 口味画像。`days` 是「最近 N 天内动过状态」的窗口，缺省/0 表示全量。
+ *
+ * 口径不是「最近 N 天标记为看过」——状态行没有事件时间，只有整行的更新时间，
+ * 见后端 `TasteWindow`。
+ */
+export const mediaTaste = (days?: number): Promise<Resp<TasteProfile>> =>
+  http.get<TasteProfile>("/media/taste", {
+    params: { days: days || undefined },
+  }) as Promise<Resp<TasteProfile>>
 
 export interface MediaPersonQuery {
   keyword?: string

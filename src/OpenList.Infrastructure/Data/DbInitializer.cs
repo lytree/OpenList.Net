@@ -48,10 +48,11 @@ public static class DbInitializer
         // OpenListDbContextFactory + Program.cs MigrationsAssembly()).
         // Fresh DB: MigrateAsync creates the schema + __EFMigrationsHistory.
         // Already-migrated DB: GetPendingMigrations is empty, nothing to do.
-        // Legacy EnsureCreated DB (tables exist, no __EFMigrationsHistory):
-        //   GetPendingMigrations returns all migrations, MigrateAsync throws
-        //   because the tables already exist — the catch falls through to the
-        //   EnsureCreated + MigrateSchemaAsync path which is idempotent.
+        // Legacy DB (tables exist, no applied migrations — typically EnsureCreated
+        //   from a pre-migration build): GetPendingMigrations returns all migrations,
+        //   MigrateAsync throws because the tables already exist — the catch falls
+        //   through to LegacySchemaAdopter, which puts that DB onto the migration
+        //   track so that *subsequent* migrations apply normally (docs §44).
         var migrated = false;
         try
         {
@@ -60,12 +61,37 @@ public static class DbInitializer
                 await db.Database.MigrateAsync(ct);
             migrated = true;
         }
-        catch
+        catch (Exception ex)
         {
             // No migration assembly registered, or a pre-migration EnsureCreated
             // database whose tables collide with the Init migration. Either way
             // fall back to the legacy EnsureCreated + additive ALTER TABLE path.
+            //
+            // 但这条 catch 曾经是空的，于是「迁移为什么没跑」在运行时完全不可见：
+            // 所有库（含全新库）都静默走 EnsureCreated，新增的表永远不会被迁移
+            // 建出来。现在把原因吐出来 —— 回退本身是合法策略，静默不是。
+            // 只记消息不记堆栈：旧库走到这里属于预期路径，每台旧库启动都刷一段
+            // Migrator 的调用栈只会盖住真正的信息。
+            logger?.LogWarning(
+                "EF Core 迁移未执行（{Error}），改走 EnsureCreated / 旧库接管（provider={Provider}）。",
+                $"{ex.GetType().Name}: {ex.Message}", isPostgres ? "postgres" : "sqlite");
             migrated = false;
+        }
+
+        if (!migrated)
+        {
+            // 没有迁移历史表的既有库（Go 时代遗留库、C# 早期 EnsureCreated 建的库）：
+            // 把它接管到迁移轨道上，之后新增迁移就能正常增量应用，不必再为每张新表手写 DDL。
+            // 接管失败不要紧 —— 下面的 EnsureCreated + MigrateSchemaAsync 仍是原路径。
+            try
+            {
+                migrated = await LegacySchemaAdopter.TryAdoptAsync(db, isPostgres, logger, ct);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "旧库接管失败，退回 EnsureCreated + 追加式补列。");
+                migrated = false;
+            }
         }
 
         if (!migrated)
@@ -174,10 +200,12 @@ public static class DbInitializer
         // providers and is idempotent.
         await BackfillBuiltInAdminAsync(db, ct);
 
-        // 媒体域的建表/补列只由 EF 迁移负责（AddMediaSchema / AddMediaCollections）。
-        // 这条 fallback 路径面向的是 Go 时代遗留库，媒体域不承诺兼容它们：
-        // 表结构一旦演进，手写 DDL 与模型会持续漂移（历史上就漏过 WatchLater/Flagged
-        // 三列，导致首次升级必须再补一遍）。需要媒体功能的旧库按 README 重建即可。
+        // 媒体域的表由「迁移 + 旧库接管」负责（AddMediaSchema / … / AddMediaWatchSessions，
+        // 以及 LegacySchemaAdopter 按模型补建）。**新表不要再往这里加 DDL**：
+        // 手写 DDL 与模型会持续漂移（历史上就漏过 x_user_media_states 的 WatchLater/Flagged
+        // 三列），§44 之后旧库能被接管，迁移就能真正跑起来。
+        // 下面两张表是接管机制出现之前的历史遗留（Go 时代就有、且当年就靠这段 DDL 补），
+        // 留着是为了接管万一失败时仍有兜底；它们幂等，正常路径上是空操作。
 
         // Ensure whole tables introduced after the initial EnsureCreated run exist.
         // EnsureCreatedAsync only creates tables on a fresh database; for databases
@@ -306,8 +334,9 @@ public static class DbInitializer
 
     /// <summary>
     /// 判断指定表是否存在。SQLite 查询 sqlite_master，PostgreSQL 查询 information_schema.tables。
+    /// （<see cref="LegacySchemaAdopter"/> 判断「哪张表缺席」时也用这一份，避免两套口径漂移。）
     /// </summary>
-    private static async Task<bool> TableExistsAsync(
+    internal static async Task<bool> TableExistsAsync(
         OpenListDbContext db, string table, bool isPostgres, CancellationToken ct)
     {
         var conn = db.Database.GetDbConnection();

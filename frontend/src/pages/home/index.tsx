@@ -486,7 +486,7 @@ export default defineComponent({
           </aside>
         )}
         <div class="ol-home-main">
-      <ElCard shadow="never" bodyStyle={{ padding: "12px 16px" }}>
+      <div class="ol-home-nav">
           <div class="ol-files-bar">
             <div class="ol-bar-left">
               <ElTooltip content={treeVisible.value ? "隐藏目录树" : "显示目录树"} placement="bottom">
@@ -521,7 +521,7 @@ export default defineComponent({
                   size="small"
                   placeholder="在当前目录筛选"
                   clearable={true}
-                  style={{ width: "180px" }}
+                  style={{ width: "140px" }}
                   v-slots={{ prefix: () => <ElIcon><Search /></ElIcon> }}
                 />
               )}
@@ -603,7 +603,7 @@ export default defineComponent({
               <ElSelect
                 modelValue={files.sortKey.value}
                 size="small"
-                style={{ width: "120px" }}
+                style={{ width: "96px" }}
                 onUpdate:modelValue={(v: SortKey) => (files.sortKey.value = v)}
               >
                 {sortOptions.map((opt) => (
@@ -618,11 +618,8 @@ export default defineComponent({
               >
                 <ElIcon>{files.sortOrder.value === "asc" ? <SortUp /> : <SortDown />}</ElIcon>
               </ElButton>
-              {files.provider.value && (
-                <ElTag size="small" type="info">
-                  {files.provider.value}
-                </ElTag>
-              )}
+              {/* 挂载点驱动信息（Local/S3/…）不再单列一个标签：参考前端这一行只有
+                  面包屑 + 计数，多一个标签就会把控件挤到第二行。 */}
               {files.state.value === "folder" && (
                 <ElTag size="small">
                   {files.pagedObjs.value.total === files.total.value
@@ -701,7 +698,7 @@ export default defineComponent({
               </ElSpace>
             </div>
           )}
-        </ElCard>
+        </div>
 
         <ElCard
           shadow="never"

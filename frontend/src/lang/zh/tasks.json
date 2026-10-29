@@ -1,0 +1,78 @@
+{
+  "offline_download": "把文件下载到本机",
+  "offline_download_transfer": "把下载好的文件转存到对应存储",
+  "upload": "把文件上传到对应存储",
+  "copy": "把文件从一个存储复制到另一个存储",
+  "move": "把文件从一个存储移动到另一个存储",
+  "decompress": "下载并解压压缩包",
+  "decompress_upload": "把解压出来的文件上传到目标存储",
+  "done": "已完成",
+  "undone": "进行中",
+  "clear_succeeded": "清除已成功",
+  "retry": "重试",
+  "retry_failed": "重试失败",
+  "state": {
+    "0": "等待中",
+    "1": "进行中",
+    "2": "成功",
+    "3": "取消中",
+    "4": "已取消",
+    "5": "出错",
+    "6": "失败中",
+    "7": "已失败",
+    "8": "等待重试",
+    "9": "准备重试"
+  },
+  "retry_selected": "重试选中项",
+  "cancel_selected": "取消选中项",
+  "delete_selected": "删除选中项",
+  "filter": "筛选",
+  "expand": "展开",
+  "fold": "折叠",
+  "expand_all": "全部展开",
+  "fold_all": "全部折叠",
+  "attr": {
+    "name": "名称",
+    "creator": "创建者",
+    "state": "状态",
+    "progress": "进度",
+    "speed": "速度",
+    "operation": "操作",
+    "copy": {
+      "src": "源路径",
+      "dst": "目标路径"
+    },
+    "upload": {
+      "path": "路径"
+    },
+    "offline_download": {
+      "url": "链接",
+      "path": "目标路径",
+      "transfer_src": "源路径",
+      "transfer_src_local": "源路径（本机）",
+      "transfer_dst": "目标路径"
+    },
+    "decompress": {
+      "src": "源路径",
+      "dst": "目标路径",
+      "inner": "压缩包内路径",
+      "password": "解压密码"
+    },
+    "time_elapsed": "耗时",
+    "status": "状态",
+    "err": "错误"
+  },
+  "show_only_mine": "只看我的任务",
+  "transfer": "跨存储转存",
+  "download": "下载",
+  "aria2_down": "Aria2 下载",
+  "aria2_transfer": "Aria2 转存",
+  "qbit_down": "qBittorrent 下载",
+  "qbit_transfer": "qBittorrent 转存",
+  "transmission_down": "Transmission 下载",
+  "transmission_transfer": "Transmission 转存",
+  "empty_done": "没有已完成的任务",
+  "empty_undone": "没有进行中的任务",
+  "auto_refresh": "自动刷新",
+  "clear_confirm": "清除该类任务中所有成功的记录？"
+}

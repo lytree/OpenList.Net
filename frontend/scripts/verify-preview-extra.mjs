@@ -107,7 +107,7 @@ const browser = await chromium.launch({
   // 无头 Chromium 默认没有 GPU，必须显式启用 SwiftShader 才能拿到 WebGL 上下文
   args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
 })
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: "en-US" })
 const errors = []
 page.on("console", (msg) => {
   // WebGL/SwiftShader 的驱动级警告不算页面错误，只收 error 级别

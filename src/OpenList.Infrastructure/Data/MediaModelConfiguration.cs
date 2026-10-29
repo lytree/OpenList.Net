@@ -80,6 +80,19 @@ internal static class MediaModelConfiguration
             e.HasKey(s => s.Id);
             e.HasIndex(s => new { s.UserId, s.ItemId }).IsUnique();
         });
+        b.Entity<MediaWatchSession>(e =>
+        {
+            e.ToTable(prefix + "media_watch_sessions");
+            e.HasKey(s => s.Id);
+            // 上报是幂等的：同一个客户端 token 反复打过来只能落到同一行。
+            // 唯一索引是这条幂等的**唯一**保证 —— 没有它，两个并发心跳会各插一行，
+            // 观看时长就被算了两遍。
+            e.HasIndex(s => new { s.UserId, s.Token }).IsUnique();
+            // 历史与逐日统计都按 (用户, 时间) 扫
+            e.HasIndex(s => new { s.UserId, s.StartedAt });
+            e.HasIndex(s => s.ItemId);
+            e.Property(s => s.Token).HasMaxLength(64);
+        });
         b.Entity<MediaPlaylist>(e =>
         {
             e.ToTable(prefix + "media_playlists");

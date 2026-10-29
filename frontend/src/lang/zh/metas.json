@@ -1,0 +1,23 @@
+{
+  "path": "路径",
+  "password": "密码",
+  "read_users": "可读用户",
+  "read_users_help": "只有被选中且具备权限的用户才能读取该路径。",
+  "write_users": "可写用户",
+  "write_users_help": "只有被选中且具备权限的用户才能写入该路径。",
+  "all_permitted_users": "所有有权限的用户",
+  "write": "写入内容绕过权限",
+  "write_help": "写入内容（新建/上传/修改）时跳过用户权限检查。谨慎使用。",
+  "hide": "隐藏",
+  "readme": "Readme",
+  "readme_help": "在页面底部渲染一段 Markdown，可填内容或链接",
+  "header": "页头",
+  "header_help": "在页面顶部渲染一段 Markdown，可填内容或链接",
+  "apply_sub": "应用到子文件夹",
+  "hide_help": "一行一个正则表达式",
+  "tips": "规则按路径生效。「应用到子文件夹」会把规则延伸到其下每一级目录。",
+  "section_password": "密码",
+  "section_permission": "权限",
+  "section_view": "显示",
+  "sub_mark": "子级"
+}

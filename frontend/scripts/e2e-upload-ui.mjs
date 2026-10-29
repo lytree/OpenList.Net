@@ -57,7 +57,7 @@ async function main() {
 
     // ---- 无头 Edge ----
     const browser = await chromium.launch({ channel: "msedge", headless: true })
-    const page = await browser.newPage()
+    const page = await browser.newPage({ locale: "en-US" })
     const consoleErrors = []
     page.on("console", (m) => {
       if (m.type() === "error") {

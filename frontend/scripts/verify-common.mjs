@@ -26,7 +26,7 @@ function check(name, ok, extra = "") {
 }
 
 const browser = await chromium.launch({ channel: "msedge", headless: true })
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: "en-US" })
 const errors = []
 page.on("console", (msg) => {
   if (msg.type() === "error") errors.push(msg.text())
@@ -51,20 +51,20 @@ check(
 
 // ---------- A. 错误口令不放行 ----------
 await goto("#/@login")
-check("直接访问登录页可渲染", (await page.locator(".ol-login-page").count()) === 1, page.url())
-await page.locator(".ol-login-page input").first().fill("admin")
-await page.locator(".ol-login-page input").nth(1).fill("wrong-password")
-await page.locator(".ol-login-card button").first().click()
+check("直接访问登录页可渲染", (await page.locator(".ol-auth").count()) === 1, page.url())
+await page.locator(".ol-auth input").first().fill("admin")
+await page.locator(".ol-auth input").nth(1).fill("wrong-password")
+await page.locator(".ol-auth-card button.el-button--primary").first().click()
 await page.waitForTimeout(1500)
-const stillLogin = await page.locator(".ol-login-page").count()
+const stillLogin = await page.locator(".ol-auth").count()
 const badToken = await page.evaluate(() => localStorage.getItem("token"))
 check("错误口令不放行", stillLogin === 1 && !badToken, `login=${stillLogin} token=${badToken}`)
 const errMsg = (await page.locator(".el-alert, .el-message").first().innerText().catch(() => "")) || ""
 check("错误口令有可见提示", errMsg.trim().length > 0, errMsg.replace(/\s+/g, " ").slice(0, 60))
 
 // 正确口令
-await page.locator(".ol-login-page input").nth(1).fill(PASS)
-await page.locator(".ol-login-card button").first().click()
+await page.locator(".ol-auth input").nth(1).fill(PASS)
+await page.locator(".ol-auth-card button.el-button--primary").first().click()
 await page.waitForTimeout(2500)
 const token = await page.evaluate(() => localStorage.getItem("token"))
 check("登录成功并落 token", Boolean(token) && !/#\/@login/.test(page.url()), page.url())
@@ -72,7 +72,7 @@ check("登录成功并落 token", Boolean(token) && !/#\/@login/.test(page.url()
 // 刷新后仍登录（token 恢复 + 守卫放行）
 await page.reload({ waitUntil: "networkidle" })
 await page.waitForTimeout(1200)
-check("刷新后保持登录", (await page.locator(".ol-login-page").count()) === 0, page.url())
+check("刷新后保持登录", (await page.locator(".ol-auth").count()) === 0, page.url())
 
 // ---------- E. 管理台 12 个模块都能打开 ----------
 // （12 个全部就绪：about 是最后一个，见 §38；plugins 已于 §35 从导航移除 ——

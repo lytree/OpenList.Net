@@ -1,0 +1,22 @@
+{
+  "new_folder": "新建文件夹",
+  "folder_name": "文件夹名",
+  "rename": "重命名",
+  "move_to": "移动到",
+  "copy_to": "复制到",
+  "delete": "删除",
+  "delete_confirm": "删除选中的 {{count}} 个条目？此操作不可撤销。",
+  "select_target": "选择目标文件夹",
+  "choose_here": "选择当前位置",
+  "no_subfolder": "没有子文件夹",
+  "actions": "操作",
+  "open": "打开",
+  "selected_count": "已选 {{count}} 项",
+  "created": "文件夹已创建",
+  "renamed": "已重命名",
+  "deleted": "已删除",
+  "moved": "已移动",
+  "copied": "已复制",
+  "name_required": "名称不能为空",
+  "same_name": "名称没有变化"
+}

@@ -14,6 +14,11 @@ internal static class StateEndpoints
         g.MapGet("/items/{id:long}/state", async (long id, ClaimsPrincipal principal, IUserMediaStateService states) =>
             Results.Ok(await states.GetAsync(id, principal.ToUser())));
 
+        // POST /api/media/items/states — 批量取个人状态（列表页/播放队列打「已看」角标）
+        // 路由与下面的 `/items/{id:long}/state` 不可能撞：段数不同，且 id 约束是 long。
+        g.MapPost("/items/states", async (BatchStatesReq req, ClaimsPrincipal principal, IUserMediaStateService states) =>
+            Results.Ok(await states.GetStatesAsync(req.ItemIds, principal.ToUser())));
+
         // POST /api/media/items/{id}/state — 收藏/看过/评分/进度/稍后/标记
         g.MapPost("/items/{id:long}/state", async (long id, ClaimsPrincipal principal, UpdateUserMediaStateReq req, IUserMediaStateService states) =>
             Results.Ok(await states.UpdateAsync(id, req, principal.ToUser())));
@@ -32,9 +37,10 @@ internal static class StateEndpoints
             return Results.Ok(await states.ListInProgressAsync(page, perPage, principal.ToUser()));
         });
 
-        // GET /api/media/taste — 口味画像
-        g.MapGet("/taste", async (ClaimsPrincipal principal, IUserMediaStateService states) =>
-            Results.Ok(await states.GetTasteProfileAsync(principal.ToUser())));
+        // GET /api/media/taste?days= — 口味画像（days 为"最近 N 天内动过"的窗口，缺省=全量）
+        g.MapGet("/taste", async (HttpContext ctx, ClaimsPrincipal principal, IUserMediaStateService states) =>
+            Results.Ok(await states.GetTasteProfileAsync(
+                principal.ToUser(), MediaQuery.IntOrNull(ctx.Request.Query, "days"))));
 
         // GET /api/media/watch-later — 稍后看
         g.MapGet("/watch-later", async (HttpContext ctx, ClaimsPrincipal principal, IUserMediaStateService states) =>

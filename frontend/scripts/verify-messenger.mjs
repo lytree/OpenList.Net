@@ -38,7 +38,7 @@ function watch(page, tag) {
 
 /** 登录并返回一个已注入 token 的 page。 */
 async function signIn(username, password, tag) {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: "en-US" })
   watch(page, tag)
   const token = await page.request
     .post(`${BASE}/api/auth/login`, { data: { username, password } })

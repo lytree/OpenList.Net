@@ -13,7 +13,7 @@ import { join } from "node:path"
  * 为什么用 NFO 而不是 TMDB：人物/片商/系列三个维度只有刮削后才有数据，
  * 离线装置走 local NFO 才能稳定复现（在线刮削依赖外网，且结果会变）。
  *
- * 覆盖：首页 facets 筛选 → 人物列表/详情 → 片商/系列 → 口味画像 →
+ * 覆盖：首页 facets 筛选 → 人物列表/详情 → 片商/系列 → 口味画像（含时间窗口参数贯通）→
  * 播放列表（建/加/重排/移除）→ 字幕对话框 → 零控制台错误。
  */
 
@@ -110,7 +110,7 @@ log("fixture:", FIXTURE_ROOT)
 
 // ---------- 1. 浏览器与登录 ----------
 const browser = await chromium.launch({ channel: "msedge", headless: true })
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: "en-US" })
 const errors = []
 // 脚本会故意访问不存在的维度 id 来验 404 语义，浏览器必然为那两次请求记 error。
 // 只放行这两条 URL，其它一律算缺陷（零错误断言不能变成「什么都放行」）。
@@ -380,6 +380,27 @@ const missingTitle = ((await page.locator(".ol-media-page-title").textContent())
 check("不存在的片商显示 Not found", missingTitle === "Not found", missingTitle)
 
 // ---------- 7. 口味画像 ----------
+// 先造一条"刚发生"的个人状态，否则口径验的是 0 = 0。
+// 窗口本身（40 天前的行被排除）在 dotnet 单测里用真实时间戳覆盖：
+// 这套装置只能造出"现在"的状态，造不出"半年前"的行。
+await api("post", `/media/items/${itemList[0].id}/state`, { favorite: true })
+
+const tasteAll = await api("get", "/media/taste")
+check("taste 默认 windowDays=0（不限）", tasteAll.data?.windowDays === 0, `${tasteAll.data?.windowDays}`)
+check("taste 全量收藏数 1", tasteAll.data?.favoriteCount === 1, `${tasteAll.data?.favoriteCount}`)
+
+const taste30 = await api("get", "/media/taste?days=30")
+check("taste?days=30 回显 30", taste30.data?.windowDays === 30, `${taste30.data?.windowDays}`)
+check("刚收藏的条目落在 30 天窗口内", taste30.data?.favoriteCount === 1, `${taste30.data?.favoriteCount}`)
+
+// 非法 days 与缺省同义：不报错、按不限处理
+const tasteBogus = await api("get", "/media/taste?days=abc")
+check(
+  "days 非法值退回不限",
+  tasteBogus.code === 200 && tasteBogus.data?.windowDays === 0 && tasteBogus.data?.favoriteCount === 1,
+  JSON.stringify(tasteBogus.data?.windowDays),
+)
+
 await page.goto(`${BASE}/#/media/taste`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-stat-card", { timeout: 10000 })
 const statValues = await page.locator(".ol-media-stat-value").allInnerTexts()
@@ -387,6 +408,25 @@ check("口味页统计卡有 6 张", statValues.length === 6, `${statValues.leng
 check("口味页条目数 = 3", statValues[0]?.trim() === "3", statValues.join("|"))
 const barRows = await page.locator(".ol-media-bar-row").count()
 check("口味页条形图有数据", barRows >= 3, `${barRows} rows`)
+
+// 时间范围下拉：切换必须真的带 days=30 重新请求（只看下拉里的字会漏掉"选完没生效"）
+check(
+  "口味页有 2 个下拉（时间范围 + 媒体库）",
+  (await page.locator(".ol-media-tools .el-select").count()) === 2,
+  `${await page.locator(".ol-media-tools .el-select").count()}`,
+)
+const tasteReq = page.waitForResponse(
+  (r) => r.url().includes("/api/media/taste") && r.url().includes("days=30"),
+  { timeout: 10000 },
+)
+await page.locator(".ol-media-tools .el-select").first().click()
+await page.locator(".el-select-dropdown__item", { hasText: "Last 30 days" }).first().click()
+const tasteResp = await tasteReq.catch(() => null)
+check("切到「近 30 天」会带 days=30 重新请求", tasteResp !== null)
+const summary = ((await page.locator(".ol-media-taste-summary").innerText().catch(() => "")) ?? "")
+  .replace(/\s+/g, " ")
+  .trim()
+check("窗口内偏好面板仍在（Favorites: 1）", summary.includes("Favorites: 1"), summary)
 
 // ---------- 8. 播放列表：建 → 加 → 重排 → 移除 ----------
 await page.goto(`${BASE}/#/media/playlists`, { waitUntil: "networkidle" })

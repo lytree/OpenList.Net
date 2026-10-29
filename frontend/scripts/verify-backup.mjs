@@ -43,7 +43,7 @@ mkdirSync(WORK, { recursive: true })
 mkdirSync(PROBE_ROOT, { recursive: true })
 
 const browser = await chromium.launch({ channel: "msedge", headless: true })
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, acceptDownloads: true })
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, acceptDownloads: true, locale: "en-US" })
 
 const errors = []
 page.on("console", (msg) => {

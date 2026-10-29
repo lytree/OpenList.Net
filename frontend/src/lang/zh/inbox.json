@@ -1,0 +1,10 @@
+{
+  "bell": "站内信",
+  "title": "收件箱",
+  "empty": "暂无消息。",
+  "unread": "{{count}} 条未读",
+  "all_read": "全部已读",
+  "mark_read": "标为已读",
+  "close": "关闭",
+  "refresh": "刷新"
+}

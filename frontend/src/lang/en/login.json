@@ -8,6 +8,7 @@
   "forget_url": "https://doc.oplist.org/faq/howto#how-to-get-password-if-i-forget-it",
   "clear": "Clear",
   "login": "Login",
+  "ldap_tips": "Login with LDAP",
   "use_guest": "Browse as a guest",
   "success": "Login successfully"
 }

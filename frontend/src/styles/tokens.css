@@ -1,11 +1,9 @@
 /* ============================================================================
  * 设计 token
  * ----------------------------------------------------------------------------
- * 旧前端用 hope-ui 的 token（$space-4 / $neutral-7 / $primary9 …），Element Plus
- * 用 CSS 变量（--el-*）。这里的作用是**一层薄桥接**：
- *   1. 保留 hope-ui 的语义 token 名，方便逐页翻译时对照，不用重新想命名；
- *   2. 把品牌色锚定到 --el-color-primary，主题/换色只改一个变量；
- *   3. 深浅色由 <html class="dark"> 驱动（EP 自带 dark/css-vars.css）。
+ * 数值取自旧前端（hope-ui）在真实浏览器里的计算样式，而不是凭感觉调：
+ * 页面底色 #F7F8FA、正文色 #11181C、正文 16px/24px。EP 的默认值
+ * （#F2F3F5 / #303133 / 14px）偏灰偏小，两套放一起就是"不像"的来源。
  *
  * 约定：业务组件优先用 --el-* 与 EP 组件属性；只有 EP 覆盖不到的地方
  *（自定义容器、间距节奏）才用下面的 --ol-* token。
@@ -21,27 +19,72 @@
   --ol-space-6: 24px;
   --ol-space-8: 32px;
 
-  /* 圆角：EP 默认 4px，页面容器略大 */
+  /* 圆角：参考前端 sm=4 / md=6 / lg=8 / xl=16 */
   --ol-radius-sm: 4px;
-  --ol-radius-md: 8px;
-  --ol-radius-lg: 12px;
+  --ol-radius-md: 6px;
+  --ol-radius-lg: 8px;
+  --ol-radius-xl: 16px;
 
-  /* 布局尺寸 */
-  --ol-header-height: 56px;
-  --ol-aside-width: 220px;
-  --ol-aside-width-collapsed: 64px;
+  /* 布局尺寸（取自参考前端：头部 60px、内容列 980px、管理侧栏 224px） */
+  --ol-header-height: 60px;
+  --ol-content-width: 980px;
+  --ol-content-width-wide: 1280px;
+  --ol-manage-header-height: 64px;
+  --ol-aside-width: 224px;
 
-  /* 语义色：默认指向 EP 的变量，深色模式自动跟随 */
-  --ol-bg-page: var(--el-bg-color-page);
-  --ol-bg-surface: var(--el-bg-color);
-  --ol-bg-hover: var(--el-fill-color-light);
-  --ol-border: var(--el-border-color-lighter);
-  --ol-text: var(--el-text-color-primary);
-  --ol-text-secondary: var(--el-text-color-regular);
-  --ol-text-muted: var(--el-text-color-secondary);
+  /* 中性色：对齐 hope-ui 的 neutral 标度（浅色） */
+  --ol-bg-page: #f7f8fa;
+  --ol-bg-surface: #ffffff;
+  --ol-bg-hover: #edeef0;
+  --ol-border: #e6e8eb;
+  --ol-text: #11181c;
+  --ol-text-secondary: #4a5560;
+  --ol-text-muted: #7c878e;
+
+  /* 卡片投影：参考前端的列表卡片几乎"浮"在底色上，只有很淡的一层 */
+  --ol-shadow-card: 0 1px 2px rgba(17, 24, 28, 0.06), 0 2px 8px rgba(17, 24, 28, 0.04);
+  --ol-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.09), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
 
   /* 品牌色默认值；运行时由 useBrandColor() 按站点设置覆盖 */
   --ol-brand: #1890ff;
+}
+
+/* 把 EP 的语义色接到同一套中性色上。
+ * 不做这一步，卡片/表格里用的还是 EP 默认的 #303133 / #DCDFE6，和页面级的
+ * #11181C / #E6E8EB 并排出现，同一屏会有两种灰。 */
+:root {
+  --el-text-color-primary: #11181c;
+  --el-text-color-regular: #4a5560;
+  --el-text-color-secondary: #7c878e;
+  --el-text-color-placeholder: #9aa4aa;
+  --el-border-color: #e6e8eb;
+  --el-border-color-light: #e6e8eb;
+  --el-border-color-lighter: #eff1f3;
+  --el-fill-color-light: #f2f3f5;
+  --el-bg-color-page: #f7f8fa;
+}
+
+/* 暗色：hope-ui 的 neutral 反转，页面比卡片更深一层 */
+html.dark {
+  --ol-bg-page: #11181c;
+  --ol-bg-surface: #1a1d1e;
+  --ol-bg-hover: #26292b;
+  --ol-border: #2b3134;
+  --ol-text: #edeef0;
+  --ol-text-secondary: #b4bcc2;
+  --ol-text-muted: #8b959b;
+  --ol-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.24);
+  --ol-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.4);
+
+  --el-text-color-primary: #edeef0;
+  --el-text-color-regular: #b4bcc2;
+  --el-text-color-secondary: #8b959b;
+  --el-text-color-placeholder: #6d777d;
+  --el-border-color: #2b3134;
+  --el-border-color-light: #2b3134;
+  --el-border-color-lighter: #23282b;
+  --el-fill-color-light: #23282b;
+  --el-bg-color-page: #11181c;
 }
 
 html,
@@ -54,6 +97,9 @@ body,
 body {
   background: var(--ol-bg-page);
   color: var(--ol-text);
+  /* 参考前端正文是 16px/1.5；EP 组件内部默认 14px，这里只影响页面级文本 */
+  font-size: 15px;
+  line-height: 1.5;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", sans-serif;

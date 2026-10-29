@@ -47,3 +47,53 @@ describe("i18n", () => {
     expect(locale.value).toBe("en")
   })
 })
+
+/**
+ * 字典完整性：zh 必须覆盖 en 的每一个键。
+ *
+ * 缺键不会报错，只会静默回退英文 —— 单看界面根本看不出「这里漏翻了」，
+ * 所以只能靠键集合比对。`index.json` 只存语言名（`lang` 字段），i18n 不把它当命名空间。
+ */
+describe("zh 字典覆盖度", () => {
+  const enModules = import.meta.glob<{ default: Record<string, unknown> }>("../lang/en/*.json", {
+    eager: true,
+  })
+  const zhModules = import.meta.glob<{ default: Record<string, unknown> }>("../lang/zh/*.json", {
+    eager: true,
+  })
+
+  /** 把嵌套字典摊平成 `a.b.c` 形式的键列表（只收叶子）。 */
+  function flatten(node: Record<string, unknown>, prefix = ""): string[] {
+    return Object.entries(node).flatMap(([key, value]) => {
+      const path = prefix ? `${prefix}.${key}` : key
+      if (value && typeof value === "object") return flatten(value as Record<string, unknown>, path)
+      return [path]
+    })
+  }
+
+  const namespaceOf = (path: string) => path.replace(/^.*\/lang\/(en|zh)\//, "").replace(/\.json$/, "")
+
+  it("zh 的每个命名空间都存在，且键集合与 en 完全一致", () => {
+    const enNamespaces = Object.keys(enModules)
+      .map(namespaceOf)
+      .filter((ns) => ns !== "index")
+    const zhNamespaces = Object.keys(zhModules)
+      .map(namespaceOf)
+      .filter((ns) => ns !== "index")
+
+    expect(zhNamespaces.sort()).toEqual(enNamespaces.sort())
+
+    for (const ns of enNamespaces) {
+      const enKeys = flatten(enModules[`../lang/en/${ns}.json`]!.default)
+      const zhKeys = flatten(zhModules[`../lang/zh/${ns}.json`]!.default)
+      expect({ ns, missing: enKeys.filter((key) => !zhKeys.includes(key)) }).toEqual({
+        ns,
+        missing: [],
+      })
+      expect({ ns, extra: zhKeys.filter((key) => !enKeys.includes(key)) }).toEqual({
+        ns,
+        extra: [],
+      })
+    }
+  })
+})

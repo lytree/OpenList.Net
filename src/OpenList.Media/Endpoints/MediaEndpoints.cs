@@ -19,6 +19,7 @@ public static class MediaEndpoints
         g.MapLibraryEndpoints();   // 库 CRUD + 扫描
         g.MapItemEndpoints();      // 条目查询 + 刮削
         g.MapStateEndpoints();     // 收藏 / 看过 / 稍后 / 标记 / 口味
+        g.MapWatchEndpoints();     // 观看会话：心跳上报 / 历史 / 逐日时长
         g.MapPlaylistEndpoints();  // 用户私有播放列表
         g.MapCatalogEndpoints();   // facets / stats / home / persons / tasks
         g.MapSubtitleEndpoints();  // 字幕搜索与写回

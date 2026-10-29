@@ -15,6 +15,23 @@ import {
 import { UserMethods, type Me, type Permission } from "~/api/types"
 
 /**
+ * 登录失败时带状态码的错误。
+ *
+ * 登录页需要区分「密码错了」（401）和「还要一次性验证码」（402，后端
+ * `JwtService` 在缺 otp_code 时返回 `2fa required`）——后者要把输入框切成 TOTP，
+ * 而不是弹一条红色提示。普通 `Error` 只带 message，拿不到这个分支。
+ */
+export class LoginError extends Error {
+  constructor(
+    readonly code: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = "LoginError"
+  }
+}
+
+/**
  * 当前用户 store。
  *
  * 职责边界：只管「我是谁、我能做什么」，不负责跳转。
@@ -79,7 +96,7 @@ export const useUserStore = defineStore("user", () => {
     const resp = options.useLdap
       ? await loginWithLdap({ ...payload, password })
       : await loginWithHash({ ...payload, password: hashPassword(password) })
-    if (resp.code !== 200) throw new Error(resp.message)
+    if (resp.code !== 200) throw new LoginError(resp.code, resp.message)
     applyToken(persistToken(resp.data))
     await loadMe(true)
   }
