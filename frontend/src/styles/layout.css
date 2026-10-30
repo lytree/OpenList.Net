@@ -1908,6 +1908,114 @@ html.dark .ol-grid-check {
   color: var(--ol-text-muted);
 }
 
+/* ---- 手机端列表：卡片行（<= 767px 由 JS 换结构，见 composables/useIsPhone） ----
+ * 四列表格在 390px 下会横向溢出，这里把「名称 / 大小 / 时间 / 更多」压进两行：
+ * 首行名称（可换行两行），次行「大小 · 时间」，右侧固定「更多」。
+ * 行高 >= 52px，满足触控目标下限。 */
+.ol-rowlist {
+  display: flex;
+  flex-direction: column;
+  padding: var(--ol-space-1) 0;
+}
+
+.ol-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  padding: 10px var(--ol-space-3);
+  min-height: 52px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--ol-border);
+  transition: background 0.15s ease;
+}
+
+.ol-row:last-child {
+  border-bottom: none;
+}
+
+.ol-row:active {
+  background: var(--el-fill-color-light);
+}
+
+.ol-row.is-selected {
+  background: var(--el-color-primary-light-9);
+}
+
+.ol-row-check {
+  display: inline-flex;
+  flex: 0 0 auto;
+  /* 勾选框本身只有 14px，撑到 32px 才好点 */
+  padding: 6px 2px;
+}
+
+.ol-row-icon {
+  flex: 0 0 auto;
+}
+
+.ol-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ol-row-name {
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--ol-text);
+  /* 长文件名换行两行，而不是把「更多」挤出屏幕 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+.ol-row-meta {
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--ol-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ol-row-meta > span:first-child {
+  flex: 0 0 auto;
+}
+
+.ol-row-dot {
+  flex: 0 0 auto;
+  opacity: 0.6;
+}
+
+.ol-row-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  /* 触控区 36px，视觉上仍是一枚小图标 */
+  width: 36px;
+  height: 36px;
+  border-radius: var(--ol-radius-md);
+  color: var(--ol-text-muted);
+}
+
+.ol-row-more:active {
+  background: var(--el-fill-color);
+}
+
+/* 触屏/鼠标点过之后不要一直挂着焦点框；键盘 Tab 聚焦（:focus-visible）仍保留，别伤无障碍 */
+.ol-row-more:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 「更多」里的删除项：与表格的行内菜单共用同一份 class */
+.el-dropdown-menu__item.is-danger {
+  color: var(--el-color-danger);
+}
+
 /* ---- 分页 ---- */
 .ol-pager {
   display: flex;

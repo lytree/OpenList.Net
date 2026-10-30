@@ -25,24 +25,19 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
-  Document,
   DocumentCopy,
   Expand,
   Folder,
   FolderAdd,
-  FolderOpened,
   Fold,
-  Headset,
   MoreFilled,
-  Picture,
   Refresh,
   Search,
   SortDown,
   SortUp,
   Upload,
-  VideoCamera,
 } from "@element-plus/icons-vue"
-import { objKind, useFileList, type SortKey } from "~/composables/useFileList"
+import { useFileList, type SortKey } from "~/composables/useFileList"
 import { useFileOps } from "~/composables/useFileOps"
 import { useShortcuts } from "~/composables/useShortcuts"
 import { useViewLayout, VIEW_MODES, type ViewMode } from "~/composables/useViewLayout"
@@ -50,6 +45,10 @@ import FolderPickerDialog from "~/components/FolderPickerDialog"
 import FolderTree from "~/components/FolderTree"
 import FileContextMenu, { type ContextMenuItem } from "~/components/FileContextMenu"
 import FileGridView from "~/pages/home/GridView"
+import FileListRows from "~/pages/home/ListRows"
+import { kindColor, kindIcon } from "~/pages/home/kind"
+import { rowActionsFor, type RowAction } from "~/pages/home/rowActions"
+import { useIsPhone } from "~/composables/useIsPhone"
 import FilePager from "~/pages/home/Pager"
 import ToolbarDialogs, { type DialogKey } from "~/pages/home/toolbar/ToolbarDialogs"
 import { isArchiveName } from "~/utils/archive"
@@ -63,24 +62,6 @@ import { downloadLink } from "~/utils/link"
 import { pathJoin, pathSegments } from "~/utils/path"
 import { t } from "~/i18n"
 import type { Obj } from "~/api/types"
-
-const KIND_ICON = {
-  folder: FolderOpened,
-  video: VideoCamera,
-  audio: Headset,
-  image: Picture,
-  text: Document,
-  other: Document,
-} as const
-
-const KIND_COLOR: Record<string, string> = {
-  folder: "#e6a23c",
-  video: "#409eff",
-  audio: "#67c23a",
-  image: "#909399",
-  text: "#606266",
-  other: "#909399",
-}
 
 /** ElMessageBox 的取消是 reject，这里统一吞掉 cancel。 */
 function dismissCancel(e: unknown) {
@@ -100,6 +81,12 @@ export default defineComponent({
     const ops = useFileOps(files)
     const passwordInput = ref("")
     const { mode, treeVisible } = useViewLayout()
+
+    /**
+     * 手机断点内列表模式换成卡片行：表格四列在 390px 下必然横向溢出。
+     * 这是「换结构」而不是「改尺寸」，所以由 JS 决定而不是纯 CSS。
+     */
+    const isPhone = useIsPhone()
 
     /** FolderPicker 的用途：move / copy；null 表示关着。 */
     const pickerMode = ref<"move" | "copy" | null>(null)
@@ -223,8 +210,8 @@ export default defineComponent({
     useShortcuts({
       onSelectAll: () => {
         if (files.state.value !== "folder") return
-        // 列表交给 VexTable（保证勾选框同步）；网格没有表格实例，直接写选择数组（当前页）。
-        if (mode.value === "list") tableRef.value?.toggleAllSelection()
+        // 列表交给 VexTable（保证勾选框同步）；网格与手机卡片行没有表格实例，直接写选择数组。
+        if (mode.value === "list" && !isPhone.value) tableRef.value?.toggleAllSelection()
         else ops.selected.value = [...files.viewObjs.value]
       },
       onDelete: () => {
@@ -368,8 +355,7 @@ export default defineComponent({
       { value: "modified", label: "修改时间" },
     ]
 
-    const kindOf = (row: Obj) => objKind(row)
-    const iconOf = (row: Obj) => KIND_ICON[kindOf(row)]
+    const iconOf = (row: Obj) => kindIcon(row)
 
     async function submitPassword() {
       if (!passwordInput.value) return
@@ -438,6 +424,14 @@ export default defineComponent({
     }
 
     /** 行内菜单动作统一入口：把该行变成当前选择再复用批量逻辑。 */
+    /**
+     * 行内「更多」菜单：桌面表格的 `VexColumn` 与手机卡片行都用它渲染，命令统一交给
+     * `onRowCommand`。规则本身在 `rowActionsFor`（纯函数，可单测）。
+     */
+    function rowActions(obj: Obj): RowAction[] {
+      return rowActionsFor(obj, { writable: writable.value })
+    }
+
     async function onRowCommand(command: string, obj: Obj) {
       switch (command) {
         case "open":
@@ -755,7 +749,7 @@ export default defineComponent({
             <ElEmpty description={`没有匹配「${files.keyword.value}」的条目`} />
           )}
 
-          {files.state.value === "folder" && !isEmpty.value && !noMatch.value && mode.value === "list" && (
+          {files.state.value === "folder" && !isEmpty.value && !noMatch.value && mode.value === "list" && !isPhone.value && (
             <VexTable
               ref={tableRef}
               data={files.viewObjs.value}
@@ -775,7 +769,7 @@ export default defineComponent({
                     const Icon = iconOf(obj)
                     return (
                       <span class="ol-file-name" onClick={() => void files.open(obj)}>
-                        <ElIcon size={16} color={KIND_COLOR[kindOf(obj)]}>
+                        <ElIcon size={16} color={kindColor(obj)}>
                           <Icon />
                         </ElIcon>
                         <span>{obj.name}</span>
@@ -815,25 +809,16 @@ export default defineComponent({
                           ),
                           dropdown: () => (
                             <ElDropdownMenu>
-                              <ElDropdownItem command="open">{t("ops.open")}</ElDropdownItem>
-                              {!obj.is_dir && (
-                                <ElDropdownItem command="download">{t("home.toolbar.download")}</ElDropdownItem>
-                              )}
-                              {!obj.is_dir && (
-                                <ElDropdownItem command="copy_link">{t("home.toolbar.copy_link")}</ElDropdownItem>
-                              )}
-                              {writable.value && (
-                                <ElDropdownItem command="rename" divided={true}>
-                                  {t("ops.rename")}
+                              {rowActions(obj).map((item) => (
+                                <ElDropdownItem
+                                  key={item.command}
+                                  command={item.command}
+                                  divided={item.divided}
+                                  class={item.danger ? "is-danger" : undefined}
+                                >
+                                  {item.label}
                                 </ElDropdownItem>
-                              )}
-                              {writable.value && <ElDropdownItem command="move">{t("ops.move_to")}</ElDropdownItem>}
-                              {writable.value && <ElDropdownItem command="copy">{t("ops.copy_to")}</ElDropdownItem>}
-                              {writable.value && (
-                                <ElDropdownItem command="delete" divided={true}>
-                                  {t("ops.delete")}
-                                </ElDropdownItem>
-                              )}
+                              ))}
                             </ElDropdownMenu>
                           ),
                         }}
@@ -843,6 +828,19 @@ export default defineComponent({
                 }}
               </VexColumn>
             </VexTable>
+          )}
+
+          {files.state.value === "folder" && !isEmpty.value && !noMatch.value && mode.value === "list" && isPhone.value && (
+            <FileListRows
+              objs={files.viewObjs.value}
+              selected={selectedNames.value}
+              selectable={writable.value}
+              actions={rowActions}
+              onOpen={(obj: Obj) => openObj(obj)}
+              onToggle={(obj: Obj, checked: boolean) => toggleSelect(obj, checked)}
+              onContextmenu={(obj: Obj, ev: MouseEvent) => openRowCtx(obj, ev)}
+              onAction={(command: string, obj: Obj) => void onRowCommand(command, obj)}
+            />
           )}
 
           {files.state.value === "folder" && !isEmpty.value && !noMatch.value && mode.value !== "list" && (

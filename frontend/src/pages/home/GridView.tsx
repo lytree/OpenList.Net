@@ -1,16 +1,10 @@
 import { computed, defineComponent, type PropType } from "vue"
 import { ElCheckbox, ElIcon } from "element-plus"
-import {
-  Document,
-  FolderOpened,
-  Headset,
-  Picture,
-  VideoCamera,
-} from "@element-plus/icons-vue"
 import { ObjType, type Obj } from "~/api/types"
 import { humanSize } from "~/utils/format"
 import { downloadLink } from "~/utils/link"
 import { pathJoin } from "~/utils/path"
+import { kindColor, kindIcon } from "~/pages/home/kind"
 
 /**
  * 网格 / 图墙视图。
@@ -60,31 +54,7 @@ export default defineComponent({
     }
 
     function fallbackIcon(obj: Obj) {
-      if (obj.is_dir) return FolderOpened
-      switch (obj.type) {
-        case ObjType.IMAGE:
-          return Picture
-        case ObjType.VIDEO:
-          return VideoCamera
-        case ObjType.AUDIO:
-          return Headset
-        default:
-          return Document
-      }
-    }
-
-    function fallbackColor(obj: Obj): string {
-      if (obj.is_dir) return "#e6a23c"
-      switch (obj.type) {
-        case ObjType.IMAGE:
-          return "#909399"
-        case ObjType.VIDEO:
-          return "#409eff"
-        case ObjType.AUDIO:
-          return "#67c23a"
-        default:
-          return "#909399"
-      }
+      return kindIcon(obj)
     }
 
     return () => {
@@ -113,7 +83,7 @@ export default defineComponent({
                   {src ? (
                     <img src={src} alt={obj.name} loading="lazy" decoding="async" />
                   ) : (
-                    <ElIcon size={props.mode === "image" ? 44 : 34} color={fallbackColor(obj)}>
+                    <ElIcon size={props.mode === "image" ? 44 : 34} color={kindColor(obj)}>
                       <Icon />
                     </ElIcon>
                   )}
