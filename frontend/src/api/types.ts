@@ -372,6 +372,9 @@ export const SettingGroups: { group: number; labelKey: string }[] = [
   { group: 10, labelKey: "settings.groups.ftp" },
   { group: 11, labelKey: "settings.groups.traffic" },
   { group: 12, labelKey: "settings.groups.media" },
+  // 访问控制：媒体 / 首页各自的访客开关（设置项 media_guest_access / home_guest_access）。
+  // 放在最后而不是塞进「站点」，是因为它描述的是「两个门面各自的准入」，不是站点外观。
+  { group: 13, labelKey: "settings.groups.access" },
 ]
 
 // ---------------------------------------------------------------------------

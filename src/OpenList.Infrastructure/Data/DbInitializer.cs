@@ -682,6 +682,13 @@ public static class DbInitializer
         ("media_subtitle_language", "zh-cn", SettingValueType.String, SettingFlag.Public, 12, "zh-cn,zh-tw,en"),
         // 自动增量扫描间隔（小时）；0 表示关闭，仅手动触发。
         ("media_auto_scan_interval_hours", "0", SettingValueType.Number, SettingFlag.Private, 12, null),
+
+        // --- Group 13: ACCESS（媒体与首页各自的访客开关） ---
+        // 两个门面分开管：媒体是公开门面（默认放行游客），首页是文件浏览（默认要求登录）。
+        // 判定在 IGuestAccessService 里做，前端路由守卫读同一组公开设置，两边口径必须一致。
+        // Flag 必须是 Public —— 游客要在还没登录时就知道自己能不能进，靠 /api/public/settings 下发。
+        ("media_guest_access", "true", SettingValueType.Bool, SettingFlag.Public, 13, null),
+        ("home_guest_access", "false", SettingValueType.Bool, SettingFlag.Public, 13, null),
     };
 
     /// <summary>

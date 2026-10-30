@@ -11,6 +11,7 @@ import { pinia } from "~/stores"
 import { useInitStore } from "~/stores/init"
 import { useSettingsStore } from "~/stores/settings"
 import { useUserStore } from "~/stores/user"
+import { GuestSwitch, guestBlocked } from "~/utils/access"
 
 /**
  * 路由。
@@ -60,17 +61,19 @@ const routes: RouteRecordRaw[] = [
     path: "/",
     component: () => import("~/layouts/BasicLayout"),
     children: [
-      // 站点默认落地页是**媒体库**，且**对游客也成立**：媒体域只读端点匿名开放
-      // （见 MediaEndpoints），所以未登录用户可以直接看库、看详情、看海报。
-      // 文件浏览（首页）降级成独立页面 `/files`，并且**需要登录** —— 文件树属于
-      // 「找文件/管理」场景，不该和公开的媒体门面混在一起。
+      // 站点有两个**独立门面**，各有自己的访客策略（设置 → 访问控制）：
+      // - 媒体（`/media`）：默认**对游客开放**（`media_guest_access=true`），是站点的公开门面，
+      //   落地页就是它；媒体域只读端点匿名开放（见 MediaEndpoints）。
+      // - 首页（`/files`）：默认**需要登录**（`home_guest_access=false`）—— 文件树属于
+      //   「找文件 / 管理」场景。管理员放开这个开关后，游客也能只读浏览（写操作照旧按
+      //   权限位隐藏：`/fs/list` 返回的 `write` 为 false）。
       //
       // 媒体域内部再分两层界面：`/media` 是**媒体首页**（继续观看 / 最近入库 /
       // 最近收藏的聚合推荐），`/media/library` 是**媒体库**（按库、题材、年份、评分筛选浏览）。
       // 两者曾经挤在同一页，见 docs/unified-media-product-plan.md 第 48 节。
       //
       // 旧书签/文档里的文件深链是 `/?path=/a/b`（没有 /files 前缀），这类地址照旧
-      // 转给首页：游客会被 requiresAuth 拦到登录页，登录用户则正常浏览。
+      // 转给首页：游客会被访客策略拦到登录页，登录用户则正常浏览。
       {
         path: "",
         redirect: (to) => (to.query.path ? { name: "home", query: to.query } : { name: "media" }),
@@ -79,7 +82,7 @@ const routes: RouteRecordRaw[] = [
         path: "files",
         name: "home",
         component: () => import("~/pages/home"),
-        meta: { title: "global.nav_home", requiresAuth: true },
+        meta: { title: "global.nav_home", requiresAuth: true, guestSwitch: GuestSwitch.home },
       },
       // 媒体域的两个界面：`/media` 是**媒体首页**（聚合推荐，点「媒体」先看到它），
       // `/media/library` 是**媒体库**（按库/题材/年份/评分筛选浏览）。
@@ -88,13 +91,13 @@ const routes: RouteRecordRaw[] = [
         path: "media",
         name: "media",
         component: () => import("~/pages/media/Home"),
-        meta: { title: "media.tab_home", wide: true },
+        meta: { title: "media.tab_home", wide: true, guestSwitch: GuestSwitch.media },
       },
       {
         path: "media/library",
         name: "media-library",
         component: () => import("~/pages/media"),
-        meta: { title: "media.tab_libraries", wide: true },
+        meta: { title: "media.tab_libraries", wide: true, guestSwitch: GuestSwitch.media },
       },
       {
         // 兼容：媒体首页刚拆出来时短期用过 `/media/home`
@@ -105,7 +108,7 @@ const routes: RouteRecordRaw[] = [
         path: "media/item/:id",
         name: "media-item",
         component: () => import("~/pages/media/ItemDetail"),
-        meta: { title: "media.title", wide: true },
+        meta: { title: "media.title", wide: true, guestSwitch: GuestSwitch.media },
       },
       // ---- 媒体域维度页（M4 第三片）----
       // 片商/系列共用一个列表组件与一个详情组件，靠 meta.kind 区分维度
@@ -113,37 +116,37 @@ const routes: RouteRecordRaw[] = [
         path: "media/persons",
         name: "media-persons",
         component: () => import("~/pages/media/PersonList"),
-        meta: { title: "media.persons", wide: true },
+        meta: { title: "media.persons", wide: true, guestSwitch: GuestSwitch.media },
       },
       {
         path: "media/persons/:id(\\d+)",
         name: "media-person",
         component: () => import("~/pages/media/PersonDetail"),
-        meta: { title: "media.persons", wide: true },
+        meta: { title: "media.persons", wide: true, guestSwitch: GuestSwitch.media },
       },
       {
         path: "media/studios",
         name: "media-studios",
         component: () => import("~/pages/media/TaxonomyList"),
-        meta: { title: "media.studios", kind: "studios", wide: true },
+        meta: { title: "media.studios", kind: "studios", wide: true, guestSwitch: GuestSwitch.media },
       },
       {
         path: "media/studios/:id(\\d+)",
         name: "media-studio",
         component: () => import("~/pages/media/TaxonomyDetail"),
-        meta: { title: "media.studios", kind: "studios", wide: true },
+        meta: { title: "media.studios", kind: "studios", wide: true, guestSwitch: GuestSwitch.media },
       },
       {
         path: "media/series",
         name: "media-series",
         component: () => import("~/pages/media/TaxonomyList"),
-        meta: { title: "media.series", kind: "series", wide: true },
+        meta: { title: "media.series", kind: "series", wide: true, guestSwitch: GuestSwitch.media },
       },
       {
         path: "media/series/:id(\\d+)",
         name: "media-series-detail",
         component: () => import("~/pages/media/TaxonomyDetail"),
-        meta: { title: "media.series", kind: "series", wide: true },
+        meta: { title: "media.series", kind: "series", wide: true, guestSwitch: GuestSwitch.media },
       },
       // 播放列表与口味画像都是**按用户**的数据（个人片单、观看口味），游客没有，
       // 因此这两个入口保持 requiresAuth：游客点进去先去登录，而不是看空页面。
@@ -269,6 +272,17 @@ declare module "vue-router" {
     admin?: boolean
     /** 需要登录（默认允许游客浏览，写操作由按钮级权限控制）。 */
     requiresAuth?: boolean
+    /**
+     * 访客放行开关（公开设置里的键名）。
+     *
+     * 语义：**未登录能不能进这一页，由这个设置项决定**。
+     * - `media_guest_access`（默认 true）：媒体关闭后游客进不去，只能去登录；
+     * - `home_guest_access`（默认 false）：首页默认要登录，管理员放开后游客可只读浏览。
+     *
+     * 与 `requiresAuth` 的分工：只写 `requiresAuth` 表示「与开关无关，必须登录」
+     * （播放列表、口味画像、管理台）；两者都写表示「默认要登录，但开关可放开」（首页）。
+     */
+    guestSwitch?: string
     layout?: string
     /** 内容区放宽到 1280px（媒体库这类多列页面），默认按 OpenList 的 980px 居中列。 */
     wide?: boolean
@@ -297,7 +311,10 @@ router.beforeEach(async (to) => {
     await user.loadMe()
   }
 
-  if (to.meta.requiresAuth && !user.isLogin) {
+  // 访客策略：两个门面各自一个开关（设置 → 访问控制），判定逻辑收在 `utils/access.ts`
+  // 里（纯函数，有单测），口径与后端 `IGuestAccessService` 一致 —— 否则会出现
+  // 「页面能进、接口 401」或者反过来「接口能进、页面被弹走」。
+  if (!user.isLogin && guestBlocked(to.meta, settings.getBool)) {
     return { path: "/@login", query: { redirect: to.fullPath } }
   }
 

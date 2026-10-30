@@ -21,6 +21,16 @@ public class FsEndpointsTests
         return (factory, client);
     }
 
+    /// <summary>
+    /// 打开「首页允许游客浏览」开关（<c>home_guest_access</c>）。
+    /// <para>
+    /// 默认是 **false** —— 首页（文件浏览）需要登录，匿名 <c>/api/fs/*</c> 直接 401。
+    /// 下面几个「游客能读」的用例都建立在这条开关打开的前提下（公开只读分享站形态）。
+    /// </para>
+    /// </summary>
+    private static Task AllowGuestBrowsingAsync(TestWebAppFactory factory)
+        => factory.SetSettingAsync("home_guest_access", "true");
+
     [Test]
     public async Task List_Allows_Anonymous_Guest_Access()
     {
@@ -29,6 +39,8 @@ public class FsEndpointsTests
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
+            await AllowGuestBrowsingAsync(factory);
+
             await factory.WriteFileAsync("a.txt", "a"u8.ToArray());
 
             // No Authorization header — anonymous guest request.
@@ -48,6 +60,8 @@ public class FsEndpointsTests
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
+            await AllowGuestBrowsingAsync(factory);
+
             await factory.WriteFileAsync("a.txt", "a"u8.ToArray());
 
             var resp = await client.PostAsync("/api/fs/get",
@@ -65,6 +79,8 @@ public class FsEndpointsTests
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
+            await AllowGuestBrowsingAsync(factory);
+
             await factory.WriteFileAsync("a.txt", "a"u8.ToArray());
 
             var resp = await client.PostAsync("/api/fs/dirs",
@@ -73,6 +89,47 @@ public class FsEndpointsTests
 
             var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
             await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
+        }
+    }
+
+    [Test]
+    public async Task List_Denies_Anonymous_When_Home_Guest_Access_Is_Off()
+    {
+        // 默认策略：首页（文件浏览）需要登录。关掉 home_guest_access 时匿名 /fs/list 直接 401，
+        // 而不是「200 + 空列表」—— 前端据此回登录页，第三方客户端也不会误以为拿到了目录。
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("a.txt", "a"u8.ToArray());
+
+            var resp = await client.PostAsync("/api/fs/list",
+                JsonContent.Create(new { path = "/test" }));
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+
+            var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(401);
+        }
+    }
+
+    [Test]
+    public async Task List_Still_Allows_Share_Code_When_Home_Guest_Access_Is_Off()
+    {
+        // 公开分享是既有契约，与「首页对游客开不开」无关：带分享码的匿名请求照旧放行，
+        // 真伪交给 ShareAccess 判定（错误的分享码会拿到它自己的错误码，而不是网关层的 401）。
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("a.txt", "a"u8.ToArray());
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/api/fs/list")
+            {
+                Content = JsonContent.Create(new { path = "/" }),
+            };
+            req.Headers.TryAddWithoutValidation("Authorization", "not-a-real-share-code");
+            var resp = await client.SendAsync(req);
+
+            var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsNotEqualTo(401);
         }
     }
 

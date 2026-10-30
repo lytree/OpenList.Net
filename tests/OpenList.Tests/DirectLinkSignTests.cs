@@ -25,6 +25,10 @@ public class DirectLinkSignTests
         var factory = new TestWebAppFactory();
         var client = factory.CreateClient();
         await factory.SeedStorageAsync();
+        // 这组用例模拟的是「第三方下载器 / 播放器拿直链」的匿名视角（不带 token 取 fs/get），
+        // 前置条件是首页对游客开放（home_guest_access=true，公开只读站形态）；
+        // 默认策略下匿名请求会先被访客开关挡成 401，测不到签名逻辑。
+        await factory.SetSettingAsync("home_guest_access", "true");
         return (factory, client);
     }
 

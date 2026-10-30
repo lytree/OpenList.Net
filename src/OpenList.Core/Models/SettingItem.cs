@@ -105,6 +105,8 @@ public enum SettingGroup : int
     Traffic = 11,
     /// <summary>媒体库。</summary>
     Media = 12,
+    /// <summary>访问控制（媒体 / 首页各自的访客开关）。</summary>
+    Access = 13,
 }
 
 /// <summary>

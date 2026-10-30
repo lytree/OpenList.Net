@@ -160,6 +160,9 @@ builder.Services.AddSingleton<ITaskService, TaskService>();
 // SignService must be singleton (matches MountService lifetime) so FileSystemService
 // can resolve it. Uses the same JWT secret for HMAC signing.
 builder.Services.AddSingleton<ISignService, SignService>();
+// 访客访问策略（媒体 / 首页各自的开与关）：必须单例 —— 匿名请求逐个都要判定，
+// 做成 scoped 等于每个请求查一次设置表。内部带 3 秒缓存，保存设置后主动失效。
+builder.Services.AddSingleton<IGuestAccessService, GuestAccessService>();
 // 站点基地址解析：把 raw_url 生成成绝对地址，供浏览器之外的程序
 // （PotPlayer / IINA / 下载器）直接使用；它们不会用页面 origin 补全相对路径。
 builder.Services.AddSingleton<IPublicUrlResolver, PublicUrlResolver>();

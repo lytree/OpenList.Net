@@ -473,7 +473,7 @@ Element Plus 是 VDOM 组件库，性能热点（el-table 内部）也在 VDOM �
 
 | 文件 | 作用 |
 |---|---|
-| `api/types.ts` | `SettingItem`（key/value/help/type/flag/options/group）、`SettingValueType`、`SettingFlag`、`SettingGroups`（12 组编号 → 文案键） |
+| `api/types.ts` | `SettingItem`（key/value/help/type/flag/options/group）、`SettingValueType`、`SettingFlag`、`SettingGroups`（13 组编号 → 文案键，group 13 = 访问控制） |
 | `api/admin.ts` | `listSettings`、`saveSettings`、`resetSettingsGroup`、`resetToken` |
 | `components/SettingForm.tsx` | 设置项渲染器：`bool→ElSwitch`、`number/float→ElInputNumber`、`select→ElSelect`（options 逗号分隔）、`text/multipath→textarea`、其余 `ElInput`；`flag=2/3` 只读 |
 | `pages/manage/settings/Settings.tsx` | 12 个分组选项卡 + 关键词搜索 + 脏值跟踪 + 只提交改动项 + 分组恢复默认 + 重置签名密钥 + 离开前未保存提示 |
@@ -3021,3 +3021,103 @@ e2e 脚本同步：`verify-media.mjs` 20 → 23 项（浏览页断言改走 `#/m
 2. **顶部导航的「媒体」仍指向 `/media`**（首页），媒体库变成二级入口；如果产品上希望
    点「媒体」直达库列表，把 `BasicLayout` 的 `to="/media"` 改成 `/media/library` 即可，
    但那样「首页」就又少一个入口了。
+
+## 49. 媒体与首页：两个门面，两套访客策略（2026-10-30）
+
+### 49.1 需求
+
+> 「媒体和首页分为两个单独的界面。媒体默认都可访问（可控制）；首页需要进行登录，或者配置匿名访问。」
+
+第 48 节已经把**界面**拆开了（`/media` 媒体首页、`/media/library` 媒体库、`/files` 文件浏览），
+但**准入**还是写死的：媒体的只读端点无条件 `AllowAnonymous`，首页的路由无条件 `requiresAuth`。
+管理员没有任何开关可调 —— 想把媒体收成私有站，或者想把文件树开放成公开只读站，都只能改代码。
+
+### 49.2 两个开关（设置 → 访问控制，group 13）
+
+| 设置键 | 默认 | 含义 |
+|---|---|---|
+| `media_guest_access` | `true` | 游客能否浏览媒体域（首页 / 库 / 详情 / 海报） |
+| `home_guest_access` | `false` | 游客能否浏览首页（文件列表 / 详情 / 目录树 / 搜索） |
+
+默认值刻意相反：媒体是**公开门面**（落地页就是它，先看到海报再决定要不要登录），
+首页是**文件树**（「找文件 / 管理」场景，裸奔在公网并不合适）。
+
+两条都是 `Flag=Public`：前端路由守卫在**未登录**时就要知道能不能进，
+靠 `GET /api/public/settings` 下发，否则守卫只能按默认值猜，会和后端口径打架。
+
+> ⚠️ **升级注意**：`home_guest_access` 默认 `false` 意味着此前「不登录也能浏览文件」的部署
+> 升级后会要求登录。这是需求里的默认值，不是回归；公开只读站到「设置 → 访问控制」把
+> 「允许游客浏览首页」打开即可恢复原行为。公开**分享链接**（`/s/{code}`）不受影响。
+
+### 49.3 后端：组级 endpoint filter，不是逐个改 AllowAnonymous
+
+`AllowAnonymous()` 是启动期常量，要做成运行时判断就得把十几个端点各抄一遍。改成在路由组上挂
+一个 **endpoint filter**（授权中间件之后执行，已验证的请求直接放行，只有匿名的才去问开关）：
+
+- `MediaEndpoints`：匿名 + `media_guest_access=false` → `401`（含海报端点，整域一起关）。
+- `FsEndpoints`：匿名 + `home_guest_access=false` → `401`，但**两种匿名请求照旧放行**：
+  1. 带分享码的（`Authorization` 非空且不含 `.`，JWT 是三段式）—— 公开分享是既有契约，
+     与「首页开不开」无关，真伪交给端点内的 `ShareAccess` 校验；
+  2. 开关打开时的一切匿名读。
+
+判定值由 `IGuestAccessService`（`Infrastructure/Services/GuestAccessService.cs`）提供：
+单例 + `IServiceScopeFactory` + **3 秒 TTL**，只查这两行设置，和 `SignService` 同一套路
+（同样是「每个匿名请求都要判、值又很少变」）。管理端保存/重置设置后调 `InvalidateCache()`，
+所以开关是点一下就生效，不用等 TTL。
+
+### 49.4 前端：一个纯函数管三种路由
+
+`src/utils/access.ts` 的 `guestBlocked(meta, getBool)`：
+
+| 路由 meta | 语义 | 例子 |
+|---|---|---|
+| `guestSwitch: "media_guest_access"` | 开关说了算：关 = 必须登录 | 媒体首页 / 媒体库 / 详情 / 人物 / 片商 / 系列 |
+| `guestSwitch: "home_guest_access"` + `requiresAuth` | 默认要登录，开关可放开游客 | `/files` |
+| 只有 `requiresAuth` | 与开关无关，永远要登录 | 播放列表 / 口味画像 / 管理台 |
+
+配套的三处显隐都读同一组公开设置，避免「入口在、点进去 401」：
+
+1. **顶栏 / 抽屉**：`showMediaLink = isLogin || mediaGuestAccess`，`showHomeLink = isLogin || homeGuestAccess`。
+2. **登录页「以访客身份浏览」**：两个开关都关时**不渲染**（点了只会被守卫弹回来）；
+   只开一个时直接落到那个门面，`?redirect=` 指向进不去的地方也不再原地打转。
+3. **`/` 的落地**：仍然固定去 `media`，媒体关掉时由守卫把人送到登录页（带 `?redirect=/media`）。
+
+### 49.5 游客进首页时是只读的
+
+`/fs/list` 返回的 `write` 对游客是 `false`，首页所有写入口（新建文件夹 / 上传 / 更多 / 右键菜单）
+本来就按 `files.canWrite` 显隐，所以「允许游客浏览首页」天然就是只读模式，不需要再加一层
+`isLogin` 判断（页面上确实一处 `isLogin` 都没有）。
+
+### 49.6 验收
+
+后端 `dotnet test`：**534 项，533 通过 / 0 失败 / 1 跳过**（新增 `GuestAccessEndpointTests` 5 项；
+`FsEndpointsTests` +2 项「默认 401」「分享码仍放行」；`DirectLinkSignTests` / `MetaAccessGateTests`
+显式打开 `home_guest_access` 后继续覆盖匿名视角）。
+
+前端：`tsc --noEmit` 0 错误 · `vitest` **227 用例**（新增 `utils/access.spec.ts` 8 项）· `vite build` 通过。
+
+独立后端 + 临时挂载（`/pub`，含 `readme.txt`）跑 Playwright 冒烟 **20/20**：
+
+| 场景 | 断言 |
+|---|---|
+| 默认（媒体开 / 首页关） | 游客 `#/` → `#/media` 渲染；顶栏只有「媒体」；`#/files` → 登录页；匿名 `/api/media/items` 200、`/api/fs/list` 401 |
+| 媒体关 / 首页开 | 游客 `#/`、`#/media/library` → 登录页；`#/files` 能进且看得到挂载与文件；无上传按钮；顶栏只剩「首页」；匿名 API 反过来（media 401 / fs 200）；登录页「以访客身份浏览」落到首页 |
+| 两个都关 | 游客 → 登录页，且登录页**没有**「以访客身份浏览」 |
+| 恢复默认 | 游客又能看媒体首页 |
+
+设置页截图确认：「访问控制」分组出现，两个开关的状态与文案正确（中文环境下「首页」开关默认关、
+「媒体」开关默认开）。
+
+e2e 脚本：`verify-common.mjs` A 段新增 2 项（匿名 `/api/media/items` 200、匿名 `/api/fs/list` 401），
+其余 A–H 脚本未改动 —— 默认值下它们的前置条件仍然成立。
+
+**没跑完整 A–H 回归**：本机缺 `ffmpeg` / `.e2e/venv`，media 轮跑不起来，理由与 §48.5 相同。
+
+### 49.7 遗留
+
+1. **匿名 API 与开关的颗粒度只到「门面级」**：`home_guest_access=false` 时匿名 `/fs/*` 一律 401，
+   连「密码目录」这条游客路径也一起关了（密码目录现在只对登录用户有意义）。要支持「游客 + 密码」
+   需要把开关下钻成 per-meta 的策略。
+2. **WebDAV / S3 网关不看这两个开关**：它们有自己的认证（Basic / AccessKey），游客本来就进不去。
+3. **设置项没有独立的权限位描述**：目前只有 `Public` 标记，前端守卫直接读键名；
+   如果以后要多站点/多角色，需要把「谁能看哪个门面」提到角色层。

@@ -36,6 +36,8 @@
     "hope_container": "Hope 容器",
     "max_980px": "最大 980px"
   },
+  "home_guest_access": "允许游客浏览首页（文件）",
+  "home_guest_access-tips": "默认关闭，即首页需要登录。开启后未登录用户可只读浏览文件列表；上传、删除等写操作仍按权限隐藏。公开分享链接不受此开关影响。",
   "home_icon": "首页图标",
   "iframe_previews": "Iframe 预览",
   "ignore_direct_link_params": "忽略直链参数",
@@ -64,6 +66,8 @@
   "max_index_depth-tips": "索引的最大深度",
   "max_server_download_speed": "服务端最大下载速度",
   "max_server_upload_speed": "服务端最大上传速度",
+  "media_guest_access": "允许游客浏览媒体",
+  "media_guest_access-tips": "默认开启。关闭后未登录用户会被送到登录页：媒体首页、媒体库、详情页与海报全部要求登录。",
   "move_task_threads_num": "移动任务线程数",
   "multipart_chunk_size": "分片上传块大小（MB）",
   "multipart_chunk_size-tips": "分片上传的块大小，单位 MB（正整数）。请控制在 CDN 的请求体上限内；每个活跃会话在服务端磁盘上最多缓冲 8 个分片",
@@ -159,7 +163,8 @@
     "s3": "S3",
     "ftp": "FTP",
     "traffic": "流量",
-    "media": "媒体"
+    "media": "媒体",
+    "access": "访问控制"
   },
   "flag": {
     "readonly": "只读",

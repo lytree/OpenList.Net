@@ -54,6 +54,13 @@ check(
   (await page.locator(".ol-media").count()) === 1,
   `ol-media=${await page.locator(".ol-media").count()}`,
 )
+// 访客策略的两个开关（设置 → 访问控制）默认值：媒体放行、首页要登录。
+// 这两条同时钉住「路由能进但接口 401」的回归 —— 两端口径必须一致。
+const anonMedia = await page.request.get(`${BASE}/api/media/items`)
+check("媒体默认对游客开放（匿名 /api/media/items 200）", anonMedia.status() === 200, `${anonMedia.status()}`)
+const anonFs = await page.request.post(`${BASE}/api/fs/list`, { data: { path: "/" } })
+check("首页默认要求登录（匿名 /api/fs/list 401）", anonFs.status() === 401, `${anonFs.status()}`)
+
 check(
   "游客顶栏只有媒体入口（没有首页）",
   (await page.locator('.ol-view-links a[href*="#/files"]').count()) === 0,

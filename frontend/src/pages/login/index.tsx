@@ -118,14 +118,36 @@ export default defineComponent({
       }
     }
 
+    /**
+     * 游客此刻能落脚的门面（设置 → 访问控制）。
+     *
+     * 两个开关是独立的：媒体默认开、首页默认关，管理员也可能两个都关（纯私有站点）。
+     * 都关时站点没有任何「游客可看」的页面，登录页就不该再摆「以游客身份浏览」这个按钮 ——
+     * 点了只会被守卫原样弹回来，看起来像页面坏了。
+     */
+    const guestEntry = computed(() => {
+      if (settings.mediaGuestAccess) return "/media"
+      if (settings.homeGuestAccess) return "/files"
+      return ""
+    })
+
+    function guestCanOpen(path: string): boolean {
+      if (path.startsWith("/@manage")) return false
+      if (path.startsWith("/files")) return settings.homeGuestAccess
+      if (path.startsWith("/media")) {
+        // 播放列表 / 口味是「按用户」的数据，只有「媒体 + 首页」的开关管不到它们
+        if (path.startsWith("/media/playlists") || path.startsWith("/media/taste")) return false
+        return settings.mediaGuestAccess
+      }
+      return Boolean(guestEntry.value)
+    }
+
     async function browseAsGuest() {
       await user.logout()
-      // 游客能看的是**媒体库**（只读端点匿名开放，`/` 也落在那里）；文件浏览（/files）
-      // 与个人页（播放列表 / 口味）需要登录，`?redirect=` 指向这些地方时落回媒体首页，
-      // 别再把人送进一个会被守卫弹回来的页面。
+      // `?redirect=` 指向游客进不去的地方时落回「当前还开着的门面」，
+      // 别再把人送进一个会被守卫弹回来的页面（来回死循环）。
       const target = targetAfterLogin()
-      const needsAccount = ["/files", "/@manage", "/media/playlists", "/media/taste"]
-      await router.replace(needsAccount.some((path) => target.startsWith(path)) ? "/media" : target)
+      await router.replace(guestCanOpen(target) ? target : guestEntry.value || "/@login")
     }
 
     return () => (
@@ -211,9 +233,11 @@ export default defineComponent({
             </ElCheckbox>
           )}
 
-          <ElButton class="ol-auth-btn is-ghost" onClick={() => void browseAsGuest()}>
-            {t("login.use_guest")}
-          </ElButton>
+          {guestEntry.value && (
+            <ElButton class="ol-auth-btn is-ghost" onClick={() => void browseAsGuest()}>
+              {t("login.use_guest")}
+            </ElButton>
+          )}
 
           <div class="ol-auth-foot">
             <ElTooltip content={t("home.toolbar.switch_lang")} placement="top">

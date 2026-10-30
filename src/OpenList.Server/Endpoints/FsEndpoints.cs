@@ -25,6 +25,33 @@ public static class FsEndpoints
     {
         var g = app.MapGroup("/api/fs").WithTags("Fs").RequireAuthorization();
 
+        // 首页（文件浏览）的访客开关：**默认要求登录**（设置项 home_guest_access，默认 false）。
+        //
+        // 这里只拦「纯粹的匿名请求」，两种匿名请求照旧放行：
+        // 1. 带分享码的 —— `Authorization` 非空且不含 '.'（JWT 是三段式）。公开分享是既有契约，
+        //    与「首页对游客开不开」无关，真伪交给端点内的 ShareAccess 校验；这里只做粗筛，
+        //    放行后密码错/过期照样会被 ShareAccess 拒掉。
+        // 2. 管理员显式打开了 home_guest_access —— 公开只读分享站的部署形态。
+        //
+        // 用组级 endpoint filter 而不是去动各端点的 AllowAnonymous：后者是启动期常量。
+        // 授权中间件在前，所以写端点（无 AllowAnonymous）根本走不到这里。
+        g.AddEndpointFilter(async (context, next) =>
+        {
+            var http = context.HttpContext;
+            if (http.User.Identity?.IsAuthenticated == true) return await next(context);
+
+            var raw = http.Request.Headers.Authorization.ToString().Trim();
+            if (raw.Length > 0 && !raw.Contains('.')) return await next(context);
+
+            var access = http.RequestServices.GetService<IGuestAccessService>();
+            if (access is null || await access.CanBrowseHomeAsync(http.RequestAborted))
+                return await next(context);
+
+            return Results.Json(
+                Resp.Fail("login is required to browse files", RespCodes.Unauthorized),
+                statusCode: StatusCodes.Status401Unauthorized);
+        });
+
         // --- 读取 ---
         // Go's fsAndShare group allows guest access (Auth(true)) for these read endpoints.
         // AllowAnonymous here lets unauthenticated visitors browse public shares; JWT, if

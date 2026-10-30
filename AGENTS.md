@@ -84,6 +84,13 @@
 - 已存在的管理员永不被配置覆盖 —— 凭据以数据库为准（管理界面 / 桌面端 / CLI 改的密码不会被下次启动打回）。
 - 忘记密码的三条恢复路径：`POST /api/admin/user/reset_admin_password`、桌面端设置页、`cli/openlist admin random`（直连数据库，Web 层起不来时唯一可用的）。
 - 注意：本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（`Id=0`，见 `SignEndpoints` / `ShareDownloadEndpoints`），与库里这条 `guest` 记录无关。
+- **两个门面的游客准入由设置控制**（group 13「访问控制」）：`media_guest_access`（默认 `true`）、`home_guest_access`（默认 `false`）。
+  后端在 `MediaEndpoints` / `FsEndpoints` 的**路由组上各挂一个 endpoint filter** 拦匿名请求（不是逐端点改 `AllowAnonymous`，
+  那是启动期常量）；判定值来自单例 `IGuestAccessService`（3 秒 TTL，管理端保存设置后 `InvalidateCache()` 立即生效）。
+  `FsEndpoints` 的过滤器**放行带分享码的匿名请求**（`Authorization` 非空且不含 `.`），否则公开分享链接会被误杀。
+  前端守卫读**同一组公开设置**（`utils/access.ts` 的 `guestBlocked`，路由 meta 用 `guestSwitch`），三处显隐（顶栏 / 抽屉 /
+  登录页「以访客身份浏览」）也要同步 —— 只看后端会导致「入口在、点进去 401」。**改默认值等于改产品的准入语义**，要同步改
+  `DbInitializer` 种子、`GuestAccessService.Snapshot.Default`、前端 `stores/settings.ts` 的兜底 三处。
 
 ## CLI (`src/OpenList.Cli`)
 

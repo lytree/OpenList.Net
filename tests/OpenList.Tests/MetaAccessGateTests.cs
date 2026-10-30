@@ -28,6 +28,9 @@ public class MetaAccessGateTests
         var factory = new TestWebAppFactory();
         var client = factory.CreateClient();
         await factory.SeedStorageAsync();
+        // 这些用例关心的是「密码目录对**游客**的拦截」，前置条件是首页本来就允许游客浏览；
+        // 默认（home_guest_access=false）匿名请求会先被访客策略挡成 401，与密码无关。
+        await factory.SetSettingAsync("home_guest_access", "true");
         return (factory, client);
     }
 

@@ -70,7 +70,7 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// 直接改写一条设置（模拟管理端保存设置），并让签名策略缓存立即失效。
+    /// 直接改写一条设置（模拟管理端保存设置），并让签名策略 / 访客访问策略缓存立即失效。
     /// </summary>
     public async Task SetSettingAsync(string key, string value)
     {
@@ -94,6 +94,7 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
         }
         await db.SaveChangesAsync();
         InvalidateSignCache();
+        InvalidateGuestAccessCache();
     }
 
     /// <summary>切换某个存储的「签名访问」（enable_sign），并让签名策略缓存立即失效。</summary>
@@ -125,6 +126,12 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
     {
         if (Services.GetRequiredService<OpenList.Core.Interfaces.ISignService>() is SignService signs)
             signs.InvalidateCache();
+    }
+
+    /// <summary>丢弃访客访问策略（媒体 / 首页开关）的内存缓存。</summary>
+    public void InvalidateGuestAccessCache()
+    {
+        Services.GetRequiredService<OpenList.Core.Interfaces.IGuestAccessService>().InvalidateCache();
     }
 
     /// <summary>

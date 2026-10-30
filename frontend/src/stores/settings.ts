@@ -48,6 +48,19 @@ export const useSettingsStore = defineStore("settings", () => {
   const ldapEnabled = computed(() => getBool("ldap_login_enabled"))
   const webauthnEnabled = computed(() => getBool("webauthn_login_enabled"))
 
+  /**
+   * 媒体域是否对游客开放（设置项 `media_guest_access`，默认 true）。
+   *
+   * 键缺失时按 true 兜底 —— 与后端 `IGuestAccessService` 的默认值、以及
+   * `DbInitializer` 的种子**必须一致**，否则会出现「路由放行、接口 401」
+   * （或反过来把游客挡在门外）。
+   */
+  const mediaGuestAccess = computed(() =>
+    settings.value.media_guest_access === undefined ? true : getBool("media_guest_access"),
+  )
+  /** 首页（文件浏览）是否对游客开放（设置项 `home_guest_access`，默认 false）。 */
+  const homeGuestAccess = computed(() => getBool("home_guest_access"))
+
   return {
     settings,
     loaded,
@@ -61,5 +74,7 @@ export const useSettingsStore = defineStore("settings", () => {
     mainColor,
     ldapEnabled,
     webauthnEnabled,
+    mediaGuestAccess,
+    homeGuestAccess,
   }
 })

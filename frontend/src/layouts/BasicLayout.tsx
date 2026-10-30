@@ -44,6 +44,11 @@ export default defineComponent({
 
     const isMedia = computed(() => route.path.startsWith("/media"))
 
+    /** 顶栏「媒体」入口：登录用户恒可见；游客看 `media_guest_access`。 */
+    const showMediaLink = computed(() => user.isLogin || settings.mediaGuestAccess)
+    /** 顶栏「首页」入口：登录用户恒可见；游客只在管理员放开 `home_guest_access` 时可见。 */
+    const showHomeLink = computed(() => user.isLogin || settings.homeGuestAccess)
+
     async function onLogout() {
       navOpen.value = false
       await user.logout()
@@ -89,16 +94,20 @@ export default defineComponent({
             </RouterLink>
 
             <nav class="ol-view-links">
-              {/* 媒体库是站点默认落地页（`/` 也指向它），且**游客也能看**，因此对所有
-                  人可见；文件浏览（`/files`）需要登录，未登录时不渲染入口 —— 挂在外面
-                  只会在点进去时被守卫弹到登录页，等于给游客一个假入口。 */}
-              <RouterLink
-                to="/media"
-                class={["ol-view-link", route.path.startsWith("/media") && "is-active"]}
-              >
-                {t("global.nav_media")}
-              </RouterLink>
-              {user.isLogin && (
+              {/* 两个门面各自按访客开关决定要不要露入口（设置 → 访问控制）：
+                  - 媒体（`/media`）默认对游客开放，所以游客也看得到；
+                  - 首页（`/files`）默认要登录，未登录且没开 `home_guest_access` 时**不渲染** ——
+                    挂在外面只会让人点进去被守卫弹回登录页，等于给游客一个假入口。
+                  开关与路由守卫读的是同一组公开设置，不会出现「入口在、点进去 401」。 */}
+              {showMediaLink.value && (
+                <RouterLink
+                  to="/media"
+                  class={["ol-view-link", route.path.startsWith("/media") && "is-active"]}
+                >
+                  {t("global.nav_media")}
+                </RouterLink>
+              )}
+              {showHomeLink.value && (
                 <RouterLink to="/files" class={["ol-view-link", isHome.value && "is-active"]}>
                   {t("global.nav_home")}
                 </RouterLink>
@@ -198,14 +207,16 @@ export default defineComponent({
           onClick={() => (navOpen.value = false)}
         />
         <aside class={["ol-view-drawer", navOpen.value && "is-open"]}>
-          <RouterLink
-            to="/media"
-            class={["ol-view-drawer-link", isMedia.value && "is-active"]}
-            onClick={() => (navOpen.value = false)}
-          >
-            {t("global.nav_media")}
-          </RouterLink>
-          {user.isLogin && (
+          {showMediaLink.value && (
+            <RouterLink
+              to="/media"
+              class={["ol-view-drawer-link", isMedia.value && "is-active"]}
+              onClick={() => (navOpen.value = false)}
+            >
+              {t("global.nav_media")}
+            </RouterLink>
+          )}
+          {showHomeLink.value && (
             <RouterLink
               to="/files"
               class={["ol-view-drawer-link", isHome.value && "is-active"]}

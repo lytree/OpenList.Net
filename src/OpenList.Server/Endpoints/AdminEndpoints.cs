@@ -136,8 +136,14 @@ public static class AdminEndpoints
             return Results.Ok(Resp<List<SettingItem>>.Ok(filtered));
         });
 
-        g.MapPost("/setting/save", async (List<SettingItem> items, ISettingService svc) =>
-            Results.Ok(await svc.SaveAsync(items)));
+        // 保存设置后立刻失效「访客访问策略」缓存：媒体 / 首页开关是管理员点一下就期待生效的，
+        // 不该让人等 3 秒 TTL（与 SignService.InvalidateCache 的用法一致）。
+        g.MapPost("/setting/save", async (List<SettingItem> items, ISettingService svc, IGuestAccessService access) =>
+        {
+            var resp = await svc.SaveAsync(items);
+            access.InvalidateCache();
+            return Results.Ok(resp);
+        });
 
         g.MapGet("/setting/get", async (string keys, ISettingService svc) =>
         {
@@ -150,8 +156,12 @@ public static class AdminEndpoints
             return Results.Ok(Resp<List<SettingItem>>.Ok(results));
         });
 
-        g.MapPost("/setting/set", async (List<SettingItem> items, ISettingService svc) =>
-            Results.Ok(await svc.SaveAsync(items)));
+        g.MapPost("/setting/set", async (List<SettingItem> items, ISettingService svc, IGuestAccessService access) =>
+        {
+            var resp = await svc.SaveAsync(items);
+            access.InvalidateCache();
+            return Results.Ok(resp);
+        });
 
         // DELETE /admin/setting/delete?key= — remove a single setting key.
         g.MapPost("/setting/delete", async (string key, ISettingService svc) =>
@@ -161,10 +171,12 @@ public static class AdminEndpoints
         });
 
         // POST /admin/setting/default?group= — restore defaults for a settings group.
-        g.MapPost("/setting/default", async (HttpRequest req, ISettingService svc) =>
+        g.MapPost("/setting/default", async (HttpRequest req, ISettingService svc, IGuestAccessService access) =>
         {
             var group = req.Query["group"].ToString();
-            return Results.Ok(await svc.DefaultAsync(string.IsNullOrEmpty(group) ? null : group));
+            var resp = await svc.DefaultAsync(string.IsNullOrEmpty(group) ? null : group);
+            access.InvalidateCache();
+            return Results.Ok(resp);
         });
 
         // POST /admin/setting/reset_token — rotate the JWT signing secret. All existing
