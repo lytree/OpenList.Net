@@ -66,18 +66,20 @@ export default defineComponent({
             </RouterLink>
 
             <nav class="ol-view-links">
-              {/* 媒体库是站点默认落地页（`/` 也指向它），排在前面；文件浏览挪到
-                  `/files`，作为一个独立入口保留 —— 它属于「管理/找文件」场景，
-                  不该和媒体库抢默认位。 */}
+              {/* 媒体库是站点默认落地页（`/` 也指向它），且**游客也能看**，因此对所有
+                  人可见；文件浏览（`/files`）需要登录，未登录时不渲染入口 —— 挂在外面
+                  只会在点进去时被守卫弹到登录页，等于给游客一个假入口。 */}
               <RouterLink
                 to="/media"
                 class={["ol-view-link", route.path.startsWith("/media") && "is-active"]}
               >
                 {t("global.nav_media")}
               </RouterLink>
-              <RouterLink to="/files" class={["ol-view-link", isHome.value && "is-active"]}>
-                {t("global.nav_home")}
-              </RouterLink>
+              {user.isLogin && (
+                <RouterLink to="/files" class={["ol-view-link", isHome.value && "is-active"]}>
+                  {t("global.nav_home")}
+                </RouterLink>
+              )}
             </nav>
 
             <div class="ol-view-header-right">

@@ -4,14 +4,20 @@ namespace OpenList.Media.Endpoints;
 /// <c>/api/media</c> 路由组入口：只负责分组与子域挂载，具体端点分散在同目录的
 /// <c>*Endpoints.cs</c> 里（库 / 条目 / 个人状态 / 播放列表 / 聚合 / 字幕）。
 /// <para>
-/// 分组统一 <c>RequireAuthorization()</c>：媒体域没有匿名端点。库管理、扫描、刮削的
-/// 管理权限在服务层按 <see cref="OpenList.Core.Models.User.CanManageMediaLibrary"/> 校验，
-/// 浏览类端点按 <c>BasePath</c> 过滤，因此这里不再逐个标注策略。
+/// 分组整体 <c>RequireAuthorization()</c>，**浏览类只读端点逐个 <c>AllowAnonymous</c>**：
+/// 媒体库是站点的公开门面，未登录的游客也能进去看（默认落地页就是 <c>/media</c>），
+/// 而个人状态（收藏/进度/观看会话）与所有写操作（建库、扫描、刮削、播放列表、字幕写回）
+/// 仍然需要登录。这与 <c>FsEndpoints</c> 的做法一致：组上挂要求，端点里开例外。
+/// </para>
+/// <para>
+/// 匿名请求的身份是 <c>ClaimsPrincipal.ToUser()</c> 产出的 Guest（Id=0、BasePath=null），
+/// 因此游客**能看全部媒体库**；登录用户仍按自己的 BasePath 过滤。库管理、扫描、刮削的
+/// 管理权限在服务层按 <see cref="OpenList.Core.Models.User.CanManageMediaLibrary"/> 校验。
 /// </para>
 /// </summary>
 public static class MediaEndpoints
 {
-    /// <summary>注册 <c>/api/media</c> 路由组（需登录）。</summary>
+    /// <summary>注册 <c>/api/media</c> 路由组（整体需登录，只读浏览端点匿名）。</summary>
     public static IEndpointRouteBuilder MapMediaApi(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/media").WithTags("Media").RequireAuthorization();

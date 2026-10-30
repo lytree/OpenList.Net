@@ -15,8 +15,9 @@ internal static class LibraryEndpoints
         // ---------- 媒体库 ----------
 
         // GET /api/media/libraries — 当前用户可见的媒体库
+        // 匿名可读：媒体库是站点门面（游客默认落地页），库列表与库详情都是纯只读元数据。
         g.MapGet("/libraries", async (ClaimsPrincipal principal, IMediaLibraryService libraries) =>
-            Results.Ok(await libraries.ListAsync(principal.ToUser())));
+            Results.Ok(await libraries.ListAsync(principal.ToUser()))).AllowAnonymous();
 
         // POST /api/media/libraries — 创建媒体库
         g.MapPost("/libraries", async (ClaimsPrincipal principal, CreateMediaLibraryReq req, IMediaLibraryService libraries) =>
@@ -24,7 +25,7 @@ internal static class LibraryEndpoints
 
         // GET /api/media/libraries/{id}
         g.MapGet("/libraries/{id:long}", async (long id, ClaimsPrincipal principal, IMediaLibraryService libraries) =>
-            Results.Ok(await libraries.GetAsync(id, principal.ToUser())));
+            Results.Ok(await libraries.GetAsync(id, principal.ToUser()))).AllowAnonymous();
 
         // POST /api/media/libraries/{id}/update
         g.MapPost("/libraries/{id:long}/update", async (long id, ClaimsPrincipal principal, UpdateMediaLibraryReq req, IMediaLibraryService libraries) =>

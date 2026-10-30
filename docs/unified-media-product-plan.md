@@ -2825,3 +2825,78 @@ catch → EnsureCreated（库已存在，no-op）+ MigrateSchemaAsync（补列 +
 2. **`guest` 内置账号仍默认 `Disabled=true`**（对齐 Go 的 `initGuest`），用 `guest/guest`
    登录会被拒。访客浏览走的是匿名虚拟 Guest（`Id=0`），与这条记录无关 —— 若要让
    `guest` 账号可登录，那是管理台里改用户状态的事，不是代码问题。
+
+## 46. 媒体库转为公开门面：匿名可看，文件浏览要登录（2026-10-30）
+
+### 46.1 产品边界反转
+
+第 45 节为了解「点游客 → 登录页 → 点游客」的死循环，把访客留在了文件浏览。这一节换方向：
+**媒体库是站点的公开门面**（默认落地页、匿名可看），**文件浏览是私有面**（需要账户）。
+
+| 面 | 游客 | 登录用户 |
+|---|---|---|
+| `/media` 及其维度页（人物/片商/系列） | ✅ 可浏览、可播 | ✅ |
+| `/media/playlists`、`/media/taste` | ❌ 送登录页（按用户的数据） | ✅ |
+| `/files` 文件浏览 | ❌ 送登录页 | ✅ |
+| 收藏 / 看过 / 稍后 / 播放进度 / 观看会话 | ❌ 不显示入口、不发请求 | ✅ |
+| 管理台 / 扫描 / 刮削 / 字幕写回 | ❌ 401 | 按权限 |
+
+### 46.2 后端：只读端点逐个 `AllowAnonymous`
+
+`MediaEndpoints` 的组级 `RequireAuthorization()` 保留，浏览类端点单独开例外
+（与 `FsEndpoints` 同一套做法，那里的 `fs/list`、`fs/get` 本来就匿名，分享浏览依赖它）。
+
+| 文件 | 开放的端点 |
+|---|---|
+| `LibraryEndpoints` | `GET /libraries`、`GET /libraries/{id}` |
+| `ItemEndpoints` | `GET /items`、`/items/{id}`、`/items/{id}/files`、`/items/{id}/image`、`/items/{id}/credits` |
+| `CatalogEndpoints` | `GET /facets`、`/stats`、`/home`、`/persons*`、`/studios*`、`/series*`（9 条） |
+
+**没开**的：`/tasks`（扫描任务，管理面）、`/scrape/tasks`、`/items/{id}/scrape|match`、
+`/libraries/{id}/scrape`、`/subtitles/search`、`/items/{id}/subtitles`，以及整组
+`StateEndpoints`（收藏/进度/口味）、`WatchEndpoints`、`PlaylistEndpoints`。
+
+匿名身份是 `ClaimsPrincipal.ToUser()` 产出的虚拟 Guest（`Id=0`、`BasePath=null`），
+因此**游客能看全部媒体库**；登录用户仍按自己的 `BasePath` 过滤。个人状态表按 `user_id=0`
+查不到记录，`/home` 的「继续观看 / 最近收藏」对游客自然是空数组，不需要特判。
+
+播放不需要新端点：详情页本来就用 `POST /api/fs/get` 换 `raw_url + sign`，而 `fs/get` 是匿名只读的
+（第 45 节实测 200），所以游客点播能直接出流。
+
+### 46.3 前端：守卫 + 游客态收敛
+
+| 文件 | 改动 |
+|---|---|
+| `router.ts` | `/` 一律重定向到 `media`（只保留 `?path=` → `home` 的旧深链兼容）；`/files` 加 `requiresAuth`；媒体浏览路由去掉 `requiresAuth`（播放列表/口味保留） |
+| `layouts/BasicLayout.tsx` | 顶栏「首页」只在 `user.isLogin` 时渲染，「媒体」对所有人可见 |
+| `pages/login/index.tsx` | `browseAsGuest()` 落 `/media`；`?redirect=` 指向 `/files`、`/@manage`、播放列表、口味时同样落 `/media` |
+| `pages/media/index.tsx` | 收藏星标、继续观看、「播放列表/口味」入口只在登录时渲染 |
+| `pages/media/ItemDetail.tsx` | 游客跳过 `GET /items/{id}/state`；不写进度、不上报观看会话、不自动标记看过；收藏/看过/稍后/片单/字幕按钮整条隐藏（动作区为空时连容器都不渲染） |
+| `pages/media/PersonDetail.tsx`、`TaxonomyDetail.tsx` | 游客不拉「我的收藏」，`<MediaGrid showFavorite={user.isLogin}>` |
+| `MediaGrid` | 复用已有的 `showFavorite` 开关，没有改组件本身 |
+
+### 46.4 验收
+
+隔离后端（临时库 + `DistDir=frontend/dist`）实测：
+
+| 用例 | 结果 |
+|---|---|
+| 匿名 `GET /media/libraries|home|facets|items|persons|studios|series` | 全 200 |
+| 匿名 `GET /media/taste|playlists|items/1/state|tasks`、`POST /media/libraries`、`POST /items/1/state` | 全 401 |
+| 匿名 `POST /fs/list`、`POST /fs/get` | 200（分享浏览与游客点播依赖，保持原状） |
+| 游客打开 `#/` | 落 `#/media`，网格有卡片，无收藏星标，维度入口只有 People/Studios/Series |
+| 游客打开条目详情 | 渲染正常、不弹登录页、动作区为空 |
+| 游客打开 `#/files` | `#/@login?redirect=/files` |
+| 除 `/api/me` 外 | 零 401 请求、零控制台错误 |
+
+回归：`verify-common.mjs` **52/52 全绿**（A 段改为「游客落媒体库 / 游客能渲染媒体库页面 /
+顶栏无首页入口 / 游客进文件浏览要求登录」四条），`tsc --noEmit` 0 错误，
+`vitest` 19 文件 / 216 用例全绿。
+
+### 46.5 遗留
+
+1. **游客可看全部媒体库**（`BasePath=null`）。若以后要「只公开部分库」，需要在
+   `MediaLibrary` 上加 `IsPublic`（或给匿名身份一个可配置的 BasePath），并在
+   `CanSeeLibrary` 里加一道判断 —— 目前没做，因为产品上等价于「这台机器的媒体就是公开的」。
+2. **文件浏览只是前端守卫**：`/api/fs/*` 的只读端点仍然匿名（分享链接与游客点播都靠它），
+   所以直接打 API 仍能列目录。要真正封死得区分「分享态」与「匿名态」，会牵动分享体系，没在这次里改。

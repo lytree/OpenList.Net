@@ -7,7 +7,13 @@ using OpenList.Media.Domain.Abstractions;
 
 namespace OpenList.Media.Endpoints;
 
-/// <summary>条目查询与元数据刮削端点。</summary>
+/// <summary>
+/// 条目查询与元数据刮削端点。
+/// <para>
+/// 查询类（items / 单条 / 文件清单 / 海报 / 创作者）<c>AllowAnonymous</c>：
+/// 游客只看得到元数据，看不到任何写入口（刮削、匹配仍需登录 + 管理权限）。
+/// </para>
+/// </summary>
 internal static class ItemEndpoints
 {
     /// <summary>挂载 <c>/items</c> 与整库刮削接口。</summary>
@@ -39,15 +45,15 @@ internal static class ItemEndpoints
                 State = MediaQuery.Text(q, "state"),
             };
             return Results.Ok(await libraries.ListItemsAsync(query, principal.ToUser()));
-        });
+        }).AllowAnonymous();
 
         // GET /api/media/items/{id}
         g.MapGet("/items/{id:long}", async (long id, ClaimsPrincipal principal, IMediaLibraryService libraries) =>
-            Results.Ok(await libraries.GetItemAsync(id, principal.ToUser())));
+            Results.Ok(await libraries.GetItemAsync(id, principal.ToUser()))).AllowAnonymous();
 
         // GET /api/media/items/{id}/files
         g.MapGet("/items/{id:long}/files", async (long id, ClaimsPrincipal principal, IMediaLibraryService libraries) =>
-            Results.Ok(await libraries.ListItemFilesAsync(id, principal.ToUser())));
+            Results.Ok(await libraries.ListItemFilesAsync(id, principal.ToUser()))).AllowAnonymous();
 
         // GET /api/media/items/{id}/image?kind=poster|backdrop
         //
@@ -71,11 +77,11 @@ internal static class ItemEndpoints
                 ? item.Data.BackdropPath
                 : item.Data.PosterPath;
             return await MediaImages.ServeAsync(path, user, fs, ctx.RequestAborted);
-        });
+        }).AllowAnonymous();
 
         // GET /api/media/items/{id}/credits — 创作者列表
         g.MapGet("/items/{id:long}/credits", async (long id, ClaimsPrincipal principal, IMediaMetadataService metadata) =>
-            Results.Ok(await metadata.ListItemCreditsAsync(id, principal.ToUser())));
+            Results.Ok(await metadata.ListItemCreditsAsync(id, principal.ToUser()))).AllowAnonymous();
 
         // ---------- 刮削 ----------
 

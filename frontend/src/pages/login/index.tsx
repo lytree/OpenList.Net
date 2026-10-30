@@ -120,10 +120,12 @@ export default defineComponent({
 
     async function browseAsGuest() {
       await user.logout()
-      // 访客能访问的是文件浏览（/files）；媒体库全部端点需要登录，把游客送回去只会
-      // 又被 401 弹回登录页。`?redirect=` 指向媒体页时同样落回 /files。
+      // 游客能看的是**媒体库**（只读端点匿名开放，`/` 也落在那里）；文件浏览（/files）
+      // 与个人页（播放列表 / 口味）需要登录，`?redirect=` 指向这些地方时落回媒体首页，
+      // 别再把人送进一个会被守卫弹回来的页面。
       const target = targetAfterLogin()
-      await router.replace(target === "/" || target.startsWith("/media") ? "/files" : target)
+      const needsAccount = ["/files", "/@manage", "/media/playlists", "/media/taste"]
+      await router.replace(needsAccount.some((path) => target.startsWith(path)) ? "/media" : target)
     }
 
     return () => (

@@ -38,19 +38,30 @@ const goto = async (hash) => {
   await page.waitForTimeout(800)
 }
 
-// ---------- A. 守卫：游客可浏览文件，但进不了媒体库 / 管理台 ----------
-// 允许游客浏览文件是本产品的既定语义（与 Go 版一致），所以不假设「未登录一律踢去登录页」。
-// 但媒体域（/api/media/**）全部需要登录，`/` 对游客必须落到文件浏览 —— 否则页面挂载时
-// 连发 401、被全局 401 处理弹回登录页，而登录页的「以访客身份浏览」又回到 `/`，来回死循环。
+// ---------- A. 守卫：访客默认落媒体库（只读匿名开放），文件浏览需登录 ----------
+// 产品边界（2026-10-30 起）：媒体库是站点的公开门面 —— 媒体域只读端点匿名开放，游客
+// 不登录也能看库/详情/海报；文件浏览（/files）与个人页（播放列表、口味）需要账户。
+// 这里同时守住「游客停在媒体页不被弹走」：页面挂载时不能去调按用户的接口（收藏/续播），
+// 否则 401 → 全局处理 → 登录页，而登录页的「以访客身份浏览」又回 `/`，来回死循环。
 await goto("#/")
 check(
-  "游客打开首页落在文件浏览",
-  /#\/files/.test(page.url()) && (await page.locator(".ol-auth").count()) === 0,
+  "游客打开首页落在媒体库",
+  /#\/media/.test(page.url()) && (await page.locator(".ol-auth").count()) === 0,
   page.url(),
 )
+check(
+  "游客能渲染媒体库页面",
+  (await page.locator(".ol-media").count()) === 1,
+  `ol-media=${await page.locator(".ol-media").count()}`,
+)
+check(
+  "游客顶栏只有媒体入口（没有首页）",
+  (await page.locator('.ol-view-links a[href*="#/files"]').count()) === 0,
+  `filesLinks=${await page.locator('.ol-view-links a[href*="#/files"]').count()}`,
+)
 
-await goto("#/media")
-check("游客进媒体库被要求登录", /#\/@login/.test(page.url()), page.url())
+await goto("#/files")
+check("游客进文件浏览被要求登录", /#\/@login/.test(page.url()), page.url())
 
 await goto("#/@manage/storages")
 check("游客访问管理台被弹回首页", !/#\/@manage/.test(page.url()), page.url())

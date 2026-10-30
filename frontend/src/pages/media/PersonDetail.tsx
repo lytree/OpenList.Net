@@ -13,6 +13,7 @@ import {
 import MediaGrid from "~/components/MediaGrid"
 import PersonAvatar from "~/components/PersonAvatar"
 import FilePager from "~/pages/home/Pager"
+import { useUserStore } from "~/stores/user"
 import { t } from "~/i18n"
 
 /**
@@ -42,6 +43,7 @@ export default defineComponent({
   setup() {
     const route = useRoute()
     const router = useRouter()
+    const user = useUserStore()
 
     const aggregate = ref<PersonAggregate | null>(null)
     const items = ref<MediaItem[]>([])
@@ -93,7 +95,8 @@ export default defineComponent({
     onMounted(() => {
       void loadPerson()
       void loadItems()
-      void loadFavorites()
+      // 游客没有「我的收藏」，这个请求对 user_id=0 只会拿到空集，不如不发
+      if (user.isLogin) void loadFavorites()
     })
     watch(personId, () => {
       page.value = 1
@@ -166,6 +169,7 @@ export default defineComponent({
             <MediaGrid
               items={items.value}
               favoriteIds={[...favorites.value]}
+              showFavorite={user.isLogin}
               onOpen={(item: MediaItem) => router.push({ name: "media-item", params: { id: item.id } })}
               onFavorite={(item: MediaItem) => void toggleFavorite(item)}
             />

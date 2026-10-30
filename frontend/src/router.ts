@@ -60,37 +60,33 @@ const routes: RouteRecordRaw[] = [
     path: "/",
     component: () => import("~/layouts/BasicLayout"),
     children: [
-      // 站点默认落地页是**媒体库**；文件浏览（首页）降级成独立页面 `/files`。
-      // 但旧书签/文档里的文件深链是 `/?path=/a/b`（没有 /files 前缀），这里按
-      // 「带 path 就等于要去浏览文件」把这类地址转给首页，否则一刷新就被甩到媒体页。
+      // 站点默认落地页是**媒体库**，且**对游客也成立**：媒体域只读端点匿名开放
+      // （见 MediaEndpoints），所以未登录用户可以直接看库、看详情、看海报。
+      // 文件浏览（首页）降级成独立页面 `/files`，并且**需要登录** —— 文件树属于
+      // 「找文件/管理」场景，不该和公开的媒体门面混在一起。
+      // 旧书签/文档里的文件深链是 `/?path=/a/b`（没有 /files 前缀），这类地址照旧
+      // 转给首页：游客会被 requiresAuth 拦到登录页，登录用户则正常浏览。
       {
         path: "",
-        // 落地页对**已登录**用户是媒体库；访客留在文件浏览。
-        // 媒体域（/api/media/**）全部需要登录，把未登录访客送到 /media 只会让页面挂载时
-        // 连发几个 401、被全局 401 处理踢回登录页 —— 而登录页的「以访客身份浏览」又回到
-        // `/`，形成「点游客 → 登录页 → 点游客」的死循环。
-        redirect: (to) => {
-          if (to.query.path) return { name: "home", query: to.query }
-          return useUserStore(pinia).isLogin ? { name: "media" } : { name: "home" }
-        },
+        redirect: (to) => (to.query.path ? { name: "home", query: to.query } : { name: "media" }),
       },
       {
         path: "files",
         name: "home",
         component: () => import("~/pages/home"),
-        meta: { title: "global.nav_home" },
+        meta: { title: "global.nav_home", requiresAuth: true },
       },
       {
         path: "media",
         name: "media",
         component: () => import("~/pages/media"),
-        meta: { title: "media.title", wide: true, requiresAuth: true },
+        meta: { title: "media.title", wide: true },
       },
       {
         path: "media/item/:id",
         name: "media-item",
         component: () => import("~/pages/media/ItemDetail"),
-        meta: { title: "media.title", wide: true, requiresAuth: true },
+        meta: { title: "media.title", wide: true },
       },
       // ---- 媒体域维度页（M4 第三片）----
       // 片商/系列共用一个列表组件与一个详情组件，靠 meta.kind 区分维度
@@ -98,38 +94,40 @@ const routes: RouteRecordRaw[] = [
         path: "media/persons",
         name: "media-persons",
         component: () => import("~/pages/media/PersonList"),
-        meta: { title: "media.persons", wide: true, requiresAuth: true },
+        meta: { title: "media.persons", wide: true },
       },
       {
         path: "media/persons/:id(\\d+)",
         name: "media-person",
         component: () => import("~/pages/media/PersonDetail"),
-        meta: { title: "media.persons", wide: true, requiresAuth: true },
+        meta: { title: "media.persons", wide: true },
       },
       {
         path: "media/studios",
         name: "media-studios",
         component: () => import("~/pages/media/TaxonomyList"),
-        meta: { title: "media.studios", kind: "studios", wide: true, requiresAuth: true },
+        meta: { title: "media.studios", kind: "studios", wide: true },
       },
       {
         path: "media/studios/:id(\\d+)",
         name: "media-studio",
         component: () => import("~/pages/media/TaxonomyDetail"),
-        meta: { title: "media.studios", kind: "studios", wide: true, requiresAuth: true },
+        meta: { title: "media.studios", kind: "studios", wide: true },
       },
       {
         path: "media/series",
         name: "media-series",
         component: () => import("~/pages/media/TaxonomyList"),
-        meta: { title: "media.series", kind: "series", wide: true, requiresAuth: true },
+        meta: { title: "media.series", kind: "series", wide: true },
       },
       {
         path: "media/series/:id(\\d+)",
         name: "media-series-detail",
         component: () => import("~/pages/media/TaxonomyDetail"),
-        meta: { title: "media.series", kind: "series", wide: true, requiresAuth: true },
+        meta: { title: "media.series", kind: "series", wide: true },
       },
+      // 播放列表与口味画像都是**按用户**的数据（个人片单、观看口味），游客没有，
+      // 因此这两个入口保持 requiresAuth：游客点进去先去登录，而不是看空页面。
       {
         path: "media/playlists",
         name: "media-playlists",

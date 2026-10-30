@@ -111,14 +111,16 @@ export default defineComponent({
     async function load() {
       loading.value = true
       try {
+        // 游客没有个人状态：`/media/items/{id}/state` 需要登录，跟着发只会拿到 401、
+        // 被全局 401 处理踢回登录页 —— 所以游客只取公开的两份数据。
         const [itemResp, filesResp, stateResp] = await Promise.all([
           mediaGetItem(itemId.value),
           mediaListItemFiles(itemId.value),
-          mediaGetState(itemId.value),
+          user.isLogin ? mediaGetState(itemId.value) : Promise.resolve(null),
         ])
         item.value = itemResp.code === 200 ? itemResp.data : null
         files.value = filesResp.code === 200 ? (filesResp.data ?? []) : []
-        state.value = stateResp.code === 200 ? stateResp.data : null
+        state.value = stateResp && stateResp.code === 200 ? stateResp.data : null
         lastSavedSeconds = state.value?.progress_seconds ?? 0
       } finally {
         loading.value = false
@@ -141,8 +143,9 @@ export default defineComponent({
       playerSrc.value = rawLink(file.path, resp.data.raw_url, resp.data.sign)
       // 条目级进度：只在播第一个文件时续播，切集从 0 开始（否则每集都从头几秒看起）
       startAt.value = playing.value.id === files.value[0]?.id ? (state.value?.progress_seconds ?? 0) : 0
-      // 换文件就是新的一段会话：tracker 内部会先把上一段收尾
-      watchSession.start(itemId.value, file.id, startAt.value)
+      // 换文件就是新的一段会话：tracker 内部会先把上一段收尾。
+      // 观看会话要登录（写库 + 计时长），游客纯看不记。
+      if (user.isLogin) watchSession.start(itemId.value, file.id, startAt.value)
     }
 
     function closePlayer() {
@@ -153,6 +156,8 @@ export default defineComponent({
 
     function onProgress(seconds: number) {
       if (!playing.value) return
+      // 游客没有进度可写（也没有个人状态可读），连节流判断都省了
+      if (!user.isLogin) return
       const now = Date.now()
       const moved = Math.abs(seconds - lastSavedSeconds) >= SAVE_INTERVAL_SECONDS
       if (!moved || now - lastSavedAt < SAVE_INTERVAL_SECONDS * 1000) return
@@ -174,10 +179,12 @@ export default defineComponent({
       // 看完：标记 watched；进度清零，避免「看完了还从 47 分钟续播」
       const endedAt = lastSavedSeconds
       lastSavedSeconds = 0
-      watchSession.end(endedAt, true)
-      void mediaUpdateState(itemId.value, { watched: true, progress_seconds: 0 }).then((resp) => {
-        if (resp.code === 200 && resp.data) state.value = resp.data
-      })
+      if (user.isLogin) {
+        watchSession.end(endedAt, true)
+        void mediaUpdateState(itemId.value, { watched: true, progress_seconds: 0 }).then((resp) => {
+          if (resp.code === 200 && resp.data) state.value = resp.data
+        })
+      }
       // 自动连播下一集（按后端返回的文件顺序）
       const index = files.value.findIndex((file) => file.id === playing.value?.id)
       const next = files.value[index + 1]
@@ -187,6 +194,7 @@ export default defineComponent({
 
     onUnmounted(() => {
       // 离开页面兜底：播放器组件自己的 onUnmounted 也会 emit，双保险但不重复写
+      if (!user.isLogin) return
       watchSession.end(lastSavedSeconds)
       if (playing.value && lastSavedSeconds > 0) {
         void mediaUpdateState(itemId.value, { progress_seconds: Math.floor(lastSavedSeconds) })
@@ -398,34 +406,43 @@ export default defineComponent({
                 <p class="ol-media-detail-overview">
                   {current.overview || t("media.no_overview")}
                 </p>
-                <div class="ol-media-detail-actions">
-                  <ElButton size="small" type={state.value?.favorite ? "warning" : "default"} onClick={toggleFavorite}>
-                    <ElIcon style={{ marginRight: "4px" }}>
-                      {state.value?.favorite ? <StarFilled /> : <Star />}
-                    </ElIcon>
-                    {state.value?.favorite ? t("media.unfavorite") : t("media.favorite")}
-                  </ElButton>
-                  <ElButton size="small" type={state.value?.watched ? "success" : "default"} onClick={toggleWatched}>
-                    <ElIcon style={{ marginRight: "4px" }}><View /></ElIcon>
-                    {state.value?.watched ? t("media.mark_unwatched") : t("media.mark_watched")}
-                  </ElButton>
-                  <ElButton size="small" type={state.value?.watch_later ? "primary" : "default"} onClick={toggleLater}>
-                    {t("media.watch_later")}
-                  </ElButton>
-                  <ElButton size="small" onClick={openPlaylistDialog}>
-                    <ElIcon style={{ marginRight: "4px" }}><Plus /></ElIcon>
-                    {t("media.add_to_playlist")}
-                  </ElButton>
-                  <ElButton size="small" onClick={openSubtitleDialog}>
-                    {t("media.subtitles")}
-                  </ElButton>
-                  {canManage.value && (
-                    <ElButton size="small" loading={scraping.value} onClick={scrape}>
-                      <ElIcon style={{ marginRight: "4px" }}><Refresh /></ElIcon>
-                      {t("media.scrape")}
-                    </ElButton>
-                  )}
-                </div>
+                {/* 游客既不能收藏也不能记进度，整条动作区可能只剩「刮削」—— 为空就别占一行 */}
+                {(user.isLogin || canManage.value) && (
+                  <div class="ol-media-detail-actions">
+                    {/* 个人状态四件套（收藏/看过/稍后/片单）都需要登录 —— 游客看不到也点不了 */}
+                    {user.isLogin && (
+                      <>
+                        <ElButton size="small" type={state.value?.favorite ? "warning" : "default"} onClick={toggleFavorite}>
+                          <ElIcon style={{ marginRight: "4px" }}>
+                            {state.value?.favorite ? <StarFilled /> : <Star />}
+                          </ElIcon>
+                          {state.value?.favorite ? t("media.unfavorite") : t("media.favorite")}
+                        </ElButton>
+                        <ElButton size="small" type={state.value?.watched ? "success" : "default"} onClick={toggleWatched}>
+                          <ElIcon style={{ marginRight: "4px" }}><View /></ElIcon>
+                          {state.value?.watched ? t("media.mark_unwatched") : t("media.mark_watched")}
+                        </ElButton>
+                        <ElButton size="small" type={state.value?.watch_later ? "primary" : "default"} onClick={toggleLater}>
+                          {t("media.watch_later")}
+                        </ElButton>
+                        <ElButton size="small" onClick={openPlaylistDialog}>
+                          <ElIcon style={{ marginRight: "4px" }}><Plus /></ElIcon>
+                          {t("media.add_to_playlist")}
+                        </ElButton>
+                        {/* 字幕搜索要登录（会写回媒体目录） */}
+                        <ElButton size="small" onClick={openSubtitleDialog}>
+                          {t("media.subtitles")}
+                        </ElButton>
+                      </>
+                    )}
+                    {canManage.value && (
+                      <ElButton size="small" loading={scraping.value} onClick={scrape}>
+                        <ElIcon style={{ marginRight: "4px" }}><Refresh /></ElIcon>
+                        {t("media.scrape")}
+                      </ElButton>
+                    )}
+                  </div>
+                )}
                 {state.value && state.value.progress_seconds > 0 && (
                   <div class="ol-media-detail-progress">
                     {t("media.state_progress")}: {formatDuration(state.value.progress_seconds)}

@@ -15,6 +15,7 @@ import {
   type MediaLibrary,
 } from "~/api/media"
 import FilePager from "~/pages/home/Pager"
+import { useUserStore } from "~/stores/user"
 import { t } from "~/i18n"
 
 /**
@@ -22,6 +23,10 @@ import { t } from "~/i18n"
  *
  * 数据面很薄：库列表 + 条目分页查询 + Home 聚合里的「继续观看」。
  * 库的管理（建/删/扫描）在管理台，这里只做**看与播**。
+ *
+ * **游客也能进这一页**（只读端点匿名开放，`/` 默认落这里）。凡是「按用户」的东西
+ * （收藏星标、继续观看、播放列表/口味入口）只在登录时渲染 —— 否则游客会连发几个
+ * 401，被全局 401 处理踢回登录页。
  *
  * 海报一律走 `/api/media/items/{id}/image` 专用端点 ——
  * 一页 30 张图逐条 fs/get 取签名不可接受，见 `api/media.ts` 里的注释。
@@ -44,6 +49,10 @@ export default defineComponent({
   setup() {
     const route = useRoute()
     const router = useRouter()
+    const user = useUserStore()
+
+    /** 收藏/继续观看这类「按用户」的能力只在登录后才有（游客没有个人状态）。 */
+    const canPersonalize = computed(() => user.isLogin)
 
     const libraries = ref<MediaLibrary[]>([])
     const libraryId = ref(0) // 0 = 全部库
@@ -213,16 +222,18 @@ export default defineComponent({
               </div>
             )}
             {item.rating ? <span class="ol-media-rating">★ {item.rating.toFixed(1)}</span> : null}
-            <span
-              class={fav ? "ol-media-fav is-on" : "ol-media-fav"}
-              title={fav ? t("media.unfavorite") : t("media.favorite")}
-              onClick={(event: MouseEvent) => {
-                event.stopPropagation()
-                void toggleFavorite(item)
-              }}
-            >
-              <ElIcon>{fav ? <StarFilled /> : <Star />}</ElIcon>
-            </span>
+            {canPersonalize.value && (
+              <span
+                class={fav ? "ol-media-fav is-on" : "ol-media-fav"}
+                title={fav ? t("media.unfavorite") : t("media.favorite")}
+                onClick={(event: MouseEvent) => {
+                  event.stopPropagation()
+                  void toggleFavorite(item)
+                }}
+              >
+                <ElIcon>{fav ? <StarFilled /> : <Star />}</ElIcon>
+              </span>
+            )}
           </div>
           <div class="ol-media-card-title" title={item.title}>
             {item.title}
@@ -290,8 +301,13 @@ export default defineComponent({
             { name: "media-persons", label: t("media.persons") },
             { name: "media-studios", label: t("media.studios") },
             { name: "media-series", label: t("media.series") },
-            { name: "media-playlists", label: t("media.tab_playlists") },
-            { name: "media-taste", label: t("media.tab_taste") },
+            // 播放列表与口味画像是按用户的数据 → 游客不显示入口（路由本身也 requiresAuth）
+            ...(canPersonalize.value
+              ? [
+                  { name: "media-playlists", label: t("media.tab_playlists") },
+                  { name: "media-taste", label: t("media.tab_taste") },
+                ]
+              : []),
           ].map((entry) => (
             <ElButton
               key={entry.name}
@@ -370,7 +386,7 @@ export default defineComponent({
           <ElEmpty description={t("media.no_libraries")} />
         ) : (
           <>
-            {continueWatching.value.length > 0 && !keyword.value && (
+            {canPersonalize.value && continueWatching.value.length > 0 && !keyword.value && (
               <div class="ol-media-section">
                 <div class="ol-media-section-title">{t("media.continue_watching")}</div>
                 <div class="ol-media-strip">
