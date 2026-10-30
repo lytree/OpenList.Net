@@ -4,6 +4,7 @@ using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Core.Security;
 using OpenList.Vfs;
 using DirectUploadInfo = OpenList.Core.Interfaces.DirectUploadInfo;
 using ArchiveEntry = OpenList.Core.Interfaces.ArchiveEntry;
@@ -145,19 +146,25 @@ public sealed class FileSystemService : IFileSystemService
             catch { /* meta 解析失败不影响 list 本体 */ }
         }
 
-        // 写入条件：驱动非只读 AND（用户可写 OR meta 显式标记 Write=true）。
-        // 与 Go fsread.go 的 CanWrite(meta, path) 语义对齐。
+        // 写入条件：驱动非只读 AND（用户可写 OR meta 显式开放写入）。
+        // meta 那一路必须走 CanWriteContentBypass —— 它内部带 WSub 判断，写入许可才会按
+        // 「是否作用于子目录」传导；此前只看 meta.Write，导致子目录里 w_sub=false 也回
+        // write=true，直到真正上传才被 ContentWriteGateAsync 判 403（前后不一致）。
         var driverWritable = driver?.ReadOnly == false;
-        var metaForcesWrite = nearest is { Write: true };
+        var pathText = path.ToString();
+        var metaForcesWrite = MetaAccess.CanWriteContentBypass(nearest, pathText);
         var write = (driverWritable && (user.IsAdmin() || user.CanWriteContent())) || metaForcesWrite;
 
-        // 镜像 Go isEncrypt(meta, path)：meta 含密码 + RSub/PSub 覆盖则视为加密（readme/header 取 meta）。
-        var readme = nearest is { Readme: { Length: > 0 } r, RSub: true } ? r
-            : nearest is { Readme: { Length: > 0 } r2 } && PathCoveredByMeta(path.ToString(), nearest.Path, "/") ? r2
-            : null;
-        var header = nearest is { Header: { Length: > 0 } h, HeaderSub: true } ? h
-            : nearest is { Header: { Length: > 0 } h2 } && PathCoveredByMeta(path.ToString(), nearest.Path, "/") ? h2
-            : null;
+        // readme/header 是「目录标签」：RSub/HeaderSub 决定祖先 meta 的文案是否下传到子目录，
+        // 关闭时只有 meta.Path 自身这一层能拿到。此前兜底分支用的是前缀判断，而 nearest 本身
+        // 就是「覆盖当前路径的最深 meta」，条件恒真 —— 两个开关等于永远开启。
+        var metaOnSelf = nearest is not null
+            && string.Equals(
+                MetaAccess.Normalize(nearest.Path),
+                MetaAccess.Normalize(pathText),
+                StringComparison.OrdinalIgnoreCase);
+        var readme = nearest is { Readme: { Length: > 0 } r } && (nearest.RSub || metaOnSelf) ? r : null;
+        var header = nearest is { Header: { Length: > 0 } h } && (nearest.HeaderSub || metaOnSelf) ? h : null;
 
         return Resp<FsListResp>.Ok(new FsListResp
         {
@@ -192,16 +199,6 @@ public sealed class FileSystemService : IFileSystemService
             }
         }
         return best;
-    }
-
-    /// <summary>
-    /// 简化版 "meta 覆盖路径" 判断：路径 == meta.Path 或以 "meta.Path/" 开头。
-    /// </summary>
-    private static bool PathCoveredByMeta(string path, string metaPath, string rSub)
-    {
-        var mp = metaPath.TrimEnd('/');
-        if (string.IsNullOrEmpty(mp)) return true; // 根 meta 默认覆盖所有
-        return path == mp || path.StartsWith(mp + "/", StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -2900,3 +2900,44 @@ catch → EnsureCreated（库已存在，no-op）+ MigrateSchemaAsync（补列 +
    `CanSeeLibrary` 里加一道判断 —— 目前没做，因为产品上等价于「这台机器的媒体就是公开的」。
 2. **文件浏览只是前端守卫**：`/api/fs/*` 的只读端点仍然匿名（分享链接与游客点播都靠它），
    所以直接打 API 仍能列目录。要真正封死得区分「分享态」与「匿名态」，会牵动分享体系，没在这次里改。
+
+## 47. meta「应用到子文件夹」开关：两个失效项与列表口径修复（2026-10-30）
+
+管理台 → 元数据（`#/@manage/metas`）里每条路径规则有 7 个「应用到子文件夹」开关，对应
+`Meta` 的 `p_sub` / `h_sub` / `w_sub` / `write_users_sub` / `read_users_sub` / `r_sub` / `header_sub`。
+本轮核对发现其中 **2 个不生效、1 处口径不一致**，已修。
+
+### 47.1 `r_sub` / `header_sub` 恒等于开启
+
+`FileSystemService.ListAsync` 原来的取值：
+
+```csharp
+var readme = nearest is { Readme: { Length: > 0 } r, RSub: true } ? r
+    : nearest is { Readme: { Length: > 0 } r2 } && PathCoveredByMeta(path, nearest.Path, "/") ? r2
+    : null;
+```
+
+兜底分支用 `PathCoveredByMeta`，它是**前缀判断**，而 `nearest` 的定义就是「覆盖当前路径的最深
+meta」—— 条件恒真，于是祖先 meta 的 readme/header 无视开关一律注入子目录。`PathCoveredByMeta`
+的第三个参数 `rSub` 也是死参数（签名收了、函数体没用）。
+
+改为「`*Sub` 为真 **或** 请求路径与 `meta.Path` 完全相等」才取 meta 的文案，并删掉
+`PathCoveredByMeta`。前端 `ReadmeCard` 优先渲染目录里真实的 `readme.md`，meta 文案只是兜底，
+所以关闭开关后子目录会回到「没有兜底文案」的干净状态。
+
+### 47.2 列表的 `write` 标志忽略 `w_sub`
+
+原来 `var metaForcesWrite = nearest is { Write: true };`，子目录里 `w_sub=false` 也回
+`write=true`（界面显示可写），真正上传时才被 `ContentWriteGateAsync` → `CanWriteContentBypass`
+判 403。改为直接用 `MetaAccess.CanWriteContentBypass(nearest, path)`，与上传门禁用同一把尺子；
+`write_content_bypass` 也随之变准。
+
+### 47.3 验证
+
+`tests/OpenList.Tests/FileSystemListGetFieldsTests.cs` 新增 5 个用例（`r_sub` 关/开、`header_sub` 关、
+`w_sub` 关/开，全部走真实 `IServiceScopeFactory` 注入 `IMetaService` 桩）。全套 `dotnet test`
+**526 通过 / 1 skip / 0 失败**。
+
+审阅后仍未改的一处：`h_sub` 的隐藏判定以「父目录」为基准
+（`MetaCoversPath(meta.Path, Parent(path), meta.HideSub)`），因此隐藏规则在 meta 所在目录与其
+直接子目录里都生效，`h_sub` 只影响更深的层级。这与「隐藏的是目录里的条目」语义自洽，故保留。

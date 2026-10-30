@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
@@ -11,6 +12,7 @@ namespace OpenList.Tests;
 /// <item><c>refresh=true</c> 非管理员返回 403；</item>
 /// <item><c>list</c> 返回 <c>provider</c> 与 <c>write</c>（驱动 ReadOnly 联动）；</item>
 /// <item><c>get</c> 对视频文件附带同目录同名（去扩展名）前缀的兄弟；非视频文件不附带。</item>
+/// <item>meta 的 <c>r_sub</c>/<c>header_sub</c>/<c>w_sub</c> 决定对应规则是否传导到子目录。</item>
 /// </list>
 /// </summary>
 public class FileSystemListGetFieldsTests
@@ -24,6 +26,93 @@ public class FileSystemListGetFieldsTests
         var mem = new MemoryFileSystem();
         mount.Root.Mount("/test", mem);
         return (new FileSystemService(mount), mem);
+    }
+
+    /// <summary>带 meta 的装配：把固定 meta 列表塞进 DI，供 ListAsync 解析 nearest meta。</summary>
+    private static (FileSystemService svc, MemoryFileSystem mem) SetupWithMeta(params Meta[] metas)
+    {
+        var mount = new MountService();
+        var mem = new MemoryFileSystem();
+        mount.Root.Mount("/test", mem);
+        var services = new ServiceCollection();
+        services.AddSingleton<IMetaService>(new FakeMetaService(metas));
+        var provider = services.BuildServiceProvider();
+        var svc = new FileSystemService(
+            mount, null, null, null, provider.GetRequiredService<IServiceScopeFactory>(), null);
+        return (svc, mem);
+    }
+
+    // ---- meta 的子目录开关 ----
+
+    [Test]
+    public async Task ListAsync_Readme_SubOff_OnlyAppliesToMetaPathItself()
+    {
+        var (svc, mem) = SetupWithMeta(new Meta { Path = "/test/movies", Readme = "简介", RSub = false });
+        mem.CreateDirectory("/movies");
+        mem.CreateDirectory("/movies/sub");
+
+        var self = await svc.ListAsync(new FsListReq { Path = "/test/movies" }, AdminUser);
+        var child = await svc.ListAsync(new FsListReq { Path = "/test/movies/sub" }, AdminUser);
+
+        // r_sub=false：只有 meta 自身那层拿到 readme，子目录不再继承
+        await Assert.That(self.Data!.Readme).IsEqualTo("简介");
+        await Assert.That(child.Data!.Readme).IsNull();
+    }
+
+    [Test]
+    public async Task ListAsync_Readme_SubOn_InheritedByChildren()
+    {
+        var (svc, mem) = SetupWithMeta(new Meta { Path = "/test/movies", Readme = "简介", RSub = true });
+        mem.CreateDirectory("/movies");
+        mem.CreateDirectory("/movies/sub");
+
+        var child = await svc.ListAsync(new FsListReq { Path = "/test/movies/sub" }, AdminUser);
+
+        await Assert.That(child.Data!.Readme).IsEqualTo("简介");
+    }
+
+    [Test]
+    public async Task ListAsync_Header_SubOff_OnlyAppliesToMetaPathItself()
+    {
+        var (svc, mem) = SetupWithMeta(new Meta { Path = "/test/movies", Header = "<b>hi</b>", HeaderSub = false });
+        mem.CreateDirectory("/movies");
+        mem.CreateDirectory("/movies/sub");
+
+        var self = await svc.ListAsync(new FsListReq { Path = "/test/movies" }, AdminUser);
+        var child = await svc.ListAsync(new FsListReq { Path = "/test/movies/sub" }, AdminUser);
+
+        await Assert.That(self.Data!.Header).IsEqualTo("<b>hi</b>");
+        await Assert.That(child.Data!.Header).IsNull();
+    }
+
+    [Test]
+    public async Task ListAsync_WriteFlag_RespectsWSub()
+    {
+        // MemoryFileSystem 解析不到驱动（driverWritable=false），write 完全由 meta 决定。
+        var (svc, mem) = SetupWithMeta(new Meta { Path = "/test/movies", Write = true, WSub = false });
+        mem.CreateDirectory("/movies");
+        mem.CreateDirectory("/movies/sub");
+
+        var self = await svc.ListAsync(new FsListReq { Path = "/test/movies" }, GuestUser);
+        var child = await svc.ListAsync(new FsListReq { Path = "/test/movies/sub" }, GuestUser);
+
+        // w_sub=false：meta 位于自身时开放写入，子目录则不继承
+        await Assert.That(self.Data!.Write).IsTrue();
+        await Assert.That(child.Data!.Write).IsFalse();
+        await Assert.That(child.Data!.WriteContentBypass).IsFalse();
+    }
+
+    [Test]
+    public async Task ListAsync_WriteFlag_WSubOn_InheritedByChildren()
+    {
+        var (svc, mem) = SetupWithMeta(new Meta { Path = "/test/movies", Write = true, WSub = true });
+        mem.CreateDirectory("/movies");
+        mem.CreateDirectory("/movies/sub");
+
+        var child = await svc.ListAsync(new FsListReq { Path = "/test/movies/sub" }, GuestUser);
+
+        await Assert.That(child.Data!.Write).IsTrue();
+        await Assert.That(child.Data!.WriteContentBypass).IsTrue();
     }
 
     [Test]
@@ -82,5 +171,27 @@ public class FileSystemListGetFieldsTests
     {
         using var s = mem.OpenFile(new UPath(path), FileMode.Create, FileAccess.Write);
         s.Write(bytes, 0, bytes.Length);
+    }
+
+    /// <summary>只实现 <see cref="IMetaService.ListAsync"/> 的桩：ListAsync 之外的成员不应被调用。</summary>
+    private sealed class FakeMetaService(IReadOnlyList<Meta> metas) : IMetaService
+    {
+        public Task<Resp<List<Meta>>> ListAsync(CancellationToken ct = default)
+            => Task.FromResult(Resp<List<Meta>>.Ok(metas.ToList()));
+
+        public Task<Resp<Meta>> GetAsync(string path, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Resp<Meta>> GetByIdAsync(long id, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Resp<Meta>> CreateAsync(Meta meta, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Resp> UpdateAsync(long id, Meta meta, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Resp> DeleteAsync(long id, CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }
