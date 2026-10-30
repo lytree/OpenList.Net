@@ -3121,3 +3121,95 @@ e2e 脚本：`verify-common.mjs` A 段新增 2 项（匿名 `/api/media/items` 2
 2. **WebDAV / S3 网关不看这两个开关**：它们有自己的认证（Basic / AccessKey），游客本来就进不去。
 3. **设置项没有独立的权限位描述**：目前只有 `Public` 标记，前端守卫直接读键名；
    如果以后要多站点/多角色，需要把「谁能看哪个门面」提到角色层。
+
+## 50. 手机端列表视图：表格换成卡片行（2026-10-30）
+
+### 50.1 遗留项与判断
+
+承 10-30 响应式适配（`styles/responsive.css`，见该文件顶部注释）留下的已知局限：
+
+> 手机端文件**列表**仍用 ElTable 横向滚动（未转卡片）。
+
+手机是这套产品的真实使用场景之一（媒体首页本来就是手机上先看），而列表模式是默认视图
+（`ol-view-mode` 缺省 `list`）。四列（名称 / 大小 / 修改时间 / 操作）在 390px 下必然横向溢出，
+表格内部滚动在触屏上既难发现也难操作 —— 用户看到的是「文件列表被截断了」。
+
+结论：**手机上列表模式换结构，不是换尺寸**。CSS 能压字体、能收间距，但压不出第 390 列。
+
+### 50.2 结构切换交给 JS，尺寸交给 CSS
+
+| 层面 | 手段 | 位置 |
+|---|---|---|
+| 列表 / 表格二选一 | `useIsPhone()`（`matchMedia("(max-width: 767px)")`） | `composables/useIsPhone.ts` |
+| 网格列数、工具条换行等 | 媒体查询 | `styles/responsive.css` |
+
+断点数值写在两处（JS 常量 + CSS 媒体查询），刻意如此：CSS 管「同结构改尺寸」，JS 管「换结构」。
+`useIsPhone` 在组件卸载时摘掉监听，`matchMedia` 不存在时按桌面处理，调用方永远拿到布尔 ref。
+
+### 50.3 卡片行：两行装下四列
+
+`pages/home/ListRows.tsx`：
+
+```
+[勾选] [图标] 名称（最多两行）                    [更多]
+              大小|文件夹 · 修改时间
+```
+
+- 行高 ≥ 52px、勾选框触控区 32px、「更多」触控区 36px —— 都按触控目标下限给；
+- 勾选框只在可写时出现，与表格的 `selection` 列同条件（游客只读时列表就没有勾选框）；
+- 长文件名换行两行再省略，而不是把「更多」挤出屏幕。
+
+### 50.4 顺手收掉两份重复
+
+加卡片行时发现同一件事已经有三份实现，先合再落地：
+
+| 模块 | 原来 | 现在 |
+|---|---|---|
+| 文件类型图标 / 颜色 | `index.tsx` 的 `KIND_ICON`/`KIND_COLOR` + `GridView.tsx` 的 `fallbackIcon`/`fallbackColor`（且文本色两边不一致：`#606266` vs `#909399`） | `pages/home/kind.ts`（`kindIcon` / `kindColor`） |
+| 行内「更多」菜单 | 只写在表格模板里，加视图就得抄 | `pages/home/rowActions.ts` 的 `rowActionsFor(obj, { writable })`，表格与卡片共用；纯函数，可单测 |
+
+统一后文本类图标取 `#909399`：图标颜色不跟主题走（它表达文件类型），而 `#606266` 在深色主题下
+几乎看不见。删除项在两侧菜单里都加了 `is-danger`（`layout.css` 里一条 `.el-dropdown-menu__item.is-danger`），
+桌面表格因此也有了红色的删除项 —— 这是本轮唯一的桌面观感变化。
+
+### 50.5 四个踩坑
+
+1. **`useStorage` 的字符串默认值走 string 序列化**：`useStorage("ol-view-mode", "list")` 读写都不做 JSON。
+   验收脚本一开始写 `JSON.stringify("list")`（带引号的 `"list"`），读回来是含引号的字符串，
+   于是被判成「非 list」而落到网格视图。脚本改成写原样值。
+2. **Element Plus 的 `.el-checkbox__original` 不可见**：Playwright 点它会超时，要点外层 `.ol-row-check`
+   （真实用户点的也是那一层）。
+3. **每行的 dropdown 都会预渲染**：mobile 下 4 行就有 4 份 `.el-dropdown-menu` 藏在 popper 里，
+   断言菜单项必须加 `:visible` 过滤，否则数到的是所有行菜单之和。
+4. **`addInitScript` 每次导航都跑**：把 `theme-mode` 写进 init script 后，切深色再 `reload` 会被覆盖回浅色，
+   「深色下文字是否翻成浅色」那条断言永远失败。主题改由 `evaluate` 设置。
+
+### 50.6 验收
+
+前端：`tsc --noEmit` 0 错误 · `vitest` **240 用例**（新增 `ListRows.spec.ts` 8 项 + `rowActions.spec.ts` 5 项）·
+`vite build` 通过。
+
+新增 `frontend/scripts/verify-phone-list.mjs`（13 项，指向一个已构建的隔离后端 + 自建挂载 `/e2e-phone`）：
+
+| 分组 | 断言 |
+|---|---|
+| 结构 | 390px 渲染 4 行卡片 · 表格完全不在 DOM |
+| 布局 | `scrollWidth == clientWidth`（390 / 1024 两侧都量） · 副信息含 `·` 与时间 |
+| 交互 | 勾选不触发打开 · 勾选后进入选中态 · 文件行「更多」7 项 · 删除项标红 |
+| 主题 | 深色下名称文字亮度翻转（`rgb(17,24,28)` → `rgb(237,238,240)`） |
+| 断点 | 1024px 回到表格且卡片行消失（`vxe-table`=1、`.ol-row`=0） · 缩回 390px 卡片行恢复（监听器没被销毁） |
+| 卫生 | 控制台无报错 |
+
+截图（`.e2e/phone/shots/`，已忽略）：`phone-list-light.png` / `phone-list-dark.png` / `desktop-list.png`。
+
+> 浏览器用本机 Edge（`channel: "msedge"`）：这台机器没有下载 Playwright 自带 Chromium，
+> 而 `chromium.launch({ channel: "msedge" })` 不需要联网装浏览器。
+
+### 50.7 遗留
+
+1. **卡片行没有缩略图**：图片 / 视频仍是类型图标。网格视图有 `<img>`，列表行加缩略图会让行高不稳，
+   且大目录下等于开一屏解码任务 —— 要做应该配后端缩略图服务（`/p?type=thumb`，见 §31 遗留），而不是直链原图。
+2. **平板（768–1024px）仍用表格**：826px 竖屏下四列能放下，没有换结构的必要；
+   若后续平板横屏也要卡片化，改 `useIsPhone` 的查询即可，组件本身与宽度无关。
+3. **长按菜单**：手机上右键菜单靠「长按」触发，但浏览器不派发 `contextmenu` 的时长与系统一致，
+   部分安卓浏览器会同时触发文字选择。目前依赖每行的「更多」按钮，没做长按的额外 `touchstart` 计时。
