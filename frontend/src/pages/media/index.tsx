@@ -1,12 +1,10 @@
 import { computed, defineComponent, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ElButton, ElEmpty, ElIcon, ElInput, ElOption, ElSelect, ElTag } from "element-plus"
-import { Search, Star, StarFilled, VideoCamera } from "@element-plus/icons-vue"
+import { ElButton, ElEmpty, ElInput, ElOption, ElSelect, ElTag } from "element-plus"
+import { Search } from "@element-plus/icons-vue"
 import {
-  MediaItemStatus,
+  mediaBatchStates,
   mediaFacets,
-  mediaHome,
-  mediaImageLink,
   mediaListItems,
   mediaListLibraries,
   mediaUpdateState,
@@ -14,19 +12,25 @@ import {
   type MediaItem,
   type MediaLibrary,
 } from "~/api/media"
+import MediaGrid from "~/components/MediaGrid"
 import FilePager from "~/pages/home/Pager"
+import MediaNav from "~/pages/media/MediaNav"
 import { useUserStore } from "~/stores/user"
 import { t } from "~/i18n"
 
 /**
  * 媒体库浏览页（M4 第一片）。
  *
- * 数据面很薄：库列表 + 条目分页查询 + Home 聚合里的「继续观看」。
- * 库的管理（建/删/扫描）在管理台，这里只做**看与播**。
+ * 数据面很薄：库列表 + 条目分页查询（筛选/排序/搜索）。
+ * 库的管理（建/删/扫描）在管理台，这里只做**看**。
+ *
+ * **媒体首页（推荐聚合）是另一个界面**（`pages/media/Home.tsx`，`#/media`）：
+ * 继续观看 / 最近入库 / 最近收藏都在那边，这一页只负责「按库、题材、年份、评分找条目」。
+ * 本页在 `#/media/library`，两者共用 `MediaNav` 的入口条，见 docs/unified-media-product-plan.md 第 48 节。
  *
  * **游客也能进这一页**（只读端点匿名开放，`/` 默认落这里）。凡是「按用户」的东西
- * （收藏星标、继续观看、播放列表/口味入口）只在登录时渲染 —— 否则游客会连发几个
- * 401，被全局 401 处理踢回登录页。
+ * （收藏星标、「播放列表/口味」入口）只在登录时渲染 —— 否则游客会连发几个 401，
+ * 被全局 401 处理踢回登录页。
  *
  * 海报一律走 `/api/media/items/{id}/image` 专用端点 ——
  * 一页 30 张图逐条 fs/get 取签名不可接受，见 `api/media.ts` 里的注释。
@@ -51,7 +55,7 @@ export default defineComponent({
     const router = useRouter()
     const user = useUserStore()
 
-    /** 收藏/继续观看这类「按用户」的能力只在登录后才有（游客没有个人状态）。 */
+    /** 收藏这类「按用户」的能力只在登录后才有（游客没有个人状态）。 */
     const canPersonalize = computed(() => user.isLogin)
 
     const libraries = ref<MediaLibrary[]>([])
@@ -62,7 +66,6 @@ export default defineComponent({
     const items = ref<MediaItem[]>([])
     const total = ref(0)
     const loading = ref(false)
-    const continueWatching = ref<MediaItem[]>([])
     /** 筛选条数据源（题材/年份聚合，只取可见库）。 */
     const facets = ref<MediaFacets | null>(null)
     /** 当前筛选：空串/0 表示不筛。年份精确匹配靠 year_from = year_to。 */
@@ -71,8 +74,6 @@ export default defineComponent({
     const ratingMin = ref(0)
     /** 收藏态缓存：网格卡片上直接点星切换，不用进详情页。 */
     const favorites = ref<Set<number>>(new Set())
-    /** 海报加载失败的条目：换成占位块而不是裂图。 */
-    const brokenPosters = ref<Set<number>>(new Set())
 
     /** URL `?library=` 记住当前库，刷新/返回不掉状态。 */
     const syncQuery = () => {
@@ -117,9 +118,25 @@ export default defineComponent({
           items.value = []
           total.value = 0
         }
+        await loadFavoriteStates()
       } finally {
         loading.value = false
       }
+    }
+
+    /**
+     * 收藏态不复用「首页聚合」里的 recently_favorited（那是媒体首页的数据，且只有十几条）。
+     * 这里按**当前页**的条目问一次批量状态端点：一次请求，页面里每颗星都是真的。
+     */
+    async function loadFavoriteStates() {
+      if (!user.isLogin || items.value.length === 0) return
+      const resp = await mediaBatchStates(items.value.map((item) => item.id))
+      if (resp.code !== 200) return
+      const set = new Set<number>()
+      for (const state of resp.data ?? []) {
+        if (state.favorite) set.add(state.item_id)
+      }
+      favorites.value = set
     }
 
     /** facets 跟着库切换刷新：换了库，题材/年份的可选项本来就不同。 */
@@ -130,16 +147,6 @@ export default defineComponent({
 
     onMounted(() => {
       void loadLibraries()
-      void mediaHome(12).then((resp) => {
-        if (resp.code === 200) {
-          continueWatching.value = resp.data?.continue_watching ?? []
-          // 继续观看卡片直接反映收藏态，免去详情页往返
-          favorites.value = new Set([
-            ...favorites.value,
-            ...(resp.data?.recently_favorited ?? []).map((item) => item.id),
-          ])
-        }
-      })
     })
 
     watch([libraryId, sort], () => {
@@ -188,66 +195,10 @@ export default defineComponent({
       }
     }
 
-    const statusTag = (item: MediaItem) => {
-      if (item.status === MediaItemStatus.Pending) return t("media.status_pending")
-      if (item.status === MediaItemStatus.Unmatched) return t("media.status_unmatched")
-      return ""
-    }
-
-    function renderCard(item: MediaItem, mode: "grid" | "strip") {
-      const broken = brokenPosters.value.has(item.id)
-      const fav = favorites.value.has(item.id)
-      return (
-        <div
-          key={`${mode}-${item.id}`}
-          class={mode === "grid" ? "ol-media-card" : "ol-media-card is-strip"}
-          onClick={() => openItem(item)}
-        >
-          <div class="ol-media-poster">
-            {item.poster_path && !broken ? (
-              <img
-                src={mediaImageLink(item.id)}
-                loading="lazy"
-                alt={item.title}
-                onError={() => {
-                  const set = new Set(brokenPosters.value)
-                  set.add(item.id)
-                  brokenPosters.value = set
-                }}
-              />
-            ) : (
-              <div class="ol-media-poster-fallback">
-                <ElIcon><VideoCamera /></ElIcon>
-                <span>{t("media.no_poster")}</span>
-              </div>
-            )}
-            {item.rating ? <span class="ol-media-rating">★ {item.rating.toFixed(1)}</span> : null}
-            {canPersonalize.value && (
-              <span
-                class={fav ? "ol-media-fav is-on" : "ol-media-fav"}
-                title={fav ? t("media.unfavorite") : t("media.favorite")}
-                onClick={(event: MouseEvent) => {
-                  event.stopPropagation()
-                  void toggleFavorite(item)
-                }}
-              >
-                <ElIcon>{fav ? <StarFilled /> : <Star />}</ElIcon>
-              </span>
-            )}
-          </div>
-          <div class="ol-media-card-title" title={item.title}>
-            {item.title}
-          </div>
-          <div class="ol-media-card-sub">
-            {item.year ? <span>{item.year}</span> : null}
-            {statusTag(item) ? <ElTag size="small" type="warning">{statusTag(item)}</ElTag> : null}
-          </div>
-        </div>
-      )
-    }
-
     return () => (
       <div class="ol-media">
+        <MediaNav />
+
         <div class="ol-media-toolbar">
           <div class="ol-media-libs">
             <ElButton
@@ -289,35 +240,6 @@ export default defineComponent({
               ))}
             </ElSelect>
           </div>
-        </div>
-
-        {/*
-          维度入口：人物 / 片商 / 系列 / 口味 / 播放列表各自独立成页。
-          做成按钮而不是 tab，是因为它们是**浏览视图**而不是库内筛选；
-          tab 会让人以为切换后还在同一个列表里。
-        */}
-        <div class="ol-media-dim-nav">
-          {[
-            { name: "media-persons", label: t("media.persons") },
-            { name: "media-studios", label: t("media.studios") },
-            { name: "media-series", label: t("media.series") },
-            // 播放列表与口味画像是按用户的数据 → 游客不显示入口（路由本身也 requiresAuth）
-            ...(canPersonalize.value
-              ? [
-                  { name: "media-playlists", label: t("media.tab_playlists") },
-                  { name: "media-taste", label: t("media.tab_taste") },
-                ]
-              : []),
-          ].map((entry) => (
-            <ElButton
-              key={entry.name}
-              size="small"
-              plain={true}
-              onClick={() => router.push({ name: entry.name })}
-            >
-              {entry.label}
-            </ElButton>
-          ))}
         </div>
 
         {/* 筛选条：数据来自 /media/facets（只含当前库可见条目的聚合） */}
@@ -386,20 +308,14 @@ export default defineComponent({
           <ElEmpty description={t("media.no_libraries")} />
         ) : (
           <>
-            {canPersonalize.value && continueWatching.value.length > 0 && !keyword.value && (
-              <div class="ol-media-section">
-                <div class="ol-media-section-title">{t("media.continue_watching")}</div>
-                <div class="ol-media-strip">
-                  {continueWatching.value.map((item) => renderCard(item, "strip"))}
-                </div>
-              </div>
-            )}
-
-            {items.value.length === 0 && !loading.value ? (
-              <ElEmpty description={t("media.no_items")} />
-            ) : (
-              <div class="ol-media-grid">{items.value.map((item) => renderCard(item, "grid"))}</div>
-            )}
+            <MediaGrid
+              items={items.value}
+              favoriteIds={canPersonalize.value ? [...favorites.value] : []}
+              showFavorite={canPersonalize.value}
+              emptyText={t("media.no_items")}
+              onOpen={openItem}
+              onFavorite={(item: MediaItem) => void toggleFavorite(item)}
+            />
 
             <FilePager
               page={page.value}

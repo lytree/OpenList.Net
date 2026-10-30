@@ -42,7 +42,7 @@ const apiGet = async (path) =>
     .then((r) => r.json())
 
 // ---------- 1. 媒体库浏览页 ----------
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1800)
 
 const libTabs = await page.locator(".ol-media-libs .el-button").allTextContents()
@@ -135,9 +135,26 @@ check("详情页显示续播位置", /0:15|0:1[4-9]/.test(progressLine), progres
 
 await page.screenshot({ path: `${SHOT}/media-playing.png` })
 
-// ---------- 6. 继续观看横滑条 ----------
+// ---------- 6. 媒体首页 vs 媒体库：两个界面 ----------
+// 媒体库页只负责「找」：不该再混入首页聚合（继续观看横滑条）
+await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
+await page.waitForTimeout(800)
+const stripOnLibrary = await page.locator(".ol-media-strip").count()
+check("媒体库页不含首页聚合条", stripOnLibrary === 0, `strip=${stripOnLibrary}`)
+
+// 媒体首页（#/media）才是聚合推荐：继续观看 / 最近入库
 await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
+const navLabels = (await page.locator(".ol-media-nav .el-button").allTextContents()).map((s) => s.trim())
+check("媒体域导航含首页与媒体库入口", navLabels.includes("Media home") && navLabels.includes("Libraries"), JSON.stringify(navLabels))
+
+const sectionTitles = (await page.locator(".ol-media-section-title").allTextContents()).map((s) => s.trim())
+check(
+  "媒体首页渲染继续观看 + 最近入库",
+  sectionTitles.includes("Continue watching") && sectionTitles.includes("Recently added"),
+  JSON.stringify(sectionTitles),
+)
+
 const stripCard = await page.locator(".ol-media-strip .ol-media-card", { hasText: "The Grand Budapest Hotel" }).count()
 check("继续观看条出现该条目", stripCard === 1, `strip=${stripCard}`)
 

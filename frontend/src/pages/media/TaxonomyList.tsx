@@ -98,7 +98,7 @@ export default defineComponent({
       <div class="ol-media">
         <div class="ol-media-toolbar">
           <div class="ol-media-title-row">
-            <ElButton size="small" text={true} onClick={() => router.push({ name: "media" })}>
+            <ElButton size="small" text={true} onClick={() => router.push({ name: "media-library" })}>
               <ElIcon style={{ marginRight: "4px" }}>
                 <ArrowLeft />
               </ElIcon>

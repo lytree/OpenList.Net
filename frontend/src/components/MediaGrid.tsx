@@ -23,6 +23,12 @@ export default defineComponent({
     emptyText: { type: String, default: "" },
     /** 是否显示右上角收藏星标（播放列表等场景可以关掉）。 */
     showFavorite: { type: Boolean, default: true },
+    /**
+     * 排版：`grid` 是自适应海报墙（媒体库/收藏/作品列表），
+     * `strip` 是单行横滑条（媒体首页的「继续观看」）。
+     * 卡片本身只有一份实现，只有容器与卡片宽度不同。
+     */
+    layout: { type: String as PropType<"grid" | "strip">, default: "grid" },
   },
   emits: {
     open: (_item: MediaItem) => true,
@@ -49,12 +55,17 @@ export default defineComponent({
         return <ElEmpty description={props.emptyText || t("media.no_items")} />
       }
       const favoriteSet = new Set(props.favoriteIds)
+      const strip = props.layout === "strip"
       return (
-        <div class="ol-media-grid">
+        <div class={strip ? "ol-media-strip" : "ol-media-grid"}>
           {props.items.map((item) => {
             const fav = favoriteSet.has(item.id)
             return (
-              <div key={item.id} class="ol-media-card" onClick={() => emit("open", item)}>
+              <div
+                key={item.id}
+                class={strip ? "ol-media-card is-strip" : "ol-media-card"}
+                onClick={() => emit("open", item)}
+              >
                 <div class="ol-media-poster">
                   {item.poster_path && !broken.value.has(item.id) ? (
                     <img

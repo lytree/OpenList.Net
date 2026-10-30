@@ -2941,3 +2941,83 @@ meta」—— 条件恒真，于是祖先 meta 的 readme/header 无视开关一
 审阅后仍未改的一处：`h_sub` 的隐藏判定以「父目录」为基准
 （`MetaCoversPath(meta.Path, Parent(path), meta.HideSub)`），因此隐藏规则在 meta 所在目录与其
 直接子目录里都生效，`h_sub` 只影响更深的层级。这与「隐藏的是目录里的条目」语义自洽，故保留。
+
+## 48. 媒体首页与媒体库拆成两个界面（2026-10-30）
+
+### 48.1 为什么拆
+
+第 46 节把媒体库定成公开门面后，`pages/media/index.tsx` 一屏里同时干了三件事：
+库/搜索/排序、题材/年份/评分筛选条、以及 `/media/home` 的「继续观看」横滑条。
+一个是**看什么**（推荐聚合），一个是**找什么**（库内浏览），混在一起的直接后果是
+筛选条上方永远压着一段与筛选无关的横滑条，而「最近入库 / 最近收藏」这两个
+`GET /media/home` 本来就会返回的列表根本没人用。
+
+### 48.2 两个界面 / 两条路由
+
+| 路由 | 名字 | 页面 | 内容 | 游客 |
+|---|---|---|---|---|
+| `#/media` | `media` | `pages/media/Home.tsx` | 继续观看（横滑条）/ 最近入库 / 最近收藏 | ✅ 只剩「最近入库」 |
+| `#/media/library` | `media-library` | `pages/media/index.tsx` | 库页签、搜索、排序、facets、网格、分页 | ✅ 只读 |
+| `#/media/home` | — | 重定向到 `media` | 拆分初期短期用过这个地址，保留一条兼容 | — |
+
+`/` 的重定向不变（仍落 `media`），所以默认落地页现在是**媒体首页**：游客打开站点
+先看到有海报的推荐页，点「媒体库」再进筛选浏览。
+
+导航只有一套：新组件 `pages/media/MediaNav.tsx`（`.ol-media-nav`）同时挂在两个页面顶部，
+按钮依次是 媒体首页 / 媒体库 / 人物 / 片商 / 系列 /（播放列表 / 口味，仅登录）。
+原来 `pages/media/index.tsx` 里内联的「维度入口」块被它取代（类名 `ol-media-dim-nav`
+随之改名为 `ol-media-nav`）；人物/片商/系列/口味/播放列表页的「返回」按钮
+（`router.push({ name: "media" })`）改成 `media-library`，否则会退到聚合页。
+
+标签用「媒体首页」而不是「首页」，是因为顶栏已经有一个「首页」（`/files` 文件浏览），
+两个 Home 并排会让人分不清哪个是文件树。
+
+### 48.3 收藏态：从聚合接口挪到批量状态接口
+
+拆之前，库浏览页的星标靠 `GET /media/home` 的 `recently_favorited` 播种 —— 那只有十几条，
+而且现在属于首页的数据。改为：条目加载完，按**当前页**的 id 调一次
+`POST /media/items/states`（`mediaBatchStates`），只把 `favorite` 为真的收进集合。
+首页同理（继续观看 / 最近入库里也可能有已收藏条目），三个 section 共用一份 `favoriteIds`。
+
+### 48.4 卡片渲染收编到 `MediaGrid`
+
+`pages/media/index.tsx` 里那份手写 `renderCard`（网格 + 横滑条两种形态）删掉，
+`components/MediaGrid.tsx` 新增 `layout: "grid" | "strip"` 属性：容器换成
+`.ol-media-strip`、卡片加 `is-strip`，其余（海报兜底、评分角标、状态徽标、收藏星标）
+一份实现。之前「继续观看」和「库网格」是两份长得几乎一样的卡片代码，改一处忘一处。
+
+### 48.5 验收
+
+隔离后端（临时库 + `DistDir=frontend/dist`，端口 5088），用 mock 数据（3 个条目 +
+1 条带进度的状态 + 1 条收藏状态）跑一轮 Playwright 冒烟：
+
+| 用例 | 结果 |
+|---|---|
+| 游客 `#/` → `#/media`，页面是聚合页（有 section、无筛选条） | ✅ |
+| 登录 `#/media`：三个 section（Continue watching / Recently added / Recently favorited）| ✅ |
+| 继续观看是横滑条（`.ol-media-strip .ol-media-card.is-strip`）| ✅ |
+| 最近入库 + 最近收藏走 `.ol-media-grid`，卡片 161×289 尺寸一致 | ✅ |
+| 网格卡片点星 → `POST /media/items/{id}/state` 落库（`favorite=true`） | ✅ |
+| `#/media/library`：无 `.ol-media-strip`、有 facets、3 张卡片、导航高亮「Libraries」 | ✅ |
+| `#/media/home` 重定向到 `#/media` | ✅ |
+| 人物页「返回」→ `#/media/library` | ✅ |
+| 游客导航 5 项 / 登录 7 项；除 `/api/me` 外零 401、零控制台错误 | ✅ |
+
+`tsc --noEmit` 0 错误，`vitest` 20 文件 / 219 用例全绿。
+e2e 脚本同步：`verify-media.mjs` 20 → 23 项（浏览页断言改走 `#/media/library`，新增
+「媒体库页不含首页聚合条」「媒体域导航含首页与媒体库入口」「媒体首页渲染继续观看 + 最近入库」），
+`verify-media-dimensions.mjs` 的库网格入口全部改 `#/media/library`（56 项不变），
+`verify-common.mjs` A 段文案改为「游客落媒体首页」。
+
+**没跑完整 A–H 回归**：这台机器上没有 `.e2e/venv` 和 `ffmpeg`（媒体装置要真视频），
+`run-regression.sh` 的 media 轮跑不起来；上表是独立后端 + mock 数据的等价覆盖，
+真机回归留待有装置的环境补跑。
+
+### 48.6 遗留
+
+1. **`/media` 与 `/media/library` 都不带筛选状态**：媒体首页点「最近入库」的条目走详情页，
+   没有「看全部」入口跳到库里对应的筛选（`GET /media/items?state=favorite|in-progress`
+   后端已支持，前端还没接）。要做的话是给 section 标题加「查看全部 →」。
+2. **顶部导航的「媒体」仍指向 `/media`**（首页），媒体库变成二级入口；如果产品上希望
+   点「媒体」直达库列表，把 `BasicLayout` 的 `to="/media"` 改成 `/media/library` 即可，
+   但那样「首页」就又少一个入口了。

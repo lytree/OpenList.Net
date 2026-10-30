@@ -247,15 +247,15 @@ check(
   (stats.data?.by_genre ?? []).some((g) => g.value === "Science Fiction"),
 )
 
-// ---------- 4. 媒体首页：facets 筛选 + 维度入口 ----------
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+// ---------- 4. 媒体库：facets 筛选 + 维度入口 ----------
+await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-facets", { timeout: 10000 })
 
 const facetChips = await page.locator(".ol-media-facets .ol-media-chip-tag").count()
-check("首页渲染 facets 筛选条", facetChips > 3, `${facetChips} chips`)
+check("媒体库页渲染 facets 筛选条", facetChips > 3, `${facetChips} chips`)
 
-const navCount = await page.locator(".ol-media-dim-nav .el-button").count()
-check("首页渲染 5 个维度入口", navCount === 5, `${navCount} buttons`)
+const navCount = await page.locator(".ol-media-nav .el-button").count()
+check("媒体域导航 7 个入口（首页 + 媒体库 + 5 个维度）", navCount === 7, `${navCount} buttons`)
 
 const cardsBefore = await page.locator(".ol-media-grid .ol-media-card").count()
 await page.locator(".ol-media-facets .ol-media-chip-tag", { hasText: "Blade Runner" }).count()
@@ -269,7 +269,7 @@ await yearChip.click()
 await page.waitForTimeout(500)
 
 // ---------- 5. 人物列表 / 详情 ----------
-await page.locator(".ol-media-dim-nav .el-button", { hasText: "People" }).click()
+await page.locator(".ol-media-nav .el-button", { hasText: "People" }).click()
 await page.waitForSelector(".ol-media-person-card", { timeout: 10000 })
 const personCards = await page.locator(".ol-media-person-card").count()
 check("人物列表 5 张卡片", personCards === 5, `${personCards}`)
@@ -325,8 +325,8 @@ const roleTags = await page.locator(".ol-media-person-head .el-tag").allInnerTex
 check("人物详情含 Director 角色标签", roleTags.some((tag) => tag.includes("Director")), roleTags.join("|"))
 
 // ---------- 6. 片商 / 系列 ----------
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
-await page.locator(".ol-media-dim-nav .el-button", { hasText: "Studios" }).click()
+await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
+await page.locator(".ol-media-nav .el-button", { hasText: "Studios" }).click()
 await page.waitForSelector(".ol-media-taxonomy-chip", { timeout: 10000 })
 const studioChips = await page.locator(".ol-media-taxonomy-chip").allInnerTexts()
 check(
@@ -439,7 +439,7 @@ const playlistCards = await page.locator(".ol-media-playlist-card").count()
 check("播放列表创建后出现 1 张卡片", playlistCards === 1, `${playlistCards}`)
 
 // 从条目详情加入：第一部（Blade Runner 1982）
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
 await page.locator(".ol-media-grid .ol-media-card", { hasText: "Blade Runner" }).first().click()
 await page.waitForSelector(".ol-media-detail-actions", { timeout: 10000 })
 check(
@@ -455,7 +455,7 @@ await page.locator(".el-dialog__footer .el-button--primary").click()
 await page.waitForTimeout(800)
 
 // 第二部（Blade Runner 2049）
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
 await page.locator(".ol-media-grid .ol-media-card", { hasText: "Blade Runner 2049" }).first().click()
 await page.waitForSelector(".ol-media-detail-actions", { timeout: 10000 })
 await page.locator(".ol-media-detail-actions .el-button", { hasText: "Add to playlist" }).click()
@@ -500,7 +500,7 @@ const rowsAfterRemove = await page.locator(".ol-media-queue-row").count()
 check("移除后剩 1 行", rowsAfterRemove === 1, `${rowsAfterRemove}`)
 
 // ---------- 9. 字幕对话框 ----------
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
 await page.locator(".ol-media-grid .ol-media-card", { hasText: "Arrival" }).first().click()
 await page.waitForSelector(".ol-media-detail-actions", { timeout: 10000 })
 await page.locator(".ol-media-detail-actions .el-button", { hasText: "Subtitles" }).click()

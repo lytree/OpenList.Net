@@ -64,6 +64,11 @@ const routes: RouteRecordRaw[] = [
       // （见 MediaEndpoints），所以未登录用户可以直接看库、看详情、看海报。
       // 文件浏览（首页）降级成独立页面 `/files`，并且**需要登录** —— 文件树属于
       // 「找文件/管理」场景，不该和公开的媒体门面混在一起。
+      //
+      // 媒体域内部再分两层界面：`/media` 是**媒体首页**（继续观看 / 最近入库 /
+      // 最近收藏的聚合推荐），`/media/library` 是**媒体库**（按库、题材、年份、评分筛选浏览）。
+      // 两者曾经挤在同一页，见 docs/unified-media-product-plan.md 第 48 节。
+      //
       // 旧书签/文档里的文件深链是 `/?path=/a/b`（没有 /files 前缀），这类地址照旧
       // 转给首页：游客会被 requiresAuth 拦到登录页，登录用户则正常浏览。
       {
@@ -76,11 +81,25 @@ const routes: RouteRecordRaw[] = [
         component: () => import("~/pages/home"),
         meta: { title: "global.nav_home", requiresAuth: true },
       },
+      // 媒体域的两个界面：`/media` 是**媒体首页**（聚合推荐，点「媒体」先看到它），
+      // `/media/library` 是**媒体库**（按库/题材/年份/评分筛选浏览）。
+      // 两者共用 `MediaNav` 的入口条，见 docs/unified-media-product-plan.md 第 48 节。
       {
         path: "media",
         name: "media",
+        component: () => import("~/pages/media/Home"),
+        meta: { title: "media.tab_home", wide: true },
+      },
+      {
+        path: "media/library",
+        name: "media-library",
         component: () => import("~/pages/media"),
-        meta: { title: "media.title", wide: true },
+        meta: { title: "media.tab_libraries", wide: true },
+      },
+      {
+        // 兼容：媒体首页刚拆出来时短期用过 `/media/home`
+        path: "media/home",
+        redirect: { name: "media" },
       },
       {
         path: "media/item/:id",

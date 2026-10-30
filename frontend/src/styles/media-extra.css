@@ -23,8 +23,8 @@
   color: var(--ol-text-muted);
 }
 
-/* ---- 维度入口 ---- */
-.ol-media-dim-nav {
+/* ---- 媒体域页面导航（首页 / 媒体库 / 维度页） ---- */
+.ol-media-nav {
   display: flex;
   gap: var(--ol-space-2);
   flex-wrap: wrap;
