@@ -5,11 +5,10 @@ import {
   ElEmpty,
   ElIcon,
   ElSkeleton,
-  ElTable,
-  ElTableColumn,
   ElTag,
   ElTooltip,
 } from "element-plus"
+import { VexTable, VexColumn } from "~/components/table"
 import { Refresh } from "@element-plus/icons-vue"
 import { getIndexProgress, getScanProgress, listStorages, listUsers } from "~/api/admin"
 import { listShares } from "~/api/shares"
@@ -279,16 +278,16 @@ export default defineComponent({
                 {scrape.value.length === 0 ? (
                   <ElEmpty description={t("manage.dashboard.no_library")} imageSize={60} />
                 ) : (
-                  <ElTable data={scrape.value} size="small" rowKey="library_id" border={false}>
-                    <ElTableColumn label={t("manage.dashboard.col_library")} minWidth={160}>
+                  <VexTable data={scrape.value} size="small" rowKey="library_id" border={false}>
+                    <VexColumn label={t("manage.dashboard.col_library")} minWidth={160}>
                       {{
                         default: ({ row }) => {
                           const r = row as MediaScrapeStatus
                           return <span title={r.library_name}>{r.library_name}</span>
                         },
                       }}
-                    </ElTableColumn>
-                    <ElTableColumn label={t("manage.dashboard.col_rate")} width={150}>
+                    </VexColumn>
+                    <VexColumn label={t("manage.dashboard.col_rate")} width={150}>
                       {{
                         default: ({ row }) => {
                           const rate = libraryMatchRate(row as MediaScrapeStatus)
@@ -306,23 +305,23 @@ export default defineComponent({
                           )
                         },
                       }}
-                    </ElTableColumn>
-                    <ElTableColumn
+                    </VexColumn>
+                    <VexColumn
                       prop="matched"
                       label={t("manage.dashboard.col_matched")}
                       width={90}
                     />
-                    <ElTableColumn
+                    <VexColumn
                       prop="pending"
                       label={t("manage.dashboard.col_pending")}
                       width={90}
                     />
-                    <ElTableColumn
+                    <VexColumn
                       prop="unmatched"
                       label={t("manage.dashboard.col_unmatched")}
                       width={100}
                     />
-                    <ElTableColumn label={t("manage.dashboard.col_state")} minWidth={150}>
+                    <VexColumn label={t("manage.dashboard.col_state")} minWidth={150}>
                       {{
                         default: ({ row }) => {
                           const r = row as MediaScrapeStatus
@@ -354,8 +353,8 @@ export default defineComponent({
                           return <span class="ol-dash-state">{tag}</span>
                         },
                       }}
-                    </ElTableColumn>
-                  </ElTable>
+                    </VexColumn>
+                  </VexTable>
                 )}
               </section>
 

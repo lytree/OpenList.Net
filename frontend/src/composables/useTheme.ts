@@ -33,6 +33,8 @@ watchEffect(() => {
   const root = document.documentElement
   root.classList.toggle("dark", isDark.value)
   root.style.colorScheme = isDark.value ? "dark" : "light"
+  // vxe-table 的调色板挂在这个属性上（见 styles/vxe-theme.css）
+  root.setAttribute("data-vxe-ui-theme", isDark.value ? "dark" : "light")
 })
 
 function setMode(next: ThemeMode) {

@@ -1,0 +1,46 @@
+/**
+ * vxe-table 主题对齐。
+ *
+ * vxe 4.6 的调色板挂在 `[data-vxe-ui-theme=light|dark]` 上（属性由 useTheme 写到
+ * <html>），所以这里只需要把它的关键变量重新指向 Element Plus / 项目 token：
+ * 深浅色都由 `html.dark` 驱动，不需要维护两套值。
+ */
+[data-vxe-ui-theme] {
+  --vxe-ui-font-color: var(--ol-text);
+  --vxe-ui-font-primary-color: var(--ol-brand);
+  --vxe-ui-layout-background-color: var(--ol-bg-surface);
+  --vxe-ui-input-border-color: var(--ol-border);
+  --vxe-ui-border-radius: var(--ol-radius-md);
+  --vxe-ui-font-size: 14px;
+
+  --vxe-font-color: var(--ol-text);
+  --vxe-primary-color: var(--ol-brand);
+  --vxe-table-body-background-color: var(--ol-bg-surface);
+  --vxe-table-header-background-color: var(--ol-bg-page);
+  --vxe-table-header-font-color: var(--ol-text-secondary);
+  --vxe-table-border-color: var(--ol-border);
+  --vxe-table-row-hover-background-color: var(--ol-bg-hover);
+  --vxe-table-row-striped-background-color: var(--ol-bg-page);
+  --vxe-table-row-hover-striped-background-color: var(--ol-bg-hover);
+  --vxe-table-row-checkbox-checked-background-color: transparent;
+  --vxe-table-row-hover-checkbox-checked-background-color: var(--ol-bg-hover);
+  --vxe-table-row-current-background-color: var(--ol-bg-hover);
+  --vxe-table-column-hover-background-color: transparent;
+  /* 行高向 Element Plus 的 size="small" 看齐（22 行高 + 5×2 内边距 = 32px） */
+  --vxe-table-row-height-mini: 32px;
+  --vxe-table-column-padding-mini: 5px 0;
+  --vxe-table-row-height-small: 36px;
+  --vxe-table-column-padding-small: 7px 0;
+  --vxe-table-border-radius: var(--ol-radius-md);
+  --vxe-checkbox-border-radius: 2px;
+}
+
+/* 表格外框跟随卡片圆角，避免 vxe 自带的白底在深色下漏出来 */
+.vxe-table--render-default .vxe-table--body-wrapper,
+.vxe-table--render-default .vxe-table--header-wrapper {
+  background-color: transparent;
+}
+
+.vxe-table {
+  font-size: 13px;
+}

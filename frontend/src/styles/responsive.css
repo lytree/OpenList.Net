@@ -1,0 +1,282 @@
+/* ============================================================================
+ * 响应式适配总入口（手机 / 平板）
+ * ----------------------------------------------------------------------------
+ * 设计断点（对齐真实设备实测逻辑视口）：
+ *   手机  : <= 767px   —— 参考 小米15 竖屏 ≈ 390px
+ *   平板  : 768–1024px —— 参考 小米平板9 Pro Max 竖屏 ≈ 826px
+ *   大平板/小桌面: 1025–1279px（基本复用桌面布局，仅微调）
+ *
+ * 原则：
+ *   1. 不改动桌面观感——所有覆写都包在媒体查询里；
+ *   2. 尽量复用已有的 auto-fill 网格与 EP 自带的横向滚动，只在「会溢出/挤崩」处动刀；
+ *   3. 手机端浏览顶栏的导航与账户操作收进汉堡抽屉（见 BasicLayout）。
+ * ========================================================================== */
+
+/* 移动端浏览器地址栏占位：用 dvh 修正 100vh 把按钮顶到屏幕外的问题。
+ * 先写 vh 作回退，再写 dvh（支持的浏览器取后者）。 */
+.ol-view {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.ol-manage {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* 抽屉在桌面端默认隐藏（手机媒体查询里再显示） */
+.ol-view-drawer,
+.ol-view-drawer-mask {
+  display: none;
+}
+
+/* ===== 手机端 (<= 767px) =================================================== */
+@media (max-width: 767px) {
+  /* ---- 浏览顶栏：隐藏内联导航与右侧控件，改由抽屉承载 ---- */
+  .ol-view-links,
+  .ol-view-header-right {
+    display: none;
+  }
+
+  .ol-view-menu-btn {
+    display: inline-flex;
+  }
+
+  .ol-view-header-inner {
+    padding: 0 var(--ol-space-3);
+    gap: var(--ol-space-2);
+  }
+
+  /* 无 logo 时退化的「首字母方块 + 站点名」：手机上只留方块，省横向空间 */
+  .ol-view-site {
+    display: none;
+  }
+
+  /* 内容列在手机上铺满，仅留少量安全边距 */
+  .ol-view-body,
+  .ol-view-body.is-wide {
+    width: 100%;
+  }
+
+  .ol-view-inner {
+    padding: 4px 12px 0;
+  }
+
+  /* ---- 网格：手机上普通视图 3 列、图墙 2 列 ---- */
+  .ol-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: var(--ol-space-2);
+    padding: var(--ol-space-2);
+  }
+
+  .ol-grid-image {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+
+  .ol-grid-name {
+    font-size: 12px;
+  }
+
+  /* ---- 文件工具条：搜索框占满一行，控件整体换行、左对齐 ---- */
+  .ol-files-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--ol-space-2);
+  }
+
+  .ol-files-bar > .el-space {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+  }
+
+  .ol-files-search {
+    width: 100% !important;
+  }
+
+  /* 面包屑在窄屏可横向滚动，避免深路径把工具条撑破 */
+  .ol-bar-left {
+    min-width: 0;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .ol-bar-left .el-breadcrumb {
+    white-space: nowrap;
+  }
+
+  /* ---- 对话框：接近全屏，内边距收紧 ---- */
+  .ol-dialog,
+  .el-dialog {
+    width: 92vw !important;
+    max-width: 92vw !important;
+  }
+
+  .el-dialog__body {
+    padding: 16px;
+  }
+
+  /* ---- 设置页：标签与控件改为上下堆叠 ---- */
+  .ol-setting-row {
+    grid-template-columns: 1fr;
+    gap: var(--ol-space-2);
+  }
+
+  .ol-setting-control .el-input,
+  .ol-setting-control .el-select,
+  .ol-setting-control .el-input-number,
+  .ol-setting-control .el-textarea {
+    max-width: 100%;
+  }
+
+  .ol-settings-tabs .el-tabs__header {
+    margin-bottom: var(--ol-space-2);
+  }
+
+  /* ---- 媒体统计卡：手机两列 ---- */
+  .ol-media-stat-cards {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+
+  .ol-media-person-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--ol-space-3);
+  }
+
+  /* ---- 预览器：文件名放宽、工具条内边距收紧 ---- */
+  .ol-preview-name {
+    max-width: 60vw;
+  }
+
+  .ol-preview-toolbar {
+    padding: var(--ol-space-1) var(--ol-space-2);
+  }
+
+  /* ---- 公开分享页：减小外边距 ---- */
+  .ol-share-page {
+    padding: var(--ol-space-3);
+  }
+
+  .ol-share-topbar {
+    margin-bottom: var(--ol-space-3);
+  }
+
+  /* ---- 权限位复选框：手机上单列 ---- */
+  .ol-perm-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* ---- 底部批量操作条：手机上更贴边、可滚动 ---- */
+  .ol-batch-bar {
+    left: 50%;
+    right: auto;
+    max-width: calc(100vw - 24px);
+    overflow-x: auto;
+  }
+}
+
+/* ===== 平板端 (768–1024px) ================================================= */
+@media (min-width: 768px) and (max-width: 1024px) {
+  /* 管理台侧栏在平板上略收窄，给内容区多留一点 */
+  .ol-manage-side {
+    width: 200px;
+  }
+
+  .ol-manage-content {
+    padding: var(--ol-space-3);
+  }
+
+  /* 无 logo 时退化的站点名在平板也收起，避免和「管理」标题挤 */
+  .ol-view-site {
+    display: none;
+  }
+
+  /* 网格在平板上多给一列的余量（auto-fill 会自动多排，这里只收紧卡片最小宽） */
+  .ol-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+
+  .ol-grid-image {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+}
+
+/* ===== 汉堡抽屉（仅手机端可见，见上 767px 块激活） ======================== */
+@media (max-width: 767px) {
+  .ol-view-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(80vw, 300px);
+    background: var(--ol-bg-surface);
+    box-shadow: var(--el-box-shadow-light);
+    z-index: 210;
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    padding: var(--ol-space-4) var(--ol-space-3);
+    gap: var(--ol-space-1);
+    overflow-y: auto;
+  }
+
+  .ol-view-drawer.is-open {
+    transform: none;
+  }
+
+  .ol-view-drawer-mask.is-open {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 205;
+  }
+
+  .ol-view-drawer-link {
+    display: flex;
+    align-items: center;
+    gap: var(--ol-space-2);
+    padding: 10px 12px;
+    border-radius: var(--ol-radius-md);
+    font-size: 15px;
+    color: var(--ol-text);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .ol-view-drawer-link.is-active {
+    background: var(--el-color-primary-light-9);
+    color: var(--el-color-primary);
+    font-weight: 600;
+  }
+
+  .ol-view-drawer-section {
+    font-size: 12px;
+    color: var(--ol-text-muted);
+    padding: var(--ol-space-2) 12px var(--ol-space-1);
+  }
+
+  .ol-view-drawer-sep {
+    height: 1px;
+    background: var(--ol-border);
+    margin: var(--ol-space-2) 4px;
+  }
+
+  .ol-view-drawer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ol-space-2);
+  }
+
+  .ol-view-drawer-user {
+    display: flex;
+    align-items: center;
+    gap: var(--ol-space-2);
+    padding: 10px 12px;
+    border-radius: var(--ol-radius-md);
+    font-size: 14px;
+    color: var(--ol-text);
+  }
+}

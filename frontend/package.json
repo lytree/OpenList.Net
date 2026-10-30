@@ -47,6 +47,7 @@
     "vue": "3.5.22",
     "vue-echarts": "^7.0.3",
     "vue-router": "^4.5.0",
+    "vxe-table": "4.6.25",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

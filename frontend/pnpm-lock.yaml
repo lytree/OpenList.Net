@@ -267,6 +267,9 @@ importers:
       vue-router:
         specifier: ^4.5.0
         version: 4.6.4(vue@3.5.22(typescript@5.9.3))
+      vxe-table:
+        specifier: 4.6.25
+        version: 4.6.25(vue@3.5.22(typescript@5.9.3))
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
@@ -1336,6 +1339,9 @@ packages:
   docx-preview@0.4.1:
     resolution: {integrity: sha512-Dv4g+LeE0swHpPvNC0lAT0YsR5Zq5pAxw7d3vHQ8EChBLgIrqqe9VPL5nVt2HBJap8bEZbXUI0TJob7kBeNU9w==}
 
+  dom-zindex@1.0.8:
+    resolution: {integrity: sha512-n6UB0BU5pltbvMWNu3zZqnLO35uFvOjTBO/s2GiPbdnfhyVGYLhLxynou/B2QSQEPJR4d398/0jbUZHLNiOmfA==}
+
   dompurify@3.4.17:
     resolution: {integrity: sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==}
 
@@ -2226,6 +2232,11 @@ packages:
       typescript:
         optional: true
 
+  vxe-table@4.6.25:
+    resolution: {integrity: sha512-rFhGh8w+420cdnIasQKisiKagz9F/iNieB/z6v0j4GcsMfGHEmSJ72YrHcXogQh4wNlCzKVfb7rl7nREL5eIOg==}
+    peerDependencies:
+      vue: 3.5.22
+
   w3c-keyname@2.2.8:
     resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
 
@@ -2277,6 +2288,9 @@ packages:
         optional: true
       utf-8-validate:
         optional: true
+
+  xe-utils@3.9.1:
+    resolution: {integrity: sha512-Ujk5UmoH6Iaqhgz3oGwfCXVcMdUJKlXnfvLABdnMyseMG0eHsX2mcCvLd/8sGlIXtfwsprI9bW7vgcVognLmqQ==}
 
   xlsx@0.18.5:
     resolution: {integrity: sha512-dmg3LCjBPHZnQp5/F/+nnTa+miPJxUXB6vtk42YjBBKayDNagxGEeIdWApkYPOf3Z3pm3k62Knjzp7lMeTEtFQ==}
@@ -3184,6 +3198,8 @@ snapshots:
     dependencies:
       jszip: 3.10.2
 
+  dom-zindex@1.0.8: {}
+
   dompurify@3.4.17:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
@@ -4003,6 +4019,12 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.3
 
+  vxe-table@4.6.25(vue@3.5.22(typescript@5.9.3)):
+    dependencies:
+      dom-zindex: 1.0.8
+      vue: 3.5.22(typescript@5.9.3)
+      xe-utils: 3.9.1
+
   w3c-keyname@2.2.8: {}
 
   w3c-xmlserializer@5.0.0:
@@ -4034,6 +4056,8 @@ snapshots:
   word@0.3.0: {}
 
   ws@8.22.0: {}
+
+  xe-utils@3.9.1: {}
 
   xlsx@0.18.5:
     dependencies:

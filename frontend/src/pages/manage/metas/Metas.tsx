@@ -13,10 +13,9 @@ import {
   ElOption,
   ElSelect,
   ElSwitch,
-  ElTable,
-  ElTableColumn,
   ElTag,
 } from "element-plus"
+import { VexTable, VexColumn } from "~/components/table"
 import { Delete, Edit, Plus, Refresh } from "@element-plus/icons-vue"
 import { deleteMeta, listMetas, listUsers, saveMeta } from "~/api/admin"
 import type { AdminUser, Meta } from "~/api/types"
@@ -242,16 +241,16 @@ export default defineComponent({
             <ElAlert type="error" showIcon={true} title={error.value} closable={false} />
           )}
 
-          <ElTable data={rows.value} size="small" style={{ width: "100%" }}>
-            <ElTableColumn label={t("metas.path")} prop="path" minWidth={180}>
+          <VexTable data={rows.value} size="small" style={{ width: "100%" }}>
+            <VexColumn label={t("metas.path")} prop="path" minWidth={180}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Meta
                   return <span class="ol-mono">{r.path}</span>
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("metas.password")} width={110}>
+            </VexColumn>
+            <VexColumn label={t("metas.password")} width={110}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Meta
@@ -264,8 +263,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("metas.write")} width={110}>
+            </VexColumn>
+            <VexColumn label={t("metas.write")} width={110}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Meta
@@ -278,8 +277,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("metas.write_users")} width={120}>
+            </VexColumn>
+            <VexColumn label={t("metas.write_users")} width={120}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Meta
@@ -291,8 +290,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("metas.read_users")} width={120}>
+            </VexColumn>
+            <VexColumn label={t("metas.read_users")} width={120}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Meta
@@ -304,8 +303,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("metas.hide")} minWidth={140} showOverflowTooltip={true}>
+            </VexColumn>
+            <VexColumn label={t("metas.hide")} minWidth={140} showOverflowTooltip={true}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Meta
@@ -316,8 +315,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("metas.readme")} width={100}>
+            </VexColumn>
+            <VexColumn label={t("metas.readme")} width={100}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Meta
@@ -330,8 +329,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("metas.header")} width={100}>
+            </VexColumn>
+            <VexColumn label={t("metas.header")} width={100}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Meta
@@ -344,8 +343,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("global.operations")} width={170} align="center">
+            </VexColumn>
+            <VexColumn label={t("global.operations")} width={170} align="center">
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Meta
@@ -367,8 +366,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-          </ElTable>
+            </VexColumn>
+          </VexTable>
         </ElCard>
 
         <ElDialog

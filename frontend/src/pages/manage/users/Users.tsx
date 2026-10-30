@@ -18,10 +18,9 @@ import {
   ElOption,
   ElSelect,
   ElSwitch,
-  ElTable,
-  ElTableColumn,
   ElTag,
 } from "element-plus"
+import { VexTable, VexColumn } from "~/components/table"
 import { Edit, Key, MoreFilled, Plus, Refresh } from "@element-plus/icons-vue"
 import {
   cancelUser2Fa,
@@ -248,9 +247,9 @@ export default defineComponent({
             <ElAlert type="error" showIcon={true} title={error.value} closable={false} />
           )}
 
-          <ElTable data={rows.value} size="small" style={{ width: "100%" }}>
-            <ElTableColumn prop="id" label="ID" width={56} />
-            <ElTableColumn label={t("users.username")} minWidth={130}>
+          <VexTable data={rows.value} size="small" style={{ width: "100%" }}>
+            <VexColumn prop="id" label="ID" width={56} />
+            <VexColumn label={t("users.username")} minWidth={130}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as AdminUser
@@ -266,8 +265,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("users.role")} width={96}>
+            </VexColumn>
+            <VexColumn label={t("users.role")} width={96}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as AdminUser
@@ -279,16 +278,16 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("users.base_path")} minWidth={110}>
+            </VexColumn>
+            <VexColumn label={t("users.base_path")} minWidth={110}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as AdminUser
                   return <span class="ol-mono">{r.base_path || "/"}</span>
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("users.permission")} width={120}>
+            </VexColumn>
+            <VexColumn label={t("users.permission")} width={120}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as AdminUser
@@ -300,8 +299,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("users.disabled")} width={92}>
+            </VexColumn>
+            <VexColumn label={t("users.disabled")} width={92}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as AdminUser
@@ -312,8 +311,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label="2FA" width={66}>
+            </VexColumn>
+            <VexColumn label="2FA" width={66}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as AdminUser
@@ -324,8 +323,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("global.operations")} width={230} align="center">
+            </VexColumn>
+            <VexColumn label={t("global.operations")} width={230} align="center">
               {{
                 default: ({ row }) => {
                   const r = row as unknown as AdminUser
@@ -375,8 +374,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-          </ElTable>
+            </VexColumn>
+          </VexTable>
         </ElCard>
 
         <ElDialog

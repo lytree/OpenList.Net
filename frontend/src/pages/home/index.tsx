@@ -17,11 +17,10 @@ import {
   ElOption,
   ElSelect,
   ElSpace,
-  ElTable,
-  ElTableColumn,
   ElTag,
   ElTooltip,
 } from "element-plus"
+import { VexTable, VexColumn } from "~/components/table"
 import {
   ArrowDown,
   ArrowLeft,
@@ -105,7 +104,7 @@ export default defineComponent({
     /** FolderPicker 的用途：move / copy；null 表示关着。 */
     const pickerMode = ref<"move" | "copy" | null>(null)
 
-    /** ElTable 实例：Ctrl+A 走 toggleAllSelection；切回列表视图时恢复勾选。 */
+    /** VexTable 实例：Ctrl+A 走 toggleAllSelection；切回列表视图时恢复勾选。 */
     const tableRef = ref<{
       toggleAllSelection: () => void
       toggleRowSelection: (row: Obj, selected?: boolean) => void
@@ -224,7 +223,7 @@ export default defineComponent({
     useShortcuts({
       onSelectAll: () => {
         if (files.state.value !== "folder") return
-        // 列表交给 ElTable（保证勾选框同步）；网格没有表格实例，直接写选择数组（当前页）。
+        // 列表交给 VexTable（保证勾选框同步）；网格没有表格实例，直接写选择数组（当前页）。
         if (mode.value === "list") tableRef.value?.toggleAllSelection()
         else ops.selected.value = [...files.viewObjs.value]
       },
@@ -332,7 +331,7 @@ export default defineComponent({
       ops.selected.value = checked ? [...rest, obj] : rest
     }
 
-    // 切回列表视图时按名字把已选行重新勾上（ElTable 不读外部状态）；
+    // 切回列表视图时按名字把已选行重新勾上（VexTable 不读外部状态）；
     // 同时把「图墙只看目录+图片」这个约束交给数据层，让分页口径跟着变。
     watch(
       () => mode.value,
@@ -518,10 +517,10 @@ export default defineComponent({
               {files.state.value === "folder" && (
                 <ElInput
                   v-model={files.keyword.value}
+                  class="ol-files-search"
                   size="small"
                   placeholder="在当前目录筛选"
                   clearable={true}
-                  style={{ width: "140px" }}
                   v-slots={{ prefix: () => <ElIcon><Search /></ElIcon> }}
                 />
               )}
@@ -602,8 +601,8 @@ export default defineComponent({
               </ElButton>
               <ElSelect
                 modelValue={files.sortKey.value}
+                class="ol-files-sort"
                 size="small"
-                style={{ width: "96px" }}
                 onUpdate:modelValue={(v: SortKey) => (files.sortKey.value = v)}
               >
                 {sortOptions.map((opt) => (
@@ -757,7 +756,7 @@ export default defineComponent({
           )}
 
           {files.state.value === "folder" && !isEmpty.value && !noMatch.value && mode.value === "list" && (
-            <ElTable
+            <VexTable
               ref={tableRef}
               data={files.viewObjs.value}
               rowKey="name"
@@ -768,8 +767,8 @@ export default defineComponent({
                 openRowCtx(row as Obj, event)
               }
             >
-              {writable.value && <ElTableColumn type="selection" width={42} />}
-              <ElTableColumn label={t("global.name")} minWidth={280}>
+              {writable.value && <VexColumn type="selection" width={42} />}
+              <VexColumn label={t("global.name")} minWidth={280}>
                 {{
                   default: ({ row }) => {
                     const obj = row as unknown as Obj
@@ -784,21 +783,21 @@ export default defineComponent({
                     )
                   },
                 }}
-              </ElTableColumn>
-              <ElTableColumn label="大小" width={130}>
+              </VexColumn>
+              <VexColumn label="大小" width={130}>
                 {{
                   default: ({ row }) => {
                     const obj = row as unknown as Obj
                     return obj.is_dir ? "-" : humanSize(obj.size)
                   },
                 }}
-              </ElTableColumn>
-              <ElTableColumn label="修改时间" width={180}>
+              </VexColumn>
+              <VexColumn label="修改时间" width={180}>
                 {{
                   default: ({ row }) => formatTime((row as unknown as Obj).modified),
                 }}
-              </ElTableColumn>
-              <ElTableColumn label={t("ops.actions")} width={64} align="center">
+              </VexColumn>
+              <VexColumn label={t("ops.actions")} width={64} align="center">
                 {{
                   default: ({ row }) => {
                     const obj = row as unknown as Obj
@@ -842,8 +841,8 @@ export default defineComponent({
                     )
                   },
                 }}
-              </ElTableColumn>
-            </ElTable>
+              </VexColumn>
+            </VexTable>
           )}
 
           {files.state.value === "folder" && !isEmpty.value && !noMatch.value && mode.value !== "list" && (

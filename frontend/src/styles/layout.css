@@ -107,6 +107,11 @@
   font-size: 14px;
 }
 
+/* 手机端汉堡按钮：桌面隐藏，断点见 styles/responsive.css（对齐 .ol-manage-burger） */
+.ol-view-menu-btn {
+  display: none;
+}
+
 .ol-view-body {
   width: min(99%, var(--ol-content-width));
   margin: 0 auto;
@@ -507,6 +512,15 @@ html.dark .ol-auth {
 .ol-files-bar > .el-space {
   flex: 1 1 auto;
   justify-content: flex-end;
+}
+
+/* 工具条搜索框 / 排序下拉：桌面固定宽，手机端由 responsive.css 改成占满。 */
+.ol-files-search {
+  width: 140px;
+}
+
+.ol-files-sort {
+  width: 96px;
 }
 
 /* 批量选择条：浮在视口底部中间（旧前端 Center 工具条），不挤压列表高度 */

@@ -14,10 +14,9 @@ import {
   ElProgress,
   ElSelect,
   ElSwitch,
-  ElTable,
-  ElTableColumn,
   ElTag,
 } from "element-plus"
+import { VexTable, VexColumn } from "~/components/table"
 import { Delete, Edit, List, MagicStick, Plus, Refresh, VideoPause, VideoPlay } from "@element-plus/icons-vue"
 import {
   mediaCreateLibrary,
@@ -333,32 +332,32 @@ export default defineComponent({
             <ElAlert type="warning" showIcon={true} closable={false} title={t("media.no_libraries")} />
           )}
 
-          <ElTable data={rows.value} size="small" style={{ width: "100%" }}>
-            <ElTableColumn label={t("media.field_name")} minWidth={130}>
+          <VexTable data={rows.value} size="small" style={{ width: "100%" }}>
+            <VexColumn label={t("media.field_name")} minWidth={130}>
               {{
                 default: ({ row }) => {
                   const r = row as MediaLibrary
                   return <strong>{r.name}</strong>
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("media.field_path")} minWidth={170} showOverflowTooltip={true}>
+            </VexColumn>
+            <VexColumn label={t("media.field_path")} minWidth={170} showOverflowTooltip={true}>
               {{
                 default: ({ row }) => {
                   const r = row as MediaLibrary
                   return <span class="ol-mono">{r.path}</span>
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("media.field_type")} width={80}>
+            </VexColumn>
+            <VexColumn label={t("media.field_type")} width={80}>
               {{
                 default: ({ row }) => {
                   const r = row as MediaLibrary
                   return <ElTag size="small">{t(`media.type_${libraryTypeKey(r.type)}`)}</ElTag>
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("media.manage.col_state")} minWidth={180}>
+            </VexColumn>
+            <VexColumn label={t("media.manage.col_state")} minWidth={180}>
               {{
                 default: ({ row }) => {
                   const r = row as MediaLibrary
@@ -386,8 +385,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("media.manage.col_metadata")} minWidth={150}>
+            </VexColumn>
+            <VexColumn label={t("media.manage.col_metadata")} minWidth={150}>
               {{
                 default: ({ row }) => {
                   const r = row as MediaLibrary
@@ -445,8 +444,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("media.last_scan")} width={120}>
+            </VexColumn>
+            <VexColumn label={t("media.last_scan")} width={120}>
               {{
                 default: ({ row }) => {
                   const r = row as MediaLibrary
@@ -457,10 +456,10 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
+            </VexColumn>
             {/* 钉在右侧：7 列在 1440 宽窗口里放不下（内容区约 900px），
                 不固定的话「操作」会被推到横向滚动区外面 —— 按钮看不见等于没有。 */}
-            <ElTableColumn label={t("global.operations")} width={186} align="center" fixed="right">
+            <VexColumn label={t("global.operations")} width={186} align="center" fixed="right">
               {{
                 default: ({ row }) => {
                   const r = row as MediaLibrary
@@ -525,8 +524,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-          </ElTable>
+            </VexColumn>
+          </VexTable>
         </ElCard>
 
         {/* 建/编对话框：编辑时后端不允许改 path（UpdateMediaLibraryReq 没有该字段），输入框置灰 */}
@@ -631,16 +630,16 @@ export default defineComponent({
                 {logs.value.length === 0 && !logsLoading.value && (
                   <ElAlert type="info" showIcon={true} closable={false} title={t("media.manage.no_logs")} />
                 )}
-                <ElTable data={logs.value} size="small" style={{ width: "100%" }} v-loading={logsLoading.value}>
-                  <ElTableColumn label={t("media.manage.col_started")} width={150}>
+                <VexTable data={logs.value} size="small" style={{ width: "100%" }} v-loading={logsLoading.value}>
+                  <VexColumn label={t("media.manage.col_started")} width={150}>
                     {{
                       default: ({ row }) => {
                         const r = row as MediaScanLog
                         return <span class="ol-field-help">{formatTime(r.started_at)}</span>
                       },
                     }}
-                  </ElTableColumn>
-                  <ElTableColumn label={t("media.manage.col_finished")} width={150}>
+                  </VexColumn>
+                  <VexColumn label={t("media.manage.col_finished")} width={150}>
                     {{
                       default: ({ row }) => {
                         const r = row as MediaScanLog
@@ -651,16 +650,16 @@ export default defineComponent({
                         )
                       },
                     }}
-                  </ElTableColumn>
-                  <ElTableColumn label={t("media.manage.col_result")} width={120}>
+                  </VexColumn>
+                  <VexColumn label={t("media.manage.col_result")} width={120}>
                     {{
                       default: ({ row }) => {
                         const r = row as MediaScanLog
                         return <span class="ol-mono">{scanLogSummary(r)}</span>
                       },
                     }}
-                  </ElTableColumn>
-                  <ElTableColumn label={t("media.manage.col_error")} minWidth={180} showOverflowTooltip={true}>
+                  </VexColumn>
+                  <VexColumn label={t("media.manage.col_error")} minWidth={180} showOverflowTooltip={true}>
                     {{
                       default: ({ row }) => {
                         const r = row as MediaScanLog
@@ -671,8 +670,8 @@ export default defineComponent({
                         )
                       },
                     }}
-                  </ElTableColumn>
-                </ElTable>
+                  </VexColumn>
+                </VexTable>
               </div>
             ),
           }}

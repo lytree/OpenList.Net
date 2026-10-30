@@ -1,6 +1,7 @@
 import { defineComponent, computed, ref, onMounted } from "vue"
 import { useRoute } from "vue-router"
-import { ElAlert, ElButton, ElCard, ElIcon, ElInput, ElTable, ElTableColumn, ElTag } from "element-plus"
+import { ElAlert, ElButton, ElCard, ElIcon, ElInput, ElTag } from "element-plus"
+import { VexTable, VexColumn } from "~/components/table"
 import { ArrowLeft, Download } from "@element-plus/icons-vue"
 import { shareDownloadLink, shareFsGet, shareFsList } from "~/api/sharePublic"
 import type { FsGetData, Obj } from "~/api/types"
@@ -215,8 +216,8 @@ export default defineComponent({
               </span>
             ))}
           </div>
-          <ElTable data={sorted.value} size="small" style={{ width: "100%" }}>
-            <ElTableColumn label={t("global.name")} minWidth={240}>
+          <VexTable data={sorted.value} size="small" style={{ width: "100%" }}>
+            <VexColumn label={t("global.name")} minWidth={240}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Obj
@@ -233,23 +234,23 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("shares.size")} width={120}>
+            </VexColumn>
+            <VexColumn label={t("shares.size")} width={120}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Obj
                   return r.is_dir ? <span class="ol-muted">-</span> : humanSize(r.size)
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("shares.modified")} width={170}>
+            </VexColumn>
+            <VexColumn label={t("shares.modified")} width={170}>
               {{
                 default: ({ row }) => (
                   <span class="ol-field-help">{formatTime((row as unknown as Obj).modified)}</span>
                 ),
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("global.operations")} width={120} align="center">
+            </VexColumn>
+            <VexColumn label={t("global.operations")} width={120} align="center">
               {{
                 default: ({ row }) => {
                   const r = row as unknown as Obj
@@ -265,8 +266,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-          </ElTable>
+            </VexColumn>
+          </VexTable>
           {!sorted.value.length && (
             <div class="ol-share-empty">{t("shares.empty_dir")}</div>
           )}

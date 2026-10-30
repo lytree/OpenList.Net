@@ -12,10 +12,9 @@ import {
   ElInputNumber,
   ElMessage,
   ElMessageBox,
-  ElTable,
-  ElTableColumn,
   ElTag,
 } from "element-plus"
+import { VexTable, VexColumn } from "~/components/table"
 import { CopyDocument, Delete, Edit, Link, Plus, Refresh, VideoPause, VideoPlay } from "@element-plus/icons-vue"
 import {
   createShare,
@@ -226,8 +225,8 @@ export default defineComponent({
             <ElAlert type="error" showIcon={true} title={error.value} closable={false} />
           )}
 
-          <ElTable data={rows.value} size="small" style={{ width: "100%" }}>
-            <ElTableColumn label={t("shares.id")} width={140}>
+          <VexTable data={rows.value} size="small" style={{ width: "100%" }}>
+            <VexColumn label={t("shares.id")} width={140}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as ShareInfo
@@ -249,17 +248,17 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("shares.files")} minWidth={170} showOverflowTooltip={true}>
+            </VexColumn>
+            <VexColumn label={t("shares.files")} minWidth={170} showOverflowTooltip={true}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as ShareInfo
                   return <span class="ol-mono">{sharePath(r)}</span>
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("shares.creator")} prop="creator" width={100} />
-            <ElTableColumn label={t("shares.pwd")} width={76}>
+            </VexColumn>
+            <VexColumn label={t("shares.creator")} prop="creator" width={100} />
+            <VexColumn label={t("shares.pwd")} width={76}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as ShareInfo
@@ -272,8 +271,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("shares.expires")} width={128}>
+            </VexColumn>
+            <VexColumn label={t("shares.expires")} width={128}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as ShareInfo
@@ -284,8 +283,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("shares.accessed")} width={88}>
+            </VexColumn>
+            <VexColumn label={t("shares.accessed")} width={88}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as ShareInfo
@@ -297,8 +296,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("shares.status")} width={72}>
+            </VexColumn>
+            <VexColumn label={t("shares.status")} width={72}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as ShareInfo
@@ -309,8 +308,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("global.operations")} width={118} align="center">
+            </VexColumn>
+            <VexColumn label={t("global.operations")} width={118} align="center">
               {{
                 default: ({ row }) => {
                   const r = row as unknown as ShareInfo
@@ -350,8 +349,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-          </ElTable>
+            </VexColumn>
+          </VexTable>
         </ElCard>
 
         <ElDialog

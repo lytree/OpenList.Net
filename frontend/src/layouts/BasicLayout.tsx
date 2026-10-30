@@ -1,4 +1,4 @@
-import { computed, defineComponent } from "vue"
+import { computed, defineComponent, ref, watch } from "vue"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import {
   ElAvatar,
@@ -9,7 +9,7 @@ import {
   ElIcon,
   ElTooltip,
 } from "element-plus"
-import { ArrowDown, Moon, Sunny, SwitchButton } from "@element-plus/icons-vue"
+import { ArrowDown, Menu, Moon, Sunny, SwitchButton } from "@element-plus/icons-vue"
 import { availableLanguages, locale, setLocale, t } from "~/i18n"
 import { useSettingsStore } from "~/stores/settings"
 import { useUserStore } from "~/stores/user"
@@ -38,7 +38,14 @@ export default defineComponent({
     const isHome = computed(() => route.name === "home")
     const wide = computed(() => route.meta.wide === true)
 
+    /** 手机端汉堡抽屉：导航与账户操作收进这里，避免顶栏在窄屏挤崩。 */
+    const navOpen = ref(false)
+    watch(() => route.fullPath, () => (navOpen.value = false))
+
+    const isMedia = computed(() => route.path.startsWith("/media"))
+
     async function onLogout() {
+      navOpen.value = false
       await user.logout()
       await router.push("/")
     }
@@ -48,10 +55,26 @@ export default defineComponent({
       if (command === "manage") void router.push("/@manage")
     }
 
+    function goManage() {
+      navOpen.value = false
+      void router.push("/@manage")
+    }
+
     return () => (
       <div class="ol-view">
         <header class="ol-view-header el-header">
           <div class="ol-view-header-inner">
+            <ElButton
+              class="ol-view-menu-btn"
+              text={true}
+              circle={true}
+              onClick={() => (navOpen.value = !navOpen.value)}
+            >
+              <ElIcon>
+                <Menu />
+              </ElIcon>
+            </ElButton>
+
             <RouterLink to="/" class="ol-view-brand" title={settings.siteTitle}>
               {settings.logo ? (
                 <img class="ol-view-logo" src={settings.logo} alt={settings.siteTitle} />
@@ -168,6 +191,93 @@ export default defineComponent({
             {user.isLogin ? t("home.footer.manage") : t("login.login")}
           </RouterLink>
         </footer>
+
+        {/* 手机端汉堡抽屉（断点见 styles/responsive.css）。桌面端这两个节点 display:none。 */}
+        <div
+          class={["ol-view-drawer-mask", navOpen.value && "is-open"]}
+          onClick={() => (navOpen.value = false)}
+        />
+        <aside class={["ol-view-drawer", navOpen.value && "is-open"]}>
+          <RouterLink
+            to="/media"
+            class={["ol-view-drawer-link", isMedia.value && "is-active"]}
+            onClick={() => (navOpen.value = false)}
+          >
+            {t("global.nav_media")}
+          </RouterLink>
+          {user.isLogin && (
+            <RouterLink
+              to="/files"
+              class={["ol-view-drawer-link", isHome.value && "is-active"]}
+              onClick={() => (navOpen.value = false)}
+            >
+              {t("global.nav_home")}
+            </RouterLink>
+          )}
+
+          <div class="ol-view-drawer-sep" />
+
+          <div class="ol-view-drawer-section">{t("global.language")}</div>
+          {availableLanguages.map((lang) => (
+            <button
+              key={lang.code}
+              class="ol-view-drawer-link"
+              onClick={() => {
+                setLocale(lang.code)
+                navOpen.value = false
+              }}
+              style={{
+                border: "none",
+                background:
+                  lang.code === locale.value ? "var(--el-color-primary-light-9)" : "transparent",
+                color: lang.code === locale.value ? "var(--el-color-primary)" : "var(--ol-text)",
+                textAlign: "left",
+                cursor: "pointer",
+                font: "inherit",
+              }}
+            >
+              {lang.name}
+            </button>
+          ))}
+
+          <div class="ol-view-drawer-row" style={{ padding: "10px 12px" }}>
+            <span style={{ fontSize: "14px", color: "var(--ol-text)" }}>{t("home.toolbar.toggle_theme")}</span>
+            <ElButton text={true} circle={true} onClick={toggle}>
+              <ElIcon>{isDark.value ? <Sunny /> : <Moon />}</ElIcon>
+            </ElButton>
+          </div>
+
+          <div class="ol-view-drawer-sep" />
+
+          {user.isLogin ? (
+            <>
+              <div class="ol-view-drawer-user">
+                <ElAvatar size={28}>
+                  {(user.username || "?").slice(0, 1).toUpperCase()}
+                </ElAvatar>
+                <span class="ol-user-name">{user.username}</span>
+              </div>
+              {user.isAdmin && (
+                <div class="ol-view-drawer-link" onClick={goManage}>
+                  {t("global.nav_manage")}
+                </div>
+              )}
+              <div class="ol-view-drawer-link" onClick={() => void onLogout()}>
+                {t("global.logout")}
+              </div>
+            </>
+          ) : (
+            <ElButton
+              type="primary"
+              onClick={() => {
+                navOpen.value = false
+                void router.push("/@login")
+              }}
+            >
+              {t("login.login")}
+            </ElButton>
+          )}
+        </aside>
       </div>
     )
   },

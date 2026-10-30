@@ -7,10 +7,9 @@ import {
   ElIcon,
   ElMessage,
   ElMessageBox,
-  ElTable,
-  ElTableColumn,
   ElTag,
 } from "element-plus"
+import { VexTable, VexColumn } from "~/components/table"
 import { Delete, Edit, Plus, Refresh, VideoPause, VideoPlay } from "@element-plus/icons-vue"
 import {
   deleteStorage,
@@ -116,22 +115,22 @@ export default defineComponent({
             <ElAlert type="error" showIcon={true} title={error.value} closable={false} />
           )}
 
-          <ElTable data={list.value} size="small" style={{ width: "100%" }}>
-            <ElTableColumn
+          <VexTable data={list.value} size="small" style={{ width: "100%" }}>
+            <VexColumn
               label={t("storages.common.mount_path")}
               prop="mount_path"
               minWidth={160}
             />
-            <ElTableColumn label={t("storages.common.driver")} width={150}>
+            <VexColumn label={t("storages.common.driver")} width={150}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as StorageWithDriver
                   return <ElTag size="small" type="info">{r.driver_name || r.driver}</ElTag>
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("storages.common.order")} prop="order" width={80} />
-            <ElTableColumn label={t("storages.common.status")} width={120}>
+            </VexColumn>
+            <VexColumn label={t("storages.common.order")} prop="order" width={80} />
+            <VexColumn label={t("storages.common.status")} width={120}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as StorageWithDriver
@@ -143,14 +142,14 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn
+            </VexColumn>
+            <VexColumn
               label={t("storages.common.remark")}
               prop="remark"
               minWidth={140}
               showOverflowTooltip={true}
             />
-            <ElTableColumn label={t("global.operations")} width={210} align="center">
+            <VexColumn label={t("global.operations")} width={210} align="center">
               {{
                 default: ({ row }) => {
                   const r = row as unknown as StorageWithDriver
@@ -186,8 +185,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-          </ElTable>
+            </VexColumn>
+          </VexTable>
         </ElCard>
       </div>
     )

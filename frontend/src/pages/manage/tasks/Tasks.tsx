@@ -12,10 +12,9 @@ import {
   ElSelect,
   ElOption,
   ElSwitch,
-  ElTable,
-  ElTableColumn,
   ElTag,
 } from "element-plus"
+import { VexTable, VexColumn } from "~/components/table"
 import { Delete, Refresh, RefreshRight, VideoPause } from "@element-plus/icons-vue"
 import {
   TASK_TYPES,
@@ -234,8 +233,8 @@ export default defineComponent({
             </ElButton>
           </div>
 
-          <ElTable data={rows.value} size="small" style={{ width: "100%" }} emptyText={emptyText.value}>
-            <ElTableColumn label={t("tasks.attr.name")} minWidth={220} showOverflowTooltip={true}>
+          <VexTable data={rows.value} size="small" style={{ width: "100%" }} emptyText={emptyText.value}>
+            <VexColumn label={t("tasks.attr.name")} minWidth={220} showOverflowTooltip={true}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as TaskInfo
@@ -247,9 +246,9 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("tasks.attr.creator")} prop="creator" width={110} />
-            <ElTableColumn label={t("tasks.attr.state")} width={120}>
+            </VexColumn>
+            <VexColumn label={t("tasks.attr.creator")} prop="creator" width={110} />
+            <VexColumn label={t("tasks.attr.state")} width={120}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as TaskInfo
@@ -260,8 +259,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("tasks.attr.progress")} minWidth={200}>
+            </VexColumn>
+            <VexColumn label={t("tasks.attr.progress")} minWidth={200}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as TaskInfo
@@ -280,8 +279,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("tasks.attr.time_elapsed")} width={170}>
+            </VexColumn>
+            <VexColumn label={t("tasks.attr.time_elapsed")} width={170}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as TaskInfo
@@ -292,8 +291,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("tasks.attr.err")} minWidth={160} showOverflowTooltip={true}>
+            </VexColumn>
+            <VexColumn label={t("tasks.attr.err")} minWidth={160} showOverflowTooltip={true}>
               {{
                 default: ({ row }) => {
                   const r = row as unknown as TaskInfo
@@ -304,8 +303,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-            <ElTableColumn label={t("tasks.attr.operation")} width={200} align="center">
+            </VexColumn>
+            <VexColumn label={t("tasks.attr.operation")} width={200} align="center">
               {{
                 default: ({ row }) => {
                   const r = row as unknown as TaskInfo
@@ -354,8 +353,8 @@ export default defineComponent({
                   )
                 },
               }}
-            </ElTableColumn>
-          </ElTable>
+            </VexColumn>
+          </VexTable>
         </ElCard>
       </div>
     )
