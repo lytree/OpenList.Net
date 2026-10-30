@@ -3213,3 +3213,128 @@ e2e 脚本：`verify-common.mjs` A 段新增 2 项（匿名 `/api/media/items` 2
    若后续平板横屏也要卡片化，改 `useIsPhone` 的查询即可，组件本身与宽度无关。
 3. **长按菜单**：手机上右键菜单靠「长按」触发，但浏览器不派发 `contextmenu` 的时长与系统一致，
    部分安卓浏览器会同时触发文字选择。目前依赖每行的「更多」按钮，没做长按的额外 `touchstart` 计时。
+
+## 51. A–H 全量回归（2026-10-31）：装置补齐、端口误判与三类脚本漂移
+
+上一轮全量回归是 10-28 的 §41（15 轮）。此后 10-29 至 10-30 落了访客策略（§49）、
+媒体首页拆分（§48）、ElTable→VexTable、手机卡片行（§50），但每次只跑了被改到的那一两个脚本，
+**整套 A–H 一次都没重跑过**。这一轮就是把它跑通。
+
+### 51.1 先把装置补齐（不是「修正代码」）
+
+`run-regression.sh` 的两个硬前置在这台机器上都不在：`.e2e/venv` 从来没建过，`ffmpeg` 也不在 PATH。
+
+| 依赖 | 拿法 | 说明 |
+|---|---|---|
+| `openpyxl` / `python-docx` / `Pillow` | `python -m venv .e2e/venv` + `pip install openpyxl python-docx Pillow` | 脚本优先用 `.e2e/venv/Scripts/python.exe`，拿不到才退回系统 `python` |
+| `ffmpeg` | `pip install imageio-ffmpeg` → 把 `imageio_ffmpeg.get_ffmpeg_exe()` 拷成 `.e2e/bin/ffmpeg.exe` | 它带的正是 **gyan.dev essentials build 7.1**（`--enable-libx264`），省掉 winget/官网 zip |
+
+`AGENTS.md` 里原先写的「bash/python/ffmpeg 在 `C:/Users/hiyan/AppData/Local/tools`」是另一台机器的路径，
+在这台机器上不成立，已改成本节的做法。跑的时候把 `.e2e/bin` 前置进 PATH 即可：
+
+```bash
+export PATH="$PWD/.e2e/bin:/c/Program Files/dotnet:/c/Program Files/nodejs:$PATH"
+PORT=5066 bash frontend/scripts/run-regression.sh
+```
+
+### 51.2 端口检测把 ALG 服务当成冲突（脚本缺陷，已修）
+
+第一次完整跑：**15 轮全红，每轮只有一行**
+
+```
+!! port 5055 held by a non-dotnet process (16960) — refusing to touch it
+```
+
+没有一条断言跑过。真因是 Windows 的 `alg.exe`（ICS，开热点时启动）监听 `192.168.137.1:5055`，
+而旧的 `free_port` 只按端口号匹配：
+
+```bash
+netstat -ano | grep -E ":$PORT .*LISTENING"      # 不区分绑定地址
+```
+
+后端绑的是 `127.0.0.1:$PORT`，与 `192.168.137.1:5055` **地址不重叠、本来能共存**。
+改成只认回环/通配监听（`0.0.0.0` / `127.0.0.1` / `[::]` / `[::1]`）后 5055 立刻可用；
+本轮为避开热点网卡剩余风险另取了 `PORT=5066`。
+
+> 教训：这种「每轮秒退」的失败最容易被读成「环境没准备好」而放过 —— 15 轮 0 断言其实等于**没跑**，
+> 不能算「跑过但环境问题」。
+
+### 51.3 NuGet 还原崩溃的真因：`ProgramFiles(x86)` 不在环境变量里
+
+之前（10-30 打包时）记的是 `The type initializer for 'NuGet.Configuration.ConfigurationDefaults' threw an exception`，
+一直以为是 NuGet 自己的配置坏了。这次用 `-v:diag` 拿到了真堆栈：
+
+```
+System.ArgumentNullException: Value cannot be null. (Parameter 'path1')
+  at System.IO.Path.Combine(String path1, String path2)
+  at NuGet.Common.NuGetEnvironment.CalculateFolderPath(NuGetFolderPath folder)
+  at NuGet.Configuration.XPlatMachineWideSetting..ctor()
+```
+
+即 `XPlatMachineWideSetting` 取 `%ProgramFiles(x86)%` 拿到了 **null**。这个 bash 会话里
+`ProgramFiles` / `ProgramFiles(x86)` / `ProgramData` / `LOCALAPPDATA` 全都不存在（只有 `SYSTEMROOT`/`WINDIR`）。
+修法（`export` 设不了带括号的名字，必须用 `env` 传）：
+
+```bash
+env "PATH=/c/Program Files/dotnet:/usr/bin:/bin" \
+    "ProgramFiles(x86)=C://Program Files (x86)" \
+    dotnet restore src/OpenList.Core/OpenList.Core.csproj
+```
+
+恢复正常（`NU1900` 只是漏洞库取不到，离线可忽略）。回归脚本自身**不跑还原**（它只
+`dotnet <dll>`），所以只需在 `dotnet build` 那一步加这个前缀。
+
+### 51.4 8 个红轮：三类漂移，没有一个是「功能真的坏了」
+
+| 轮次 | 现象 | 真因 |
+|---|---|---|
+| B/ops（verify-v2） | 目录树/表格/README 全 0 命中 | 游客进不了 `/files`（`home_guest_access` 默认 false，§49） |
+| D/preview | 预览器「没被自动选中」 | 同上：页面停在登录页 |
+| B/ops（verify-ops） | 解压后 API 列目录 `code=401` | `page.request` 不带 localStorage，直连 `/api/fs/list` 没带 token |
+| E/media-manage | 「建库后表格出现新行」 | `.el-table__row` 是 VexTable 之前的类名 |
+| E/scrape | 「管理台出现两个库」 | 同上 |
+| E/dashboard | 「健康表 1 行」 | `.el-table__body tr` 同上 |
+| B/rename | 列表项读不到 | `.el-table__body .ol-file-name` 同上 |
+| F/media | 「匿名访问图片 401」 | 断言过期：§46 之后图片端点已 `AllowAnonymous`，应为 200 |
+| F/dimensions | 「匿名访问人物头像 → 401」 | 同上，且它是最后一条，直接让整轮报 FAILED |
+
+归成三类：
+
+1. **访客策略的连带影响没同步到脚本**（§49 说「其余脚本前置条件仍然成立」是错的）：
+   `verify-v2` / `verify-preview` 直接 `#/?path=...` 进，被 `requiresAuth + guestSwitch` 弹到登录页。
+   修法与 `verify-editor` / `verify-rename` / `verify-torrent` 一致：先 `POST /api/auth/login` 拿 token，
+   再 `addInitScript` 写进 localStorage。
+2. **表格选择器停留在 ElTable 时代**：`.el-table__body tr` / `.el-table__row` → `.vxe-body--row`；
+   表头全选 `.el-table__header .el-checkbox` → `.vxe-header--column .vxe-cell--checkbox`
+   （vxe 的点击处理只认自己的 `.vxe-cell--checkbox`，点外层不会翻转）。
+3. **两条断言自己过期**：媒体图片/人物头像在 §46 已随「媒体公开门面」放开匿名，断言该是 200。
+
+另有一条容易被误判成「后端坏了」的：`page.request` 是**独立的请求上下文**，不共享页面的
+localStorage。`home_guest_access=false` 之后凡是「页面里登录、再用 `page.request` 直连断言」的地方
+都必须显式带 `Authorization`。
+
+### 51.5 结果
+
+`PORT=5066 bash frontend/scripts/run-regression.sh` —— **15/15 全绿，439 条断言**：
+
+| 轮次 | 断言 | 轮次 | 断言 |
+|---|---|---|---|
+| AEG/common | 54 | F/media | 23 |
+| B/ops（v2 18 + ops 24） | 42 | E/media-manage | 20 |
+| C/upload | 22 | F/dimensions | 56 |
+| D/preview | 18 | E/scrape | 39 |
+| D/preview-extra | 15 | E/dashboard | 40 |
+| D/editor | 11 | E/backup | 39 |
+| B/rename | 12 | E/messenger | 33 |
+| D/torrent | 15 | | |
+
+日志留在 `.e2e/regression-1031-final.log`（`gitignore` 覆盖，不入库）。
+
+### 51.6 遗留
+
+1. **`safe-delete` 守卫会拦装置重建**：`media-manage` 轮的 `rm -rf G:/Share/ol-v2-media` 有 2002 个条目，
+   高于沙箱阈值 50，会打出 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`；本轮是靠「脚本随即自己重建目录」才通过的。
+   CI/真机没有这个守卫，别把这当成稳定行为。
+2. **浏览器仍是本机 Edge**（`channel: "msedge"`）：这台机器没有 Playwright 自带的 Chromium，
+   换机器时要先确认有 Edge，或 `npx playwright install chromium` 后把 channel 去掉。
+3. **`ffmpeg` 是 venv 里的 `imageio-ffmpeg` 副本**，不是系统安装；`.e2e/` 不入库，新克隆的机器要按 §51.1 重做一遍。
