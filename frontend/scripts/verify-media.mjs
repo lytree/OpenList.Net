@@ -107,7 +107,7 @@ check("图片端点 Content-Type", posterReq.headers()["content-type"] === "imag
 const missing = await page.request.get(`${BASE}/api/media/items/2/image`, { headers: { Authorization: token } })
 check("无海报条目 404", missing.status() === 404, `status=${missing.status()}`)
 const anon = await page.request.get(`${BASE}/api/media/items/1/image`)
-check("匿名访问图片 401", anon.status() === 401, `status=${anon.status()}`)
+check("匿名访问图片 200（媒体门面对游客开放，§46）", anon.status() === 200, `status=${anon.status()}`)
 
 // ---------- 5. 播放 + 进度上报 ----------
 await page.locator(".ol-media-file button", { hasText: "Play" }).first().click()

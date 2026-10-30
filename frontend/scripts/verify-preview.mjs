@@ -28,6 +28,16 @@ page.on("console", (msg) => {
 })
 page.on("pageerror", (e) => errors.push(String(e)))
 
+// 登录：文件首页默认要登录（`home_guest_access=false`，见文档 §49），
+// 游客会被弹到登录页 —— 那样预览器一条都挂不上，症状是「自动选中」类断言全 0。
+const token = await page.request
+  .post(`${BASE}/api/auth/login`, {
+    data: { username: process.env.ADMIN_USER || "admin", password: process.env.ADMIN_PASS || "e2e12345" },
+  })
+  .then((r) => r.json())
+  .then((body) => body.data.token)
+await page.addInitScript((value) => localStorage.setItem("token", value), token)
+
 /** 打开某个文件的预览页并等它稳定下来（异步分包 + 取数都要时间）。 */
 async function openFile(name, wait = 2500) {
   await page.goto(`${BASE}/#/?path=${encodeURIComponent(`${TARGET}/${name}`)}`, {

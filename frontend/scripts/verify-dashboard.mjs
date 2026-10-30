@@ -172,7 +172,7 @@ check("媒体库卡副标题：2 个条目", libSub.includes("2"), libSub)
 
 // 元数据健康表（第一块面板）
 const healthPanel = page.locator(".ol-dash-panel").first()
-const rows = healthPanel.locator(".el-table__body tr")
+const rows = healthPanel.locator(".vxe-body--row")
 check("健康表 1 行", (await rows.count()) === 1, `rows=${await rows.count()}`)
 const cells = []
 const cellCount = await rows.first().locator("td").count()

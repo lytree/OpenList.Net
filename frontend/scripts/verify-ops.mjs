@@ -89,7 +89,7 @@ async function rowMenu(name, menuText) {
   await ensureNoDialog()
   await search.fill(name)
   await page.waitForTimeout(400)
-  const row = page.locator(".el-table__body tr").filter({ hasText: name }).first()
+  const row = page.locator(".vxe-body--row").filter({ hasText: name }).first()
   await row.locator(".ol-file-name").first().click({ button: "right" })
   await page.waitForTimeout(250)
   const item = page.locator(".ol-ctx-item").filter({ hasText: menuText }).first()
@@ -122,6 +122,10 @@ await page.locator("button:has-text('Login')").first().click()
 await page.waitForTimeout(1500)
 check("登录成功", (await page.locator(".ol-user-name").count()) > 0)
 
+// `page.request` 是独立的请求上下文，**不带**页面的 localStorage —— 直连 API 的断言
+// 必须自己带 Authorization。否则在 `home_guest_access=false`（§49）下全是 401。
+const token = await page.evaluate(() => localStorage.getItem("token"))
+
 // ---------- 进入挂载点 ----------
 await page.goto(`${BASE}/#/?path=/e2e`, { waitUntil: "networkidle" })
 await waitList()
@@ -135,15 +139,15 @@ check("新建文件对话框打开", (await page.locator(".el-dialog:visible .el
 await page.locator(".el-dialog:visible input").first().fill("e2e-new.txt")
 await page.locator(".el-dialog:visible button:has-text('创建')").first().click()
 await waitList()
-check("新建文件后列表出现该项", (await page.locator(".el-table__body tr").filter({ hasText: "e2e-new.txt" }).count()) > 0)
+check("新建文件后列表出现该项", (await page.locator(".vxe-body--row").filter({ hasText: "e2e-new.txt" }).count()) > 0)
 
 // ---------- 2. 删除空目录 ----------
 await moreMenu("删除空目录")
 check("删除空目录对话框打开", (await page.locator(".el-dialog:visible .el-dialog__title:has-text('删除空目录')").count()) > 0)
 await page.locator(".el-dialog:visible button:has-text('开始清理')").first().click()
 await waitList()
-check("空目录 B 已被递归清理", (await page.locator(".el-table__body tr").filter({ hasText: "空目录B" }).count()) === 0)
-check("非空目录 A 保留", (await page.locator(".el-table__body tr").filter({ hasText: "子目录A" }).count()) > 0)
+check("空目录 B 已被递归清理", (await page.locator(".vxe-body--row").filter({ hasText: "空目录B" }).count()) === 0)
+check("非空目录 A 保留", (await page.locator(".vxe-body--row").filter({ hasText: "子目录A" }).count()) > 0)
 
 // ---------- 3. 解压 ----------
 const hasDecompress = await rowMenu("bundle.zip", "解压")
@@ -153,6 +157,7 @@ await page.locator(".el-dialog:visible button:has-text('开始解压')").first()
 await waitList()
 const extracted = await page.request.post(`${BASE}/api/fs/list`, {
   data: { path: "/e2e/bundle", password: "", page: 1, per_page: 0 },
+  headers: { Authorization: token ?? "" },
 })
 const extractedBody = await extracted.json()
 check(
@@ -226,7 +231,6 @@ check("未选目标目录时给出提示且不提交", (await page.locator(".el-
 await closeDialog()
 
 // ---------- 6b. 递归移动真实执行（整树搬移 + 删源）----------
-const token = await page.evaluate(() => localStorage.getItem("token"))
 const apiPost = (apiPath, body) =>
   page.request.post(`${BASE}/api${apiPath}`, {
     data: body,

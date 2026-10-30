@@ -56,11 +56,11 @@ await page.goto(`${BASE}/#/?path=/e2e`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 
 const listNames = async () =>
-  page.locator(".el-table__body .ol-file-name").allTextContents()
+  page.locator(".vxe-body--row .ol-file-name").allTextContents()
 
 /** 全选当前页并打开批量重命名对话框。 */
 async function selectAllAndOpen() {
-  await page.locator(".el-table__header .el-checkbox").first().click()
+  await page.locator(".vxe-header--column .vxe-cell--checkbox").first().click()
   await page.waitForTimeout(300)
   await page.locator(".ol-batch-bar button", { hasText: "重命名" }).first().click()
   await page.waitForTimeout(500)

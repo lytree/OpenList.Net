@@ -31,6 +31,16 @@ page.on("console", (msg) => {
 })
 page.on("pageerror", (e) => errors.push(String(e)))
 
+// 登录：文件首页默认要登录（`home_guest_access=false`，见文档 §49），游客会被弹到登录页，
+// 于是「目录树 / 表格 / README」全是 0 命中 —— 症状看起来像渲染坏了。
+const token = await page.request
+  .post(`${BASE}/api/auth/login`, {
+    data: { username: process.env.ADMIN_USER || "admin", password: process.env.ADMIN_PASS || "e2e12345" },
+  })
+  .then((r) => r.json())
+  .then((body) => body.data.token)
+await page.addInitScript((value) => localStorage.setItem("token", value), token)
+
 const modeBtn = (label) => page.locator(`.el-button-group .el-button:has-text('${label}')`).first()
 
 await page.goto(`${BASE}/#/?path=${encodeURIComponent(TARGET)}`, { waitUntil: "networkidle" })
@@ -41,7 +51,7 @@ const treeNodes = await page.locator(".ol-tree .el-tree-node").count()
 check("目录树渲染", treeNodes > 0, `nodes=${treeNodes}`)
 
 // --- 列表 + 分页 ---
-const rows = await page.locator(".el-table__body tr").count()
+const rows = await page.locator(".vxe-body--row").count()
 check(`列表按每页 ${PAGE_SIZE} 条分页`, rows === PAGE_SIZE, `rows=${rows}`)
 
 const totalTag = await page.locator(".ol-files-bar .el-tag").last().textContent().catch(() => "")
@@ -54,7 +64,7 @@ check("分页条出现且总数正确", pagerCount > 0 && pagerTotal.includes(St
 if (pagerCount > 0) {
   await page.locator(".ol-pager-actions .el-button", { hasText: "2" }).first().click()
   await page.waitForTimeout(500)
-  const rowsP2 = await page.locator(".el-table__body tr").count()
+  const rowsP2 = await page.locator(".vxe-body--row").count()
   check(`第 2 页只剩 ${TOTAL - PAGE_SIZE} 条`, rowsP2 === TOTAL - PAGE_SIZE, `rows=${rowsP2}`)
   await page.locator(".ol-pager-actions .el-button", { hasText: "1" }).first().click()
   await page.waitForTimeout(400)
@@ -91,7 +101,7 @@ check("过滤输入框存在", (await searchInput.count()) > 0)
 if (await searchInput.count()) {
   await searchInput.fill("file-1")
   await page.waitForTimeout(500)
-  const rowsFiltered = await page.locator(".el-table__body tr").count()
+  const rowsFiltered = await page.locator(".vxe-body--row").count()
   const tagFiltered = await page.locator(".ol-files-bar .el-tag").last().textContent().catch(() => "")
   check("过滤命中 file-1* 10 条（file-10..file-19）", rowsFiltered === 10, `rows=${rowsFiltered}`)
   check(

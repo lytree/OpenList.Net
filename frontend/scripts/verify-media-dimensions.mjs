@@ -238,7 +238,7 @@ const goslingImg = await page.request.get(`${BASE}/api/media/persons/${gosling?.
 })
 check("无头像人物 → 404", goslingImg.status() === 404, `status=${goslingImg.status()}`)
 const anonImg = await page.request.get(`${BASE}/api/media/persons/${ford?.id}/image`)
-check("匿名访问人物头像 → 401", anonImg.status() === 401, `status=${anonImg.status()}`)
+check("匿名访问人物头像 → 200（媒体门面对游客开放，§46）", anonImg.status() === 200, `status=${anonImg.status()}`)
 
 const stats = await api("get", `/media/stats?library_id=${libId}`)
 check("stats：条目数 3", stats.data?.item_count === 3, JSON.stringify(stats.data?.item_count))

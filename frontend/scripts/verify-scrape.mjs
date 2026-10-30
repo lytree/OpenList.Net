@@ -143,8 +143,8 @@ check("pending 保持不变", fullAfter?.pending === 3, `pending=${fullAfter?.pe
 await page.goto(`${BASE}/#/@manage/media`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 
-const rowFull = page.locator(".el-table__row", { hasText: LIB_FULL })
-const rowEmpty = page.locator(".el-table__row", { hasText: LIB_EMPTY })
+const rowFull = page.locator(".vxe-body--row", { hasText: LIB_FULL })
+const rowEmpty = page.locator(".vxe-body--row", { hasText: LIB_EMPTY })
 check("管理台出现两个库", (await rowFull.count()) === 1 && (await rowEmpty.count()) === 1)
 
 // 列顺序：名称 0 / 路径 1 / 类型 2 / 扫描状态 3 / 元数据 4 / 最近扫描 5 / 操作 6

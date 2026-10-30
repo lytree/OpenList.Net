@@ -45,9 +45,16 @@ say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 # 上一轮异常退出时可能留下一个还占着端口的服务（它绑着旧数据库），
 # 那样新一轮的创建挂载会写进另一个库，症状是「接口 200 但列表为空」。
 # 只杀确实是 OpenList.Server 的进程，别的程序一律不动。
+#
+# **只看回环/通配监听**：后端绑的是 `127.0.0.1:$PORT`，而 Windows 的 `alg.exe`
+# （ICS，开热点时启动）会占着 `192.168.137.1:5055` —— 按「端口号 + LISTENING」
+# 粗暴匹配会把它当成冲突，于是每一轮都以「非 dotnet 进程占着端口」秒退，
+# 15 轮全红却没有一行真断言跑过。绑定地址不重叠就不算冲突。
 free_port() {
   local pid
-  pid="$(netstat -ano 2>/dev/null | grep -E ":$PORT .*LISTENING" | awk '{print $NF}' | head -1)"
+  pid="$(netstat -ano 2>/dev/null | awk -v p=":$PORT" '
+    $1 == "TCP" && $4 == "LISTENING" &&
+    $2 ~ ("^(0\\.0\\.0\\.0|127\\.0\\.0\\.1|\\[::\\]|\\[::1\\])" p "$") { print $NF; exit }')"
   [ -z "$pid" ] && return 0
   if tasklist //FI "PID eq $pid" 2>/dev/null | grep -qi "dotnet.exe"; then
     echo "!! port $PORT held by stale dotnet $pid — killing"
