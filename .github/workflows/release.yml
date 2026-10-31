@@ -143,6 +143,12 @@ jobs:
           name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           fail_on_unmatched_files: true
+          # Pre-release tags (v0.2.0-beta.1, v1.0.0-rc.1, ...) must never become
+          # the repo's "Latest": /releases/latest redirects there and users who
+          # just grab the newest version would land on a beta. Anything without
+          # a hyphen (v1.2.3) is a stable release and keeps Latest.
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+          make_latest: ${{ contains(env.RELEASE_TAG, '-') && 'false' || 'true' }}
           files: release-assets/*
           body: |
             ## Version
