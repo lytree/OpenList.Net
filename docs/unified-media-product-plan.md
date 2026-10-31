@@ -3339,3 +3339,61 @@ localStorage。`home_guest_access=false` 之后凡是「页面里登录、再用
 2. **浏览器仍是本机 Edge**（`channel: "msedge"`）：这台机器没有 Playwright 自带的 Chromium，
    换机器时要先确认有 Edge，或 `npx playwright install chromium` 后把 channel 去掉。
 3. **`ffmpeg` 是 venv 里的 `imageio-ffmpeg` 副本**，不是系统安装；`.e2e/` 不入库，新克隆的机器要按 §51.1 重做一遍。
+
+## 52. 全量回归复跑：三个「种子默认值」把旧行为翻掉了（2026-11-01）
+
+§51 的 15 轮跑在 10-31 07:29，而当天下午到晚上落的设置接线（`ac2bfbc`，54 文件）之后
+只补了单测 —— 而那批改动正好动到列表过滤（`hide_files`）、分享访问、分页和 index.html 注入，
+全是 E2E 的覆盖区。所以这轮先把 16 轮（含 `I/thumb`）整体复跑一遍。
+
+### 52.1 首跑：14/16，红的 6 条断言全是同一个根因
+
+| 轮次 | 断言 | 现象 |
+|---|---|---|
+| B/ops | `列表按每页 30 条分页 rows=44`、`分页条出现且总数正确 total=""`、`网格视图渲染 30 张卡 cards=44` | 44 项一屏全出、分页条消失 |
+| B/ops | `打包下载对话框打开`（`verify-ops` 超时 30s） | 右键菜单里没有「打包下载」入口 |
+| D/preview | `归档预览器被自动选中 Direct Download`、`归档根层 4 个条目 rows=0` | 归档不再自动预览，落在「下载」页 |
+
+三个种子默认值（`DbInitializer.DefaultSettings`）接线时被写成了 `pagination_type=all`、
+`package_download=false`、`preview_archives_by_default=false`（`share_preview_archives_by_default` 同理），
+而**接线前的实际行为**是：每页 30 条 + 打包入口恒在 + 归档自动预览。
+也就是说升级后老用户会同时丢三样东西，而这不是任何需求要的。
+
+### 52.2 口径：接线只暴露开关，不动默认体验
+
+改回与接线前一致 —— `pagination_type=pagination`、`package_download=true`、
+`preview_archives_by_default=true`、`share_preview_archives_by_default=true`。
+「上游默认值就是 all」这句注释也一并改掉：它是上游的取舍，不代表本仓库的既有行为，
+拿它当默认值等于借接线偷偷做产品决策。
+
+注意 `SeedDefaultSettingsAsync` **只补缺失键**、只纠正 group/type，不会改已有值：
+所以这次修复只对全新库生效，跑过 `ac2bfbc` 那版一天的库要手动改或恢复分组默认值
+（该提交未发布，实际影响为零）。
+
+### 52.3 复跑结果（16/16 + 手机端）
+
+| 轮次 | 断言 | 轮次 | 断言 |
+|---|---|---|---|
+| AEG/common | 54 | E/media-manage | 20 |
+| B/ops（v2 18 + ops 24） | 42 | I/thumb | 28 |
+| C/upload | 22 | F/dimensions | 56 |
+| D/preview | 18 | E/scrape | 39 |
+| D/preview-extra | 15 | E/dashboard | 40 |
+| D/editor | 11 | E/backup | 39 |
+| B/rename | 12 | E/messenger | 33 |
+| D/torrent | 15 | | |
+| F/media | 23 | | |
+
+16/16 全绿（`bash frontend/scripts/run-regression.sh`，日志 `.e2e/regression-1101b.log`）。
+单测：后端 608 项（607 通过 / 1 跳过）、前端 vitest 252。
+
+手机端那轮不在编排器的默认清单里，单独跑：`verify-phone-list.mjs` 13/13 ——
+其中「文件行更多菜单 7 项」正是 `package_download` 的哨兵，默认值改回 `true` 后仍是 7 项。
+
+### 52.4 两个环境坑
+
+1. **`dotnet test` 报「运行了零个测试」（退出码 5）**：TUnit 走 Microsoft.Testing.Platform 桥接时
+   在这台机器上收集不到用例，`dotnet build` 后再 `dotnet test` 也一样。直接跑宿主即可：
+   `dotnet tests/OpenList.Tests/bin/Debug/net10.0/OpenList.Tests.dll`。
+2. **`pnpm` 不在 Git-Bash 的 PATH 里**：仓库锁的是 `pnpm@12.15.0`，用 `corepack pnpm build|test`。
+   首次 `pnpm build` 偶发在 `prepareOutDir` 阶段被沙箱的批量删除守卫打断，重跑即过。

@@ -581,18 +581,21 @@ public static class DbInitializer
         ("audio_cover", "", SettingValueType.String, SettingFlag.Public, 3, null),
         ("ocr_api", "", SettingValueType.String, SettingFlag.Public, 3, null),
         ("readme_autorender", "true", SettingValueType.Bool, SettingFlag.Public, 3, null),
-        ("package_download", "false", SettingValueType.Bool, SettingFlag.Public, 3, null),
+        // 这三个「默认值」必须保持接线前的行为：设置是**暴露开关**，不是顺手改默认体验。
+        // 曾经写成 package_download=false / preview_archives_by_default=false / pagination_type=all，
+        // 结果升级后打包入口消失、归档不再自动预览、列表不再分页 —— A–H 回归立刻红了 6 条。
+        ("package_download", "true", SettingValueType.Bool, SettingFlag.Public, 3, null),
         ("share_preview", "true", SettingValueType.Bool, SettingFlag.Public, 3, null),
         ("share_archive_preview", "false", SettingValueType.Bool, SettingFlag.Public, 3, null),
-        ("preview_archives_by_default", "false", SettingValueType.Bool, SettingFlag.Public, 3, null),
+        ("preview_archives_by_default", "true", SettingValueType.Bool, SettingFlag.Public, 3, null),
         ("preview_download_by_default", "false", SettingValueType.Bool, SettingFlag.Public, 3, null),
-        ("share_preview_archives_by_default", "false", SettingValueType.Bool, SettingFlag.Public, 3, null),
+        ("share_preview_archives_by_default", "true", SettingValueType.Bool, SettingFlag.Public, 3, null),
         ("share_preview_download_by_default", "false", SettingValueType.Bool, SettingFlag.Public, 3, null),
         ("non_efs_zip_encoding", "", SettingValueType.String, SettingFlag.Public, 3, null),
 
         // --- Group 4: GLOBAL ---
         ("hide_files", "", SettingValueType.Text, SettingFlag.Public, 4, null),
-        ("pagination_type", "all", SettingValueType.Select, SettingFlag.Public, 4, "all,pagination"),
+        ("pagination_type", "pagination", SettingValueType.Select, SettingFlag.Public, 4, "all,pagination"),
         ("default_page_size", "30", SettingValueType.Number, SettingFlag.Public, 4, null),
         ("ignore_paths", "", SettingValueType.Text, SettingFlag.Public, 4, null),
         ("ignore_direct_link_params", "", SettingValueType.String, SettingFlag.Public, 4, null),

@@ -84,7 +84,8 @@ export default defineComponent({
     const settings = useSettingsStore()
 
     /**
-     * 打包下载总开关（设置项 `package_download`，默认关闭）。
+     * 打包下载总开关（设置项 `package_download`，种子默认开启 —— 接线前入口恒在，
+     * 默认关会让人以为功能没了）。
      * 关闭时右键菜单与批量操作条都不出现入口 —— 打包是纯浏览器端行为（streamsaver），
      * 后端没有可拦的端点，所以这个开关只能在前端生效。
      */

@@ -226,3 +226,22 @@ G12：`media_default_provider`（provider 选择未消费此键，实际注册�
 | 8 | **P2 收尾** `proxy_types` | ⏳ 等决策（驱动名 vs 挂载粒度、与存储 `web_proxy` 的优先级） |
 | 9 | **P3 收尾** PDF 首页 | ⛔ 环境阻塞（NuGet 不可达 + 无 PDF 渲染器） |
 | 10 | **P1-1c** 纯展示类 | 🚫 复核后判为 N/A 或属新功能，见上方「复核结论」B/C 类 |
+
+## 接线纪律：默认值不得改变接线前的行为（2026-11-01）
+
+五批接线合进 `ac2bfbc` 之后，按 §52 复跑全量回归立刻红了 6 条断言 —— 不是逻辑错，
+是三个种子默认值顺手把旧行为翻掉了：
+
+| 键 | 当时的默认 | 接线前的行为 | 现在 |
+|---|---|---|---|
+| `pagination_type` | `all` | 每页 30 条（`default_page_size`） | `pagination` |
+| `package_download` | `false` | 右键菜单/批量条恒有打包入口 | `true` |
+| `preview_archives_by_default` / `share_preview_archives_by_default` | `false` | 打开压缩包默认落在归档预览 | `true` |
+
+规则：**设置项是把已有行为暴露成开关，不是借机做产品决策**。上游的默认值（例如 `all`）
+只能当参考，它与本仓库的既有行为冲突时以既有行为为准 —— 否则升级后用户会同时丢功能，
+而变更日志里一个字都没有。给新键定默认值的自检动作：把该键对应的代码退回到「不读设置」时
+的行为是什么，默认值就写什么。
+
+顺带记住 `SeedDefaultSettingsAsync` 只补缺失键、只纠正 group/type，**不会改已有值**：
+默认值改回去只对全新库生效，已落库的要靠 `/admin/setting/default?group=` 或手改。

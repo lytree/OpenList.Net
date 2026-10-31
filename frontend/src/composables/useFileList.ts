@@ -69,7 +69,8 @@ export function useFileList() {
    *
    * `all` 时一次渲染全部条目（`paginate` 收到 pageSize=0 会原样返回），
    * 分页条也会因为 `pages === 1` 自动隐藏 —— 不用再给宿主加一个开关。
-   * 上游默认值就是 `all`：小目录里翻页纯粹是负担。
+   * 上游默认值虽是 `all`，本仓库的种子给的是 `pagination` —— 接线前就是每页 30 条，
+   * 换默认值等于升级后悄悄改掉用户看到的列表形态（E2E 的 B/ops 轮正是守这条）。
    */
   const paged = computed(() => settings.get("pagination_type") !== "all")
 
