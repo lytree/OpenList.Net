@@ -229,7 +229,8 @@ export default defineComponent({
 
           {settings.ldapEnabled && (
             <ElCheckbox v-model={form.useLdap} class="ol-auth-ldap">
-              {t("login.ldap_tips")}
+              {/* 管理员在「LDAP 设置」里填了提示文案就用它，未填回退多语言默认值 */}
+              {settings.ldapLoginTips || t("login.ldap_tips")}
             </ElCheckbox>
           )}
 

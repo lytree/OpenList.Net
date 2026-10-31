@@ -37,6 +37,8 @@
     "too_large": "文件太大，无法预览，请下载后查看。",
     "lines": "{{count}} 行",
     "iframe_missing_scheme": "该预览需要在站点设置里配置 URL 模板。",
+    "external_hint": "已交给本机程序打开；没反应就点下面的按钮再试一次。",
+    "external_blocked": "浏览器拦截了新窗口，请点按钮手动打开。",
     "no_inline_preview": "该类型没有内置预览，下载后本地打开。",
     "failed_to_render": "预览失败：{{message}}",
     "failed_load_img": "图片加载失败",

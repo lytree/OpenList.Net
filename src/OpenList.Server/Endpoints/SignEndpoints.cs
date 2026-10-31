@@ -42,11 +42,12 @@ public static class SignEndpoints
             ISignService signs,
             IFileSystemService fs,
             MountService mount,
+            ISettingService settings,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false, settings);
         }).AllowAnonymous();
 
         // /p/{path}?sign=... — 代理下载：始终通过服务器流式传输文件
@@ -67,13 +68,14 @@ public static class SignEndpoints
             IFileSystemService fs,
             MountService mount,
             ThumbnailService thumbs,
+            ISettingService settings,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             if (IsThumbRequest(type))
                 return await ThumbnailAsync(thumbs, fullPath, w, h, at, fmt, q, ctx, head: false);
-            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true, settings);
         }).AllowAnonymous();
 
         // HEAD /d/ 与 /p/ — Go 在 GET 之外同时注册了 HEAD。播放器与下载管理器
@@ -84,11 +86,12 @@ public static class SignEndpoints
             string? sign,
             ISignService signs,
             MountService mount,
+            ISettingService settings,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false, settings);
         }).AllowAnonymous();
         app.MapMethods("/p/{**path}", new[] { "HEAD" }, async (
             string path,
@@ -99,13 +102,14 @@ public static class SignEndpoints
             ISignService signs,
             MountService mount,
             ThumbnailService thumbs,
+            ISettingService settings,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             if (IsThumbRequest(type))
                 return await ThumbnailAsync(thumbs, fullPath, w, h, null, null, null, ctx, head: true);
-            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true, settings);
         }).AllowAnonymous();
 
         // --- 归档签名路由（对齐 Go /ad/、/ap/、/ae/）---
@@ -312,8 +316,9 @@ public static class SignEndpoints
     /// <param name="fullPath">请求的完整挂载路径。</param>
     /// <param name="ctx">当前 HTTP 上下文。</param>
     /// <param name="preferProxy">true 走代理通道，false 优先直链。</param>
+    /// <param name="settings">设置服务（直链参数转发规则）。</param>
     private static async Task<IResult> DownloadAsync(
-        MountService mount, string fullPath, HttpContext ctx, bool preferProxy)
+        MountService mount, string fullPath, HttpContext ctx, bool preferProxy, ISettingService settings)
     {
         if (mount.FindDriverForPath(fullPath) is IFileSystemLinkProvider linkProvider)
         {
@@ -335,7 +340,16 @@ public static class SignEndpoints
             }
 
             if (!preferProxy && link?.Url is { Length: > 0 } url)
-                return Results.Redirect(url, permanent: false);
+            {
+                // 直链默认不带请求参数；forward_direct_link_params 打开后按黑名单转发
+                // （见 DirectLinkParams）。sign 恒不下发，避免把本站签名泄漏给上游。
+                var target = await DirectLinkParams.ApplyAsync(
+                    url,
+                    ctx.Request.Query.Select(kv => new KeyValuePair<string, string?>(kv.Key, kv.Value.ToString())),
+                    settings,
+                    ctx.RequestAborted);
+                return Results.Redirect(target, permanent: false);
+            }
 
             if (preferProxy && link?.RangeReader is { } reader)
             {

@@ -26,6 +26,10 @@ public sealed class FileSystemService : IFileSystemService
     private readonly ITaskService? _tasks;
     private readonly IPublicUrlResolver? _publicUrls;
     private readonly IThumbnailUrlBuilder? _thumbs;
+    private readonly ListFilterOptionsProvider? _listFilter;
+
+    /// <summary>非 UTF-8 标志位 zip 的条目名解码编码设置键。</summary>
+    private const string ZipEntryEncodingKey = "non_efs_zip_encoding";
 
     /// <summary>创建文件系统服务实例（仅用于单元测试）。</summary>
     public FileSystemService(MountService mount) => _mount = mount;
@@ -75,6 +79,7 @@ public sealed class FileSystemService : IFileSystemService
     /// <param name="tasks">后台任务服务（用于 move/copy 任务化，可选）。</param>
     /// <param name="publicUrls">站点基地址解析器（用于把 raw_url 生成为绝对地址，可选）。</param>
     /// <param name="thumbs">缩略图 URL 构造器（可选；未注入时 <c>Obj.Thumb</c> 恒为空）。</param>
+    /// <param name="listFilter">列表过滤快照（可选；未注入时不过滤任何条目）。</param>
     public FileSystemService(
         MountService mount,
         ISignService? signs,
@@ -83,7 +88,8 @@ public sealed class FileSystemService : IFileSystemService
         IServiceScopeFactory? scopes,
         ITaskService? tasks,
         IPublicUrlResolver? publicUrls = null,
-        IThumbnailUrlBuilder? thumbs = null)
+        IThumbnailUrlBuilder? thumbs = null,
+        ListFilterOptionsProvider? listFilter = null)
     {
         _mount = mount;
         _signs = signs;
@@ -93,6 +99,7 @@ public sealed class FileSystemService : IFileSystemService
         _tasks = tasks;
         _publicUrls = publicUrls;
         _thumbs = thumbs;
+        _listFilter = listFilter;
     }
 
     /// <summary>
@@ -122,6 +129,12 @@ public sealed class FileSystemService : IFileSystemService
             .OrderBy(e => !e.IsDir)
             .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        // hide_files / ignore_system_files：过滤发生在「发布索引」与「分页」之前，
+        // 这样搜索结果、总数、分页数都不会把被隐藏的条目算进去。
+        var filter = _listFilter?.Current;
+        if (filter is not null)
+            entries = entries.Where(e => !filter.ShouldHide(e.Name)).ToList();
 
         // 发布该目录最新条目列表，让订阅者（增量索引）在此刻与真实文件系统对齐。
         if (_hooks is not null)
@@ -870,7 +883,9 @@ public sealed class FileSystemService : IFileSystemService
             {
                 // 驱动的 System 以其挂载点为根，因此传入相对挂载点的路径。
                 var relPath = _mount.ToDriverRelativePath(path);
-                var entries = reader.ListArchiveEntriesAsync(relPath, ct).GetAwaiter().GetResult();
+                // 密码此前没传下去 —— 加密包列表会直接失败（驱动侧只有密码参数，缺了就抛）。
+                var entries = reader.ListArchiveEntriesAsync(relPath, password, ResolveZipEntryEncoding(), ct)
+                    .GetAwaiter().GetResult();
                 var list = entries.Select(e => new ArchiveEntry
                 {
                     Name = e.Name, Size = e.Size, IsDir = e.IsDir, Modified = e.Modified,
@@ -891,7 +906,8 @@ public sealed class FileSystemService : IFileSystemService
             try
             {
                 var relArchive = _mount.ToDriverRelativePath(archivePath);
-                var stream = reader.OpenArchiveEntryAsync(relArchive, entryPath, password, ct).GetAwaiter().GetResult();
+                var stream = reader.OpenArchiveEntryAsync(relArchive, entryPath, password, ResolveZipEntryEncoding(), ct)
+                    .GetAwaiter().GetResult();
                 return Task.FromResult(stream is null
                     ? Resp<Stream>.Fail("entry not found in archive", RespCodes.NotFound)
                     : Resp<Stream>.Ok(stream));
@@ -912,12 +928,38 @@ public sealed class FileSystemService : IFileSystemService
                 // 驱动的 System 以其挂载点为根，因此传入相对挂载点的路径。
                 var relArchive = _mount.ToDriverRelativePath(archivePath);
                 var relDest = _mount.ToDriverRelativePath(destPath);
-                decompressor.DecompressAsync(relArchive, relDest, password, ct).GetAwaiter().GetResult();
+                decompressor.DecompressAsync(relArchive, relDest, password, ResolveZipEntryEncoding(), ct)
+                    .GetAwaiter().GetResult();
             }
             catch (Exception ex) { return Task.FromResult(Resp.Fail(ex.Message, RespCodes.InternalError)); }
             return Task.FromResult(Resp.Ok());
         }
         return Task.FromResult(Resp.Fail("driver does not support decompression", RespCodes.NotImplemented));
+    }
+
+    /// <summary>
+    /// 读取 <c>non_efs_zip_encoding</c>：非 UTF-8 标志位 zip 条目名的解码编码。
+    /// </summary>
+    /// <remarks>
+    /// 归档操作是低频动作（打开一个包才调用一次），且 <c>SettingService.GetAsync</c> 走
+    /// 单条主键查询，没有必要像列表过滤那样做快照；未注入作用域（单元测试里直接 new）时返回
+    /// <c>null</c>，驱动按默认 UTF-8 处理。
+    /// </remarks>
+    private string? ResolveZipEntryEncoding()
+    {
+        if (_scopes is null) return null;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            if (scope.ServiceProvider.GetService<ISettingService>() is not { } settings) return null;
+            var resp = settings.GetAsync(ZipEntryEncodingKey).GetAwaiter().GetResult();
+            return resp.Data?.Value;
+        }
+        catch
+        {
+            // 读设置失败不应让「打开压缩包」整体 500 —— 退回默认编码即可。
+            return null;
+        }
     }
 
     /// <summary>递归收集目录（最深 3 层），用于前端目录选择器。</summary>

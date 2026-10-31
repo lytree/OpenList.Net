@@ -46,7 +46,7 @@ import FolderTree from "~/components/FolderTree"
 import FileContextMenu, { type ContextMenuItem } from "~/components/FileContextMenu"
 import FileGridView from "~/pages/home/GridView"
 import FileListRows from "~/pages/home/ListRows"
-import { kindColor, kindIcon } from "~/pages/home/kind"
+import ThumbIcon from "~/components/ThumbIcon"
 import { rowActionsFor, type RowAction } from "~/pages/home/rowActions"
 import { useIsPhone } from "~/composables/useIsPhone"
 import FilePager from "~/pages/home/Pager"
@@ -55,6 +55,8 @@ import { isArchiveName } from "~/utils/archive"
 import { isTorrentName, parseTorrent, torrentMagnet } from "~/utils/torrent"
 import { onEvent } from "~/utils/bus"
 import ReadmeCard from "~/pages/home/ReadmeCard"
+import AnnouncementCard from "~/pages/home/AnnouncementCard"
+import { useSettingsStore } from "~/stores/settings"
 import UploadPanel from "~/pages/home/upload/UploadPanel"
 import { PreviewHost } from "~/pages/home/previews"
 import { humanSize, formatTime } from "~/utils/format"
@@ -79,6 +81,14 @@ export default defineComponent({
   setup() {
     const files = useFileList()
     const ops = useFileOps(files)
+    const settings = useSettingsStore()
+
+    /**
+     * 打包下载总开关（设置项 `package_download`，默认关闭）。
+     * 关闭时右键菜单与批量操作条都不出现入口 —— 打包是纯浏览器端行为（streamsaver），
+     * 后端没有可拦的端点，所以这个开关只能在前端生效。
+     */
+    const packageDownloadEnabled = computed(() => settings.getBool("package_download"))
     const passwordInput = ref("")
     const { mode, treeVisible } = useViewLayout()
 
@@ -132,16 +142,20 @@ export default defineComponent({
           },
           { key: "copy_link", label: t("home.toolbar.copy_link"), handler: () => void copyObjLink(obj) },
           { key: "share", label: "分享", handler: () => openDialog("share", [obj]) },
-          { key: "package", label: "打包下载", handler: () => openDialog("package-download", [obj]) },
         )
+        if (packageDownloadEnabled.value) {
+          items.push({ key: "package", label: "打包下载", handler: () => openDialog("package-download", [obj]) })
+        }
         if (isArchiveName(obj.name)) {
           items.push({ key: "decompress", label: "解压", handler: () => openDialog("decompress", [obj]) })
         }
       } else {
         items.push(
           { key: "share", label: "分享", handler: () => openDialog("share", [obj]) },
-          { key: "package", label: "打包下载", handler: () => openDialog("package-download", [obj]) },
         )
+        if (packageDownloadEnabled.value) {
+          items.push({ key: "package", label: "打包下载", handler: () => openDialog("package-download", [obj]) })
+        }
       }
       if (writable.value) {
         items.push(
@@ -354,8 +368,6 @@ export default defineComponent({
       { value: "size", label: "大小" },
       { value: "modified", label: "修改时间" },
     ]
-
-    const iconOf = (row: Obj) => kindIcon(row)
 
     async function submitPassword() {
       if (!passwordInput.value) return
@@ -639,12 +651,14 @@ export default defineComponent({
                 {t("ops.selected_count", { count: ops.selected.value.length })}
               </span>
               <ElSpace size={8}>
-                <ElButton
-                  size="small"
-                  onClick={() => openDialog("package-download", ops.selected.value)}
-                >
-                  打包下载
-                </ElButton>
+                {packageDownloadEnabled.value && (
+                  <ElButton
+                    size="small"
+                    onClick={() => openDialog("package-download", ops.selected.value)}
+                  >
+                    打包下载
+                  </ElButton>
+                )}
                 <ElButton size="small" onClick={() => openDialog("share", ops.selected.value)}>
                   分享
                 </ElButton>
@@ -692,6 +706,8 @@ export default defineComponent({
             </div>
           )}
         </div>
+
+        <AnnouncementCard />
 
         <ElCard
           shadow="never"
@@ -766,12 +782,9 @@ export default defineComponent({
                 {{
                   default: ({ row }) => {
                     const obj = row as unknown as Obj
-                    const Icon = iconOf(obj)
                     return (
                       <span class="ol-file-name" onClick={() => void files.open(obj)}>
-                        <ElIcon size={16} color={kindColor(obj)}>
-                          <Icon />
-                        </ElIcon>
+                        <ThumbIcon obj={obj} size={40} iconSize={18} />
                         <span>{obj.name}</span>
                       </span>
                     )

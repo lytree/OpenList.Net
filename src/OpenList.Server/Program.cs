@@ -14,6 +14,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
 using OpenList.Infrastructure.Services;
+using OpenList.Infrastructure.Tasks;
 using OpenList.Infrastructure.Thumbnails;
 using OpenList.Media;
 using OpenList.Server.Endpoints;
@@ -157,6 +158,9 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IWebAuthnService, WebAuthnService>();
 builder.Services.AddSingleton<IScanService, ScanService>();
 builder.Services.AddSingleton<ISearchService, SearchService>();
+// 任务并发上限（copy_task_threads_num 等 8 个键）：与缩略图同一套 20s 快照，
+// TaskService 创建任务时只读内存，不查库。必须先于 ITaskService 注册（构造注入）。
+builder.Services.AddSingleton<ITaskConcurrencyProvider, TaskConcurrencyProvider>();
 builder.Services.AddSingleton<ITaskService, TaskService>();
 // SignService must be singleton (matches MountService lifetime) so FileSystemService
 // can resolve it. Uses the same JWT secret for HMAC signing.
@@ -180,6 +184,8 @@ builder.Services.AddSingleton<FfmpegProcessRunner>();
 builder.Services.AddSingleton<FfmpegTool>();
 builder.Services.AddSingleton<ThumbnailService>();
 builder.Services.AddSingleton<ThumbnailOptionsProvider>();
+// 列表过滤（hide_files / ignore_system_files）同样用 20s 快照，避免 fs/list 逐请求查库。
+builder.Services.AddSingleton<ListFilterOptionsProvider>();
 builder.Services.AddSingleton<IThumbnailUrlBuilder>(sp => new ThumbnailUrlBuilder(
     sp.GetRequiredService<ThumbnailOptionsProvider>(),
     sp.GetService<IPublicUrlResolver>(),
@@ -230,7 +236,8 @@ builder.Services.AddSingleton<IFileSystemService>(sp =>
         sp.GetService<IServiceScopeFactory>(),
         sp.GetService<ITaskService>(),
         sp.GetService<IPublicUrlResolver>(),
-        sp.GetService<IThumbnailUrlBuilder>()));
+        sp.GetService<IThumbnailUrlBuilder>(),
+        sp.GetService<ListFilterOptionsProvider>()));
 // Multipart (chunked) upload sessions — singleton; depends only on IFileSystemService.
 builder.Services.AddSingleton<IMultipartUploadService, MultipartUploadService>();
 // S3 gateway multipart-upload sessions — singleton; parts staged on disk, TTL-reaped
@@ -425,22 +432,47 @@ if (app.Environment.IsDevelopment())
 // SPA fallback — matches ALL unmatched paths (including those with file extensions),
 // mirroring Go's NoRoute catch-all. The default MapFallback uses {*path:nonfile}
 // which excludes paths with extensions (e.g. /somefile.txt) and returns 404.
-app.MapFallback("{*path}", ctx =>
+app.MapFallback("{*path}", async (HttpContext ctx, ISettingService settings) =>
 {
     var distDir = appConfig.DistDir;
     var indexPath = Path.Combine(distDir, "index.html");
-    if (File.Exists(indexPath))
+    if (!File.Exists(indexPath))
     {
-        ctx.Response.ContentType = "text/html";
-        // Prevent caching of index.html so users always get the latest app shell
-        ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
-        ctx.Response.Headers.Pragma = "no-cache";
-        ctx.Response.Headers.Expires = "0";
-
-        return ctx.Response.SendFileAsync(indexPath);
+        ctx.Response.StatusCode = 404;
+        return;
     }
-    ctx.Response.StatusCode = 404;
-    return Task.CompletedTask;
+
+    ctx.Response.ContentType = "text/html";
+    // Prevent caching of index.html so users always get the latest app shell
+    ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+    ctx.Response.Headers.Pragma = "no-cache";
+    ctx.Response.Headers.Expires = "0";
+
+    // 站点设置里的自定义 head/body 片段（`customize_head` / `customize_body`）。
+    // 语义与 Go 版一致：原样插入，管理员自己负责内容合法 —— 所以这里不做转义。
+    // 全部为空时走 SendFileAsync，避免把整页 HTML 读进内存再写一遍。
+    string head = "";
+    string body = "";
+    try
+    {
+        var pub = await settings.GetPublicAsync();
+        head = pub.Data?.TryGetValue("customize_head", out var h) == true ? h ?? "" : "";
+        body = pub.Data?.TryGetValue("customize_body", out var b) == true ? b ?? "" : "";
+    }
+    catch
+    {
+        // 设置表读不出来不该让首页 500 —— 退化成不带自定义片段的原始外壳。
+    }
+
+    if (head.Length == 0 && body.Length == 0)
+    {
+        await ctx.Response.SendFileAsync(indexPath);
+        return;
+    }
+
+    var html = await File.ReadAllTextAsync(indexPath, ctx.RequestAborted);
+    html = SpaHtmlInjector.Apply(html, head, body);
+    await ctx.Response.WriteAsync(html, ctx.RequestAborted);
 });
 
 // Initialize database + seed admin user + load storages

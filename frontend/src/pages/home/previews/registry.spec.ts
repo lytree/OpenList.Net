@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { ObjType } from "~/api/types"
-import { convertUrl, guessObjType, parseIframePreviews, resolvePreviews } from "./registry"
+import {
+  convertUrl,
+  guessObjType,
+  parseExternalPreviews,
+  parseExtList,
+  parseIframePreviews,
+  resolvePreviews,
+} from "./registry"
 import type { PreviewEntry } from "./types"
 
 const file = (name: string, type: ObjType, size = 1024) => ({ name, type, size })
@@ -144,6 +151,52 @@ describe("convertUrl", () => {
 
   it("$durl 使用下载直链而不是预览地址", () => {
     expect(convertUrl("$durl", args)).toBe(args.d_url)
+  })
+})
+
+describe("设置驱动的扩展名与归档默认位", () => {
+  it("parseExtList 兼容中英文逗号、点号前缀与空白", () => {
+    expect(parseExtList("mp3, flac，M4A")).toEqual(["mp3", "flac", "m4a"])
+    expect(parseExtList(".mkv .mp4")).toEqual(["mkv", "mp4"])
+    // 空值不能让调用方拿到空表：那样所有媒体预览都会消失
+    expect(parseExtList("   ")).toBeUndefined()
+    expect(parseExtList("")).toBeUndefined()
+    expect(parseExtList(undefined)).toBeUndefined()
+  })
+
+  it("audio_types 整表替换内置音频扩展名", () => {
+    expect(keys(resolvePreviews(file("a.m4b", ObjType.UNKNOWN)))[0]).not.toBe("audio")
+    expect(keys(resolvePreviews(file("a.m4b", ObjType.UNKNOWN), { typeExts: { audio: ["m4b"] } }))[0]).toBe(
+      "audio",
+    )
+  })
+
+  it("text_types 让自定义文本扩展名可预览", () => {
+    const result = resolvePreviews(file("a.weird", ObjType.UNKNOWN), { typeExts: { text: ["weird"] } })
+    expect(keys(result)[0]).toBe("text")
+  })
+
+  it("preview_archives_by_default=false：下载排最前，归档仍在下拉里", () => {
+    const result = keys(resolvePreviews(file("bundle.zip", ObjType.UNKNOWN), { archiveDefault: false }))
+    expect(result[0]).toBe("download")
+    expect(result).toContain("archive")
+  })
+
+  it("默认（未传 archiveDefault）仍保持归档优先，兼容既有行为", () => {
+    expect(keys(resolvePreviews(file("bundle.zip", ObjType.UNKNOWN)))[0]).toBe("archive")
+  })
+
+  it("external_previews 按扩展名注入外置预览条目", () => {
+    const externalPreviews = parseExternalPreviews(JSON.stringify({ mp4: { VLC: "vlc://$eurl" } }))
+    const result = resolvePreviews(file("a.mp4", ObjType.VIDEO), { externalPreviews })
+    const entry = result.find((e) => e.key.startsWith("external:"))
+    expect(entry?.key).toBe("external:mp4:VLC")
+    expect(entry?.props?.scheme).toBe("vlc://$eurl")
+  })
+
+  it("guessObjType 与主列表共用可配置扩展名（归档内外表现一致）", () => {
+    expect(guessObjType("a.m4b")).toBe(ObjType.UNKNOWN)
+    expect(guessObjType("a.m4b", { audio: ["m4b"] })).toBe(ObjType.AUDIO)
   })
 })
 

@@ -244,6 +244,19 @@ round_media_manage() {
   finish_round "E/media-manage" $?
 }
 
+round_thumb() {
+  say "round: thumb (/p?type=thumb 缩略图服务)"
+  local dir; dir="$(round_dir thumb)"; mkdir -p "$dir"
+  # fixture 由脚本自己造（ffmpeg 现生成图片/音频/视频，PDF 手拼），这里只给一个空目录。
+  local root; root="$(fixture_root thumb)"; mkdir -p "$root"
+  begin_round "$dir" || return 1
+  mount_setup /e2e "$root" || { stop_server; return 1; }
+  # 脚本要往装置里写文件，得知道路径；/e2e 这类参数会被 MSYS 改写，统一用 env 关掉转换。
+  export E2E_ROOT="$root"
+  run_node "$dir/run.log" "$FE/scripts/verify-thumb.mjs"
+  finish_round "I/thumb" $?
+}
+
 round_dimensions() {
   say "round: dimensions (F 人物 / 片商 / 系列 / 口味 / 播放列表)"
   local dir; dir="$(round_dir dimensions)"; mkdir -p "$dir"
@@ -316,7 +329,7 @@ round_upload() {
 # --------------------------------------------------------------------------- 入口
 
 WANT=("$@")
-[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage dimensions scrape dashboard backup messenger)
+[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage thumb dimensions scrape dashboard backup messenger)
 
 for name in "${WANT[@]}"; do
   # 轮次名用连字符（preview-extra），函数名用下划线 —— 这里做一次映射

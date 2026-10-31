@@ -64,13 +64,16 @@ public sealed class LocalDriver : DriverBase, IFileSystemArchiveReader, IFileSys
     /// 列出压缩包内的归档条目。
     /// </summary>
     /// <param name="path">压缩包在挂载文件系统中的路径。</param>
+    /// <param name="password">可选的加密压缩包密码。</param>
+    /// <param name="entryEncoding">非 UTF-8 条目名的解码编码（站点设置 <c>non_efs_zip_encoding</c>）。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>归档条目列表。</returns>
     /// <exception cref="InvalidOperationException">驱动尚未初始化时抛出。</exception>
-    public Task<IReadOnlyList<ArchiveEntry>> ListArchiveEntriesAsync(string path, CancellationToken ct = default)
+    public Task<IReadOnlyList<ArchiveEntry>> ListArchiveEntriesAsync(
+        string path, string? password = null, string? entryEncoding = null, CancellationToken ct = default)
     {
         if (System is null) throw new InvalidOperationException("driver not initialized");
-        return Task.FromResult(SharpCompressArchiveSupport.ListEntries(System, path));
+        return Task.FromResult(SharpCompressArchiveSupport.ListEntries(System, path, password, entryEncoding));
     }
 
     /// <summary>
@@ -79,16 +82,19 @@ public sealed class LocalDriver : DriverBase, IFileSystemArchiveReader, IFileSys
     /// <param name="archivePath">压缩包路径。</param>
     /// <param name="entryPath">归档内条目的相对路径（<c>/</c> 分隔，不含前导斜杠）。</param>
     /// <param name="password">可选的加密压缩包密码。</param>
+    /// <param name="entryEncoding">非 UTF-8 条目名的解码编码。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>可 Seek 的只读流；条目不存在时为 <c>null</c>。</returns>
     public Task<Stream?> OpenArchiveEntryAsync(
         string archivePath,
         string entryPath,
         string? password = null,
+        string? entryEncoding = null,
         CancellationToken ct = default)
     {
         if (System is null) throw new InvalidOperationException("driver not initialized");
-        return Task.FromResult(SharpCompressArchiveSupport.OpenEntry(System, archivePath, entryPath, password));
+        return Task.FromResult(
+            SharpCompressArchiveSupport.OpenEntry(System, archivePath, entryPath, password, entryEncoding));
     }
 
     /// <summary>
@@ -97,13 +103,16 @@ public sealed class LocalDriver : DriverBase, IFileSystemArchiveReader, IFileSys
     /// <param name="archivePath">压缩包在挂载文件系统中的路径。</param>
     /// <param name="destPath">解压目标目录。</param>
     /// <param name="password">可选的加密压缩包密码。</param>
+    /// <param name="entryEncoding">非 UTF-8 条目名的解码编码。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>表示解压完成的任务。</returns>
     /// <exception cref="InvalidOperationException">驱动尚未初始化，或归档条目含不安全路径时抛出。</exception>
-    public Task DecompressAsync(string archivePath, string destPath, string? password = null, CancellationToken ct = default)
+    public Task DecompressAsync(
+        string archivePath, string destPath, string? password = null, string? entryEncoding = null,
+        CancellationToken ct = default)
     {
         if (System is null) throw new InvalidOperationException("driver not initialized");
-        SharpCompressArchiveSupport.Decompress(System, archivePath, destPath, password);
+        SharpCompressArchiveSupport.Decompress(System, archivePath, destPath, password, entryEncoding);
         return Task.CompletedTask;
     }
 

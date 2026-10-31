@@ -64,6 +64,15 @@ export function useFileList() {
    */
   const pageSize = ref(resolvePageSize(settings.getNumber("default_page_size", 30)))
 
+  /**
+   * 分页方式（设置 `pagination_type`，`all` / `pagination`）。
+   *
+   * `all` 时一次渲染全部条目（`paginate` 收到 pageSize=0 会原样返回），
+   * 分页条也会因为 `pages === 1` 自动隐藏 —— 不用再给宿主加一个开关。
+   * 上游默认值就是 `all`：小目录里翻页纯粹是负担。
+   */
+  const paged = computed(() => settings.get("pagination_type") !== "all")
+
   /** 目录恒在前，再按选定字段排序；同名时退化为名字比较，保证顺序稳定。 */
   const sortedObjs = computed(() => {
     const factor = sortOrder.value === "asc" ? 1 : -1
@@ -86,7 +95,9 @@ export function useFileList() {
   })
 
   /** 当前页要渲染的条目。排序/过滤/分页三者共用这一条流水线。 */
-  const pagedObjs = computed(() => paginate(filteredObjs.value, page.value, pageSize.value))
+  const pagedObjs = computed(() =>
+    paginate(filteredObjs.value, page.value, paged.value ? pageSize.value : 0),
+  )
 
   /** 供 UI 直接用：当前页的可见条目。 */
   const viewObjs = computed(() => pagedObjs.value.items)
@@ -214,6 +225,7 @@ export function useFileList() {
     kindFilter,
     page,
     pageSize,
+    paged,
     total,
     provider,
     canWrite,

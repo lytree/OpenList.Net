@@ -1,25 +1,38 @@
 using System.Collections.Concurrent;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Infrastructure.Tasks;
 
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
 /// 内存型后台任务服务，带进度追踪。按 id 跟踪复制/上传/传输/下载/解压/移动等任务。
 /// 对应 Go 参考实现 <c>pkg/task</c> 任务管理器。
+/// <para>
+/// 并发上限由 <c>*_task_threads_num</c> 设置提供（见 <see cref="TaskConcurrencyLimits"/>）：
+/// 每个任务类型一条队列，超出上限的任务保持 <see cref="TaskState.Pending"/>（等待中），
+/// 拿到名额才转 <see cref="TaskState.Running"/>。未注入并发提供者时不限流。
+/// </para>
 /// </summary>
 public sealed class TaskService : ITaskService
 {
     private readonly TimeProvider _time;
+    private readonly ITaskConcurrencyProvider? _concurrency;
     private readonly ConcurrentDictionary<string, TaskRecord> _tasks = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _cts = new();
+    private readonly ConcurrentDictionary<TaskType, ConcurrencyGate> _gates = new();
     private int _seq;
 
     /// <summary>
     /// 创建任务服务实例。
     /// </summary>
     /// <param name="time">时间源（可选，默认系统时区）。</param>
-    public TaskService(TimeProvider? time = null) => _time = time ?? TimeProvider.System;
+    /// <param name="concurrency">并发上限来源（可选；为空时所有类型都不限并发，与接线前行为一致）。</param>
+    public TaskService(TimeProvider? time = null, ITaskConcurrencyProvider? concurrency = null)
+    {
+        _time = time ?? TimeProvider.System;
+        _concurrency = concurrency;
+    }
 
     /// <summary>
     /// 按 id 获取某个类型的任务信息。
@@ -185,7 +198,8 @@ public sealed class TaskService : ITaskService
         rec.Info.Progress = 0;
         rec.Info.EndTime = null;
         rec.Info.CompletedAt = null;
-        await RunAsync(tid, rec);
+        ScheduleRun(tid, rec);
+        await Task.CompletedTask;
         return Resp.Ok();
     }
 
@@ -220,12 +234,30 @@ public sealed class TaskService : ITaskService
         };
         _tasks[tid] = rec;
 
-        _ = RunAsync(tid, rec);
+        ScheduleRun(tid, rec);
         return Task.FromResult(tid);
     }
 
     /// <summary>
+    /// 把任务体丢到线程池执行。
+    /// <para>
+    /// 不能直接 <c>_ = RunAsync(...)</c>：复制/移动的任务体是同步 IO（<c>File.Copy</c>），
+    /// 在第一个真正的 await 之前整段都在调用线程上跑完 —— 于是 <see cref="CreateAsync"/>
+    /// 会一直阻塞到复制结束，批量复制的 6 个任务被顺序串起来，并发上限根本没机会生效，
+    /// 同时把 <c>fs/copy</c> 的 HTTP 请求也一起卡住。换成线程池调度后：
+    /// 创建立即返回、并发闸门真正生效、请求线程不被后台 IO 占用。
+    /// </para>
+    /// </summary>
+    private void ScheduleRun(string tid, TaskRecord rec)
+        => _ = Task.Run(() => RunAsync(tid, rec));
+
+    /// <summary>
     /// 执行任务工作负载并更新状态：成功 /（取消时）已取消 /（异常时）出错，结束后记录结束时间。
+    /// <para>
+    /// 先按任务类型申请并发名额，期间状态停在 <see cref="TaskState.Pending"/>；
+    /// 拿到名额才开始跑并把状态切成 <see cref="TaskState.Running"/>。名额在 finally 归还，
+    /// 无论成功、失败还是取消都不会泄漏（漏一个名额该类型就永久少一条执行通道）。
+    /// </para>
     /// </summary>
     private async Task RunAsync(string tid, TaskRecord rec)
     {
@@ -236,15 +268,19 @@ public sealed class TaskService : ITaskService
             if (rec.Info.State == TaskState.Pending) rec.Info.State = TaskState.Running;
         });
 
+        ConcurrencyGate.Lease? lease = null;
         try
         {
+            lease = await GateFor(rec.Info.Type).AcquireAsync(rec.Cts.Token).ConfigureAwait(false);
             rec.Info.State = TaskState.Running;
+            rec.Info.StartTime = _time.GetUtcNow();
             await rec.Work(progress, rec.Cts.Token);
             rec.Info.State = TaskState.Succeeded;
             rec.Info.Progress = rec.Info.Total > 0 ? rec.Info.Total : rec.Info.Progress;
         }
         catch (OperationCanceledException)
         {
+            // 包含「排队等名额时被取消」：此时任务从未真正开始，直接记为已取消。
             rec.Info.State = TaskState.Canceled;
         }
         catch (Exception ex)
@@ -254,10 +290,25 @@ public sealed class TaskService : ITaskService
         }
         finally
         {
+            lease?.Dispose();
             rec.Info.EndTime = _time.GetUtcNow();
             rec.Info.CompletedAt = rec.Info.EndTime;
             _cts.TryRemove(tid, out _);
         }
+    }
+
+    /// <summary>
+    /// 取某任务类型的并发闸门，并按最新设置同步上限。
+    /// 上限没变时只做一次无锁读取（<see cref="ConcurrencyGate.Limit"/>），不产生锁竞争。
+    /// </summary>
+    private ConcurrencyGate GateFor(TaskType type)
+    {
+        var gate = _gates.GetOrAdd(type, static _ => new ConcurrencyGate(0));
+        if (_concurrency is null) return gate;
+
+        var target = Math.Max(0, _concurrency.Current.LimitOf(type));
+        if (gate.Limit != target) gate.SetLimit(target);
+        return gate;
     }
 
     /// <summary>判断任务状态是否为已结束。</summary>

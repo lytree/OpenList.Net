@@ -373,7 +373,7 @@ public static class AdminEndpoints
         // 字段名用 snake_case：与紧邻的 /index/progress、/scan/progress 同一族，前端
         // 直接照抄键名。注意全局 JsonNamingPolicy.CamelCase 对已是小写开头的键是**空操作**
         //（它只处理首字母大写的情况），所以 snake_case 能原样出去。
-        g.MapGet("/system/info", (AppConfiguration cfg) =>
+        g.MapGet("/system/info", async (AppConfiguration cfg, ILdapAuthenticator ldapAuth) =>
         {
             var distDir = TryFullPath(cfg.DistDir);
             DateTimeOffset? distBuiltAt = null;
@@ -433,7 +433,9 @@ public static class AdminEndpoints
                     s3 = cfg.S3.Enable,
                     ftp = cfg.FTP.Enable,
                     sftp = cfg.SFTP.Enable,
-                    ldap = !string.IsNullOrWhiteSpace(cfg.Ldap.Url),
+                    // LDAP 是否可用以「设置表开关 + 服务器地址」为准（与登录页同一口径），
+                    // 不再只看 appsettings —— 否则设置页关掉后这里仍显示启用。
+                    ldap = await ldapAuth.IsEnabledAsync(),
                     mcp = cfg.MCP.Enable,
                     search_index = cfg.SearchIndex,
                     max_connections = cfg.MaxConnections,
@@ -443,12 +445,14 @@ public static class AdminEndpoints
 
         // --- Search index management ---
         // POST /admin/index/build — body { paths, max_depth }. Full rebuild.
-        g.MapPost("/index/build", async (IndexBuildReq req, ISearchService svc) =>
-            Results.Ok(await svc.BuildIndexAsync(req.Paths ?? [], req.MaxDepth)));
+        // max_depth 缺省（<0）时取设置项 max_index_depth（默认 20），
+        // 这样管理员在设置页调过的深度对前端「一键重建」也生效。
+        g.MapPost("/index/build", async (IndexBuildReq req, ISearchService svc, ISettingService settings) =>
+            Results.Ok(await svc.BuildIndexAsync(req.Paths ?? [], await ResolveIndexDepthAsync(req.MaxDepth, settings))));
 
         // POST /admin/index/update — body { paths, max_depth }. Incremental update.
-        g.MapPost("/index/update", async (IndexBuildReq req, ISearchService svc) =>
-            Results.Ok(await svc.UpdateIndexAsync(req.Paths ?? [], req.MaxDepth)));
+        g.MapPost("/index/update", async (IndexBuildReq req, ISearchService svc, ISettingService settings) =>
+            Results.Ok(await svc.UpdateIndexAsync(req.Paths ?? [], await ResolveIndexDepthAsync(req.MaxDepth, settings))));
 
         // POST /admin/index/stop — cancel a running index build.
         g.MapPost("/index/stop", async (ISearchService svc) =>
@@ -479,6 +483,27 @@ public static class AdminEndpoints
         g.MapGroup("/task").MapTaskRoutes();
 
         return app;
+    }
+
+    /// <summary>
+    /// 解析索引深度：请求显式给了非负值就用它，否则读设置项 <c>max_index_depth</c>
+    /// （默认 20，见 <c>DbInitializer.DefaultSettings</c>）。设置项读不出来时回退 20，
+    /// 不让一次索引因为设置表异常而变成「无限深度全盘扫描」。
+    /// </summary>
+    private static async Task<int> ResolveIndexDepthAsync(int requested, ISettingService settings)
+    {
+        if (requested >= 0) return requested;
+        const int fallback = 20;
+        try
+        {
+            var resp = await settings.GetAsync("max_index_depth");
+            if (resp.Code != RespCodes.Ok || resp.Data?.Value is null) return fallback;
+            return int.TryParse(resp.Data.Value, out var depth) && depth >= 0 ? depth : fallback;
+        }
+        catch
+        {
+            return fallback;
+        }
     }
 
     /// <summary>

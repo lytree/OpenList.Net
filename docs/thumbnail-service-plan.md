@@ -1,6 +1,6 @@
 # 缩略图服务技术方案（M4 遗留项）
 
-> 状态：**已实现（图片 / 音频 / 视频；PDF 仍为 415）**。对应
+> 状态：**已实现（图片 / 音频 / 视频；PDF 仍为 415）**。列表槽位与 E2E 轮次见 §0.2。对应
 > `docs/frontend-reference-analysis.md` §200 与 `docs/unified-media-product-plan.md` §3211
 > 中记为「留到 M4」的 `/p?type=thumb`。
 >
@@ -48,8 +48,20 @@
 + `tests/OpenList.Tests/ThumbnailEndpointTests.cs`（11 条，含「不传 type 时行为不变」「非法 w 不 400」「HEAD 不生成」「415/404 原因头」「真 ffmpeg 出图并二次命中缓存」）
 + `tests/OpenList.Tests/ThumbnailFfmpegTests.cs`（6 条，用仓库内 `.e2e/bin/ffmpeg.exe` 现录 3 秒 testsrc，断言产物是 320×320 的 JPEG）。
 
-**还没做**：PDF 首页、E2E 那一轮 `verify-thumb.mjs`（脚本骨架与 fixture 思路见 §12）、
-`thumb_cache_max_mb` 的定时清理（当前靠写入时每 64 次触发一次淘汰）、列表行的 40×40 缩略图槽位。
+**还没做**：PDF 首页（阻塞原因见 §0.2）、`thumb_cache_max_mb` 的定时清理
+（当前靠写入时每 64 次触发一次淘汰）。
+
+---
+
+## 0.2 实施记录（2026-10-31，第二批：列表槽位 + E2E）
+
+| 项 | 落点 | 说明 |
+|---|---|---|
+| 列表 40px 缩略图槽位 | `frontend/src/components/ThumbIcon.tsx`（新）+ `pages/home/index.tsx`（表格名称列）+ `pages/home/ListRows.tsx`（手机卡片行） | 统一成一个组件：有 `thumb` 画图，没有/加载失败退图标。**只做一级降级**（缩略图 → 图标），不像网格那样再退原图 —— 40px 的槽位为一张全尺寸图付流量不划算。手机行用 36px，好塞进 52px 的行高 |
+| E2E 轮次 `verify-thumb.mjs` | `frontend/scripts/verify-thumb.mjs` + `run-regression.sh` 的 `round_thumb`（`I/thumb`） | 28 条断言，覆盖 §12 的 9 条（并拆细）：默认关闭不下发 → 开启后下发 → 生成/命中/ETag → 改文件失效 → txt 415 → w=9999 夹到 1024 → 带封面 200 / 无封面 404 `no-cover` → PDF 415 → **不带 type 仍是原文件** → 表格/网格/手机三处槽位。fixture 由脚本用 ffmpeg 现造，PDF 用脚本内手拼的最小合法文件 |
+| 资源 404 的口径 | 同上 | 列表对「无封面 mp3」必然发一次取不到图的请求（后端无法预知有没有内嵌封面），前端按约定降级为图标。E2E 把这类 404 与**脚本级异常**分开统计，否则这一轮永远红 |
+
+**PDF 首页为什么这轮没做**：不是取舍变化，是环境阻塞 —— 本机 NuGet 源不可达（`dotnet package search PDFtoImage` 直接报「无法加载服务索引」），本地缓存里也没有 PDFtoImage/PDFium；同时机器上没有任何可用的 PDF 渲染器（`pdftoppm`/`mutool`/`gs` 都不存在）。要么联网补包（PDFtoImage 5.4.0，含 PDFium + SkiaSharp native，Docker 运行时还要补 `libfontconfig1`/`libstdc++`），要么改用外部渲染器（`pdftoppm`，与现有「外部 ffmpeg」同构，镜像里补一个 poppler-utils）。两条路都要动 Dockerfile 与发布体积，属于需要拍板的取舍，留到下一批。
 
 ---
 
@@ -439,7 +451,7 @@ key = SHA1( $"v1|{path}|{size}|{mtimeUtcTicks}|{w}x{h}|{fmt}|{q}|{atKey}|{genera
 8. 超限：源文件 > `thumb_max_source_mb` → `too-large`，不读内容。
 9. 读取预算：伪造 RangeReader 累计字节 > budget → 中止（断言抛出的异常类型）。
 
-**E2E（`frontend/scripts/verify-thumb.mjs`，新增一轮 `thumb`）**
+**E2E（`frontend/scripts/verify-thumb.mjs`，新增一轮 `thumb`）—— 已落地，见 §0.2（实际 28 条断言，下列 9 条为原始清单）**
 
 -fixture 用 `gen_fixtures.py` 现成的图片/音频/PDF；视频用 `ffmpeg` 造 3s 的 `testsrc`（回归脚本已把 ffmpeg 放进 PATH）。
 
@@ -477,7 +489,7 @@ key = SHA1( $"v1|{path}|{size}|{mtimeUtcTicks}|{w}x{h}|{fmt}|{q}|{atKey}|{genera
 | **P1 音频封面** | ATL + `CoverCrop` | 单元 + E2E 6 |
 | **P2 PDF** | PDFtoImage + `ReadOnlySeekableStream` | E2E 7 |
 | **P3 视频** | `RangeReaderSeekableSource`、Sdcb.FFmpeg 接线、预算护栏、`Dockerfile` 依赖、`build.cs` RID 包 | 单元 7/8/9 + 手工验阿里云盘 |
-| **P4 收尾** | 清理任务、列表行 40px 缩略图、详情页占位图、指标、`AGENTS.md` 与两份 docs 的遗留项标记为已完成 | 全量回归 15 轮 + 新增 1 轮 |
+| **P4 收尾** | 清理任务、列表行 40px 缩略图（§0.2 已完成）、详情页占位图、指标、`AGENTS.md` 与两份 docs 的遗留项标记为已完成 | 全量回归 15 轮 + 新增 1 轮（`I/thumb` 已落地，现为 16 轮） |
 
 **P0 就能独立上线**（图片是收益最大的那一档：网格与图墙覆盖了绝大多数浏览场景），后面每阶段都可单独回滚（关 `thumb_video_enable` → 关 `thumb_enable`）。
 

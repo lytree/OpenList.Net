@@ -13,6 +13,9 @@ namespace OpenList.Server.Endpoints;
 /// </summary>
 public static class MiscEndpoints
 {
+    /// <summary><c>robots_txt</c> 设置为空时的默认内容（对齐 Go 的固定返回值）。</summary>
+    private const string DefaultRobotsTxt = "User-agent: *\nAllow: /\n";
+
     /// <summary>
     /// 注册 /i、/manifest.json、/robots.txt、/favicon.ico 等公开路由。
     /// /i 解析 base64 编码的链接并生成 Apple plist（用于在线安装 IPA）；
@@ -44,20 +47,27 @@ public static class MiscEndpoints
             return Results.Json(manifest);
         }).AllowAnonymous();
 
-        // GET /robots.txt — 允许所有爬虫。Go 端返回固定字符串。
-        app.MapGet("/robots.txt", () =>
-            Results.Text("User-agent: *\nAllow: /\n", "text/plain", Encoding.UTF8))
-          .AllowAnonymous();
+        // GET /robots.txt — 返回设置项 robots_txt 的内容；未配置时用「允许所有爬虫」的默认串。
+        // 以前是硬编码固定串，设置页里的 robots_txt 形同虚设（见 docs/settings-gap-audit.md）。
+        app.MapGet("/robots.txt", async (ISettingService settings) =>
+        {
+            var pub = await settings.GetPublicAsync();
+            var custom = pub.Data?.TryGetValue("robots_txt", out var v) == true ? v : null;
+            var body = string.IsNullOrWhiteSpace(custom) ? DefaultRobotsTxt : custom!;
+            return Results.Text(body, "text/plain", Encoding.UTF8);
+        }).AllowAnonymous();
 
-        // GET /favicon.ico — 302 跳转到配置的 logo 地址（或返回 404）。
-        // 对齐 Go：从设置取 logo；此处若设置了 public logo 则 302 跳转，
-        // 否则返回 404（浏览器可优雅处理），避免内联 data URI。
+        // GET /favicon.ico — 302 跳转到配置的 favicon（回退 logo）地址，或返回 404。
+        // 设置优先级：favicon → logo。favicon 是浏览器标签页图标，logo 是站内品牌图；
+        // 以前只读 logo，导致设置页里的 favicon 配了不生效（见 docs/settings-gap-audit.md P0-2）。
         app.MapGet("/favicon.ico", async (ISettingService settings) =>
         {
             var pub = await settings.GetPublicAsync();
-            var logo = pub.Data?.TryGetValue("logo", out var l) == true ? l : null;
-            if (!string.IsNullOrEmpty(logo))
-                return Results.Redirect(logo, permanent: false);
+            string? Pick(string key) =>
+                pub.Data?.TryGetValue(key, out var v) == true && !string.IsNullOrWhiteSpace(v) ? v : null;
+            var icon = Pick("favicon") ?? Pick("logo");
+            if (!string.IsNullOrEmpty(icon))
+                return Results.Redirect(icon, permanent: false);
             return Results.NotFound();
         }).AllowAnonymous();
 

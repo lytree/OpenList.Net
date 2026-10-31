@@ -7,7 +7,13 @@ import { humanSize, formatTime } from "~/utils/format"
 import { downloadLink, rawLink } from "~/utils/link"
 import { t } from "~/i18n"
 import type { FsGetData } from "~/api/types"
-import { parseIframePreviews, resolvePreviews } from "./registry"
+import {
+  parseExternalPreviews,
+  parseExtList,
+  parseIframePreviews,
+  resolvePreviews,
+  type TypeExtMap,
+} from "./registry"
 import type { PreviewEntry, PreviewProps } from "./types"
 
 /**
@@ -34,12 +40,23 @@ export default defineComponent({
     const router = useRouter()
     const settings = useSettingsStore()
 
+    /** 四类可配置扩展名（`audio_types` 等）：配了就整表替换内置表。 */
+    const typeExts = computed<TypeExtMap>(() => ({
+      audio: parseExtList(settings.get("audio_types")),
+      video: parseExtList(settings.get("video_types")),
+      image: parseExtList(settings.get("image_types")),
+      text: parseExtList(settings.get("text_types")),
+    }))
+
     const entries = computed<PreviewEntry[]>(() =>
       resolvePreviews(props.obj, {
         path: props.path,
         provider: props.provider,
         iframePreviews: parseIframePreviews(settings.get("iframe_previews")),
+        externalPreviews: parseExternalPreviews(settings.get("external_previews")),
+        typeExts: typeExts.value,
         downloadFirst: settings.getBool("preview_download_by_default"),
+        archiveDefault: settings.getBool("preview_archives_by_default"),
       }),
     )
 
@@ -99,6 +116,8 @@ export default defineComponent({
       // 统一给子组件一个可靠的媒体源，避免每个组件各写一遍兜底逻辑
       src: mediaUrl.value,
       download_url: downloadUrl.value,
+      // 归档预览据此判断条目类型，与主列表保持同一套可配置扩展名
+      typeExts: typeExts.value,
     }))
 
     return () => {

@@ -28,8 +28,8 @@ import { buildArchiveTree, findArchiveNode, type ArchiveNode } from "~/utils/arc
 import { formatTime, humanSize } from "~/utils/format"
 import { archiveInnerLink } from "~/utils/link"
 import { pathBase, pathDir } from "~/utils/path"
-import { guessObjType, resolvePreviews } from "./registry"
-import type { PreviewChildProps } from "./types"
+import { guessObjType, resolvePreviews, type TypeExtMap } from "./registry"
+import type { ArchiveListFn, PreviewChildProps } from "./types"
 
 /**
  * 归档（zip/tar/7z/rar…）预览。
@@ -48,6 +48,21 @@ export default defineComponent({
     path: { type: String, required: true },
     src: { type: String, required: true },
     provider: { type: String, default: "" },
+    /**
+     * 数据源覆盖：分享页注入「带分享码」的请求实现。
+     * 不传则走登录态 `/fs/archive/list`。
+     */
+    listArchive: {
+      type: Function as PropType<ArchiveListFn>,
+      default: undefined,
+    },
+    /**
+     * 只读上下文（分享页）。归档内条目的内联预览走 `/ae`，需要登录态签名，
+     * 游客拿不到，所以这里只列条目、不给点进去；解压也一并隐藏。
+     */
+    readOnly: { type: Boolean, default: false },
+    /** 与主列表共用可配置扩展名（`audio_types` 等），供归档内条目判类型。 */
+    typeExts: { type: Object as PropType<TypeExtMap>, default: () => ({}) },
   },
   setup(props) {
     const loading = ref(true)
@@ -71,7 +86,9 @@ export default defineComponent({
       error.value = ""
       unsupported.value = false
       try {
-        const resp = await fsArchiveList(props.path, "", password.value)
+        const resp = props.listArchive
+          ? await props.listArchive(props.path, password.value)
+          : await fsArchiveList(props.path, "", password.value)
         // 202 是 Go 上游「需要密码」的约定码；本仓库的 meta 门禁用业务码 403，
         // 两者都按「可能要密码」处理 —— 真输错了下面会给出明确提示。
         if (resp.code === 202 || resp.code === 403) {
@@ -122,7 +139,8 @@ export default defineComponent({
 
     function openDir(node: ArchiveNode) {
       if (!node.isDir) {
-        selected.value = node
+        // 只读上下文（分享）没有 `/ae` 访问权，点开只会 401，所以干脆不选中。
+        if (!props.readOnly) selected.value = node
         return
       }
       dirPath.value = node.path.split("/").filter(Boolean)
@@ -143,7 +161,7 @@ export default defineComponent({
         name: node.name,
         size: node.size,
         is_dir: false,
-        type: guessObjType(node.name),
+        type: guessObjType(node.name, props.typeExts),
         modified: node.modified,
         raw_url: "",
         thumb: "",
@@ -167,9 +185,11 @@ export default defineComponent({
      */
     const innerEntries = computed(() =>
       innerObj.value
-        ? resolvePreviews(innerObj.value, { provider: props.provider, path: props.path }).filter(
-            (entry) => entry.key !== "archive",
-          )
+        ? resolvePreviews(innerObj.value, {
+            provider: props.provider,
+            path: props.path,
+            typeExts: props.typeExts,
+          }).filter((entry) => entry.key !== "archive")
         : [],
     )
     const innerKey = ref("")
@@ -201,7 +221,7 @@ export default defineComponent({
 
     function nodeIcon(node: ArchiveNode) {
       if (node.isDir) return Folder
-      const type: ObjType = guessObjType(node.name)
+      const type: ObjType = guessObjType(node.name, props.typeExts)
       if (type === 5 /* ObjType.IMAGE */) return Picture
       if (type === 2 /* ObjType.VIDEO */) return VideoCamera
       if (type === 3 /* ObjType.AUDIO */) return Headset
@@ -245,9 +265,11 @@ export default defineComponent({
             <ElTag size="small" type="info">
               {t("home.preview.archive_entries", { count: currentNodes.value.length })}
             </ElTag>
-            <ElButton size="small" loading={extracting.value} onClick={extract}>
-              {t("home.preview.archive_extract")}
-            </ElButton>
+            {!props.readOnly && (
+              <ElButton size="small" loading={extracting.value} onClick={extract}>
+                {t("home.preview.archive_extract")}
+              </ElButton>
+            )}
           </div>
         </div>
 

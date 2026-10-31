@@ -111,6 +111,7 @@ public static class DbInitializer
         // SeedDefaultSettingsAsync, leaving fresh databases without defaults.
         await SeedAdminAsync(db, config, devMode, ct, logger);
         await SeedDefaultSettingsAsync(db, ct);
+        await AdoptLdapConfigAsync(db, config, ct);
     }
 
     /// <summary>
@@ -671,7 +672,17 @@ public static class DbInitializer
         // Multipart 分片上传：multipart_chunk_size 单位为 MB；move_task_threads_num 对齐 Go 的 move_task_threads_num。
         ("multipart_enabled", "true", SettingValueType.Bool, SettingFlag.Public, 11, null),
         ("multipart_chunk_size", "10", SettingValueType.Number, SettingFlag.Public, 11, null),
+        // 任务并发上限：同类任务同时运行的数量（复制/移动是「一个文件一个任务」，
+        // 因此也等于同时在处理的文件数）。0 表示不限。由 TaskConcurrencyProvider 每 20s 读取，
+        // 超出上限的任务停在 pending，界面上显示为「等待中」而不是排队失败。
+        ("copy_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
+        ("upload_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
+        ("download_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
         ("move_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
+        ("decompress_download_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
+        ("decompress_upload_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
+        ("offline_download_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
+        ("offline_download_transfer_task_threads_num", "5", SettingValueType.Number, SettingFlag.Private, 11, null),
 
         // --- Group 12: MEDIA（媒体库 / 刮削 / 字幕） ---
         // TMDB 与 OpenSubtitles 的 API Key 属于私有配置，只对管理员可见。
@@ -748,6 +759,46 @@ public static class DbInitializer
                 Options = options,
             });
         }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// 把 appsettings 里已配置的 LDAP 一次性导入设置表（仅当 <c>ldap_server</c> 为空时）。
+    /// <para>
+    /// 背景：LDAP 认证改为「设置表优先、appsettings 兜底」后，<c>ldap_login_enabled</c>
+    /// 成了真正的总开关。只写 appsettings 的老部署如果不做这一步，登录页（读设置表）会显示
+    /// 未启用、认证也会被判定为关闭。导入后设置页展示的就是真实服务器地址，两边口径一致。
+    /// 幂等：<c>ldap_server</c> 一旦有值（管理员在设置页填过）就不再覆盖。
+    /// </para>
+    /// </summary>
+    private static async Task AdoptLdapConfigAsync(OpenListDbContext db, AppConfiguration config, CancellationToken ct)
+    {
+        var ldap = config.Ldap;
+        if (ldap is null || string.IsNullOrWhiteSpace(ldap.Url)) return;
+
+        var keys = new[]
+        {
+            "ldap_server", "ldap_login_enabled", "ldap_user_search_base",
+            "ldap_user_search_filter", "ldap_skip_tls_verify",
+        };
+        var rows = await db.Settings.Where(s => keys.Contains(s.Key)).ToListAsync(ct);
+        var byKey = rows.ToDictionary(s => s.Key, StringComparer.Ordinal);
+
+        // 管理员已经在设置页配过服务器：以设置表为准，不再回灌配置。
+        if (byKey.TryGetValue("ldap_server", out var server) && !string.IsNullOrWhiteSpace(server.Value)) return;
+        // 开关已被显式打开过（说明管理员动过设置页）：即使地址被清空也不回灌，
+        // 否则「清掉服务器地址来关闭 LDAP」会在下次启动被 appsettings 悄悄恢复。
+        if (byKey.TryGetValue("ldap_login_enabled", out var enabled) && enabled.Value == "true") return;
+
+        if (server is not null) server.Value = ldap.Url!.Trim();
+        if (enabled is not null) enabled.Value = "true";
+        if (byKey.TryGetValue("ldap_user_search_base", out var baseDn) && !string.IsNullOrWhiteSpace(ldap.UserBase))
+            baseDn.Value = ldap.UserBase.Trim();
+        if (byKey.TryGetValue("ldap_user_search_filter", out var filter) && !string.IsNullOrWhiteSpace(ldap.UserFilter))
+            filter.Value = ldap.UserFilter.Trim();
+        if (byKey.TryGetValue("ldap_skip_tls_verify", out var skip))
+            skip.Value = ldap.SkipVerify ? "true" : "false";
 
         await db.SaveChangesAsync(ct);
     }

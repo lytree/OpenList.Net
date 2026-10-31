@@ -3,7 +3,7 @@ import { ObjType } from "~/api/types"
 import { t } from "~/i18n"
 import { ARCHIVE_EXTS } from "~/utils/archive"
 import { ext } from "~/utils/path"
-import type { PreviewContext, PreviewDef, PreviewEntry } from "./types"
+import type { PreviewContext, PreviewDef, PreviewEntry, TypeExtKey } from "./types"
 
 /**
  * 预览器注册表。
@@ -62,6 +62,7 @@ const defs: PreviewDef[] = [
     type: ObjType.IMAGE,
     // svg 归图片而不是 HTML：`<img>` 渲染不会执行里面的脚本，比 srcdoc 更安全
     exts: ["avif", "avifs", "bmp", "gif", "ico", "jfif", "jpeg", "jpg", "png", "svg", "webp"],
+    extSettingsKey: "image",
     order: 20,
     component: defineAsyncComponent(() => import("./ImagePreview")),
   },
@@ -69,6 +70,7 @@ const defs: PreviewDef[] = [
     key: "video",
     type: ObjType.VIDEO,
     exts: ["mp4", "mkv", "webm", "mov", "m4v", "avi", "flv", "ts", "m2ts", "wmv"],
+    extSettingsKey: "video",
     order: 20,
     component: defineAsyncComponent(() => import("./VideoPreview")),
   },
@@ -96,6 +98,7 @@ const defs: PreviewDef[] = [
     key: "audio",
     type: ObjType.AUDIO,
     exts: ["mp3", "flac", "wav", "aac", "m4a", "ogg", "opus", "wma", "ape", "alac"],
+    extSettingsKey: "audio",
     order: 20,
     component: defineAsyncComponent(() => import("./AudioPreview")),
   },
@@ -154,6 +157,7 @@ const defs: PreviewDef[] = [
     // 覆盖后端按「未知」处理但其实是纯文本的情况（.conf/.env/.lock …）。
     type: ObjType.TEXT,
     exts: TEXTUAL_EXTS,
+    extSettingsKey: "text",
     order: 30,
     component: defineAsyncComponent(() => import("./TextPreview")),
   },
@@ -162,6 +166,7 @@ const defs: PreviewDef[] = [
     // 排在只读预览之后：默认仍是「看一眼」，想改的人再从下拉切过来
     type: ObjType.TEXT,
     exts: TEXTUAL_EXTS,
+    extSettingsKey: "text",
     order: 40,
     component: defineAsyncComponent(() => import("./TextEditorPreview")),
   },
@@ -182,8 +187,30 @@ const INFO_DEF: PreviewDef = {
 /** iframe 预览共用一个异步组件：每个条目各建一个会反复触发 chunk 加载。 */
 const IFRAME_COMPONENT = defineAsyncComponent(() => import("./IframePreview"))
 
+/** 外置预览（新窗口交给本机应用）：同样共用一个组件。 */
+const EXTERNAL_COMPONENT = defineAsyncComponent(() => import("./ExternalPreview"))
+
 /** 设置 `iframe_previews` 的解析结果：扩展名/正则 → { 显示名: URL 模板 }。 */
 export type IframePreviewMap = Record<string, Record<string, string>>
+
+/** 四类可配置类型的扩展名表（对应 `audio_types` 等设置）。 */
+export type TypeExtMap = Partial<Record<TypeExtKey, string[]>>
+
+/**
+ * 解析设置里的逗号分隔扩展名表：`mp3, flac，M4A` → `["mp3","flac","m4a"]`。
+ *
+ * 分隔符同时接受中英文逗号与空白 —— 管理员从文档里复制粘贴时很容易带中文逗号，
+ * 直接 `split(",")` 会把 `flac，m4a` 当成一个扩展名，表现为「设置存了但不生效」。
+ * 空值/全是分隔符时返回 `undefined`，调用方回落到内置表而不是「一个都不匹配」。
+ */
+export function parseExtList(raw: string | undefined | null): string[] | undefined {
+  if (!raw) return undefined
+  const list = raw
+    .split(/[,，\s]+/)
+    .map((part) => part.trim().toLowerCase().replace(/^\./, ""))
+    .filter(Boolean)
+  return list.length > 0 ? list : undefined
+}
 
 export function parseIframePreviews(raw: string | undefined | null): IframePreviewMap {
   if (!raw) return {}
@@ -205,6 +232,12 @@ export function parseIframePreviews(raw: string | undefined | null): IframePrevi
     return {}
   }
 }
+
+/**
+ * `external_previews` 与 `iframe_previews` 结构完全一致（`键 → {显示名: URL 模板}`），
+ * 只差「打开方式」，因此共用一套解析，省得两处校验逻辑漂移。
+ */
+export const parseExternalPreviews = parseIframePreviews
 
 /** 设置键匹配：`ppt,pptx` 按扩展名，`/^pdf$/` 按正则（对齐旧前端）。 */
 function iframeKeyMatches(key: string, name: string): boolean {
@@ -258,11 +291,18 @@ export function convertUrl(
     .replace(/\$[eb_]*durl/g, (matched) => wrap(dUrl, matched.match(/[eb]/g)?.join("")))
 }
 
-function matches(ctx: PreviewContext, def: PreviewDef): boolean {
+/** 定义实际生效的扩展名表：设置里配了就用设置，否则用内置表。 */
+function effectiveExts(def: PreviewDef, overrides: TypeExtMap = {}): string[] | undefined {
+  if (def.extSettingsKey) return overrides[def.extSettingsKey] ?? def.exts
+  return def.exts
+}
+
+function matches(ctx: PreviewContext, def: PreviewDef, overrides: TypeExtMap = {}): boolean {
   if (def.provider && !def.provider.test(ctx.provider)) return false
   if (def.match && def.match(ctx)) return true
   if (def.type !== undefined && def.type === ctx.type) return true
-  if (def.exts && def.exts.includes(ext(ctx.name))) return true
+  const exts = effectiveExts(def, overrides)
+  if (exts && exts.includes(ext(ctx.name))) return true
   return false
 }
 
@@ -271,11 +311,14 @@ function matches(ctx: PreviewContext, def: PreviewDef): boolean {
  *
  * 归档内条目只有名字和大小（后端不解压就分类不了），而预览器分派依赖 `ObjType`，
  * 所以从注册表自己的 `type` 声明反推 —— 不另维护一张表，避免两处漂移。
+ * 传入 `typeExts` 时与主列表用同一套可配置扩展名，避免「归档里 .m4b 是音频、
+ * 归档外却不是」这种同一文件两种表现。
  */
-export function guessObjType(name: string): ObjType {
+export function guessObjType(name: string, typeExts: TypeExtMap = {}): ObjType {
   const extension = ext(name)
   for (const def of defs) {
-    if (def.type !== undefined && def.exts?.includes(extension)) return def.type
+    if (def.type === undefined) continue
+    if (effectiveExts(def, typeExts)?.includes(extension)) return def.type
   }
   return ObjType.UNKNOWN
 }
@@ -285,8 +328,17 @@ export interface ResolveOptions {
   path?: string
   /** 设置里的 `iframe_previews`（已解析）。 */
   iframePreviews?: IframePreviewMap
+  /** 设置里的 `external_previews`（已解析，结构与 iframe 相同）。 */
+  externalPreviews?: IframePreviewMap
+  /** 设置里的 `audio_types`/`video_types`/`image_types`/`text_types`（已解析）。 */
+  typeExts?: TypeExtMap
   /** 设置 `preview_download_by_default` 为真时，「下载」排到最前。 */
   downloadFirst?: boolean
+  /**
+   * 设置 `preview_archives_by_default`：为假时归档不抢占默认位，
+   * 打开压缩包先看到「下载/信息」，想浏览条目再从下拉切过去。
+   */
+  archiveDefault?: boolean
   /** 额外条目（如归档内预览时注入的上一级入口），由调用方决定顺序。 */
   extra?: PreviewEntry[]
 }
@@ -302,16 +354,21 @@ export function resolvePreviews(
     provider: opts.provider ?? "",
     path: opts.path ?? "",
   }
+  const typeExts = opts.typeExts ?? {}
 
   const entries: PreviewEntry[] = []
   for (const def of defs) {
-    if (!matches(ctx, def)) continue
+    if (!matches(ctx, def, typeExts)) continue
     if (def.available && !def.available(ctx)) continue
+    // 归档不默认预览时，把它的 order 压到信息页/下载之后（90x），
+    // 靠排序而不是「从列表里删掉」—— 条目仍然可选。
+    const order =
+      def.key === "archive" && opts.archiveDefault === false ? 900 : (def.order ?? 100)
     entries.push({
       key: def.key,
       name: t(`home.preview.names.${def.key}`),
       component: def.component,
-      order: def.order ?? 100,
+      order,
     })
   }
 
@@ -325,6 +382,22 @@ export function resolvePreviews(
         name: label,
         component: IFRAME_COMPONENT,
         order: 90,
+        props: { scheme },
+      })
+    }
+  }
+
+  // 外置预览：与 iframe 同样的键格式，但打开的是新窗口（`vlc://`、`potplayer://`
+  // 这类自定义协议交给本机应用），因此不占用预览舞台，排在 iframe 之后。
+  const externalMap = opts.externalPreviews ?? {}
+  for (const [key, schemes] of Object.entries(externalMap)) {
+    if (!iframeKeyMatches(key, obj.name)) continue
+    for (const [label, scheme] of Object.entries(schemes)) {
+      entries.push({
+        key: `external:${key}:${label}`,
+        name: label,
+        component: EXTERNAL_COMPONENT,
+        order: 95,
         props: { scheme },
       })
     }

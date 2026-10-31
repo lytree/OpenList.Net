@@ -3,6 +3,7 @@ import { useRoute, useRouter } from "vue-router"
 import { ElButton, ElOption, ElSelect, ElSwitch, ElTag } from "element-plus"
 import { pathDir, pathJoin } from "~/utils/path"
 import { humanSize } from "~/utils/format"
+import { useSettingsStore } from "~/stores/settings"
 import { t } from "~/i18n"
 import type { PreviewChildProps } from "./types"
 
@@ -26,6 +27,10 @@ export default defineComponent({
   setup(props) {
     const route = useRoute()
     const router = useRouter()
+    const settings = useSettingsStore()
+
+    // 视频自动播放由设置项 video_autoplay 控制（默认关）。
+    const autoplay = settings.getBool("video_autoplay")
 
     const videoRef = ref<HTMLVideoElement | null>(null)
     const rate = ref(1)
@@ -84,7 +89,7 @@ export default defineComponent({
               class="ol-media-el"
               src={props.src}
               controls={true}
-              autoplay={true}
+              autoplay={autoplay}
               playsinline={true}
               onEnded={onEnded}
               onLoadedmetadata={onLoadedMetadata}

@@ -3,7 +3,7 @@ import { ElCheckbox, ElDropdown, ElDropdownItem, ElDropdownMenu, ElIcon } from "
 import { MoreFilled } from "@element-plus/icons-vue"
 import type { Obj } from "~/api/types"
 import { formatTime, humanSize } from "~/utils/format"
-import { kindColor, kindIcon } from "~/pages/home/kind"
+import ThumbIcon from "~/components/ThumbIcon"
 import type { RowAction } from "~/pages/home/rowActions"
 
 /**
@@ -40,7 +40,6 @@ export default defineComponent({
       <div class="ol-rowlist">
         {props.objs.map((obj) => {
           const checked = props.selected.includes(obj.name)
-          const Icon = kindIcon(obj)
           return (
             <div
               key={obj.name}
@@ -60,9 +59,7 @@ export default defineComponent({
                   />
                 </span>
               )}
-              <ElIcon class="ol-row-icon" size={20} color={kindColor(obj)}>
-                <Icon />
-              </ElIcon>
+              <ThumbIcon class="ol-row-icon" obj={obj} size={36} iconSize={20} />
               <div class="ol-row-main">
                 <div class="ol-row-name">{obj.name}</div>
                 <div class="ol-row-meta">

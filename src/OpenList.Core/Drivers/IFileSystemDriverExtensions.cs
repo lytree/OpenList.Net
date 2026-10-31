@@ -85,7 +85,19 @@ public interface IFileSystemWithDetails
 public interface IFileSystemArchiveReader
 {
     /// <summary>列出归档内的全部条目。</summary>
-    Task<IReadOnlyList<ArchiveEntry>> ListArchiveEntriesAsync(string path, CancellationToken ct = default);
+    /// <param name="path">归档路径（相对驱动根）。</param>
+    /// <param name="password">加密归档的密码，可为空。</param>
+    /// <param name="entryEncoding">
+    /// 条目名解码编码（对应站点设置 <c>non_efs_zip_encoding</c>）。
+    /// 仅对<b>没有</b> UTF-8 标志位的旧式 zip 生效 —— 这类包（Windows 下用 GBK 打包很常见）
+    /// 若按 UTF-8 解码，中文名会变成乱码。空值表示用驱动默认行为。
+    /// </param>
+    /// <param name="ct">取消令牌。</param>
+    Task<IReadOnlyList<ArchiveEntry>> ListArchiveEntriesAsync(
+        string path,
+        string? password = null,
+        string? entryEncoding = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// 打开归档内单个条目，返回<b>可 Seek</b> 的只读流（调用方负责 Dispose，释放时清理临时文件）。
@@ -99,6 +111,7 @@ public interface IFileSystemArchiveReader
         string archivePath,
         string entryPath,
         string? password = null,
+        string? entryEncoding = null,
         CancellationToken ct = default);
 }
 
@@ -106,7 +119,17 @@ public interface IFileSystemArchiveReader
 public interface IFileSystemArchiveDecompress
 {
     /// <summary>将归档解压到目标路径；<paramref name="password"/> 为加密归档密码，可为空。</summary>
-    Task DecompressAsync(string archivePath, string destPath, string? password = null, CancellationToken ct = default);
+    /// <param name="archivePath">归档路径（相对驱动根）。</param>
+    /// <param name="destPath">解压目标目录（相对驱动根）。</param>
+    /// <param name="password">加密归档的密码，可为空。</param>
+    /// <param name="entryEncoding">条目名解码编码，语义同 <see cref="IFileSystemArchiveReader.ListArchiveEntriesAsync"/>。</param>
+    /// <param name="ct">取消令牌。</param>
+    Task DecompressAsync(
+        string archivePath,
+        string destPath,
+        string? password = null,
+        string? entryEncoding = null,
+        CancellationToken ct = default);
 }
 
 /// <summary>驱动支持通过预签名 URL 或分片上传 API 进行直传。</summary>

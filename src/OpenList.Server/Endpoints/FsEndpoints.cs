@@ -348,10 +348,17 @@ public static class FsEndpoints
         // （否则公开目录里点开压缩包会 401 把人踢去登录页）。
         // 访问控制交给 meta 门禁：目录密码/白名单/隐藏条目与 /list 完全一致。
         // 注意区分两个密码：`password` 是目录密码（走门禁），`archive_pass` 才是压缩包密码。
-        g.MapMethods("/archive/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
+        g.MapMethods("/archive/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ISharingService shares, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<ArchiveListReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
+            // 分享页的归档预览：游客拿不到 JWT，只有分享码。不在这里解析的话，
+            // 匿名请求会退化成 BasePath="/" 的访客，进而去读服务器的 `/x.zip` ——
+            // 表现为「分享页列归档条目 501/404」，而真正的原因是没有换成受限访客。
+            var (shareError, shareUser) = await ShareAccess.ResolveAsync(
+                ctx, shares, user.Identity?.IsAuthenticated == true, req.Password, ct);
+            if (shareError is not null) return shareError;
+            if (shareUser is not null) u = shareUser;
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
             if (await AccessGateAsync(metaSvc, u, path, req.Password, ct) is { } denied) return denied;
             return Results.Ok(await svc.ArchiveListAsync(path, req.ArchivePass, u));

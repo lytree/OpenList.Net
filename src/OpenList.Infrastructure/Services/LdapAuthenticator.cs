@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Novell.Directory.Ldap;
 using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
@@ -6,29 +7,51 @@ namespace OpenList.Infrastructure.Services;
 
 /// <summary>
 /// LDAP 认证器，基于 <c>Novell.Directory.Ldap.NETStandard</c>（跨平台）。
+/// <para>
+/// 配置来源：<b>设置表优先，appsettings 兜底</b>。管理台「LDAP 设置」组的
+/// <c>ldap_server</c> / <c>ldap_manager_dn</c> / <c>ldap_manager_password</c> /
+/// <c>ldap_user_search_base</c> / <c>ldap_user_search_filter</c> /
+/// <c>ldap_skip_tls_verify</c> / <c>ldap_login_enabled</c> 是主配置，
+/// 没填的项回退到 <see cref="AppConfiguration.Ldap"/>（含 <c>BindDn</c> 模板）。
+/// 这样设置页保存后即时生效，无需重启；老部署只写 appsettings 也能继续工作
+/// （启动时由 <c>DbInitializer</c> 一次性导入设置表）。
+/// </para>
+/// <para>
 /// 支持两种绑定模式：
 /// <list type="bullet">
-/// <item><c>BindDn</c> 包含 <c>%s</c> — 使用模板化 DN 直接绑定（无需搜索）。</item>
-/// <item><c>BindDn</c> 无占位符 — 先在 <c>UserBase</c> 下搜索用户 DN 再绑定。</item>
+/// <item>设置了 <c>ldap_user_search_base</c>（或 appsettings 的 <c>BindDn</c> 不是模板）时走搜索模式：
+/// 先用服务账号（<c>ldap_manager_dn</c>）绑定，按过滤器搜索出用户 DN，再用用户密码绑定。</item>
+/// <item><c>BindDn</c> 包含 <c>%s</c>（如 <c>uid=%s,ou=users,dc=example,dc=com</c>）且未配置搜索 base 时，
+/// 直接模板替换得到 DN 后绑定。</item>
 /// </list>
-/// 4.x 起 Novell 客户端整体异步化（<c>ConnectAsync</c> / <c>BindAsync</c> / <c>SearchAsync</c>），
-/// 因此这里直接 await，不再需要用 <c>Task.Run</c> 把同步调用卸载到线程池。
 /// 对应 Go 参考实现 <c>internal/op/auth.go</c>。
+/// </para>
 /// </summary>
 public sealed class LdapAuthenticator : ILdapAuthenticator
 {
-    private readonly LdapConfig _cfg;
+    /// <summary>appsettings 兜底配置（设置表缺项时使用）。</summary>
+    private readonly LdapConfig _fallback;
+
+    /// <summary>作用域工厂：每次认证时读一次设置表（LDAP 登录是低频操作，无需缓存）。</summary>
+    private readonly IServiceScopeFactory _scopes;
 
     /// <summary>
     /// 创建 LDAP 认证器实例。
     /// </summary>
-    /// <param name="config">应用配置，取其中 <c>Ldap</c> 段（无则使用空配置）。</param>
-    public LdapAuthenticator(AppConfiguration config) => _cfg = config.Ldap ?? new();
+    /// <param name="config">应用配置，作为设置表的兜底默认值。</param>
+    /// <param name="scopes">DI 作用域工厂（读取 scoped 的 <see cref="ISettingService"/>）。</param>
+    public LdapAuthenticator(AppConfiguration config, IServiceScopeFactory scopes)
+    {
+        _fallback = config.Ldap ?? new();
+        _scopes = scopes;
+    }
 
-    /// <summary>
-    /// 指示 LDAP 是否已启用（配置了 Url 即为启用）。
-    /// </summary>
-    public bool Enabled => !string.IsNullOrWhiteSpace(_cfg.Url);
+    /// <inheritdoc />
+    public async Task<bool> IsEnabledAsync(CancellationToken ct = default)
+    {
+        var cfg = await ResolveAsync(ct);
+        return cfg.LoginEnabled && !string.IsNullOrWhiteSpace(cfg.Server);
+    }
 
     /// <summary>
     /// 校验指定用户名与密码是否能通过 LDAP 认证。
@@ -39,10 +62,12 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
     /// <returns>认证成功返回 <c>true</c>；未启用、无效输入、凭证错误或目录异常均返回 <c>false</c>。</returns>
     public async Task<bool> AuthenticateAsync(string username, string password, CancellationToken ct = default)
     {
-        if (!Enabled) return false;
+        // 登录页的开关与这里必须同源：关闭开关时即使目录可达也不接受认证。
+        var cfg = await ResolveAsync(ct);
+        if (!cfg.LoginEnabled || string.IsNullOrWhiteSpace(cfg.Server)) return false;
         if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password)) return false;
 
-        var (host, port, ssl) = ParseUrl(_cfg.Url);
+        var (host, port, ssl) = ParseUrl(cfg.Server);
         using var conn = new LdapConnection();
         try
         {
@@ -50,7 +75,7 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
             if (ssl)
             {
                 conn.SecureSocketLayer = true;
-                if (_cfg.SkipVerify)
+                if (cfg.SkipVerify)
                 {
                     // 跳过自签名证书校验，便于连接开发环境。
                     conn.UserDefinedServerCertValidationDelegate += (_, _, _, _) => true;
@@ -61,11 +86,11 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
             // 起步 TLS（STARTTLS）很少与 LDAPS 搭建组合使用；需要 TLS 的用户应改用 ldaps://。
             // 4.x 已提供 StartTlsAsync，但为保持与既有配置语义一致，此处仍不做隐式升级。
 
-            var dn = ResolveDn(username);
+            var dn = ResolveDn(cfg, username);
             if (dn is null)
             {
-                // 搜索模式：先以匿名（或服务账号）绑定以定位用户 DN。
-                dn = await SearchUserDnAsync(conn, username, ct);
+                // 搜索模式：先用服务账号（未配置则匿名）绑定以定位用户 DN。
+                dn = await SearchUserDnAsync(conn, cfg, username, ct);
                 if (dn is null) return false;
             }
 
@@ -92,39 +117,67 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
     }
 
     /// <summary>
-    /// 若 <see cref="LdapConfig.BindDn"/> 包含 <c>%s</c>，则用用户名替换占位符得到 DN；
+    /// 解析本次认证使用的运行配置：设置表优先，空值回退 appsettings。
+    /// 读取失败（未建库、迁移中）时整体回退 appsettings，不抛异常。
+    /// </summary>
+    private async Task<RuntimeConfig> ResolveAsync(CancellationToken ct)
+    {
+        Dictionary<string, string> dict;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var settings = scope.ServiceProvider.GetService<ISettingService>();
+            if (settings is null) return RuntimeConfig.FromFallback(_fallback);
+            var resp = await settings.ListAsync(ct).ConfigureAwait(false);
+            if (resp.Code != 200 || resp.Data is null) return RuntimeConfig.FromFallback(_fallback);
+            dict = resp.Data.ToDictionary(s => s.Key, s => s.Value ?? string.Empty, StringComparer.Ordinal);
+        }
+        catch
+        {
+            return RuntimeConfig.FromFallback(_fallback);
+        }
+        return RuntimeConfig.FromSettings(dict, _fallback);
+    }
+
+    /// <summary>
+    /// 若 <see cref="RuntimeConfig.BindDn"/> 包含 <c>%s</c>，则用用户名替换占位符得到 DN；
     /// 否则返回 null，表示进入搜索模式。
     /// </summary>
+    /// <param name="cfg">本次认证的运行配置。</param>
     /// <param name="username">要替换进 DN 模板的用户名。</param>
     /// <returns>模板化 DN，或 null（表示需要搜索用户 DN）。</returns>
-    private string? ResolveDn(string username)
+    private static string? ResolveDn(RuntimeConfig cfg, string username)
     {
-        var tpl = _cfg.BindDn ?? "";
-        if (tpl.Contains("%s")) return tpl.Replace("%s", EscapeLdapDN(username));
+        var tpl = cfg.BindDn;
+        if (!string.IsNullOrEmpty(tpl) && tpl.Contains("%s")) return tpl.Replace("%s", EscapeLdapDN(username));
         return null;
     }
 
     /// <summary>
-    /// 在 <c>UserBase</c> 下按用户过滤器搜索用户 DN。
+    /// 用服务账号（未配置则匿名）绑定后，在 <c>UserBase</c> 下按用户过滤器搜索用户 DN。
     /// </summary>
     /// <param name="conn">已连接的 LDAP 连接。</param>
+    /// <param name="cfg">本次认证的运行配置。</param>
     /// <param name="username">要定位的用户名。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>匹配的首个用户 DN，未找到返回 null。</returns>
-    private async Task<string?> SearchUserDnAsync(LdapConnection conn, string username, CancellationToken ct)
+    private static async Task<string?> SearchUserDnAsync(
+        LdapConnection conn, RuntimeConfig cfg, string username, CancellationToken ct)
     {
-        // 先尝试匿名绑定；若目录禁止匿名，搜索会直接抛异常并返回 null（不泄露有效用户名）。
-        try { await conn.BindAsync(LdapConnection.LdapV3, "", "", ct); } catch { /* 匿名可能被拒绝 */ }
+        // 服务账号绑定：目录通常禁止匿名搜索；未配置 manager 时退回匿名并接受失败。
+        try
+        {
+            if (!string.IsNullOrEmpty(cfg.ManagerDn))
+                await conn.BindAsync(LdapConnection.LdapV3, cfg.ManagerDn, cfg.ManagerPassword, ct);
+            else
+                await conn.BindAsync(LdapConnection.LdapV3, "", "", ct);
+        }
+        catch { /* 匿名/服务账号绑定被拒，交由下面的 Bound 判定 */ }
         if (!conn.Bound) return null;
 
-        var filter = $"({_cfg.UserFilter}={EscapeLdapFilter(username)})";
-        var results = await conn.SearchAsync(
-            _cfg.UserBase,
-            LdapConnection.ScopeSub,
-            filter,
-            new[] { _cfg.UserFilter },
-            false,
-            ct);
+        var filter = cfg.BuildFilter(username);
+        var attrs = new[] { cfg.UserFilterAttribute };
+        var results = await conn.SearchAsync(cfg.UserBase, LdapConnection.ScopeSub, filter, attrs, false, ct);
         // 取首个匹配条目的 DN。
         while (await results.HasMoreAsync(ct))
         {
@@ -164,4 +217,86 @@ public sealed class LdapAuthenticator : ILdapAuthenticator
     private static string EscapeLdapFilter(string s)
         => s.Replace("\\", "\\5c").Replace("(", "\\28").Replace(")", "\\29")
             .Replace("*", "\\2a").Replace("\0", "\\00");
+
+    /// <summary>
+    /// 一次认证所需的运行配置（设置表映射 + appsettings 兜底）。
+    /// </summary>
+    private sealed record RuntimeConfig
+    {
+        /// <summary>服务器地址（<c>ldap_server</c> / <c>Ldap:Url</c>）。</summary>
+        public string Server { get; init; } = string.Empty;
+
+        /// <summary>DN 模板（仅来自 appsettings 的 <c>BindDn</c>，且仅在未配置搜索 base 时生效）。</summary>
+        public string BindDn { get; init; } = string.Empty;
+
+        /// <summary>用户搜索基础 DN。</summary>
+        public string UserBase { get; init; } = string.Empty;
+
+        /// <summary>用户过滤配置：可以是属性名（<c>uid</c>）或带 <c>%s</c> 的过滤器模板（<c>(uid=%s)</c>）。</summary>
+        public string UserFilter { get; init; } = "uid";
+
+        /// <summary>服务账号 DN（用于搜索绑定）。</summary>
+        public string ManagerDn { get; init; } = string.Empty;
+
+        /// <summary>服务账号密码。</summary>
+        public string ManagerPassword { get; init; } = string.Empty;
+
+        /// <summary>是否跳过证书校验。</summary>
+        public bool SkipVerify { get; init; } = true;
+
+        /// <summary><c>ldap_login_enabled</c> 开关。</summary>
+        public bool LoginEnabled { get; init; }
+
+        /// <summary>搜索时作为返回属性的用户名属性名。</summary>
+        public string UserFilterAttribute => UserFilter.Contains('%') || UserFilter.Contains('(') ? "uid" : UserFilter;
+
+        /// <summary>构造 RFC 4515 过滤器：模板形式直接用 <c>%s</c> 替换，属性名形式包成 <c>(attr=value)</c>。</summary>
+        public string BuildFilter(string username)
+        {
+            var escaped = EscapeLdapFilter(username);
+            return UserFilter.Contains('%') || UserFilter.Contains('(')
+                ? UserFilter.Replace("%s", escaped)
+                : $"({UserFilter}={escaped})";
+        }
+
+        /// <summary>只用 appsettings 构造（设置表不可读时的兜底）。</summary>
+        public static RuntimeConfig FromFallback(LdapConfig cfg) => new()
+        {
+            Server = cfg.Url ?? string.Empty,
+            // 模板模式只在没有搜索 base 时启用：有了 base 就应该走「搜索 DN」而不是硬编码 DN。
+            BindDn = string.IsNullOrWhiteSpace(cfg.UserBase) ? cfg.BindDn ?? string.Empty : string.Empty,
+            UserBase = cfg.UserBase ?? string.Empty,
+            UserFilter = string.IsNullOrWhiteSpace(cfg.UserFilter) ? "uid" : cfg.UserFilter,
+            SkipVerify = cfg.SkipVerify,
+            // appsettings 里配了 Url 即视为启用（旧语义），没有 Url 则关闭。
+            LoginEnabled = !string.IsNullOrWhiteSpace(cfg.Url),
+        };
+
+        /// <summary>设置表优先、appsettings 兜底的映射。</summary>
+        public static RuntimeConfig FromSettings(IReadOnlyDictionary<string, string> settings, LdapConfig fallback)
+        {
+            var base0 = FromFallback(fallback);
+
+            string Pick(string key, string fallbackValue)
+                => settings.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : fallbackValue;
+
+            bool PickBool(string key, bool fallbackValue)
+                => settings.TryGetValue(key, out var v) && bool.TryParse(v, out var b) ? b : fallbackValue;
+
+            var searchBase = Pick("ldap_user_search_base", base0.UserBase);
+            return new RuntimeConfig
+            {
+                Server = Pick("ldap_server", base0.Server),
+                // 配置了搜索 base 就不再使用 DN 模板（否则会绕过搜索直接硬编码 DN）。
+                BindDn = string.IsNullOrWhiteSpace(searchBase) ? base0.BindDn : string.Empty,
+                UserBase = searchBase,
+                UserFilter = Pick("ldap_user_search_filter", base0.UserFilter),
+                ManagerDn = Pick("ldap_manager_dn", string.Empty),
+                ManagerPassword = Pick("ldap_manager_password", string.Empty),
+                SkipVerify = PickBool("ldap_skip_tls_verify", base0.SkipVerify),
+                // 设置表里该键始终存在（种子默认 false）；缺失时才退回「配置了 Url 即启用」。
+                LoginEnabled = PickBool("ldap_login_enabled", base0.LoginEnabled),
+            };
+        }
+    }
 }

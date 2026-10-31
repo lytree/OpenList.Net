@@ -1,11 +1,19 @@
-import { defineComponent, computed, ref, onMounted } from "vue"
+import { defineComponent, computed, h, ref, onMounted } from "vue"
 import { useRoute } from "vue-router"
 import { ElAlert, ElButton, ElCard, ElIcon, ElInput, ElTag } from "element-plus"
 import { VexTable, VexColumn } from "~/components/table"
 import { ArrowLeft, Download } from "@element-plus/icons-vue"
-import { shareDownloadLink, shareFsGet, shareFsList } from "~/api/sharePublic"
+import { shareDownloadLink, shareFsArchiveList, shareFsGet, shareFsList } from "~/api/sharePublic"
 import type { FsGetData, Obj } from "~/api/types"
 import { useSettingsStore } from "~/stores/settings"
+import {
+  parseExternalPreviews,
+  parseExtList,
+  parseIframePreviews,
+  resolvePreviews,
+  type TypeExtMap,
+} from "~/pages/home/previews/registry"
+import type { ArchiveListFn, PreviewEntry } from "~/pages/home/previews/types"
 import { humanSize, formatTime } from "~/utils/format"
 import { t } from "~/i18n"
 
@@ -36,6 +44,56 @@ export default defineComponent({
     const entries = ref<Obj[]>([])
     const currentPath = ref("/")
     const rootFile = ref<FsGetData | null>(null)
+
+    /**
+     * 单文件分享的内联预览（设置项 `share_preview`，默认开启）。
+     *
+     * 目录分享不做逐文件预览：那需要给游客一套「点开哪个文件就预览哪个」的导航，
+     * 而分享页刻意保持极简（只有面包屑 + 下载）。单文件分享本来就是「一个文件」的页面，
+     * 内联预览才有意义。
+     *
+     * 归档（`share_archive_preview`）单独一个开关：它要额外请求归档条目，
+     * 而且游客点不进条目内部（`/ae` 需要登录态），价值比普通预览低。
+     * 编辑器恒排除：它会把内容写回磁盘，分享是只读上下文。
+     */
+    const typeExts = computed<TypeExtMap>(() => ({
+      audio: parseExtList(settings.get("audio_types")),
+      video: parseExtList(settings.get("video_types")),
+      image: parseExtList(settings.get("image_types")),
+      text: parseExtList(settings.get("text_types")),
+    }))
+
+    /** 分享码版归档数据源，交给 `ArchivePreview` 替代登录态接口。 */
+    const listArchive: ArchiveListFn = (path, archivePass) =>
+      shareFsArchiveList(code.value, path, archivePass)
+
+    const previewEntries = computed<PreviewEntry[]>(() => {
+      const file = rootFile.value
+      if (!file || !settings.getBool("share_preview")) return []
+      const archiveAllowed = settings.getBool("share_archive_preview")
+      return resolvePreviews(file, {
+        path: "/",
+        provider: "",
+        iframePreviews: parseIframePreviews(settings.get("iframe_previews")),
+        externalPreviews: parseExternalPreviews(settings.get("external_previews")),
+        typeExts: typeExts.value,
+        // `share_preview_download_by_default`：为真时把「下载」摆到第一位，
+        // 打开分享页看到的就是下载卡片而不是预览。
+        downloadFirst: settings.getBool("share_preview_download_by_default"),
+        // `share_preview_archives_by_default`：为假时归档不抢默认位。
+        archiveDefault: settings.getBool("share_preview_archives_by_default"),
+      }).filter(
+        (entry) =>
+          entry.key !== "text_editor" && (archiveAllowed || entry.key !== "archive"),
+      )
+    })
+
+    const activePreviewKey = ref("")
+    const activePreview = computed<PreviewEntry | undefined>(
+      () => previewEntries.value.find((entry) => entry.key === activePreviewKey.value) ?? previewEntries.value[0],
+    )
+    /** 选中的是「下载」条目时按原样渲染下载卡片，不再套一层预览器。 */
+    const showPreview = computed(() => !!activePreview.value && activePreview.value.key !== "download")
 
     const sorted = computed(() =>
       [...entries.value].sort((a, b) =>
@@ -182,12 +240,29 @@ export default defineComponent({
       }
 
       if (rootFile.value) {
+        const file = rootFile.value
         return (
           <div class="ol-share-single">
-            <div class="ol-share-file-name">{rootFile.value.name}</div>
+            <div class="ol-share-file-name">{file.name}</div>
             <div class="ol-field-help">
-              {humanSize(rootFile.value.size)} · {formatTime(rootFile.value.modified)}
+              {humanSize(file.size)} · {formatTime(file.modified)}
             </div>
+            {showPreview.value && activePreview.value && (
+              <div class="ol-share-preview">
+                {h(activePreview.value.component, {
+                  obj: file,
+                  path: "/",
+                  provider: "",
+                  // 分享上下文没有签名直链，预览与下载都走 /sd（带分享码的下载端点）
+                  src: link("/"),
+                  download_url: link("/"),
+                  // 归档预览的数据源要换成带分享码的实现，否则游客请求只会 401
+                  listArchive,
+                  readOnly: true,
+                  typeExts: typeExts.value,
+                })}
+              </div>
+            )}
             <a href={link("/")} target="_blank" rel="noopener">
               <ElButton type="primary">
                 <ElIcon>

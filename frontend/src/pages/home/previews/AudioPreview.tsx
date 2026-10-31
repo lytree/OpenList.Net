@@ -2,6 +2,7 @@ import { defineComponent, ref, type PropType } from "vue"
 import { ElOption, ElSelect, ElSwitch } from "element-plus"
 import { Headset } from "@element-plus/icons-vue"
 import { humanSize } from "~/utils/format"
+import { useSettingsStore } from "~/stores/settings"
 import { t } from "~/i18n"
 import type { PreviewChildProps } from "./types"
 
@@ -16,6 +17,10 @@ export default defineComponent({
   },
   setup(props) {
     const audioRef = ref<HTMLAudioElement | null>(null)
+    const settings = useSettingsStore()
+    // 自动播放由设置项 audio_autoplay 控制（默认关）：此前这里硬编码 true，
+    // 打开任意音频就自动出声，且后台开关没有任何效果。
+    const autoplay = settings.getBool("audio_autoplay")
     const rate = ref(1)
     const loop = ref(false)
     const failed = ref(false)
@@ -60,7 +65,7 @@ export default defineComponent({
             class="ol-audio-el"
             src={props.src}
             controls={true}
-            autoplay={true}
+            autoplay={autoplay}
             onLoadedmetadata={() => {
               if (audioRef.value) audioRef.value.playbackRate = rate.value
             }}

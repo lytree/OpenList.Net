@@ -1,5 +1,3 @@
-using OpenList.Core.Configuration;
-
 namespace OpenList.Core.Interfaces;
 
 /// <summary>
@@ -9,8 +7,12 @@ namespace OpenList.Core.Interfaces;
 /// </summary>
 public interface ILdapAuthenticator
 {
-    /// <summary>是否已配置 LDAP URL（即功能是否开启）。</summary>
-    bool Enabled { get; }
+    /// <summary>
+    /// LDAP 登录当前是否启用。以设置表的 <c>ldap_login_enabled</c> 与服务器地址
+    /// （<c>ldap_server</c>，为空时回退 appsettings 的 <c>Ldap:Url</c>）共同判定 ——
+    /// 与前端登录页读取的公开设置是同一个口径，避免「设置页开了、实际不可用」。
+    /// </summary>
+    Task<bool> IsEnabledAsync(CancellationToken ct = default);
 
     /// <summary>
     /// 使用给定凭据尝试一次 bind。成功时返回 true。

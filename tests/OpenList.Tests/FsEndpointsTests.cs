@@ -324,6 +324,13 @@ public class FsEndpointsTests
                 var allowed = await PostJsonAsync(client, c.Allowed.Route, c.Allowed.Body);
                 // 放行断言只要求绕过权限门禁（非 403）；后续服务层结果不在本测试关注域。
                 await Assert.That(allowed.RootElement.GetProperty("code").GetInt32()).IsNotEqualTo(403);
+                // move/copy 是任务化端点：200 只代表已入队，文件操作在后台跑。
+                // 不等它结束就重建 base/m.txt，会和正在进行的移动撞上
+                // （Windows 上直接抛 "file is being used by another process"）。
+                if (c.Allowed.Route.EndsWith("/move", StringComparison.Ordinal))
+                    await WaitTasksAsync(client, "move");
+                else if (c.Allowed.Route.EndsWith("/copy", StringComparison.Ordinal))
+                    await WaitTasksAsync(client, "copy");
 
                 var denied = await PostJsonAsync(client, c.Denied.Route, c.Denied.Body);
                 await Assert.That(denied.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
@@ -430,6 +437,28 @@ public class FsEndpointsTests
             var ok = await PostJsonAsync(client, "/api/fs/copy",
                 new { src_dir = "/test/plain", dst_dir = "/test/out", names = new[] { "a.txt" } });
             await Assert.That(ok.RootElement.GetProperty("code").GetInt32()).IsNotEqualTo(403);
+            // 同上：后台复制还在写 out/a.txt 时销毁夹具，删目录会因文件被占用失败。
+            await WaitTasksAsync(client, "copy");
+        }
+    }
+
+    /// <summary>
+    /// 等待某类型的后台任务清空。
+    /// </summary>
+    /// <remarks>
+    /// move/copy 是任务化端点：HTTP 200 只代表任务已入队，文件操作在线程池里继续跑。
+    /// 测试若在返回后立刻重建/删除同一批文件，就会和还在进行中的任务撞上 ——
+    /// Windows 上表现为 <c>The process cannot access the file … because it is being used by another process</c>。
+    /// </remarks>
+    private static async Task WaitTasksAsync(HttpClient client, string type)
+    {
+        for (var i = 0; i < 150; i++)
+        {
+            var resp = await client.GetAsync($"/api/task/{type}/undone");
+            var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+            var data = json!.RootElement.GetProperty("data");
+            if (data.ValueKind == JsonValueKind.Array && data.GetArrayLength() == 0) return;
+            await Task.Delay(20);
         }
     }
 

@@ -608,15 +608,39 @@ html.dark .ol-auth {
   max-width: 100%;
 }
 
-.ol-file-name:hover span:last-child {
+.ol-file-name:hover > span:last-child {
   color: var(--el-color-primary);
   text-decoration: underline;
 }
 
-.ol-file-name span:last-child {
+.ol-file-name > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 列表缩略图槽位（桌面表格名称列 / 手机卡片行）。
+   边长由组件的 style 决定（40 / 36），这里只管裁切与圆角；图标态去掉底色，
+   让「没有缩略图」看起来和加槽位之前的纯图标列完全一致。 */
+.ol-thumb {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--el-fill-color-light);
+}
+
+.ol-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ol-thumb.is-icon {
+  background: transparent;
 }
 
 .ol-mono {
@@ -1718,6 +1742,24 @@ a.ol-share-entry:hover {
   word-break: break-all;
 }
 
+/* 单文件分享的内联预览区（设置项 share_preview） */
+.ol-share-preview {
+  width: 100%;
+  max-height: 62vh;
+  overflow: auto;
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-md);
+  background: var(--ol-bg-surface);
+}
+
+.ol-share-preview img,
+.ol-share-preview video {
+  max-width: 100%;
+  max-height: 62vh;
+  display: block;
+  margin: 0 auto;
+}
+
 .ol-share-footer {
   margin-top: var(--ol-space-4);
   font-size: 12px;
@@ -2072,6 +2114,31 @@ html.dark .ol-grid-check {
 .ol-readme-body {
   font-size: 13.5px;
   line-height: 1.7;
+}
+
+/* ---- 站点公告（设置项 announcement） ---- */
+.ol-announcement {
+  padding: 10px 16px;
+  margin-bottom: var(--ol-space-3, 12px);
+  background: var(--ol-bg-surface);
+  border: 1px solid var(--ol-border);
+  /* 左侧强调色竖条：与 README 区分开，一眼能看出是「站点公告」而不是目录说明 */
+  border-left: 3px solid var(--el-color-primary);
+  border-radius: var(--ol-radius-md);
+}
+
+.ol-announcement-body {
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+/* 公告里的 Markdown 首末段落不要撑出多余空白 */
+.ol-announcement-body > :first-child {
+  margin-top: 0;
+}
+
+.ol-announcement-body > :last-child {
+  margin-bottom: 0;
 }
 
 /* ==========================================================================

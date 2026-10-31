@@ -46,6 +46,8 @@ export const useSettingsStore = defineStore("settings", () => {
     () => window.OPENLIST_CONFIG?.main_color || get("main_color") || "#1890ff",
   )
   const ldapEnabled = computed(() => getBool("ldap_login_enabled"))
+  /** LDAP 登录提示文案（设置项 `ldap_login_tips`）；为空时登录页回退 i18n 文案。 */
+  const ldapLoginTips = computed(() => get("ldap_login_tips").trim())
   const webauthnEnabled = computed(() => getBool("webauthn_login_enabled"))
 
   /**
@@ -73,6 +75,7 @@ export const useSettingsStore = defineStore("settings", () => {
     logo,
     mainColor,
     ldapEnabled,
+    ldapLoginTips,
     webauthnEnabled,
     mediaGuestAccess,
     homeGuestAccess,

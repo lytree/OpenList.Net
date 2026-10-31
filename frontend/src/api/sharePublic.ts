@@ -67,6 +67,31 @@ export async function shareFsList(
 }
 
 /**
+ * `POST /fs/archive/list`（分享码鉴权）。
+ *
+ * 归档预览要列条目，而游客没有 JWT；`/fs/archive/list` 对匿名请求走 `ShareAccess`，
+ * 认 `Authorization: <分享码>`，所以这里只需要把分享码塞进头里，不用另开端点。
+ */
+export async function shareFsArchiveList(
+  code: string,
+  path: string,
+  archivePass?: string,
+): Promise<Resp<{ content: { name: string; size: number; is_dir: boolean; modified: string }[]; total: number }>> {
+  try {
+    const { data } = await shareClient.post<
+      Resp<{ content: { name: string; size: number; is_dir: boolean; modified: string }[]; total: number }>
+    >(
+      "/fs/archive/list",
+      { path, password: "", archive_pass: archivePass ?? "" },
+      { headers: { Authorization: code } },
+    )
+    return data
+  } catch (e) {
+    return envelope(e)
+  }
+}
+
+/**
  * 分享内文件的下载直链（`/sd/{code}/{相对路径}`）。
  * 注意：`/sd` 走的是分享根 + 相对路径，**不是**完整挂载路径。
  */

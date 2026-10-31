@@ -37,6 +37,8 @@
     "too_large": "File is too large to preview. Please download it.",
     "lines": "{{count}} lines",
     "iframe_missing_scheme": "This preview needs a URL template in site settings.",
+    "external_hint": "Handed off to a local app. If nothing happened, use the button below.",
+    "external_blocked": "The browser blocked the new window — click the button to open it.",
     "no_inline_preview": "No inline preview for this file type. Download it to open locally.",
     "failed_to_render": "Preview failed: {{message}}",
     "failed_load_img": "Failed to load image",
