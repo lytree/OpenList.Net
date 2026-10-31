@@ -4,7 +4,7 @@
 
 - **Build**: `dotnet build` — from Git Bash on Windows, `dotnet restore` (and therefore a bare `dotnet build`) dies with `Value cannot be null. (Parameter 'path1')`. That is **not** a broken NuGet config: `XPlatMachineWideSetting` reads `%ProgramFiles(x86)%` and the Git-Bash env does not carry it. Prefix the command with `env "ProgramFiles(x86)=C:\\Program Files (x86)"` (a plain `export` cannot set a name containing parentheses); `--no-restore` also works when `obj/project.assets.json` is current. See `docs/unified-media-product-plan.md` §51.3.
 - **Run**: `dotnet run --project src/OpenList.Server` (listens `http://0.0.0.0:5244` by default)
-- **Test**: `dotnet test` — uses **TUnit** (not NUnit), async convention: `await Assert.That(actual).Is(expected)`
+- **Test**: `dotnet test` — uses **TUnit** (not NUnit), async convention: `await Assert.That(actual).Is(expected)`. On this Windows box the MTP bridge sometimes reports `运行了零个测试` (exit code 5) even right after a clean build; run the host directly instead: `dotnet tests/OpenList.Tests/bin/Debug/net10.0/OpenList.Tests.dll` (608 tests, ~3 min).
 - **Lint**: `dotnet format`
 - **Cake build** (file-based `Cake.Sdk` script, `build/build.cs`): `dotnet run build/build.cs -- --target=<Task>` (e.g. `--target=CI`, `--target=Publish --semver=1.2.3`). `Cake.Sdk` is pinned via `global.json` → `msbuild-sdks`. See `build/build.cs` for all targets/args.
   - **Publish variants** via `--app=`: `server` (default — headless server; framework-dependent without `--rid`, self-contained with it) and `desktop` (`--app=desktop --rid=<rid>` — Avalonia GUI at bundle root + server under `server/` + `frontend/dist/`; always self-contained). Bundle names: `openlist-net[-desktop]-<rid>[-semver]`.
