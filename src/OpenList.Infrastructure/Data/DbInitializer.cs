@@ -689,6 +689,28 @@ public static class DbInitializer
         // Flag 必须是 Public —— 游客要在还没登录时就知道自己能不能进，靠 /api/public/settings 下发。
         ("media_guest_access", "true", SettingValueType.Bool, SettingFlag.Public, 13, null),
         ("home_guest_access", "false", SettingValueType.Bool, SettingFlag.Public, 13, null),
+
+        // --- Group 14: THUMB（缩略图服务 /p?type=thumb） ---
+        // 默认关闭：升级后不能凭空多出解码负载与远端流量；关着时 Obj.Thumb 恒空，
+        // 前端行为与升级前完全一致（退回图标/原图），打开即生效。
+        ("thumb_enable", "false", SettingValueType.Bool, SettingFlag.Public, 14, null),
+        // 列表卡片请求的边长（正方形，cover 裁剪）。改前端卡片尺寸时只改这里。
+        ("thumb_max_size", "320", SettingValueType.Number, SettingFlag.Public, 14, null),
+        ("thumb_quality", "80", SettingValueType.Number, SettingFlag.Public, 14, null),
+        // 允许生成的扩展名白名单。刻意不含 svg（存储型 XSS 载体）与 pdf（需要 PDFium，未接入）。
+        ("thumb_types", "jpg,jpeg,png,webp,bmp,gif,avif,tif,tiff,ico,mp3,flac,m4a,ogg,opus,wav,mp4,mkv,mov,webm,avi", SettingValueType.String, SettingFlag.Public, 14, null),
+        // 视频抽帧位置：秒（"15"）或百分比（"10%"）。百分比需要 ffprobe 取时长，缺失时退化为 10 秒。
+        ("thumb_video_position", "10%", SettingValueType.String, SettingFlag.Public, 14, null),
+        ("thumb_video_enable", "true", SettingValueType.Bool, SettingFlag.Public, 14, null),
+        // 缓存目录留空 = {dataDir}/thumbnails；必须放本地盘（网络盘会让首屏写缓存极慢）。
+        ("thumb_cache_folder", "", SettingValueType.String, SettingFlag.Private, 14, null),
+        ("thumb_cache_max_mb", "2048", SettingValueType.Number, SettingFlag.Private, 14, null),
+        // 图片/音频需要整读进临时文件，这里同时是内存与临时盘的护栏。
+        ("thumb_max_source_mb", "64", SettingValueType.Number, SettingFlag.Private, 14, null),
+        // 全局并发上限；0 = max(2, CPU 核数)。等不到许可的请求直接 503，不排队。
+        ("thumb_concurrency", "0", SettingValueType.Number, SettingFlag.Private, 14, null),
+        // ffmpeg 路径。留空时依次找环境变量 OPENLIST_FFMPEG、系统 PATH。
+        ("thumb_ffmpeg_path", "", SettingValueType.String, SettingFlag.Private, 14, null),
     };
 
     /// <summary>

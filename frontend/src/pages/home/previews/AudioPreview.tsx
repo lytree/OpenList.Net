@@ -19,6 +19,8 @@ export default defineComponent({
     const rate = ref(1)
     const loop = ref(false)
     const failed = ref(false)
+    // 封面加载失败（该音频没有内嵌封面 → 后端 404）时退回耳机图标。
+    const coverFailed = ref(false)
 
     function onRateChange(value: string | number | boolean) {
       rate.value = Number(value)
@@ -33,8 +35,14 @@ export default defineComponent({
     return () => (
       <div class="ol-audio-preview">
         <div class="ol-audio-cover">
-          {props.obj.thumb ? (
-            <img src={props.obj.thumb} alt="" class="ol-audio-cover-img" />
+          {props.obj.thumb && !coverFailed.value ? (
+            <img
+              src={props.obj.thumb}
+              alt=""
+              class="ol-audio-cover-img"
+              // 没有内嵌封面的音频后端会回 404：退成图标，别留裂图。
+              onError={() => (coverFailed.value = true)}
+            />
           ) : (
             <Headset class="ol-audio-cover-icon" />
           )}

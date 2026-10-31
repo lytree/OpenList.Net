@@ -70,8 +70,13 @@ RUN printf 'semver=%s\nassemblyVer=%s\nfileVer=%s\ninformationalVer=%s\nsha=%s\n
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-# ICU for globalization (upstream Dockerfile convention)
-RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev \
+# ICU for globalization (upstream Dockerfile convention).
+# ffmpeg: the thumbnail service (/p?type=thumb) shells out to it for image scaling,
+# embedded audio covers and video frame extraction — same model as Jellyfin, where
+# FFmpeg ships with the image and is invoked as a separate process. ~90 MB on
+# bookworm; users who don't want thumbnails simply leave thumb_enable=false and
+# never pay for it at runtime (the binary is only ever executed on demand).
+RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 # .NET publish output

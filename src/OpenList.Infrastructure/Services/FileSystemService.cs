@@ -25,6 +25,7 @@ public sealed class FileSystemService : IFileSystemService
     private readonly IServiceScopeFactory? _scopes;
     private readonly ITaskService? _tasks;
     private readonly IPublicUrlResolver? _publicUrls;
+    private readonly IThumbnailUrlBuilder? _thumbs;
 
     /// <summary>创建文件系统服务实例（仅用于单元测试）。</summary>
     public FileSystemService(MountService mount) => _mount = mount;
@@ -73,6 +74,7 @@ public sealed class FileSystemService : IFileSystemService
     /// <param name="scopes">DI 作用域工厂（用于解析 scoped 的 IMetaService，可选）。</param>
     /// <param name="tasks">后台任务服务（用于 move/copy 任务化，可选）。</param>
     /// <param name="publicUrls">站点基地址解析器（用于把 raw_url 生成为绝对地址，可选）。</param>
+    /// <param name="thumbs">缩略图 URL 构造器（可选；未注入时 <c>Obj.Thumb</c> 恒为空）。</param>
     public FileSystemService(
         MountService mount,
         ISignService? signs,
@@ -80,7 +82,8 @@ public sealed class FileSystemService : IFileSystemService
         IObjsUpdateHooks? hooks,
         IServiceScopeFactory? scopes,
         ITaskService? tasks,
-        IPublicUrlResolver? publicUrls = null)
+        IPublicUrlResolver? publicUrls = null,
+        IThumbnailUrlBuilder? thumbs = null)
     {
         _mount = mount;
         _signs = signs;
@@ -89,6 +92,7 @@ public sealed class FileSystemService : IFileSystemService
         _scopes = scopes;
         _tasks = tasks;
         _publicUrls = publicUrls;
+        _thumbs = thumbs;
     }
 
     /// <summary>
@@ -107,11 +111,14 @@ public sealed class FileSystemService : IFileSystemService
 
         // 签名策略与 Go 的 isEncrypt(meta, reqPath) 一样，每个请求只算一次，条目共用。
         var signCtx = await ResolveSignContextAsync(path.ToString(), ct);
+        // 驱动只查一次：既要给响应填 provider，也要给缩略图判定「该挂载参不参与」。
+        var driver = _mount.FindDriverForPath(req.Path);
+        var driverAllowsThumb = driver is not IThumbnailSwitch thumbSwitch || thumbSwitch.ThumbnailEnabled;
         var entries = _mount.Root.EnumeratePaths(path)
             .Select(p => _mount.Root.FileExists(p)
                 ? (FileSystemEntry)_mount.Root.GetFileEntry(p)
                 : _mount.Root.GetDirectoryEntry(p))
-            .Select(e => ToObj(e, signCtx))
+            .Select(e => ToObj(e, signCtx, driverAllowsThumb))
             .OrderBy(e => !e.IsDir)
             .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -127,7 +134,6 @@ public sealed class FileSystemService : IFileSystemService
         var perPage = req.PerPage < 1 ? int.MaxValue : req.PerPage;
         var paged = entries.Skip((page - 1) * perPage).Take(perPage).ToList();
 
-        var driver = _mount.FindDriverForPath(req.Path);
         // 尝试加载 nearest meta，用于 readme/header 注入与"该路径可写"判定。
         // 单元测试不走 DI 时 _scopes==null，跳过 meta 解析（保持旧行为）。
         Meta? nearest = null;
@@ -223,9 +229,10 @@ public sealed class FileSystemService : IFileSystemService
         };
         // 签名策略每个请求解析一次，条目共用：对齐 Go 的 isEncrypt(meta, reqPath) 只算一次。
         var signCtx = await ResolveSignContextAsync(path.ToString(), ct);
+        var driverAllowsThumb = driver is not IThumbnailSwitch thumbSwitch || thumbSwitch.ThumbnailEnabled;
         if (entry is not null)
         {
-            var obj = ToObj(entry, signCtx);
+            var obj = ToObj(entry, signCtx, driverAllowsThumb);
             resp.Name = obj.Name;
             resp.Size = obj.Size;
             resp.IsDir = obj.IsDir;
@@ -234,6 +241,8 @@ public sealed class FileSystemService : IFileSystemService
             resp.Type = obj.Type;
             // 前端把 sign 拼到 /d/ 直链上（外部播放器用），与 raw_url 的签名同源。
             resp.Sign = obj.Sign;
+            // 详情页也用同一个缩略图地址（视频由调用方显式带 ?type=thumb 请求，列表不下发）。
+            resp.Thumb = obj.Thumb;
         }
         // 对文件生成指向代理端点 /p 的 raw_url。
         // 这是前端用作视频/音频/pdf 预览的媒体源；路径是否需要签名由 signCtx 决定，
@@ -259,7 +268,7 @@ public sealed class FileSystemService : IFileSystemService
                     if (_mount.Root.FileExists(p))
                     {
                         var fe = _mount.Root.GetFileEntry(p);
-                        var sibling = ToObj(fe, signCtx);
+                        var sibling = ToObj(fe, signCtx, driverAllowsThumb);
                         if (sibling.Name != resp.Name && sibling.Name.StartsWith(baseName, StringComparison.OrdinalIgnoreCase))
                             siblings.Add(sibling);
                     }
@@ -969,20 +978,28 @@ public sealed class FileSystemService : IFileSystemService
     /// 为空则不拼 query，直链就靠 <c>/d/</c> 端点的「无需签名」放行（Go 默认行为）。
     /// 目录不签（没有可下载的内容）。内部调用方（索引 / 搜索）不传上下文，签名恒为空。
     /// </para>
+    /// <para>
+    /// <paramref name="driverAllowsThumb"/> 为 false 或未注入
+    /// <see cref="IThumbnailUrlBuilder"/> 时 <see cref="Obj.Thumb"/> 为空 —— 前端据此退回图标/原图。
+    /// </para>
     /// </summary>
-    private Obj ToObj(FileSystemEntry entry, SignContext? signCtx = null)
+    private Obj ToObj(FileSystemEntry entry, SignContext? signCtx = null, bool driverAllowsThumb = true)
     {
         var isDir = entry is DirectoryEntry;
         var needsSign = !isDir && signCtx is { NeedSign: true } && _signs is not null;
+        var size = isDir ? 0 : (entry as FileEntry)?.Length ?? 0;
         return new Obj
         {
             Name = entry.Name,
             IsDir = isDir,
-            Size = isDir ? 0 : (entry as FileEntry)?.Length ?? 0,
+            Size = size,
             Modified = entry.LastWriteTime,
             Created = entry.CreationTime,
             Type = GetObjType(entry.Name, isDir),
             Sign = needsSign ? _signs!.Sign(entry.Path.ToString(), signCtx!.Value.ExpireAt) : null,
+            // 缩略图判定必须保持纯内存：只看扩展名、大小与设置快照，绝不在这里做 IO。
+            Thumb = _thumbs?.Build(entry.Path.ToString(), entry.Name, size, isDir,
+                signCtx ?? SignContext.NotNeeded, driverAllowsThumb),
         };
     }
 

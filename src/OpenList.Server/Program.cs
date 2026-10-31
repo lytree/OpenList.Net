@@ -14,6 +14,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
 using OpenList.Infrastructure.Services;
+using OpenList.Infrastructure.Thumbnails;
 using OpenList.Media;
 using OpenList.Server.Endpoints;
 using OpenList.Server.Hosting;
@@ -166,6 +167,23 @@ builder.Services.AddSingleton<IGuestAccessService, GuestAccessService>();
 // 站点基地址解析：把 raw_url 生成成绝对地址，供浏览器之外的程序
 // （PotPlayer / IINA / 下载器）直接使用；它们不会用页面 origin 补全相对路径。
 builder.Services.AddSingleton<IPublicUrlResolver, PublicUrlResolver>();
+// ---------------------------------------------------------------------
+// 缩略图服务（/p?type=thumb）。
+// - ThumbnailOptionsProvider：设置项 → 内存快照（20s 后台刷新），列表映射里只读快照，不查库；
+// - ThumbnailService：类型判定 → 缓存查询 → ffmpeg 子进程生成 → 落盘；
+// - FfmpegProcessRunner：所有 ffmpeg 进程登记在案，Dispose 时统一 Kill（不留孤儿）；
+// - ThumbnailUrlBuilder：给 Obj.thumb 拼 URL，注入进 FileSystemService。
+// 生成全部交给外部 ffmpeg，进程内不链接 native（详见 docs/thumbnail-service-plan.md）。
+// ---------------------------------------------------------------------
+builder.Services.AddSingleton<ThumbnailCache>();
+builder.Services.AddSingleton<FfmpegProcessRunner>();
+builder.Services.AddSingleton<FfmpegTool>();
+builder.Services.AddSingleton<ThumbnailService>();
+builder.Services.AddSingleton<ThumbnailOptionsProvider>();
+builder.Services.AddSingleton<IThumbnailUrlBuilder>(sp => new ThumbnailUrlBuilder(
+    sp.GetRequiredService<ThumbnailOptionsProvider>(),
+    sp.GetService<IPublicUrlResolver>(),
+    sp.GetService<ISignService>()));
 // Offline-download tool adapters (aria2 / qBittorrent / Transmission) talk to external
 // daemons over HTTP — register a named HttpClient per tool so timeouts/policies can be
 // tuned independently. IHttpClientFactory is the standard ASP.NET Core pattern.
@@ -210,7 +228,9 @@ builder.Services.AddSingleton<IFileSystemService>(sp =>
         sp.GetService<IOfflineDownloadService>(),
         sp.GetService<IObjsUpdateHooks>(),
         sp.GetService<IServiceScopeFactory>(),
-        sp.GetService<ITaskService>()));
+        sp.GetService<ITaskService>(),
+        sp.GetService<IPublicUrlResolver>(),
+        sp.GetService<IThumbnailUrlBuilder>()));
 // Multipart (chunked) upload sessions — singleton; depends only on IFileSystemService.
 builder.Services.AddSingleton<IMultipartUploadService, MultipartUploadService>();
 // S3 gateway multipart-upload sessions — singleton; parts staged on disk, TTL-reaped

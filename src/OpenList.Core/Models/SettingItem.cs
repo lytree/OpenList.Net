@@ -107,6 +107,8 @@ public enum SettingGroup : int
     Media = 12,
     /// <summary>访问控制（媒体 / 首页各自的访客开关）。</summary>
     Access = 13,
+    /// <summary>缩略图（<c>/p?type=thumb</c>）。</summary>
+    Thumbnail = 14,
 }
 
 /// <summary>

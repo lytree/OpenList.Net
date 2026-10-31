@@ -143,3 +143,38 @@ public sealed class DirectUploadInfo
     /// <summary>使用的 HTTP 方法，可为空。</summary>
     public string? Method { get; set; }
 }
+
+/// <summary>
+/// 驱动能把挂载路径映射回宿主机上的真实文件路径（本地驱动）。
+/// <para>
+/// 存在的唯一理由是缩略图抽帧：ffmpeg 需要<b>可随机读</b>的输入，而 VFS 的
+/// <c>OpenFile</c> 在云盘上是不可 Seek 的顺序流。给 ffmpeg 一个真实路径，
+/// 它自己用 pread 处理，比我们绕一层 AVIO 回调简单得多。
+/// </para>
+/// <para>
+/// 实现方必须自己做越界校验（不能因为路径里带 <c>../</c> 就跑到挂载根之外）。
+/// </para>
+/// </summary>
+public interface IFileSystemLocalPath
+{
+    /// <summary>
+    /// 把驱动内相对路径（<c>/a/b.mp4</c>）映射为宿主机绝对路径。
+    /// </summary>
+    /// <param name="path">相对挂载点的驱动内路径。</param>
+    /// <param name="physicalPath">映射成功时为宿主机绝对路径，否则为空串。</param>
+    /// <returns>映射成功且文件存在时返回 <c>true</c>。</returns>
+    bool TryGetLocalPath(string path, out string physicalPath);
+}
+
+/// <summary>
+/// 驱动级的缩略图开关：存储配置里显式关掉时，该挂载下的条目不再下发 <c>thumb</c>。
+/// <para>
+/// 只有声明了这个接口的驱动才参与判定；没有声明的驱动一律按「全局开关为准」处理，
+/// 避免每个驱动各复制一个字段、最后变成「为什么这个盘不出图」要在两处排查。
+/// </para>
+/// </summary>
+public interface IThumbnailSwitch
+{
+    /// <summary>该挂载是否允许生成/下发缩略图。</summary>
+    bool ThumbnailEnabled { get; }
+}

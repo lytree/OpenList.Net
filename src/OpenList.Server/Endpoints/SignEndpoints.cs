@@ -5,6 +5,7 @@ using OpenList.Core.Drivers;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
+using OpenList.Infrastructure.Thumbnails;
 using OpenList.Vfs;
 
 namespace OpenList.Server.Endpoints;
@@ -52,16 +53,26 @@ public static class SignEndpoints
         // （用于驱动必须代理的场景，或需要 Range 支持的多媒体播放）。
         // 驱动能提供区间读取器时（阿里云盘等有回调并发配额的服务）优先走驱动读端，
         // 否则回退为通用 VFS 流式传输。
+        // 同一挂载点上的 ?type=thumb 是缩略图服务（对齐 Go 上游），在鉴权之后分流。
         app.MapGet("/p/{**path}", async (
             string path,
             string? sign,
+            string? type,
+            string? w,
+            string? h,
+            string? at,
+            string? fmt,
+            string? q,
             ISignService signs,
             IFileSystemService fs,
             MountService mount,
+            ThumbnailService thumbs,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (IsThumbRequest(type))
+                return await ThumbnailAsync(thumbs, fullPath, w, h, at, fmt, q, ctx, head: false);
             return await DownloadAsync(mount, fullPath, ctx, preferProxy: true);
         }).AllowAnonymous();
 
@@ -82,12 +93,18 @@ public static class SignEndpoints
         app.MapMethods("/p/{**path}", new[] { "HEAD" }, async (
             string path,
             string? sign,
+            string? type,
+            string? w,
+            string? h,
             ISignService signs,
             MountService mount,
+            ThumbnailService thumbs,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
+            if (IsThumbRequest(type))
+                return await ThumbnailAsync(thumbs, fullPath, w, h, null, null, null, ctx, head: true);
             return await DownloadAsync(mount, fullPath, ctx, preferProxy: true);
         }).AllowAnonymous();
 
@@ -181,6 +198,100 @@ public static class SignEndpoints
         }).AllowAnonymous();
 
         return app;
+    }
+
+    /// <summary>
+    /// 是否为缩略图请求（<c>?type=thumb</c>）。其它 <c>type</c> 值一律按普通下载处理，
+    /// 保证旧客户端、旧播放器、外来下载器拼的任何 query 都不改变既有行为。
+    /// </summary>
+    private static bool IsThumbRequest(string? type)
+        => string.Equals(type, "thumb", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 缩略图分支：命中缓存/生成成功返回图片字节，失败按可枚举原因映射状态码。
+    /// </summary>
+    /// <remarks>
+    /// 状态码口径与 <c>MediaImages</c> 一致：文件不存在与无权访问都回 <b>404</b>，
+    /// 不用 403 —— 403 等于确认「这个路径存在」。
+    /// </remarks>
+    /// <param name="thumbs">缩略图服务。</param>
+    /// <param name="path">文件的完整挂载路径。</param>
+    /// <param name="w">目标宽度。</param>
+    /// <param name="h">目标高度。</param>
+    /// <param name="at">视频抽帧位置。</param>
+    /// <param name="fmt">编码格式。</param>
+    /// <param name="q">编码质量。</param>
+    /// <param name="ctx">当前 HTTP 上下文。</param>
+    /// <param name="head">是否为 HEAD 探测（不生成、不写体）。</param>
+    private static async Task<IResult> ThumbnailAsync(
+        ThumbnailService thumbs,
+        string path,
+        string? w,
+        string? h,
+        string? at,
+        string? fmt,
+        string? q,
+        HttpContext ctx,
+        bool head)
+    {
+        // 所有 query 都按字符串收、再自行解析：非法值（w=abc）必须被忽略，
+        // 而不是让模型绑定把整个请求判成 400 —— 同一个路由还承担普通下载。
+        var request = new ThumbnailRequest(path, ToInt(w), ToInt(h), at, fmt, ToInt(q));
+        var result = head ? thumbs.Probe(request) : await thumbs.GetAsync(request, ctx.RequestAborted);
+
+        switch (result.Status)
+        {
+            case ThumbnailStatus.Ok:
+                // 只有成功结果可以长缓存：失败如果也带 max-age=604800，浏览器/CDN 会把
+                // 一次临时故障（云盘限流、ffmpeg 正在装）钉一周。
+                ctx.Response.Headers.CacheControl = "public, max-age=604800";
+                ctx.Response.ContentType = result.ContentType;
+                if (result.Data is null)
+                {
+                    // HEAD：只回头信息，绝不生成。
+                    ctx.Response.StatusCode = StatusCodes.Status200OK;
+                    return Results.Empty;
+                }
+
+                ctx.Response.Headers.ETag = BuildETag(result.Data);
+                ctx.Response.Headers["X-Thumb-Cache"] = result.FromCache ? "hit" : "generated";
+                ctx.Response.ContentLength = result.Data.Length;
+                ctx.Response.StatusCode = StatusCodes.Status200OK;
+                await ctx.Response.Body.WriteAsync(result.Data, ctx.RequestAborted);
+                return Results.Empty;
+
+            case ThumbnailStatus.Busy:
+                ctx.Response.Headers.CacheControl = "no-store";
+                ctx.Response.Headers.RetryAfter = "1";
+                ctx.Response.Headers["X-Thumb-Reason"] = result.Reason;
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
+            case ThumbnailStatus.Unsupported:
+                ctx.Response.Headers.CacheControl = "no-store";
+                ctx.Response.Headers["X-Thumb-Reason"] = result.Reason;
+                return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+
+            default:
+                ctx.Response.Headers.CacheControl = "no-store";
+                if (!string.IsNullOrEmpty(result.Reason))
+                    ctx.Response.Headers["X-Thumb-Reason"] = result.Reason;
+                return Results.StatusCode(StatusCodes.Status404NotFound);
+        }
+    }
+
+    /// <summary>把 query 里的整数解析成 <c>int?</c>；空/非法一律视为"未指定"，由设置项兜底。</summary>
+    private static int? ToInt(string? raw)
+        => int.TryParse(raw, out var value) ? value : null;
+
+    /// <summary>
+    /// 由内容算 ETag：同一张图（同尺寸/同格式/同源文件）字节相同，因此 ETag 相同，
+    /// 命中缓存与刚生成的结果一致，浏览器可以放心走 304。
+    /// </summary>
+    private static string BuildETag(byte[] data)
+    {
+        Span<byte> hash = stackalloc byte[32];
+        System.Security.Cryptography.SHA256.HashData(data, hash);
+        return $"\"t1-{Convert.ToHexStringLower(hash[..8])}\"";
     }
 
     /// <summary>

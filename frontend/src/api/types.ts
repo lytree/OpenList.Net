@@ -357,7 +357,7 @@ export interface SettingItem {
  * 分组编号 → 文案键。
  * 真源 `SettingGroup`：0=Single（驱动专用临时目录，不在设置页展示）、
  * 1=Site、2=Style、3=Preview、4=Global、5=Aria2、6=Index、7=SSO、8=LDAP、
- * 9=S3、10=FTP、11=Traffic、12=Media。
+ * 9=S3、10=FTP、11=Traffic、12=Media、13=Access、14=Thumbnail。
  */
 export const SettingGroups: { group: number; labelKey: string }[] = [
   { group: 1, labelKey: "settings.groups.site" },
@@ -375,6 +375,9 @@ export const SettingGroups: { group: number; labelKey: string }[] = [
   // 访问控制：媒体 / 首页各自的访客开关（设置项 media_guest_access / home_guest_access）。
   // 放在最后而不是塞进「站点」，是因为它描述的是「两个门面各自的准入」，不是站点外观。
   { group: 13, labelKey: "settings.groups.access" },
+  // 缩略图服务：/p?type=thumb（总开关、边长、质量、缓存、ffmpeg 路径）。
+  // 单独一组而不是塞进「预览」：它管的是「列表用什么图」，与「点开怎么预览」是两件事。
+  { group: 14, labelKey: "settings.groups.thumbnails" },
 ]
 
 // ---------------------------------------------------------------------------

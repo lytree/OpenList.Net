@@ -147,8 +147,12 @@ public class StorageServiceTests
         var svc = new StorageService(ctx, new MountService());
         var r = await svc.GetDriverInfoAsync("Local");
         await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(r.Data!.Additional).Count().IsEqualTo(3);
+        // 本地驱动只剩两个配置项：root 路径 + 缩略图开关。
+        // `thumb_cache_folder` 已删除 —— 缓存目录统一由全局设置（thumb_cache_folder）管理，
+        // 驱动上再放一个同名字段只会造出「两个语义相同、其中一个不生效」的输入框。
+        await Assert.That(r.Data!.Additional).Count().IsEqualTo(2);
         await Assert.That(r.Data.Additional[0].Name).IsEqualTo("root_folder_path");
+        await Assert.That(r.Data.Additional.Select(i => i.Name)).Contains("thumbnail");
         await Assert.That(r.Data.Config.Name).IsEqualTo("Local");
     }
 

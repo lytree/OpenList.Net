@@ -11,7 +11,7 @@ namespace OpenList.Drivers.Local;
 /// 对应 OpenList Go 的 <c>drivers/local</c>。通过 <see cref="SharpCompressArchiveSupport"/>
 /// 实现归档读取/解压接口（zip/rar/7z/tar/gz）。
 /// </summary>
-public sealed class LocalDriver : DriverBase, IFileSystemArchiveReader, IFileSystemArchiveDecompress
+public sealed class LocalDriver : DriverBase, IFileSystemArchiveReader, IFileSystemArchiveDecompress, IFileSystemLocalPath, IThumbnailSwitch
 {
     /// <summary>驱动名称。</summary>
     public override string DriverName => "Local";
@@ -19,6 +19,46 @@ public sealed class LocalDriver : DriverBase, IFileSystemArchiveReader, IFileSys
     public override bool ReadOnly => false;
     /// <summary>本地驱动不属于云存储驱动器。</summary>
     public override bool IsCloudDriver => false;
+
+    /// <summary>
+    /// 该挂载是否允许出缩略图。默认 <c>true</c>：全局开关才是主开关，
+    /// 驱动级配置只在管理员显式关掉时生效（旧版本该字段默认 false，会让本地盘静默不出图）。
+    /// </summary>
+    public bool ThumbnailEnabled => Addition.Thumbnail;
+
+    /// <summary>
+    /// 把驱动内相对路径映射为宿主机绝对路径（缩略图抽帧需要可随机读的输入）。
+    /// </summary>
+    /// <param name="path">相对挂载点的路径，例如 <c>/a/b.mp4</c>。</param>
+    /// <param name="physicalPath">成功时为宿主机绝对路径。</param>
+    /// <returns>映射成功且文件存在时为 <c>true</c>。</returns>
+    public bool TryGetLocalPath(string path, out string physicalPath)
+    {
+        physicalPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(Addition.RootFolderPath)) return false;
+        try
+        {
+            var root = Path.GetFullPath(Addition.RootFolderPath);
+            var relative = path.Replace('\\', '/').TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+            var full = Path.GetFullPath(Path.Combine(root, relative));
+
+            // 越界校验：映射结果必须仍在根目录之内，否则 ../ 就能把宿主机任意文件喂给 ffmpeg。
+            var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
+                ? root
+                : root + Path.DirectorySeparatorChar;
+            if (!full.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (!File.Exists(full)) return false;
+            physicalPath = full;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// 列出压缩包内的归档条目。
@@ -82,15 +122,9 @@ public sealed class LocalDriver : DriverBase, IFileSystemArchiveReader, IFileSys
         new()
         {
             Name = "thumbnail",
-            Help = "Enable thumbnail generation",
+            Help = "Enable thumbnail generation for this mount",
             ValueType = typeof(bool),
-            Default = false,
-        },
-        new()
-        {
-            Name = "thumb_cache_folder",
-            Help = "Cache folder for thumbnails",
-            ValueType = typeof(string),
+            Default = true,
         },
     ];
 
@@ -131,11 +165,10 @@ public sealed class LocalAddition
     [JsonPropertyName("root_folder_path")]
     public string RootFolderPath { get; set; } = string.Empty;
 
-    /// <summary>是否启用缩略图生成。</summary>
+    /// <summary>
+    /// 是否启用缩略图生成。默认 <c>true</c>：缓存目录与开关统一由全局设置
+    /// （<c>thumb_*</c>）管理，这里只保留"这个挂载参不参与"的一个粗粒度开关。
+    /// </summary>
     [JsonPropertyName("thumbnail")]
-    public bool Thumbnail { get; set; }
-
-    /// <summary>缩略图缓存目录。</summary>
-    [JsonPropertyName("thumb_cache_folder")]
-    public string? ThumbCacheFolder { get; set; }
+    public bool Thumbnail { get; set; } = true;
 }
