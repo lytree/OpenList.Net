@@ -164,8 +164,8 @@
 | 组 | 键 | 真实配置源 / 代码依据 |
 |---|---|---|
 | G8 | `ldap_server`、`ldap_manager_dn`、`ldap_manager_password`、`ldap_user_search_base`、`ldap_user_search_filter`、`ldap_default_dir`、`ldap_default_permission`、`ldap_skip_tls_verify`、`ldap_login_tips`（9 键） | `LdapAuthenticator.cs:26` 读 `AppConfiguration.Ldap`；DB 设置组整体不生效（并直接导致 P0-1 的不一致） |
-| G10 | `ftp_public_host`、`ftp_pasv_port_map`、`ftp_mandatory_tls`、`ftp_implicit_tls`、`ftp_tls_public_cert_path`、`ftp_tls_private_key_path`、`sftp_disable_password_login`（FTP/SFTP 组全部） | `FtpHostedService.cs:30-35` 读 `AppConfiguration.FTP`；SFTP 同理走 appsettings |
-| G9 | `s3_buckets`、`s3_access_key_id`、`s3_secret_access_key` | S3 网关（`S3Endpoints.cs`）按「存储挂载→桶」映射+用户认证工作，不消费这三个键 |
+| G10 | ~~FTP/SFTP 组 7 键~~ → **已接线（2026-11-01）**：`ftp_public_host`、`ftp_pasv_port_range`（替代 `ftp_pasv_port_map`，FubarDev 只支持端口段）、`ftp_mandatory_tls`、`ftp_implicit_tls`、`ftp_tls_public_cert_path`、`ftp_tls_private_key_path` 共 6 键由 `FtpServerSettingsSource` 在 FTP 启动时读取（plan §55）；`ftp_pasv_port_map`、`sftp_disable_password_login` 已删种子（前者键名与语义不符，后者 SFTP 是占位 stub） |
+| G9 | ~~`s3_buckets`、`s3_access_key_id`、`s3_secret_access_key`~~ → **已删种子（2026-11-01）**：S3 网关（`S3Endpoints.cs`）按「存储挂载→桶」映射+用户认证工作，三键从未被消费 |
 | G7 | `sso_organization_name`、`sso_application_name`、`sso_jwt_public_key`（SSO 组中这 3 键） | `SsoService.cs` 消费了 G7 其余键（client_id/secret/endpoint/oidc_username_key 等），仅这 3 个无消费 |
 
 ### 1c. 纯展示类空壳（价值低，可最后处理或随需求逐个接）
@@ -222,7 +222,7 @@ G12：`media_default_provider`（provider 选择未消费此键，实际注册�
 | 4 | **P2** 任务并发 8 键 | ✅ 第三批 |
 | 5 | **P3** 缩略图：E2E 轮次 + 列表 40px 槽位 | ✅ 第四批（PDF 未做，见 A 类） |
 | 6 | **P1-1a 收尾** `non_efs_zip_encoding`、`ignore/forward_direct_link_params` | ✅ 第五批 |
-| 7 | **P1-1b 收尾** FTP/SFTP 7 键、S3 3 键 | ⏳ 等决策（设置驱动 or 删种子） |
+| 7 | **P1-1b 收尾** FTP 6 键接线 + S3 3 键删除 | ✅ 第六批（plan §55） |
 | 8 | **P2 收尾** `proxy_types` | ⏳ 等决策（驱动名 vs 挂载粒度、与存储 `web_proxy` 的优先级） |
 | 9 | **P3 收尾** PDF 首页 | ⛔ 环境阻塞（NuGet 不可达 + 无 PDF 渲染器） |
 | 10 | **P1-1c** 纯展示类 | 🚫 复核后判为 N/A 或属新功能，见上方「复核结论」B/C 类 |

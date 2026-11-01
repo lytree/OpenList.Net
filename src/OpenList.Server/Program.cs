@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using OpenList.Core.Configuration;
 using OpenList.Core.Drivers;
@@ -322,10 +323,19 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
 builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 10L * 1024 * 1024 * 1024);
 
 // Phase 12: FTP/SFTP hosted servers (disabled by default via FTP:Enable / SFTP:Enable)
+builder.Services.AddSingleton<FtpServerSettingsSource>();
 builder.Services.AddFtpServer(s => s
     .Services
     .AddScoped<FubarDev.FtpServer.AccountManagement.IMembershipProvider, OpenListFtpMembershipProvider>()
-    .AddSingleton<FubarDev.FtpServer.FileSystem.IFileSystemClassFactory, MountFtpFileSystemFactory>());
+    .AddSingleton<FubarDev.FtpServer.FileSystem.IFileSystemClassFactory, MountFtpFileSystemFactory>()
+    // 覆盖默认的 SimplePasvAddressResolver（它没有任何配置入口）：ftp_public_host + ftp_pasv_port_range。
+    .AddSingleton<FubarDev.FtpServer.IPasvAddressResolver, SettingsPasvAddressResolver>()
+    // 关闭数据通道 TLS 时的异常会带走控制连接（见 TolerantSslStreamWrapperFactory 注释）。
+    .AddSingleton<FubarDev.FtpServer.Authentication.ISslStreamWrapperFactory, TolerantSslStreamWrapperFactory>()
+    // 显式 FTPS（AUTH TLS）的证书来源；隐式 FTPS 的控制流适配器与连接配置器。
+    .AddSingleton<IConfigureOptions<FubarDev.FtpServer.AuthTlsOptions>, SettingsAuthTlsOptionsConfigurator>()
+    .AddSingleton<FubarDev.FtpServer.IFtpControlStreamAdapter, SettingsImplicitTlsStreamAdapter>()
+    .AddSingleton<FubarDev.FtpServer.IFtpConnectionConfigurator, SettingsImplicitTlsConnectionConfigurator>());
 builder.Services.Configure<FubarDev.FtpServer.FtpServerOptions>(opts =>
 {
     var (addr, port) = FtpListenParser.Parse(appConfig.FTP.Listen);

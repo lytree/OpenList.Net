@@ -652,19 +652,20 @@ public static class DbInitializer
         ("ldap_default_permission", "0", SettingValueType.Number, SettingFlag.Public, 8, null),
         ("ldap_skip_tls_verify", "false", SettingValueType.Bool, SettingFlag.Private, 8, null),
 
-        // --- Group 9: S3 ---
-        ("s3_buckets", "[]", SettingValueType.Text, SettingFlag.Private, 9, null),
-        ("s3_access_key_id", "", SettingValueType.String, SettingFlag.Private, 9, null),
-        ("s3_secret_access_key", "", SettingValueType.String, SettingFlag.Private, 9, null),
+        // Group 9（S3）整组删除（2026-11-01）：S3 网关按「存储挂载→桶」映射 + 用户认证工作，
+        // 这三个键从来没有被消费过 —— 装饰性设置比没有设置更糟（见 settings-gap-audit.md G9）。
 
         // --- Group 10: FTP ---
+        // 这些键由 FtpServerSettingsSource 在 FTP 启动时读取（FubarDev 默认实现没有这些配置入口）。
+        // ftp_pasv_port_map 已删：FubarDev 只支持端口段，不支持内外端口映射，键名与语义不符，
+        // 改为 ftp_pasv_port_range（"50000" 或 "50000-50100"，空 = 系统自动分配）。
+        // sftp_disable_password_login 已删：SFTP 在本构建是占位 stub（无 SSH 服务端库），无行为可改。
         ("ftp_public_host", "", SettingValueType.String, SettingFlag.Private, 10, null),
-        ("ftp_pasv_port_map", "", SettingValueType.String, SettingFlag.Private, 10, null),
+        ("ftp_pasv_port_range", "", SettingValueType.String, SettingFlag.Private, 10, null),
         ("ftp_mandatory_tls", "false", SettingValueType.Bool, SettingFlag.Private, 10, null),
         ("ftp_implicit_tls", "false", SettingValueType.Bool, SettingFlag.Private, 10, null),
         ("ftp_tls_public_cert_path", "", SettingValueType.String, SettingFlag.Private, 10, null),
         ("ftp_tls_private_key_path", "", SettingValueType.String, SettingFlag.Private, 10, null),
-        ("sftp_disable_password_login", "false", SettingValueType.Bool, SettingFlag.Private, 10, null),
 
         // --- Group 11: TRAFFIC ---
         // 速率单位为 KiB/s；<= 0 表示不限速（对齐 Go 的 streamFilterNegative：-1 为无限）。

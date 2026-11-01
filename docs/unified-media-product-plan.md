@@ -3551,3 +3551,52 @@ PDF 的成本与**图片同一档**：整读一次源文件（受 `thumb_max_sou
 2. 加密 PDF 归 `pdf-encrypted` 后不再尝试，未来若要支持"用户自己填密码"得把密码做成请求参数，
    这与缩略图的缓存键耦合，不划算。
 3. 仍只渲染首页；`page` 参数化会牵动缓存键与 URL 约定，按需求再加。
+
+## 55. FTP 设置接线（只接语义成立的 6 键）+ S3 种子清理（2026-11-01）
+
+### 55.1 决策：接线 ≠ 照单全收
+
+审计 G9/G10 的 10 个键逐一过了一遍 FubarDev 3.1.2 的真实配置入口，结论分三类：
+
+| 处置 | 键 | 理由 |
+|---|---|---|
+| 接线 | `ftp_public_host`、`ftp_pasv_port_range`、`ftp_mandatory_tls`、`ftp_implicit_tls`、`ftp_tls_public_cert_path`、`ftp_tls_private_key_path` | FubarDev 默认实现没有这些配置入口（PASV 公网地址/端口段、FTPS 证书、强制 TLS） |
+| 删种子 | `ftp_pasv_port_map` | FubarDev 只支持端口段，不支持内外端口映射，键名与语义不符；改为 `ftp_pasv_port_range`（`"50000"` 或 `"50000-50100"`，空 = 系统自动分配） |
+| 删种子 | `sftp_disable_password_login` | SFTP 在本构建是占位 stub（无 SSH 服务端库），无行为可改 |
+| 删种子 | `s3_buckets`、`s3_access_key_id`、`s3_secret_access_key` | S3 网关按「存储挂载→桶」映射+用户认证工作，三键从未被消费 |
+
+### 55.2 实现
+
+- `Hosting/FtpServerSettings.cs`：惰性快照单例（模式同 `ThumbnailOptionsProvider`，进程内读一次设置组 10），
+  含 `ParsePublicHost`（只认 IP 字面量，拒域名）、`ParsePortRange`、`LoadCertificate`（PFX/P12 单文件或 PEM 对；
+  Windows 上 PEM 走 PKCS#12 再导出绕开 ephemeral key 限制；任何失败降级为明文 FTP 并告警，不阻断启动）。
+- `Hosting/FtpServerSettingsWiring.cs` 四个类：`SettingsPasvAddressResolver`（覆盖 `SimplePasvAddressResolver`）、
+  `SettingsAuthTlsOptionsConfigurator`（显式 FTPS 证书）、隐式 FTPS 的 `IFtpControlStreamAdapter` +
+  `IFtpConnectionConfigurator`、`TolerantSslStreamWrapperFactory`（见 55.3）。
+- 强制 TLS 的落点不是命令层而是 `OpenListFtpMembershipProvider.ValidateUserAsync`：明文登录直接返回
+  `InvalidLogin`（客户端看到 530），隐式 FTPS 天然全 TLS 不参与判断。
+
+### 55.3 FubarDev 3.1.2 的三个坑（版本锁定前先读这里）
+
+1. **`IFtpConnection.IsSecure` 永远抛异常**：实现就是
+   `throw new NotSupportedException("Access to irrelevant leaking abstraction.")`，
+   TLS 连接上也是。公开 API 里没有可靠的控制连接 TLS 状态判别。
+   现用判别：`ISecureConnectionFeature.CloseEncryptedControlStream` 的默认值是非捕获 lambda
+   （Roslyn 缓存于 `<>c` 显示类，Target 类型名恰为 `<>c`）；AUTH TLS 后被替换为**捕获闭包**
+   （`<>c__DisplayClass*`）。以 Target 类型名区分 —— **依赖 Roslyn lambda 命名不变式，升级版本需回归此判定**。
+2. **数据通道 TLS 关闭会带死控制连接**：`SslStream.ShutdownAsync` 对已关闭的数据通道抛
+   `InvalidOperationException`/`ObjectDisposedException`，顺着 `SendResponsesAsync` 传播，控制连接直接断
+   （实测 PROT P 上传后 QUIT 收 EOF；数据本身完整落盘）。修复：`TolerantSslStreamWrapperFactory`
+   包装 `DefaultSslStreamWrapperFactory`，仅在 `CloseStreamAsync` 吞掉这两类关闭竞态，其余全透传。
+   注意 `CreateSslStream` 不在公开接口 `ISslStreamWrapperFactory` 上（3.1.2），无法也不能覆写。
+3. **客户端残留 wart**：数据通道关闭不发 TLS close_notify，严格客户端（python ftplib）在 STOR 后报
+   `SSLEOFError` —— 数据完整，属客户端可恢复错误；服务端 226 照发。记录在案，不做花活。
+
+### 55.4 结果
+
+- **验收矩阵 8/8**（探测实例 :5221，本地 Local 挂载 `/e2e-ftp`）：明文登录 530、AUTH TLS 登录 + PROT P、
+  PASV 公告 127.0.0.1 且端口落在 52000-52010、LIST、STOR 32 字节落盘内容一致、**STOR 后 QUIT 拿到 221
+  （控制连接存活，55.3-2 的修复生效）**、RETR 往返一致、MKD。
+- 后端 **632 项全通过**（新增 14 条 `FtpServerSettingsTests`：host/port-range/证书解析/快照开关）。
+- A–H 全量回归见本轮记录；`ftp_pasv_port_range` 前端文案 zh/en 已补，删除键的文案同步移除。
+- 已知不变式（升级 FubarDev 必查）：55.3-1 的 `<>c` 判别、`ISslStreamWrapperFactory` 接口面。

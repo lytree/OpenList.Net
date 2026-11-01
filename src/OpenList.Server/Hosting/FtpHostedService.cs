@@ -3,8 +3,10 @@ using System.Security.Claims;
 using FubarDev.FtpServer;
 using FubarDev.FtpServer.AccountManagement;
 using FubarDev.FtpServer.BackgroundTransfer;
+using FubarDev.FtpServer.Features;
 using FubarDev.FtpServer.FileSystem;
 using FubarDev.FtpServer.FileSystem.Generic;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -24,15 +26,18 @@ public sealed class FtpHostedService : IHostedService
     private readonly IFtpServerHost _ftpServerHost;
     private readonly ILogger<FtpHostedService> _logger;
     private readonly FtpConfig _config;
+    private readonly FtpServerSettingsSource _settings;
 
     public FtpHostedService(
         IFtpServerHost ftpServerHost,
         IOptions<AppConfiguration> config,
+        FtpServerSettingsSource settings,
         ILogger<FtpHostedService> logger)
     {
         _ftpServerHost = ftpServerHost;
         _logger = logger;
         _config = config.Value.FTP;
+        _settings = settings;
     }
 
     /// <summary>启动 FTP 服务器；未启用时仅记录日志并直接返回。</summary>
@@ -43,6 +48,9 @@ public sealed class FtpHostedService : IHostedService
             _logger.LogInformation("FTP server disabled (FTP:Enable=false)");
             return;
         }
+
+        // 预热设置快照：配置错误（端口段/证书/公网地址）在启动日志里就能看到，而不是等首个客户端。
+        _ = _settings.Get();
 
         _logger.LogInformation("Starting FTP server on {Listen}", _config.Listen);
         await _ftpServerHost.StartAsync(cancellationToken);
@@ -87,10 +95,17 @@ public static class FtpListenParser
 public sealed class OpenListFtpMembershipProvider : IMembershipProvider
 {
     private readonly IUserService _userService;
+    private readonly FtpServerSettingsSource _settings;
+    private readonly IFtpConnectionAccessor _connectionAccessor;
 
-    public OpenListFtpMembershipProvider(IUserService userService)
+    public OpenListFtpMembershipProvider(
+        IUserService userService,
+        FtpServerSettingsSource settings,
+        IFtpConnectionAccessor connectionAccessor)
     {
         _userService = userService;
+        _settings = settings;
+        _connectionAccessor = connectionAccessor;
     }
 
     /// <summary>
@@ -103,6 +118,41 @@ public sealed class OpenListFtpMembershipProvider : IMembershipProvider
     {
         if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
             return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
+
+        // 强制 TLS（ftp_mandatory_tls）：控制通道未加密时拒绝登录 —— 账号密码和文件内容都在裸奔。
+        // 注意：不能用 IFtpConnection.IsSecure —— FubarDev 把它实现成永远抛 NotSupportedException
+        // 的废弃属性（消息还叫 "Access to irrelevant leaking abstraction"），异常会让 PASS 回 502。
+        // 判定用 ISecureConnectionFeature：AUTH TLS 握手完成后库会设置 CloseEncryptedControlStream；
+        // 隐式 TLS 模式下控制连接生来就是 TLS，直接放行。
+        // 强制 TLS（ftp_mandatory_tls）：控制通道未加密时拒绝登录 —— 账号密码和文件内容都在裸奔。
+        //
+        // 为什么这么绕：FubarDev 3.1.2 没有公开的「控制通道是否已加密」信号 ——
+        // IFtpConnection.IsSecure 被实现成永远抛 NotSupportedException 的废弃属性
+        // （异常会让 PASS 回 502 "Access to irrelevant leaking abstraction"）；
+        // ISecureConnectionFeature.CloseEncryptedControlStream 默认也是非 null 的 no-op。
+        // 可用的判定：AUTH TLS 握手完成后，库（TlsEnableServerCommandHandler）会把
+        // CloseEncryptedControlStream 从「无捕获的静态 lambda（委托 Target == null）」
+        // 换成「捕获了 feature 的闭包（Target != null）」。隐式 TLS 模式下控制连接
+        // 生来就是 TLS，直接放行。两个 lambda 形态随 FubarDev 3.1.2 锁定于
+        // Directory.Packages.props，升级版本时这里要复核。
+        var ftp = _settings.Get();
+        if (ftp.MandatoryTls && !ftp.ImplicitTls)
+        {
+            var closeHook = _connectionAccessor.FtpConnection?.Features
+                .Get<ISecureConnectionFeature>().CloseEncryptedControlStream;
+            // AUTH TLS 完成后，库（TlsEnableServerCommandHandler）把这个委托从「无捕获的静态
+            // lambda（Target 是 Roslyn 的缓存单例，类型名恰为 "<>c"）」换成「捕获了 feature 的
+            // 闭包（类型名 "<>c__DisplayClass…"）」。为什么不用别的信号：
+            //   - IFtpConnection.IsSecure 在 3.1.2 里永远抛 NotSupportedException（连 FTPS 连接也一样）；
+            //   - CloseEncryptedControlStream 默认值非 null（ct => Task.CompletedTask），不能用 null 判断。
+            // Roslyn 对非捕获 lambda / 捕获闭包的命名规则是稳定的；FubarDev 锁定 3.1.2，升级时复核。
+            var isTls = closeHook is not null
+                        && !string.Equals(closeHook.Target?.GetType().Name, "<>c", StringComparison.Ordinal);
+            if (!isTls)
+            {
+                return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
+            }
+        }
 
         var resp = await _userService.GetByNameAsync(username, CancellationToken.None);
         if (resp.Code != 200 || resp.Data is null)

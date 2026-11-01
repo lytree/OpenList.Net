@@ -29,7 +29,7 @@
   "forward_direct_link_params-tips": "开启后，/d/ 跳转到直链时会把请求里的查询参数一并带上（同名参数覆盖直链自带值）；sign 永不下发。",
   "ftp_implicit_tls": "FTP 隐式 TLS",
   "ftp_mandatory_tls": "FTP 强制 TLS",
-  "ftp_pasv_port_map": "FTP 被动模式端口映射",
+  "ftp_pasv_port_range": "FTP 被动模式端口段",
   "ftp_public_host": "FTP 对外主机名",
   "ftp_tls_private_key_path": "FTP TLS 私钥路径",
   "ftp_tls_public_cert_path": "FTP TLS 证书路径",
@@ -105,9 +105,6 @@
   "qbittorrent_url": "qBittorrent 地址",
   "readme_autorender": "自动渲染 Readme",
   "robots_txt": "robots.txt",
-  "s3_access_key_id": "S3 Access Key ID",
-  "s3_buckets": "S3 存储桶",
-  "s3_secret_access_key": "S3 Secret Access Key",
   "search_index": "搜索索引",
   "search_indexs": {
     "bleve": "Bleve",
@@ -121,7 +118,6 @@
     "list": "列表",
     "responsive": "自适应"
   },
-  "sftp_disable_password_login": "SFTP 禁用密码登录",
   "share_archive_preview": "分享页预览压缩包",
   "share_force_proxy": "分享强制走代理",
   "share_icon": "分享图标",
