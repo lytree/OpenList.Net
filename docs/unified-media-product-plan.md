@@ -3397,3 +3397,71 @@ localStorage。`home_guest_access=false` 之后凡是「页面里登录、再用
    `dotnet tests/OpenList.Tests/bin/Debug/net10.0/OpenList.Tests.dll`。
 2. **`pnpm` 不在 Git-Bash 的 PATH 里**：仓库锁的是 `pnpm@12.15.0`，用 `corepack pnpm build|test`。
    首次 `pnpm build` 偶发在 `prepareOutDir` 阶段被沙箱的批量删除守卫打断，重跑即过。
+
+## 53. WebDAV 定性：一个误判的 [Skip]、两个真 bug、一层缺失的权限（2026-11-01）
+
+起因是一条挂了一个月的 `[Skip]`：`WebDavEndpointsTests.Delete_RemovesFile`，理由写着
+「首个 WebDAV 请求无限挂起，拖死整个套件」，AGENTS 的 Known Issues 里还留了一句
+「真实服务器上的 `/dav` 写入路径需在修复后回归」。也就是说 **`/dav` 从来没有端到端覆盖**：
+单测被跳过，`verify-*` 里也没有 WebDAV 轮 —— Finder / Windows 资源管理器 / rclone
+真正走的那条链路，一个月没人看过。
+
+### 53.1 结论：挂起是误判
+
+起隔离实例（Local 挂载 + Basic 认证）逐方法打：
+
+| 请求 | 结果 |
+|---|---|
+| OPTIONS | 200，4ms，`DAV: 1, 2` |
+| PUT | 200，7ms，文件落盘 |
+| GET / PROPFIND | 200 / 207，7ms / 37ms |
+| **DELETE** | **204，4ms**，磁盘文件确实消失，事后 GET 404 |
+
+把 `[Skip]` 摘掉、只跑这个类：**16/16 通过，24 秒**，连跑 3 轮稳定。
+所以那次挂起不是产品缺陷（大概率是当时测试装置/时序问题，已被后续改动带走）。
+`[Skip]` 已删除，并给整个类加了 `[Timeout(60_000)]` —— 真要挂，快速失败，不要挂住整轮 CI。
+
+### 53.2 补覆盖时又抓到两个真 bug
+
+写成 E2E 轮（`verify-webdav.mjs`）的过程中，两条断言红了：
+
+1. **COPY 把 `Destination` 的文件名丢了**。handler 只取目标**目录**，再用源文件名拼回去
+   （沿用 `CopyAsync` 的「拷进目录」语义），于是「同目录复制并改名」算出的源和目标完全相同 ——
+   第二次打开同一个文件，Windows 直接报 `used by another process`，HTTP 层是 400；
+   复制到别的目录则会**静默用源文件名**，不是客户端请求的名字。
+   修法：给 `IFileSystemService` 加 `CopyToAsync(src, destPath)`（按完整目标路径拷，可改名），
+   WebDAV COPY 改用它；顺带按 RFC 4918 §10.6 支持 `Overwrite: F` → 412。
+2. **DELETE 不存在的路径回 204**。`RemoveAsync` 对不存在的路径是静默成功，
+   于是 rclone / 资源管理器会把「啥也没删」当成删掉了。RFC 4918 §9.6 要求 404，已补显式判定。
+
+### 53.3 更严重的：`/dav` 的写方法没有权限校验
+
+查 COPY 顺带发现，`/dav` 的 PUT / MKCOL / DELETE / MOVE / COPY **只校验「已登录、未禁用」**：
+
+- 没有权限位校验（`/api/fs/remove` 有 `CanRemove`，`/mkdir` 有 `CanWriteContent`），
+- 没有 BasePath 越界校验（受限用户可以用绝对路径写到自己的根目录之外），
+- 没有 meta `WriteUsers` 白名单校验。
+
+也就是说**任何已认证账号都能通过 WebDAV 删改文件**，`/api/fs/*` 上那套守卫只在浏览器那条路上生效。
+Go 版没有这个洞，是因为它的 webdav 处理器直接调用 `FsRemove` / `FsMove` 等公共操作，
+权限检查在被调方内部；本仓库把这些操作搬到了端点层，WebDAV 就成了漏网的那条路。
+
+修法：五个写方法补齐 `TryJoinPath`（BasePath）+ 权限位 + meta 门禁，复用 `/api/fs` 那套
+`ContentWriteGateAsync` / `MetaWriteGateAsync` / `MetaReadGateAsync`（改成 `internal` 共用一份实现）。
+失败一律返回**真实 HTTP 状态码**：WebDAV 客户端只认状态码，回 `200 + {"code":403}` 会被当成成功。
+
+### 53.4 新增 `webdav` 轮（A–H 16 → 17 轮）
+
+`verify-webdav.mjs`（30 条，不开浏览器，纯 fetch + Basic 认证，自建 `/e2e-webdav` 挂载）：
+OPTIONS/DAV 能力、匿名与错口令 401、PUT→GET→HEAD、PROPFIND Depth 0/1、MKCOL、MOVE、
+COPY（同目录改名 + 换目录 + `Overwrite: F`）、LOCK/UNLOCK、DELETE 文件与递归目录、
+删不存在的路径 404、以及「最慢请求 < 5s」的防悬挂护栏（`AbortSignal.timeout` 兜住每个请求）。
+
+### 53.5 结果
+
+- 后端 613 项全通过、**0 跳过**（新增 5 条：DELETE 404、无删除权限 403、COPY 同目录改名、
+  COPY 换目录用目标名、`Overwrite: F` → 412）。
+- A–H **17/17 全绿**（`.e2e/regression-1101c.log`），webdav 轮 30/30。
+- 遗留：`/dav` 的 **PROPFIND/PUT 仍没有读权限（meta `ReadUsers`）校验** ——
+  DELETE/MOVE/COPY 已经补了写侧，读侧要不要一起收紧（会不会把「只读账号用 WebDAV 挂载浏览」
+  这个正常用法挡掉）需要产品决策，已记在这里。

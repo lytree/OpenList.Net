@@ -39,6 +39,15 @@ public interface IFileSystemService
     Task<Resp<FsManageResp>> CopyBatchAsync(MoveCopyReq req, User user, CancellationToken ct = default);
     /// <summary>删除多个路径。</summary>
     Task<Resp> RemoveAsync(IReadOnlyList<string> paths, User user, CancellationToken ct = default);
+    /// <summary>
+    /// 按**完整目标路径**复制单条资源（文件或目录），目标名来自 <paramref name="destPath"/>。
+    /// <para>
+    /// 与 <see cref="CopyAsync"/> 的区别：那个是「把源名字原样拷进目标目录」，既不能改名，
+    /// 也没法表达「同目录内复制一份副本」（源和目标会算成同一路径）。WebDAV 的 COPY
+    /// 拿到的 `Destination` 是完整路径，必须按后者语义落地。
+    /// </para>
+    /// </summary>
+    Task<Resp> CopyToAsync(string srcPath, string destPath, User user, CancellationToken ct = default);
     /// <summary>删除空的目录。</summary>
     Task<Resp> RemoveEmptyDirectoryAsync(string path, User user, CancellationToken ct = default);
     /// <summary>以流形式上传内容到指定路径。</summary>

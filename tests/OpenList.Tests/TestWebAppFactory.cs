@@ -61,6 +61,10 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
         await mount.LoadAsync(storage);
     }
 
+    /// <summary>把挂载内的相对路径解析成本机路径（断言「文件真的落到磁盘」时用）。</summary>
+    public string ResolvePath(string relativePath)
+        => Path.Combine(_tempDir, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
     /// <summary>Write a file into the mounted temp directory.</summary>
     public async Task WriteFileAsync(string relativePath, byte[] content)
     {

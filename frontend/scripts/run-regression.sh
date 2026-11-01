@@ -219,6 +219,19 @@ round_torrent() {
   finish_round "D/torrent" $?
 }
 
+round_webdav() {
+  say "round: webdav (D WebDAV 写路径)"
+  local dir root
+  dir="$(round_dir webdav)"; mkdir -p "$dir"
+  root="$RUNS/webdav/storage-$STAMP"
+  mkdir -p "$root"
+  begin_round "$dir" || return 1
+  # 脚本自己建挂载（幂等）并把装置写在 MOUNT_ROOT 下；这里只负责备好目录
+  export MOUNT_ROOT="$root"
+  run_node "$dir/run.log" "$FE/scripts/verify-webdav.mjs"
+  finish_round "D/webdav" $?
+}
+
 round_media() {
   say "round: media (F 媒体域浏览 / 详情 / 播放)"
   local dir; dir="$(round_dir media)"; mkdir -p "$dir"
@@ -329,7 +342,7 @@ round_upload() {
 # --------------------------------------------------------------------------- 入口
 
 WANT=("$@")
-[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage thumb dimensions scrape dashboard backup messenger)
+[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage thumb dimensions scrape dashboard backup messenger webdav)
 
 for name in "${WANT[@]}"; do
   # 轮次名用连字符（preview-extra），函数名用下划线 —— 这里做一次映射

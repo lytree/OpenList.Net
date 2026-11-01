@@ -673,6 +673,37 @@ public sealed class FileSystemService : IFileSystemService
         catch (Exception ex) { return Task.FromResult(Resp.Fail(ex.Message, RespCodes.InternalError)); }
     }
 
+    /// <summary>
+    /// 按完整目标路径复制（WebDAV COPY 的 Destination 是完整路径，不是目录）。
+    /// <para>
+    /// 为什么不能复用 <see cref="CopyAsync"/>：那个接口只收「目标目录」，文件名沿用源名字，
+    /// 于是「复制到同目录并改名」会被算成源=目标 —— 第二次打开同一个文件时 Windows 直接报
+    /// `used by another process`，HTTP 层表现为 400。
+    /// </para>
+    /// </summary>
+    public Task<Resp> CopyToAsync(string srcPath, string destPath, User user, CancellationToken ct = default)
+    {
+        try
+        {
+            var s = Normalize(srcPath);
+            var d = Normalize(destPath);
+            if (!_mount.Root.FileExists(s) && !_mount.Root.DirectoryExists(s))
+                return Task.FromResult(Resp.Fail("object not found", RespCodes.NotFound));
+
+            var parent = MetaAccess.Parent(d.FullName);
+            if (parent != "/" && !_mount.Root.DirectoryExists(parent))
+                return Task.FromResult(Resp.Fail("destination not found", RespCodes.NotFound));
+
+            if (string.Equals(s.FullName.TrimEnd('/'), d.FullName.TrimEnd('/'), StringComparison.Ordinal))
+                return Task.FromResult(Resp.Fail("source and destination are the same", RespCodes.BadRequest));
+
+            if (_mount.Root.FileExists(s)) CopyFile(s, d);
+            else CopyDir(s, d);
+            return Task.FromResult(Resp.Ok());
+        }
+        catch (Exception ex) { return Task.FromResult(Resp.Fail(ex.Message, RespCodes.InternalError)); }
+    }
+
     /// <summary>删除多个路径（目录递归删除）。</summary>
     public Task<Resp> RemoveAsync(IReadOnlyList<string> paths, User user, CancellationToken ct = default)
     {

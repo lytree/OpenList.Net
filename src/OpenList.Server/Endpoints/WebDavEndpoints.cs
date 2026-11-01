@@ -51,7 +51,7 @@ public static class WebDavEndpoints
         g.MapMethods("/", ["PROPFIND"], (HttpContext ctx, MountService m, IStorageService s) => PropfindAsync("", ctx, m, s));
         g.MapGet("/", (HttpContext ctx, MountService m, IStorageService s) => GetAsync("", ctx, m, s));
         g.MapMethods("/", ["HEAD"], (HttpContext ctx, MountService m, IStorageService s) => HeadAsync("", ctx, m, s));
-        g.MapMethods("/", ["MKCOL"], (HttpContext ctx, MountService m, IStorageService s, IFileSystemService fs) => MkcolAsync("", ctx, m, s, fs));
+        g.MapMethods("/", ["MKCOL"], (HttpContext ctx, MountService m, IStorageService s, IFileSystemService fs, IMetaService meta) => MkcolAsync("", ctx, m, s, fs, meta));
 
         return app;
     }
@@ -197,52 +197,112 @@ public static class WebDavEndpoints
         return Results.NotFound();
     }
 
+    // --- 写方法的权限 / 路径门禁 ---
+    //
+    // 这一层以前是缺的：`/dav` 的 PUT / MKCOL / DELETE / MOVE / COPY 只校验「已登录、未禁用」，
+    // 于是**任何**已认证用户都能通过 WebDAV 删改文件 —— 没有 CanRemove 的账号、被 BasePath
+    // 限制在某个子目录的账号，全都绕过了 `/api/fs/*` 上那套守卫。
+    // Go 版没有这个洞，是因为它的 webdav 处理器直接调用 FsRemove / FsMove 等公共操作，
+    // 权限检查在被调方内部；本仓库把这些操作搬到了端点层，WebDAV 就成了漏网的那条路。
+    //
+    // 失败一律给**真实 HTTP 状态码**：Finder / Windows 资源管理器 / rclone 只认状态码，
+    // 回 200 + `{"code":403}` 会被它们当成成功。
+
+    /// <summary>把 Resp 的业务码映射成真正的 HTTP 状态码（WebDAV 客户端不看业务码）。</summary>
+    private static IResult DavFail(int code, string message) => Results.Json(
+        new { code, message },
+        statusCode: code switch
+        {
+            RespCodes.NotFound => StatusCodes.Status404NotFound,
+            RespCodes.Forbidden => StatusCodes.Status403Forbidden,
+            RespCodes.Unauthorized => StatusCodes.Status401Unauthorized,
+            RespCodes.Conflict => StatusCodes.Status409Conflict,
+            _ => code is >= 400 and < 500 ? code : StatusCodes.Status400BadRequest,
+        });
+
+    private static IResult DavDeny(string message) => DavFail(RespCodes.Forbidden, message);
+
+    /// <summary>
+    /// BasePath 越界检查：受限用户的 `/dav` 绝对路径也必须落在自己的根目录内。
+    /// 与 <c>/api/fs/*</c> 用同一个判定（<see cref="User.TryJoinPath"/>），失败给 403。
+    /// </summary>
+    private static IResult? DavPathGuard(User user, string rawPath, out string fullPath)
+    {
+        var joined = "/" + rawPath.TrimStart('/');
+        if (user.TryJoinPath(joined, out var path)) { fullPath = path; return null; }
+        fullPath = string.Empty;
+        return DavDeny("using relative path is not allowed");
+    }
+
+    /// <summary>目标是否已存在（文件或目录）。</summary>
+    private static bool DavExists(MountService mount, string path)
+    {
+        var upath = NormalizePath(path);
+        return mount.Root.FileExists(upath) || mount.Root.DirectoryExists(upath);
+    }
+
     // --- PUT：上传文件 ---
 
-    private static async Task<IResult> PutAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> PutAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs, IMetaService metaSvc)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
         if (user.Disabled) return Results.Forbid();
 
-        var fullPath = "/" + path.TrimStart('/');
+        if (DavPathGuard(user, path, out var fullPath) is { } pathDenied) return pathDenied;
+        // 镜像 Go 的 fsup 中间件：CanWriteContent（或 meta 显式开放写入）+ 父目录 meta WriteUsers。
+        if (await FsEndpoints.ContentWriteGateAsync(metaSvc, user, fullPath, ctx.RequestAborted) is not null)
+            return DavDeny("permission denied");
+
         await using var stream = ctx.Request.Body;
         var resp = await fs.PutStreamAsync(fullPath, stream, user, ctx.RequestAborted);
-        if (resp.Code != 200) return Results.BadRequest(resp.Message);
+        if (resp.Code != 200) return DavFail(resp.Code, resp.Message);
         return Results.Ok();
     }
 
     // --- MKCOL：创建目录 ---
 
-    private static async Task<IResult> MkcolAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> MkcolAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs, IMetaService metaSvc)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
         if (user.Disabled) return Results.Forbid();
 
-        var fullPath = "/" + path.TrimStart('/');
+        if (DavPathGuard(user, path, out var fullPath) is { } pathDenied) return pathDenied;
+        if (await FsEndpoints.ContentWriteGateAsync(metaSvc, user, fullPath, ctx.RequestAborted) is not null)
+            return DavDeny("permission denied");
+
         var resp = await fs.MkdirAsync(fullPath, user, ctx.RequestAborted);
-        if (resp.Code != 200) return Results.BadRequest(resp.Message);
+        if (resp.Code != 200) return DavFail(resp.Code, resp.Message);
         return Results.Ok();
     }
 
     // --- DELETE：删除文件或目录 ---
 
-    private static async Task<IResult> DeleteAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> DeleteAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs, IMetaService metaSvc)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
         if (user.Disabled) return Results.Forbid();
 
-        var fullPath = "/" + path.TrimStart('/');
+        if (DavPathGuard(user, path, out var fullPath) is { } pathDenied) return pathDenied;
+        // 镜像 Go FsRemove：CanRemove + 父目录 meta 写入校验。
+        if (!user.CanRemove()) return DavDeny("permission denied");
+        if (await FsEndpoints.MetaWriteGateAsync(metaSvc, user, MetaAccess.Parent(fullPath), ctx.RequestAborted) is not null)
+            return DavDeny("permission denied");
+
+        // RFC 4918 §9.6：删除不存在的资源是 404。RemoveAsync 对不存在的路径是静默成功，
+        // 这里显式判一次，否则 rclone / 资源管理器会把「删了个寂寞」当成删掉了。
+        if (!DavExists(mount, fullPath)) return DavFail(RespCodes.NotFound, "object not found");
+
         var resp = await fs.RemoveAsync([fullPath], user, ctx.RequestAborted);
-        if (resp.Code != 200) return Results.BadRequest(resp.Message);
+        if (resp.Code != 200) return DavFail(resp.Code, resp.Message);
         return Results.NoContent();
     }
 
     // --- MOVE：移动/重命名 ---
 
-    private static async Task<IResult> MoveAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> MoveAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs, IMetaService metaSvc)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
@@ -252,18 +312,27 @@ public static class WebDavEndpoints
         var destUrl = ctx.Request.Headers["Destination"].ToString();
         if (string.IsNullOrEmpty(destUrl)) return Results.BadRequest("Destination header required");
 
-        var destPath = ExtractPathFromUrl(destUrl, ctx);
-        if (destPath is null) return Results.BadRequest("invalid Destination");
+        var rawDest = ExtractPathFromUrl(destUrl, ctx);
+        if (rawDest is null) return DavFail(RespCodes.BadRequest, "invalid Destination");
 
-        var srcPath = "/" + path.TrimStart('/');
+        // MOVE 既覆盖「移动」（跨目录，要 CanMove）也覆盖「重命名」（同目录，要 CanRename）。
+        if (!user.CanMove() && !user.CanRename()) return DavDeny("permission denied");
+        if (DavPathGuard(user, path, out var srcPath) is { } srcDenied) return srcDenied;
+        if (DavPathGuard(user, rawDest, out var destPath) is { } destDenied) return destDenied;
+        if (await FsEndpoints.MetaWriteGateAsync(metaSvc, user, MetaAccess.Parent(srcPath), ctx.RequestAborted) is not null)
+            return DavDeny("permission denied");
+        if (await FsEndpoints.MetaWriteGateAsync(metaSvc, user, MetaAccess.Parent(destPath), ctx.RequestAborted) is not null)
+            return DavDeny("permission denied");
+        if (!DavExists(mount, srcPath)) return DavFail(RespCodes.NotFound, "object not found");
+
         var resp = await fs.RenameAsync(srcPath, destPath, user, ctx.RequestAborted);
-        if (resp.Code != 200) return Results.BadRequest(resp.Message);
+        if (resp.Code != 200) return DavFail(resp.Code, resp.Message);
         return Results.Ok();
     }
 
     // --- COPY：复制文件/目录 ---
 
-    private static async Task<IResult> CopyAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs)
+    private static async Task<IResult> CopyAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc, IFileSystemService fs, IMetaService metaSvc)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
@@ -272,15 +341,28 @@ public static class WebDavEndpoints
         var destUrl = ctx.Request.Headers["Destination"].ToString();
         if (string.IsNullOrEmpty(destUrl)) return Results.BadRequest("Destination header required");
 
-        var destPath = ExtractPathFromUrl(destUrl, ctx);
-        if (destPath is null) return Results.BadRequest("invalid Destination");
+        var rawDest = ExtractPathFromUrl(destUrl, ctx);
+        if (rawDest is null) return DavFail(RespCodes.BadRequest, "invalid Destination");
 
-        var srcPath = "/" + path.TrimStart('/');
-        // 复制的目标目录即目标完整路径的父目录
-        var destDir = destPath[..destPath.LastIndexOf('/')];
-        var resp = await fs.CopyAsync([srcPath], destDir, user, ctx.RequestAborted);
-        if (resp.Code != 200) return Results.BadRequest(resp.Message);
-        return Results.Ok();
+        // 镜像 Go FsCopy：CanCopy + 源的 meta 读校验 + 目标目录的 meta 写校验。
+        if (!user.CanCopy()) return DavDeny("permission denied");
+        if (DavPathGuard(user, path, out var srcPath) is { } srcDenied) return srcDenied;
+        if (DavPathGuard(user, rawDest, out var destPath) is { } destDenied) return destDenied;
+        if (await FsEndpoints.MetaReadGateAsync(metaSvc, user, MetaAccess.Parent(srcPath), ctx.RequestAborted) is not null)
+            return DavDeny("permission denied");
+        if (await FsEndpoints.MetaWriteGateAsync(metaSvc, user, MetaAccess.Parent(destPath), ctx.RequestAborted) is not null)
+            return DavDeny("permission denied");
+
+        // RFC 4918 §10.6：`Overwrite: F` 且目标已存在 → 412（默认允许覆盖）。
+        var overwrite = !string.Equals(ctx.Request.Headers["Overwrite"].ToString(), "F", StringComparison.OrdinalIgnoreCase);
+        if (!overwrite && DavExists(mount, destPath))
+            return Results.StatusCode(StatusCodes.Status412PreconditionFailed);
+
+        // 这里必须按**完整目标路径**拷：`CopyAsync` 只收目标目录、文件名沿用源名，
+        // 于是「复制到同目录并改名」会被算成源=目标（Windows 上报 used by another process → 400）。
+        var resp = await fs.CopyToAsync(srcPath, destPath, user, ctx.RequestAborted);
+        if (resp.Code != 200) return DavFail(resp.Code, resp.Message);
+        return Results.Created(destPath, null);
     }
 
     // --- LOCK：发放并持久化一个独占的内存锁令牌 ---

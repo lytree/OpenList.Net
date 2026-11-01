@@ -481,7 +481,7 @@ public static class FsEndpoints
     /// 权限位门禁：镜像 Go 各管理端点内联的 <c>user.CanXxx()</c> 检查（缺位返回 403 permission denied）。
     /// 返回 null 表示放行。
     /// </summary>
-    private static IResult? PermissionGuard(bool allowed)
+    internal static IResult? PermissionGuard(bool allowed)
         => allowed ? null : Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
 
     /// <summary>
@@ -489,7 +489,7 @@ public static class FsEndpoints
     /// 解析失败返回 null 而不抛错 —— 与 Go 内联处「仅 MetaNotFound 可忽略、其余报 500」相比更宽松，
     /// 但与本项目既有 meta 处理（<c>FileSystemService.ListAsync</c>）保持一致，避免 meta 故障阻断写入。
     /// </summary>
-    private static async Task<Meta?> NearestMetaAsync(IMetaService meta, string path, CancellationToken ct)
+    internal static async Task<Meta?> NearestMetaAsync(IMetaService meta, string path, CancellationToken ct)
     {
         try { return FindNearestMeta((await meta.ListAsync(ct)).Data ?? [], path); }
         catch { return null; }
@@ -499,7 +499,7 @@ public static class FsEndpoints
     /// meta 写权限门禁（镜像 Go <c>common.CanWrite(user, meta, path)</c>）：meta 的 <c>WriteUsers</c>
     /// 白名单非空、不含该用户且 meta 覆盖该路径时返回 403，否则 null。
     /// </summary>
-    private static async Task<IResult?> MetaWriteGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
+    internal static async Task<IResult?> MetaWriteGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
         => CanWrite(user, await NearestMetaAsync(meta, path, ct), path)
             ? null
             : Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
@@ -508,7 +508,7 @@ public static class FsEndpoints
     /// meta 读权限门禁（镜像 Go <c>common.CanRead(user, meta, path)</c>）：meta 的 <c>ReadUsers</c>
     /// 白名单非空、不含该用户且 meta 覆盖该路径时返回 403，否则 null。
     /// </summary>
-    private static async Task<IResult?> MetaReadGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
+    internal static async Task<IResult?> MetaReadGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
         => CanRead(user, await NearestMetaAsync(meta, path, ct), path)
             ? null
             : Results.Ok(Resp.Fail("permission denied", RespCodes.Forbidden));
@@ -518,7 +518,7 @@ public static class FsEndpoints
     /// meta 直接挂在 <paramref name="path"/> 自身。镜像 Go <c>common.CanWriteContentBypassUserPerms</c> +
     /// <c>common.CanWrite</c> 在 mkdir / fsup / direct_upload 内联处的成对校验。
     /// </summary>
-    private static async Task<IResult?> ContentWriteGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
+    internal static async Task<IResult?> ContentWriteGateAsync(IMetaService meta, User user, string path, CancellationToken ct)
     {
         var nearest = await NearestMetaAsync(meta, path, ct);
         if (!user.CanWriteContent() && !CanWriteContentBypass(nearest, path))

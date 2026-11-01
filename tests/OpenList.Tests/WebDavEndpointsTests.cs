@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text;
+using Microsoft.Extensions.DependencyInjection;
+using OpenList.Core.Interfaces;
 using TUnit.Core;
 
 namespace OpenList.Tests;
@@ -9,6 +11,11 @@ namespace OpenList.Tests;
 /// Uses TestWebAppFactory with a Local storage mounted at /test.
 /// WebDAV auth: HTTP Basic auth with admin:admin (seeded by DbInitializer).
 /// </summary>
+// 这一类的用例曾记录过「首个 WebDAV 请求无限挂起，拖死整个套件」，于是有一条 DELETE 用例被
+// [Skip] 掉了。2026-11-01 复核：真实服务器上 OPTIONS/PUT/GET/PROPFIND/DELETE 全部毫秒级返回
+// （DELETE 204 + 磁盘文件确实消失 + 事后 GET 404），套件里连跑 3 轮 16/16 也全绿 —— 说明那次
+// 挂起不是产品缺陷，[Skip] 已摘。这里补一道超时：真挂了要快速失败，而不是挂住整轮 CI。
+[Timeout(60_000)]
 [NotInParallel("WebIntegration")]
 public class WebDavEndpointsTests
 {
@@ -151,10 +158,6 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    // PRE-EXISTING HANG (baseline, unrelated to API alignment): the first WebDAV
-    // request in this test class hangs indefinitely, blocking the whole suite.
-    // Root cause pending — see AGENTS.md "Known Issues". Re-enable once fixed.
-    [Skip("WebDAV DELETE hangs indefinitely (pre-existing, out of alignment scope)")]
     public async Task Delete_RemovesFile()
     {
         var (factory, client) = await SetupAsync();
@@ -284,6 +287,114 @@ public class WebDavEndpointsTests
             var req = new HttpRequestMessage(new HttpMethod("LOCK"), "/dav/test/x.txt");
             var resp = await client.SendAsync(req);
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+        }
+    }
+
+    // --- 写路径的守卫（2026-11-01）---
+    //
+    // 背景：这 5 个写方法原本只校验「已登录、未禁用」，既没有 /api/fs/* 上的权限位校验，
+    // 也没有 BasePath 越界检查；DELETE 对不存在的路径还会静默返回 204。下面按行为钉住。
+
+    [Test]
+    public async Task Delete_MissingFile_ReturnsNotFound()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            // RFC 4918 §9.6：删不存在的资源是 404，不是「删成功了」。
+            var resp = await client.DeleteAsync("/dav/test/never-existed.txt");
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+        }
+    }
+
+    [Test]
+    public async Task Delete_WithoutRemovePermission_IsForbidden()
+    {
+        var (factory, _) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("guarded.txt", "x"u8.ToArray());
+
+            // permission=0：没有任何写/删权限的普通用户
+            using (var scope = factory.Services.CreateScope())
+            {
+                var users = scope.ServiceProvider.GetRequiredService<IUserService>();
+                var created = await users.CreateAsync(new CreateUserReq
+                {
+                    Username = "reader",
+                    Password = "reader123",
+                    Permission = 0,
+                });
+                await Assert.That(created.Code).IsEqualTo(200);
+            }
+
+            var client = factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new("Basic", Convert.ToBase64String("reader:reader123"u8.ToArray()));
+            var resp = await client.DeleteAsync("/dav/test/guarded.txt");
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+
+            // 文件必须还在（拒绝要发生在动作之前，而不是删到一半才报错）
+            await Assert.That(File.Exists(factory.ResolvePath("guarded.txt"))).IsTrue();
+        }
+    }
+
+    [Test]
+    public async Task Copy_ToSameDirectory_HonoursDestinationName()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("orig.txt", "copy-me"u8.ToArray());
+
+            // 曾经这里会 400：handler 只取 Destination 的**目录**，再用源名字拼回去，
+            // 于是「同目录复制并改名」算出的源和目标完全相同 → Windows 报 used by another process。
+            var req = new HttpRequestMessage(new HttpMethod("COPY"), "/dav/test/orig.txt");
+            req.Headers.Add("Destination", "/dav/test/dup.txt");
+            var resp = await client.SendAsync(req);
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Created);
+
+            await Assert.That(File.Exists(factory.ResolvePath("dup.txt"))).IsTrue();
+            await Assert.That(await File.ReadAllTextAsync(factory.ResolvePath("dup.txt"))).IsEqualTo("copy-me");
+            // 源文件不能被覆盖成副本
+            await Assert.That(await File.ReadAllTextAsync(factory.ResolvePath("orig.txt"))).IsEqualTo("copy-me");
+        }
+    }
+
+    [Test]
+    public async Task Copy_ToOtherDirectory_UsesDestinationName()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("orig.txt", "abc"u8.ToArray());
+            Directory.CreateDirectory(factory.ResolvePath("dest"));
+
+            var req = new HttpRequestMessage(new HttpMethod("COPY"), "/dav/test/orig.txt");
+            req.Headers.Add("Destination", "/dav/test/dest/renamed.txt");
+            var resp = await client.SendAsync(req);
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Created);
+
+            // 目标目录里必须是请求的名字，而不是源文件名 orig.txt
+            await Assert.That(File.Exists(factory.ResolvePath("dest/renamed.txt"))).IsTrue();
+            await Assert.That(File.Exists(factory.ResolvePath("dest/orig.txt"))).IsFalse();
+        }
+    }
+
+    [Test]
+    public async Task Copy_OverwriteFalse_OnExistingTarget_Returns412()
+    {
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("orig.txt", "abc"u8.ToArray());
+            await factory.WriteFileAsync("exists.txt", "old"u8.ToArray());
+
+            var req = new HttpRequestMessage(new HttpMethod("COPY"), "/dav/test/orig.txt");
+            req.Headers.Add("Destination", "/dav/test/exists.txt");
+            req.Headers.Add("Overwrite", "F");
+            var resp = await client.SendAsync(req);
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.PreconditionFailed);
+            await Assert.That(await File.ReadAllTextAsync(factory.ResolvePath("exists.txt"))).IsEqualTo("old");
         }
     }
 }
