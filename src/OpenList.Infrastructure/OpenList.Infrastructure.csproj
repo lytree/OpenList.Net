@@ -19,6 +19,7 @@
     <PackageReference Include="Mapster" />
     <PackageReference Include="Novell.Directory.Ldap.NETStandard" />
     <PackageReference Include="Fido2" />
+    <PackageReference Include="PDFtoImage" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OpenList.Tests" />

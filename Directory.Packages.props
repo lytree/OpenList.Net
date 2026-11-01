@@ -45,6 +45,12 @@
     <PackageVersion Include="Minio" Version="7.0.0" />
     <PackageVersion Include="Novell.Directory.Ldap.NETStandard" Version="4.0.0" />
     <PackageVersion Include="SharpCompress" Version="0.50.5" />
+    <!-- PDF 首页缩略图：PDFium（BSD）+ SkiaSharp（MIT）。
+         刻意停在 5.2.0，不跟到最新：5.3.0 起改用 SkiaSharp 4.x，会把服务端的 SkiaSharp 从
+         3.119.4（Avalonia 12 已验证过的版本、也是我们唯一实测过的 native）顶到 4.153.1。
+         PDF 只有在修 PDFium CVE 或遇到线性化 PDF 打不开时才值得付这个代价 —— 届时升到
+         5.4.0 并在 Docker 里实测一遍缩略图即可。 -->
+    <PackageVersion Include="PDFtoImage" Version="5.2.0" />
     <PackageVersion Include="MonoTorrent" Version="3.0.2" />
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />

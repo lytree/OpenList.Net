@@ -3465,3 +3465,89 @@ COPY（同目录改名 + 换目录 + `Overwrite: F`）、LOCK/UNLOCK、DELETE �
 - 遗留：`/dav` 的 **PROPFIND/PUT 仍没有读权限（meta `ReadUsers`）校验** ——
   DELETE/MOVE/COPY 已经补了写侧，读侧要不要一起收紧（会不会把「只读账号用 WebDAV 挂载浏览」
   这个正常用法挡掉）需要产品决策，已记在这里。
+
+## 54. PDF 首页缩略图：唯一破例走进程内 native 的类型（2026-11-01）
+
+按 §53 之后的排期做 PDF 封面。这是缩略图服务最后一类"明确写了未实现"的类型
+（`ThumbKind.Pdf` 一律回 415 `pdf-unsupported`）。
+
+### 54.1 为什么必须破例
+
+缩略图其余类型全部交给外部 ffmpeg 进程（§0.1 的三条理由：native 崩了只死子进程、不必为 6 个
+RID 各打一份解码器、LGPL 只需在 NOTICE 致谢）。但 **ffmpeg 不解 PDF**，而 PDF 只有 PDFium
+这一个实用选项。所以这不是"顺手再引一套 native"，是"PDF 封面"这个需求本身的最低成本路径。
+
+当初的判断（plan §0.1 表格最后一行）写的是"接 PDFium 要再引一套 native，收益明显低于成本"。
+这次做过之后看，那个判断错在**成本估高了**：
+
+| 当初的估计 | 实测 |
+|---|---|
+| 再引一套 native（SkiaSharp + PDFium，~17MB） | SkiaSharp 桌面端本来就有（Avalonia 依赖），服务端增量只有 `libSkiaSharp.so`（9.0MB）+ `libpdfium.so`（5.7MB）= **+14.7MB** |
+| Docker 要补 `libfontconfig1` / `libstdc++` | **不用**。`PDFtoImage` 依赖的是 `SkiaSharp.NativeAssets.Linux.NoDependencies`，fontconfig 静态链入 |
+| 环境不可达 | 只是 `api.nuget.org` 被 302 到 `nuget.azure.cn` 而 `dotnet` 不跟随；镜像直连可用 |
+
+而收益是实打实的：文档目录里"看得见封面"是这类产品的常规预期，缺了它就是缺一块。
+
+### 54.2 复用同一条 ffmpeg 流水线，不写第二套缩放
+
+```
+VFS 整读 → 临时 .pdf → PDFium 首页栅格化成 PNG（Dpi=120）
+  → 该 PNG 当作 ffmpeg 输入 → 同一个 scale/crop 滤镜 + 同一个编码分支
+```
+
+`ThumbnailService.GenerateCoreAsync` 里只多了一个分支：渲染成功后把 `source` 换成 PNG，
+后面完全不变。好处是取景（cover 裁剪）、格式回落（webp 不支持时落 jpeg）、失败归因
+（`ClassifyFailure`）全都与图片共用一份实现 —— 用户不会发现"PDF 封面和图片封面的裁切规则不一样"。
+
+PDFium **不是线程安全的**，所以渲染全局串行（`SemaphoreSlim(1)`）。这只是把并发 PDF 请求排队，
+不是把整个服务串行化：等锁异步、渲染同步，且结果进缓存，串行的实际代价很低。
+
+### 54.3 版本：停在 PDFtoImage 5.2.0
+
+| 版本 | 要求 SkiaSharp | PDFium |
+|---|---|---|
+| **5.2.0（采用）** | 3.119.1 → 统一到 **3.119.4** | 139.0.7215 |
+| 5.3.0 / 5.4.0 | 4.150.1 → 顶到 **4.153.1** | 152.0.7961 |
+
+3.119.4 是 Avalonia 12.1.4 依赖、也是我们唯一实测过的 native。升 5.3+ 会同时换 SkiaSharp
+大版本和 PDFium 主版本；在没法跑 Docker 实测的条件下一次动两个变量不划算。
+**升级触发条件**：PDFium 出 CVE，或遇到线性化 PDF 打不开（5.4.0 的 release notes 明说修了这类）。
+
+### 54.4 列表也下发（与视频相反）
+
+视频被排除在列表之外，是因为一个 20 个视频的目录 = 20 次远端 seek 抽帧。
+PDF 的成本与**图片同一档**：整读一次源文件（受 `thumb_max_source_mb` 默认 64MB 限制）+ 一次栅格化。
+既然图片能在列表里出封面，PDF 没有理由不行。
+
+顺手删掉 `ThumbnailUrlBuilder.Build` 里一行冗余判断（`if (kind != Image && kind != Audio) return null`）——
+它和 `IsListSafe` 重复，把 Pdf 加进白名单后会变成"列表永远不下发 PDF"的隐藏死锁点。
+
+### 54.5 失败口径
+
+| 原因 | 触发 | 负缓存 |
+|---|---|---|
+| `pdf-encrypted` | 加密 PDF（不尝试密码） | 30 分钟 |
+| `pdf-invalid` | 打不开 / 没有首页 / 半截文件 | 30 分钟 |
+| `pdfium-unavailable` | native 加载失败（缺 `.so`、架构不对） | 30 分钟 |
+| `decode-failed` | 其它 PDFium 异常 | 5 分钟 |
+
+`pdfium-unavailable` 这条是刻意加的：与 `ffmpeg-unavailable` 同一口径，部署问题要能一眼从
+`X-Thumb-Reason` 上看出来，而不是笼统的 `decode-failed`。
+
+### 54.6 结果
+
+- 后端 **618 项全通过 / 0 跳过**（新增 5 条：直出 PNG 并校验尺寸、坏 PDF 归因、全链路出 JPEG、
+  坏 PDF 全链路归因、`Probe` 对 PDF 回 200）。
+- **A–H 17/17 全绿**（`.e2e/regression-1101d.log`）。
+- `I/thumb` 轮 **33/33**（28 → 33）：PDF 条目下发 thumb、`GET` 200 + 2594B JPEG、二次 `hit`、
+  半截 PDF → 404 `pdf-invalid`。
+- 发布产物：`linux-x64` 服务端 `libSkiaSharp.so` + `libpdfium.so` 各一份、无重名冲突；
+  桌面端不链接 `OpenList.Infrastructure`（Server 是子进程），SkiaSharp 仍是 3.119.4。
+
+### 54.7 遗留
+
+1. **老库不会自动放开 PDF**：`thumb_types` 的默认值加了 `pdf`，但种子只补缺失键、不改已有值 ——
+   已落库的要在设置页手填或 `/admin/setting/default?group=14`。
+2. 加密 PDF 归 `pdf-encrypted` 后不再尝试，未来若要支持"用户自己填密码"得把密码做成请求参数，
+   这与缩略图的缓存键耦合，不划算。
+3. 仍只渲染首页；`page` 参数化会牵动缓存键与 URL 约定，按需求再加。

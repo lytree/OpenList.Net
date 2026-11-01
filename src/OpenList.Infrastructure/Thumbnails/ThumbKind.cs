@@ -17,7 +17,7 @@ public enum ThumbKind
     /// <summary>视频：抽一帧。成本最高，且需要可随机读的源。</summary>
     Video = 3,
 
-    /// <summary>PDF：首页渲染。<b>当前未实现</b>（需要 PDFium，见 docs/thumbnail-service-plan.md §5）。</summary>
+    /// <summary>PDF：首页渲染。唯一的进程内 native（PDFium），见 <see cref="PdfRenderer"/>。</summary>
     Pdf = 4,
 }
 
@@ -72,8 +72,12 @@ public static class ThumbKinds
     /// 视频被排除在外：一个 20 个视频的目录会让浏览器立刻发起 20 次远端抽帧，
     /// 直接把云盘配额打掉。视频缩略图只在详情页显式请求（见计划文档 §15 风险清单）。
     /// </para>
+    /// <para>
+    /// PDF 在列表里是安全的：成本与图片同一档（整读一次源文件 + 一次栅格化），
+    /// 不像视频那样需要远端 seek 抽帧；文档目录"看得见封面"正是这个功能的主要场景。
+    /// </para>
     /// </summary>
-    public static bool IsListSafe(ThumbKind kind) => kind is ThumbKind.Image or ThumbKind.Audio;
+    public static bool IsListSafe(ThumbKind kind) => kind is ThumbKind.Image or ThumbKind.Audio or ThumbKind.Pdf;
 
     /// <summary>该类型是否需要"随机读"（视频要 seek，图片/音频整读即可）。</summary>
     public static bool NeedsRandomAccess(ThumbKind kind) => kind == ThumbKind.Video;

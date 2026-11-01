@@ -55,7 +55,6 @@ public sealed class ThumbnailUrlBuilder : IThumbnailUrlBuilder
 
         var kind = ThumbKinds.FromName(name);
         if (!ThumbKinds.IsListSafe(kind)) return null;
-        if (kind != ThumbKind.Image && kind != ThumbKind.Audio) return null;
         if (size > options.MaxSourceBytes) return null;
 
         var dot = name.LastIndexOf('.');

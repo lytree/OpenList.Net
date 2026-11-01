@@ -11,7 +11,7 @@ import { chromium } from "playwright"
  *      `round_thumb` 建好），且**本机有可用的 ffmpeg**（后端生成缩略图全靠它）。
  *
  * fixture 全部现造：图片/音频/视频用 ffmpeg（PATH → `OPENLIST_FFMPEG` → 仓库 `.e2e/bin`），
- * PDF 用脚本内拼的最小合法文件（xref 偏移现算）。没有 ffmpeg 时直接判一条 FAIL 并退出 ——
+ * PDF 用脚本内拼的最小合法文件（xref 偏移现算），另加一个「半截 PDF」验证失败归因。没有 ffmpeg 时直接判一条 FAIL 并退出 ——
  * 那不是「功能坏了」，而是这一轮的前置没满足，不能让它伪装成「9 条全过」。
  *
  * 用法：`BASE=http://127.0.0.1:5055 ADMIN_PASS=e2e12345 E2E_ROOT=... node scripts/verify-thumb.mjs`
@@ -121,6 +121,8 @@ run(["-f", "lavfi", "-i", "testsrc=size=320x200:rate=10:duration=2", "-pix_fmt",
 
 fs.writeFileSync(path.join(ROOT, "notes.txt"), "plain text, no thumbnail\n")
 fs.writeFileSync(path.join(ROOT, "doc.pdf"), buildPdf())
+// 下载中断的半截文件：PDFium 打不开，必须落成「确定失败」而不是 500。
+fs.writeFileSync(path.join(ROOT, "broken.pdf"), "%PDF-1.4\ntruncated body\n", "latin1")
 log("fixture:", fs.readdirSync(ROOT).sort().join(", "))
 
 // ---------------------------------------------------------------- API helpers
@@ -198,9 +200,9 @@ check(
   `thumb=${byName(on, "clip.mp4")?.thumb}`,
 )
 check(
-  "PDF 条目不下发 thumb（PDF 未实现，见 §6.4）",
-  (byName(on, "doc.pdf")?.thumb ?? "") === "",
-  `thumb=${byName(on, "doc.pdf")?.thumb}`,
+  "PDF 条目下发 thumb（成本与图片同档：整读一次源文件）",
+  (byName(on, "doc.pdf")?.thumb ?? "").includes("type=thumb"),
+  `thumb=${byName(on, "doc.pdf")?.thumb ?? "null"}`,
 )
 
 const thumbUrl = photo?.thumb ?? ""
@@ -261,15 +263,28 @@ check("无封面的 mp3 → 404", noCover.status === 404, `status=${noCover.stat
 check("无封面 reason=no-cover", noCover.headers.get("x-thumb-reason") === "no-cover", noCover.headers.get("x-thumb-reason") || "")
 await noCover.arrayBuffer()
 
-// ---------------------------------------------------------------- 7. PDF（当前明确未实现）
+// ---------------------------------------------------------------- 7. PDF 首页
 
 const pdf = await fetch(`${BASE}/p/e2e/doc.pdf?type=thumb`)
+const pdfBytes = Buffer.from(await pdf.arrayBuffer())
+check("PDF → 200", pdf.status === 200, `status=${pdf.status} reason=${pdf.headers.get("x-thumb-reason")}`)
+check("PDF 返回图片 Content-Type", (pdf.headers.get("content-type") || "").startsWith("image/"), pdf.headers.get("content-type") || "")
+// JPEG 的 SOI：确认不是空 body 或一段 HTML。
+check("PDF 返回真图片字节", pdfBytes.length > 200 && pdfBytes[0] === 0xff && pdfBytes[1] === 0xd8, `bytes=${pdfBytes.length}`)
+
+const pdfAgain = await fetch(`${BASE}/p/e2e/doc.pdf?type=thumb`)
+await pdfAgain.arrayBuffer()
+check("PDF 二次 GET 命中缓存", pdfAgain.headers.get("x-thumb-cache") === "hit", pdfAgain.headers.get("x-thumb-cache") || "")
+
+// 损坏的 PDF 必须是「确定失败」而不是 500：列表里会有一堆下载中断的半截文件。
+const broken = await fetch(`${BASE}/p/e2e/broken.pdf?type=thumb`)
+await broken.arrayBuffer()
+check("损坏的 PDF → 404", broken.status === 404, `status=${broken.status}`)
 check(
-  "PDF → 415（未实现；实现后此条改为 200）",
-  pdf.status === 415 && pdf.headers.get("x-thumb-reason") === "pdf-unsupported",
-  `status=${pdf.status} reason=${pdf.headers.get("x-thumb-reason")}`,
+  "损坏的 PDF reason 可诊断",
+  ["pdf-invalid", "decode-failed"].includes(broken.headers.get("x-thumb-reason") || ""),
+  broken.headers.get("x-thumb-reason") || "",
 )
-await pdf.arrayBuffer()
 
 // ---------------------------------------------------------------- 8. 不传 type 时行为不变（最重要）
 

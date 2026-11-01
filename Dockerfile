@@ -76,6 +76,11 @@ WORKDIR /app
 # FFmpeg ships with the image and is invoked as a separate process. ~90 MB on
 # bookworm; users who don't want thumbnails simply leave thumb_enable=false and
 # never pay for it at runtime (the binary is only ever executed on demand).
+#
+# PDF thumbnails need no extra package: they run in-process through PDFium pinned by
+# the PDFtoImage package, which depends on SkiaSharp.NativeAssets.Linux.NoDependencies
+# (fontconfig/harfbuzz are statically linked) and ships libpdfium.so per RID.
+# Publish output grows by ~15 MB (libSkiaSharp.so 9.0 + libpdfium.so 5.7 on linux-x64).
 RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 

@@ -278,24 +278,4 @@ public class ThumbnailFfmpegTests
     }
 
     /// <summary>ISettingService 假件（只实现缩略图链路会用到的 ListAsync）。</summary>
-    private sealed class FakeSettings(Dictionary<string, string> values) : ISettingService
-    {
-        public Task<Resp<List<SettingItem>>> ListAsync(CancellationToken ct = default)
-            => Task.FromResult(Resp<List<SettingItem>>.Ok(
-                [.. values.Select(kv => new SettingItem { Key = kv.Key, Value = kv.Value })]));
-
-        public Task<Resp<SettingItem>> GetAsync(string key, CancellationToken ct = default)
-            => Task.FromResult(Resp<SettingItem>.Fail("not found", RespCodes.NotFound));
-        public Task<Resp> SaveAsync(List<SettingItem> items, CancellationToken ct = default) => Task.FromResult(Resp.Ok());
-        public Task<Resp> DeleteAsync(string key, CancellationToken ct = default) => Task.FromResult(Resp.Ok());
-        public Task<Resp<List<SettingItem>>> DefaultAsync(string? group = null, CancellationToken ct = default)
-            => Task.FromResult(Resp<List<SettingItem>>.Ok([]));
-        public Task<Resp> ResetTokenAsync(CancellationToken ct = default) => Task.FromResult(Resp.Ok());
-        public Task<Resp<Dictionary<string, string>>> GetPublicAsync(CancellationToken ct = default)
-            => Task.FromResult(Resp<Dictionary<string, string>>.Ok([]));
-        public Task<Resp<string[]>> GetOfflineDownloadToolsAsync(CancellationToken ct = default)
-            => Task.FromResult(Resp<string[]>.Ok([]));
-        public Task<Resp<string[]>> GetArchiveExtensionsAsync(CancellationToken ct = default)
-            => Task.FromResult(Resp<string[]>.Ok([]));
-    }
 }

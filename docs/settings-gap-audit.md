@@ -64,13 +64,13 @@
 | ✅ 列表 40px 缩略图槽位 | `frontend/src/components/ThumbIcon.tsx`（新） | 有 `thumb` 画图、无/失败退图标；**只做一级降级**（不像网格再退原图）。桌面表格名称列 40px，手机卡片行 36px（塞进 52px 行高）。失败态按 `(name, thumb)` 重置，复用实例不会一直显示图标 |
 | ✅ 网格 `src` 含 `type=thumb` 断言 | `verify-thumb.mjs` | 原来只有实现没有断言，现在三处槽位（表格 / 网格 / 手机行）都在回归里钉住 |
 | ✅ E2E `I/thumb` 轮 | `frontend/scripts/verify-thumb.mjs`（新）+ `run-regression.sh` 的 `round_thumb` | 28 条断言；fixture 由脚本用 ffmpeg 现造，PDF 用脚本内手拼的最小合法文件（xref 偏移现算）。默认轮次列表已加 `thumb`（共 16 轮） |
-| ⛔ PDF 首页 | 仍 415 `pdf-unsupported` | 环境阻塞，不是取舍变化：NuGet 不可达 + 本地无 PDFtoImage/PDFium + 机器无 `pdftoppm`/`mutool`/`gs`。两条路（联网补 PDFtoImage / 改外部 pdftoppm）都要动 Dockerfile 与发布体积，需拍板 |
+| ✅ PDF 首页 | `Thumbnails/PdfRenderer.cs`（新）+ `ThumbnailService` 的 PDF 分支 | 走进程内 PDFium（`PDFtoImage 5.2.0`）：首页栅格化成 PNG 后**回到同一条 ffmpeg 流水线**做缩放/裁剪/编码，格式与失败归因与图片一致。只在 PDF 这一种类型上破例引 native（ffmpeg 不解 PDF），代价见 plan §54。列表也下发（成本与图片同档） |
 | ✅ 测试契约同步（第三批遗留） | `FsEndpointsTests.WaitTasksAsync` | 任务体改成线程池后，`/fs/move`、`/fs/copy` 的 HTTP 200 只代表**已入队**。原测试「返回即可重建同名文件」的假设随之失效，全量跑时偶发 `file is being used by another process`（移动任务还在跑）。补了按类型轮询 `/api/task/{type}/undone` 的 helper；生产行为正确，改的是测试 |
 | ⏳ 详情页占位图、指标 | — | 两份文档都只写了名字、没有口径，留待需求明确 |
 
 **第四批验证**：前端 `vitest` **252 项全绿**（新增 5 条 `ThumbIcon.spec.ts`）、`tsc --noEmit`、`vite build` 通过；E2E `I/thumb` **28/28 PASS**（含「不带 type 仍是原文件」这条回归保护）；后端未改，仍为 594 项（593 通过 / 1 跳过）。
 
-**E2E 实测口径**（隔离实例 5055 + Local 驱动）：`thumb=null` → 开启后 `http://…/p/e2e/photo.jpg?type=thumb&w=320&h=320` → 首次 `generated` 5444B → 二次 `hit` 且 ETag 相同 → 改写源文件后 `generated` 5981B；`w=9999` 输出 1024×1024 PNG；无封面 mp3 → 404 `no-cover`；PDF → 415 `pdf-unsupported`；列表三处槽位分别渲染 3 张图 + 4 个图标位（无封面音频与视频/PDF 走图标）。
+**E2E 实测口径**（隔离实例 5055 + Local 驱动）：`thumb=null` → 开启后 `http://…/p/e2e/photo.jpg?type=thumb&w=320&h=320` → 首次 `generated` 5444B → 二次 `hit` 且 ETag 相同 → 改写源文件后 `generated` 5981B；`w=9999` 输出 1024×1024 PNG；无封面 mp3 → 404 `no-cover`；PDF → 200 + 2594B JPEG，二次 `hit`；半截 PDF → 404 `pdf-invalid`；列表三处槽位分别渲染 4 张图（含 PDF）+ 4 个图标位（无封面音频与视频走图标）。
 
 ### 执行进度（第五批，2026-10-31）：直链参数 + 归档编码
 
@@ -107,7 +107,7 @@
 |---|---|
 | `proxy_types` / `share_force_proxy` | 存储已有「按存储」的代理开关（`web_proxy` / `webdav_policy`），全局白名单要定 ① 匹配驱动名还是挂载粒度 ② 与存储显式 `web_proxy=false` 的优先级。`share_force_proxy` 另外发现**恒为真**（见 B 类） |
 | FTP/SFTP 7 键、S3 3 键 | 实际走 `AppConfiguration`（`FtpHostedService` / `S3Endpoints`）。要么按 LDAP 的先例做成「设置优先、配置兜底 + 启动导入」，要么删种子并隐藏设置组 |
-| PDF 首页缩略图 | 环境阻塞：NuGet 不可达 + 本机无任何 PDF 渲染器。两条路（联网补 PDFtoImage / 改外部 `pdftoppm`）都要动 Dockerfile 与发布体积 |
+| ~~PDF 首页缩略图~~ | 已解（2026-11-01）：走 `PDFtoImage 5.2.0`，NuGet 从这里经 `nuget.azure.cn` 镜像可达 |
 
 **B. 复核后判定为不适用（建议保留种子但在文档/设置页标明，不必写代码）**
 
@@ -196,9 +196,9 @@ G12：`media_default_provider`（provider 选择未消费此键，实际注册�
 
 > **状态（2026-10-31 第三批）**：2、3 已完成；1 被环境阻塞；4 的文档部分已清理，剩「详情页占位图 / 指标」两项本身没有明确需求。
 
-1. ❌ **PDF 首页**：`ThumbKind.Pdf` 仍回 415 `pdf-unsupported`。**不是取舍变化，是环境阻塞**：NuGet 源不可达（`dotnet package search PDFtoImage` 失败）+ 本地缓存无 PDFtoImage/PDFium + 机器上没有任何 PDF 渲染器（`pdftoppm`/`mutool`/`gs` 均不存在）。两条可选路径：① 联网补 PDFtoImage 5.4.0（含 native，Docker 要补 `libfontconfig1`/`libstdc++`）；② 改成外部 `pdftoppm`（与现有「外部 ffmpeg」同构，镜像补 poppler-utils）。两条都要动 Dockerfile 与发布体积，需拍板。
+1. ✅ **PDF 首页**（2026-11-01 完成）：`PDFtoImage 5.2.0`（PDFium 139，进程内）把首页栅格化成 PNG，再交给现有 ffmpeg 流水线缩放/裁剪/编码。当初卡住的两个说法都只对了一半：NuGet 确实不可达（`api.nuget.org` 被 302 到镜像，`dotnet` 不跟随），但 `nuget.azure.cn` 直连可用；Docker 也**不需要**补 `libfontconfig1` —— PDFtoImage 依赖的是 `SkiaSharp.NativeAssets.Linux.NoDependencies`（fontconfig 静态链入）。详见 plan §54。
 2. ✅ **E2E `verify-thumb.mjs`**：已落地为 `I/thumb` 轮（`run-regression.sh` 的 `round_thumb`），**28 条断言**全绿。fixture 由脚本用 ffmpeg 现造（图片/音频/视频），PDF 用手拼的最小合法文件。注意：列表对「无封面 mp3」必然发一次 404，E2E 把资源 404 与脚本级异常分开统计。
-3. ✅ **列表行 40px 缩略图槽位** + 网格页 `src` 断言：新增 `components/ThumbIcon.tsx`（表格名称列 40px、手机卡片行 36px），网格断言进 E2E。视频/PDF 在列表里仍不下发 thumb（防一屏 20 次远端抽帧），槽位直接显示图标。
+3. ✅ **列表行 40px 缩略图槽位** + 网格页 `src` 断言：新增 `components/ThumbIcon.tsx`（表格名称列 40px、手机卡片行 36px），网格断言进 E2E。视频在列表里仍不下发 thumb（防一屏 20 次远端抽帧），槽位直接显示图标；**PDF 自 2026-11-01 起在列表里下发**（成本与图片同档）。
 4. 文档标记已清理（本文件 + `thumbnail-service-plan.md` §0.1/§0.2/§14/§12）。**详情页占位图**与**指标**两项，`AGENTS.md` 与 plan 都只写了名字、没有定义口径（指标是命中率？是 dashboard 面板？），留待需求明确；媒体网格的「海报加载失败换占位块」已有实现（`components/MediaGrid.tsx`）。
 
 ## 已确认正常、无需处理

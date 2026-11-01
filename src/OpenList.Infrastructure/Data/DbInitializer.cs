@@ -711,8 +711,9 @@ public static class DbInitializer
         // 列表卡片请求的边长（正方形，cover 裁剪）。改前端卡片尺寸时只改这里。
         ("thumb_max_size", "320", SettingValueType.Number, SettingFlag.Public, 14, null),
         ("thumb_quality", "80", SettingValueType.Number, SettingFlag.Public, 14, null),
-        // 允许生成的扩展名白名单。刻意不含 svg（存储型 XSS 载体）与 pdf（需要 PDFium，未接入）。
-        ("thumb_types", "jpg,jpeg,png,webp,bmp,gif,avif,tif,tiff,ico,mp3,flac,m4a,ogg,opus,wav,mp4,mkv,mov,webm,avi", SettingValueType.String, SettingFlag.Public, 14, null),
+        // 允许生成的扩展名白名单。刻意不含 svg（存储型 XSS 载体）；pdf 在列表里也安全
+        // （只栅格化首页，不产生远端流量），因此包含在内。
+        ("thumb_types", "jpg,jpeg,png,webp,bmp,gif,avif,tif,tiff,ico,mp3,flac,m4a,ogg,opus,wav,mp4,mkv,mov,webm,avi,pdf", SettingValueType.String, SettingFlag.Public, 14, null),
         // 视频抽帧位置：秒（"15"）或百分比（"10%"）。百分比需要 ffprobe 取时长，缺失时退化为 10 秒。
         ("thumb_video_position", "10%", SettingValueType.String, SettingFlag.Public, 14, null),
         ("thumb_video_enable", "true", SettingValueType.Bool, SettingFlag.Public, 14, null),

@@ -81,8 +81,10 @@ public sealed record ThumbnailResult(
 /// <summary>
 /// 缩略图服务：判定类型 → 查缓存 → 调 ffmpeg 生成 → 回填缓存。
 /// <para>
-/// <b>生成全部交给外部 ffmpeg 进程</b>（与 Jellyfin 同一路线，见
-/// <c>docs/thumbnail-service-plan.md</c> §5 修订记录）。这样做的取舍：
+/// <b>生成基本交给外部 ffmpeg 进程</b>（与 Jellyfin 同一路线，见
+/// <c>docs/thumbnail-service-plan.md</c> §5 修订记录）。<b>唯一例外是 PDF</b>：
+/// ffmpeg 不解 PDF，所以先用 <see cref="PdfRenderer"/> 把首页栅格化成 PNG，再回到同一条 ffmpeg
+/// 流水线做缩放/裁剪/编码。这样做的取舍：
 /// </para>
 /// <list type="bullet">
 /// <item>✅ 进程内不链接任何 native 库：native 崩溃只死子进程，不会带走整个服务；
@@ -151,8 +153,6 @@ public sealed class ThumbnailService : IDisposable
 
         var kind = ThumbKinds.FromName(request.Path);
         if (kind == ThumbKind.None) return ThumbnailResult.Unsupported("unsupported");
-        // PDF 首页需要 PDFium；当前刻意返回 415 而不是偷偷让 ffmpeg 去猜（它猜不出来）。
-        if (kind == ThumbKind.Pdf) return ThumbnailResult.Unsupported("pdf-unsupported");
         if (kind == ThumbKind.Video && !options.VideoEnabled) return ThumbnailResult.Unsupported("video-disabled");
 
         var upath = new UPath(Normalize(request.Path));
@@ -219,7 +219,7 @@ public sealed class ThumbnailService : IDisposable
         if (!options.Enabled) return ThumbnailResult.Unsupported("disabled");
 
         var kind = ThumbKinds.FromName(request.Path);
-        if (kind is ThumbKind.None or ThumbKind.Pdf) return ThumbnailResult.Unsupported("unsupported");
+        if (kind == ThumbKind.None) return ThumbnailResult.Unsupported("unsupported");
         if (kind == ThumbKind.Video && !options.VideoEnabled) return ThumbnailResult.Unsupported("video-disabled");
 
         if (!_mount.Root.FileExists(new UPath(Normalize(request.Path))))
@@ -337,11 +337,29 @@ public sealed class ThumbnailService : IDisposable
             }
             else
             {
-                // 图片 / 音频：整读进临时文件。JPEG 的 EXIF 方向、渐进式解码都需要完整数据，
-                // 而 ReadFileAsync 式的 maxBytes 上限已经在外层按设置项挡过一次。
+                // 图片 / 音频 / PDF：整读进临时文件。JPEG 的 EXIF 方向、渐进式解码都需要完整数据，
+                // 而 ReadFileAsync 式的 maxBytes 上限已经在外层按设置项挡过一次；PDF 还额外要求
+                // 「可随机读」（云盘驱动给的是不可 Seek 的顺序流），落成真实文件最省事。
                 inputFile = Path.Combine(tempDir, Guid.NewGuid().ToString("N") + "." + ExtensionOf(entry.Name));
                 await CopyToFileAsync(entry, inputFile, ct).ConfigureAwait(false);
                 source = inputFile;
+
+                if (kind == ThumbKind.Pdf)
+                {
+                    // PDF 先由 PDFium 栅格化成 PNG，再走下面同一条 ffmpeg 缩放/裁剪/编码流水线 ——
+                    // 这样 PDF 与图片的取景、编码格式、失败归因完全一致，不用维护第二套缩放逻辑。
+                    var rendered = Path.Combine(tempDir, Guid.NewGuid().ToString("N") + ".png");
+                    var (ok, reason) = await PdfRenderer.RenderFirstPageAsync(inputFile, rendered, ct).ConfigureAwait(false);
+                    if (!ok)
+                    {
+                        TryDelete(rendered);
+                        return new Generated(null, effectiveFormat, reason, "pdfium render failed");
+                    }
+
+                    TryDelete(inputFile);   // PDF 原文不再需要，先删掉省点临时盘
+                    inputFile = rendered;   // finally 里会清掉这张 PNG
+                    source = rendered;
+                }
             }
 
             outputFile = Path.Combine(tempDir, Guid.NewGuid().ToString("N") + "." + ExtensionOfFormat(effectiveFormat));

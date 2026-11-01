@@ -86,6 +86,8 @@ public class ThumbnailTests
         await Assert.That(ThumbKinds.IsListSafe(ThumbKind.Audio)).IsTrue();
         // 一个 20 个视频的目录 = 20 次远端抽帧，列表页绝不下发。
         await Assert.That(ThumbKinds.IsListSafe(ThumbKind.Video)).IsFalse();
+        // PDF 只栅格化本地临时副本，列表里下发是安全的（文档目录靠它出封面）。
+        await Assert.That(ThumbKinds.IsListSafe(ThumbKind.Pdf)).IsTrue();
     }
 
     // ---- ffmpeg 参数 ----
@@ -206,6 +208,11 @@ public class ThumbnailTests
 
         var audio = builder.Build("/test/b.mp3", "b.mp3", 1024, false, SignContext.NotNeeded);
         await Assert.That(audio).IsNotNull();
+
+        // PDF 首页（PDFium 栅格化）不产生远端流量，列表里可以下发。
+        var pdf = builder.Build("/test/c.pdf", "c.pdf", 1024, false, SignContext.NotNeeded);
+        await Assert.That(pdf).IsNotNull();
+        await Assert.That(pdf!).Contains("/p/test/c.pdf?type=thumb");
     }
 
     [Test]
@@ -369,35 +376,6 @@ public class ThumbnailTests
     }
 
     /// <summary>只实现 <see cref="ISettingService.ListAsync"/> 的桩，其余成员不应被缩略图链路调用。</summary>
-    private sealed class FakeSettings(Dictionary<string, string> values) : ISettingService
-    {
-        public Task<Resp<List<SettingItem>>> ListAsync(CancellationToken ct = default)
-            => Task.FromResult(Resp<List<SettingItem>>.Ok(
-                [.. values.Select(kv => new SettingItem { Key = kv.Key, Value = kv.Value })]));
-
-        public Task<Resp<SettingItem>> GetAsync(string key, CancellationToken ct = default)
-            => Task.FromResult(Resp<SettingItem>.Fail("not found", RespCodes.NotFound));
-
-        public Task<Resp> SaveAsync(List<SettingItem> items, CancellationToken ct = default)
-            => Task.FromResult(Resp.Ok());
-
-        public Task<Resp> DeleteAsync(string key, CancellationToken ct = default)
-            => Task.FromResult(Resp.Ok());
-
-        public Task<Resp<List<SettingItem>>> DefaultAsync(string? group = null, CancellationToken ct = default)
-            => Task.FromResult(Resp<List<SettingItem>>.Ok([]));
-
-        public Task<Resp> ResetTokenAsync(CancellationToken ct = default) => Task.FromResult(Resp.Ok());
-
-        public Task<Resp<Dictionary<string, string>>> GetPublicAsync(CancellationToken ct = default)
-            => Task.FromResult(Resp<Dictionary<string, string>>.Ok([]));
-
-        public Task<Resp<string[]>> GetOfflineDownloadToolsAsync(CancellationToken ct = default)
-            => Task.FromResult(Resp<string[]>.Ok([]));
-
-        public Task<Resp<string[]>> GetArchiveExtensionsAsync(CancellationToken ct = default)
-            => Task.FromResult(Resp<string[]>.Ok([]));
-    }
 
     /// <summary>固定签名的签名服务替身。</summary>
     private sealed class FakeSignService : ISignService

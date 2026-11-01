@@ -1,6 +1,6 @@
 # 缩略图服务技术方案（M4 遗留项）
 
-> 状态：**已实现（图片 / 音频 / 视频；PDF 仍为 415）**。列表槽位与 E2E 轮次见 §0.2。对应
+> 状态：**已实现（图片 / 音频 / 视频 / PDF 首页）**。列表槽位与 E2E 轮次见 §0.2，PDF 见 §0.3。对应
 > `docs/frontend-reference-analysis.md` §200 与 `docs/unified-media-product-plan.md` §3211
 > 中记为「留到 M4」的 `/p?type=thumb`。
 >
@@ -19,7 +19,7 @@
 | Sdcb.FFmpeg（P/Invoke 绑定 + 随包 native）抽帧 | `FfmpegProcessRunner` + `FfmpegTool`：探测路径、拼 argv、抓 stderr、超时强杀 | native 崩溃只死子进程；不必为 6 个 RID 各打一份解码器；LGPL 只需在 NOTICE 致谢（独立程序 ≠ 动态链接）；参数可复制出来手跑。代价是部署环境要有 ffmpeg，缺失时该类型降级为 404 `ffmpeg-unavailable` |
 | SkiaSharp 缩放/编码 | 同上，`ffmpeg -vf scale=…,crop=…` | 一个后端覆盖图片/音频封面/视频，省掉两套 native（SkiaSharp + PDFium）与 ~17MB 资产；顺带绕开 ImageSharp 的 SixLabors 许可问题 |
 | ATL 读音频封面 | `ffmpeg -map 0:v:0` | 内嵌封面本来就只是一条附带图像流，ffmpeg 直接能取 |
-| PDFtoImage 渲染首页 | **未实现**，`ThumbKind.Pdf` 直接回 415 `pdf-unsupported` | ffmpeg 不解 PDF；接 PDFium 要再引一套 native，收益（PDF 封面）明显低于成本，留待需要时再加 |
+| PDFtoImage 渲染首页 | **已实现**（2026-11-01，见 §0.3）：`PdfRenderer` 用 PDFium 把首页栅格化成 PNG，再回到同一条 ffmpeg 流水线 | 当时判断「收益明显低于成本」是错的 —— 增量只有 PDFium 的 ~6MB，SkiaSharp 桌面端本来就有；而文档目录里没有封面是明显缺口 |
 | `ISeekableSource` / 自定义 AVIO 回调 | 不需要了 | ffmpeg 自己会用 pread（本地路径）或 HTTP Range（驱动直链）。只保留两个源：`IFileSystemLocalPath`（本地盘真实路径）与 `FileLink.Url`（云盘直链）；两者都没有 → 404 `no-seekable-source` |
 | `thumb_video_read_budget_mb` 读取预算 | 去掉 | 该护栏是为「自己实现 AVIO 回调」设计的；交给 ffmpeg + 进程级 40s 超时 + 列表不下发视频缩略图，已经够用 |
 
@@ -65,6 +65,62 @@
 
 ---
 
+## 0.3 实施记录（2026-11-01，第三批：PDF 首页）
+
+**结论：PDF 是唯一破例走进程内 native 的类型。** 其余类型继续交给外部 ffmpeg（§0.1 的理由不变），
+但 ffmpeg 不解 PDF，而 PDF 只有 PDFium 这一个实用选项 —— 这不是"顺手再引一套 native"，
+是"PDF 封面"这个需求本身的最低成本路径。
+
+### 为什么当初"环境阻塞"的判断只对了一半
+
+| 当初的说法 | 实际 |
+|---|---|
+| NuGet 源不可达 | 对，但只是 `api.nuget.org` 被 302 到 `nuget.azure.cn` 而 `dotnet` 不跟随；`nuget.azure.cn` 直连可用。另外这台机器的 Git-Bash 里 `LOCALAPPDATA` 是空的，NuGet 算 HTTP 缓存路径时会抛 `Value cannot be null (path1)`，表现为"源加载失败"，很容易误判成网络问题 |
+| Docker 要补 `libfontconfig1`/`libstdc++` | **不需要**。`PDFtoImage` 依赖的是 `SkiaSharp.NativeAssets.Linux.NoDependencies`（fontconfig/harfbuzz 静态链入），`libpdfium.so` 自带。Dockerfile 一行没改，只补了注释 |
+| 增量 ~8MB | 实测 linux-x64 发布产物 +14.7MB（`libSkiaSharp.so` 9.0 + `libpdfium.so` 5.7），服务端 publish 目录 44MB |
+
+### 版本选择：停在 PDFtoImage 5.2.0（不是最新）
+
+| 版本 | 要求 SkiaSharp | PDFium |
+|---|---|---|
+| **5.2.0（采用）** | 3.119.1 → NuGet 统一到 **3.119.4** | 139.0.7215 |
+| 5.3.0 / 5.4.0 | 4.150.1 → 会把服务端顶到 **4.153.1** | 152.0.7961 |
+
+3.119.4 正是 Avalonia 12.1.4 依赖、也是我们唯一实测过的那份 native。升到 5.3+ 会同时换掉
+SkiaSharp 大版本和 PDFium 主版本，在没有 Docker 实测的条件下一次动两个变量不划算。
+**触发升级的条件写在这里**：PDFium 出 CVE，或遇到线性化 PDF 打不开（5.4.0 release notes 明确修了这类）。
+
+### 落点
+
+| 文件 | 改动 |
+|---|---|
+| `src/OpenList.Infrastructure/Thumbnails/PdfRenderer.cs`（新） | 首页 → PNG。PDFium 不是线程安全的，渲染**全局串行**（`SemaphoreSlim(1)`，等锁异步、渲染同步）；加密 PDF 归 `pdf-encrypted`，不试密码；native 加载失败归 `pdfium-unavailable`（与 `ffmpeg-unavailable` 同一口径） |
+| `ThumbnailService.GenerateCoreAsync` | PDF 走"整读进临时文件"分支，渲染成 PNG 后把 `source` 换成 PNG，**继续走同一条 ffmpeg 流水线**做 `scale/crop` 与编码。取景、格式回落、失败归因全部与图片共用一份实现 |
+| `ThumbKinds.IsListSafe` | 加入 `Pdf`：列表/网格可以下发。成本与图片同档（整读一次源文件 + 一次栅格化），不像视频那样要远端 seek 抽帧 |
+| `ThumbnailUrlBuilder.Build` | 顺手删掉一行 `if (kind != Image && kind != Audio) return null` —— 它和 `IsListSafe` 重复，加 Pdf 后会变成"永远不下发"的死锁点 |
+| `DbInitializer` | `thumb_types` 默认值加 `pdf`。**老库不会自动加**（种子只补缺失键），需在设置页手填或 `/admin/setting/default?group=14` |
+| `Dockerfile` | 只加注释：确认不需要额外 apt 包，并记下发布体积增量 |
+
+**没有新增设置项**：`thumb_enable`（总开关）+ `thumb_types`（扩展名白名单，去掉 `pdf` 即可关闭）
+已经够用；PDF 没有外部依赖，不像视频那样需要独立开关。
+
+### 验证
+
+- 后端 **618 项全通过 / 0 跳过**（新增 5 条：`PdfRenderer` 直出 PNG 并校验尺寸、坏 PDF 归因、
+  全链路出 JPEG、坏 PDF 全链路归因、`Probe` 对 PDF 回 200）。
+- `I/thumb` 轮 **33/33**：PDF 条目下发 thumb、`GET` 200 + 2594B JPEG、二次 `hit`、
+  半截 PDF → 404 `pdf-invalid`。
+- 发布产物核对：`linux-x64` 服务端有 `libSkiaSharp.so` + `libpdfium.so`（无重名冲突）；
+  桌面端不链接 `OpenList.Infrastructure`（Server 是子进程），`SkiaSharp` 仍是 3.119.4。
+
+### 顺带处理：测试里三份重复的 `FakeSettings`
+
+`ThumbnailTests` / `ThumbnailFfmpegTests` 各有一份私有的 `ISettingService` 假实现，这次加第三个用例
+类时接口又多了 5 个成员 —— 收到 `tests/OpenList.Tests/FakeSettings.cs` 一份。
+
+
+---
+
 ## 0. 结论摘要
 
 > 下表是**原始设计**。解码后端的最终选择被推翻（改成外部 ffmpeg 进程），
@@ -77,7 +133,7 @@
 | 图片解码/缩放 | **SkiaSharp**（MIT） | 与 PDF 渲染共用一套 native；WebP/AVIF 编解码开箱可用；避开 ImageSharp 的 SixLabors Split License（商用需付费） |
 | 视频首帧 | **Sdcb.FFmpeg 7.0.0 + runtime 包**（P/Invoke 绑定 + 随包 native） | 唯一「加个 PackageReference 就能用」的跨平台 H.264/HEVC 解码路径；不需要用户在机器上装 ffmpeg |
 | 音频封面 | **ATL**（MIT）读 tag + SkiaSharp 缩放 | ATL 覆盖 ID3v2/FLAC/MP4，纯托管，许可证干净 |
-| PDF 首页 | **PDFtoImage 5.4.0** | 内部就是 PDFium + SkiaSharp，与图片链路共用 native |
+| PDF 首页 | **PDFtoImage 5.2.0** | 内部就是 PDFium + SkiaSharp；停 5.2.0 是为了让 SkiaSharp 停在 3.119.4（见 §0.3） |
 | 远程文件随机读 | 新增 `ISeekableSource` 抽象，两实现：可 Seek 的 Stream / 驱动的 `ProxyRangeReader` | 视频抽帧必须随机读；VFS 的 `OpenFile` 对云盘是**不可 Seek 的顺序流**（`CallbackRangeReader.CanSeek => false`），拿它喂 FFmpeg 会直接失败 |
 | 默认值 | `thumb_enable = false`（**默认关闭**） | 升级后不能凭空多出解码负载与远端流量；关闭时 `Obj.Thumb` 恒空，前端行为与今天完全一致 |
 | 缓存 | 磁盘两级（内存 LRU + 文件），键含 `size+mtime+生成器版本` | mtime 变化即自然失效，不需要任何主动失效/钩子 |
@@ -272,13 +328,20 @@ ISeekableSource(source) ─┬─ 源 ≤ 32MB → 整读进内存，ATL 解析
 
 ### 6.4 PDF 首页
 
+实际实现（§0.3，与原始设计的差别：不再自己做 Skia 缩放，而是回到 ffmpeg 那条流水线）：
+
 ```
-ISeekableSource → ReadOnlySeekableStream 包装（Seek 走随机读）
-  → PDFtoImage.Conversion.SavePng(stream, page: 0, options: { Dpi = 96, WithAnnotations=false })
-  → SkiaCodec.CoverCrop
+VFS 整读 → 临时 .pdf（云盘驱动给的是不可 Seek 的顺序流，落成真实文件最省事）
+  → PdfRenderer: Conversion.SavePng(png, pdf, page 0, Dpi = 120)     [全局串行]
+  → 临时 .png 作为 ffmpeg 的输入
+  → ffmpeg -vf scale=W:H:force_original_aspect_ratio=increase:flags=lanczos,crop=W:H
+  → 编码成请求的格式（webp / png / jpeg）
 ```
 
-限制：单页渲染 DPI ≤ 150、PDF 页数 > 500 时仅渲染首页（PDFium 打开成本与页数关系不大，但这是防畸形的兜底）。加密 PDF（需要密码）→ `decode-failed`，不做密码尝试。
+- **DPI 固定 120**：目标边长最多 1024px，120 DPI 足够在缩小时保住细节，又不至于把内存放大。
+- **只渲染首页**，不枚举页数、不试密码。加密 PDF → `pdf-encrypted`，坏文件 → `pdf-invalid`，
+  native 加载不起来 → `pdfium-unavailable`（都进负缓存，重试无意义）。
+- 源文件大小受 `thumb_max_source_mb`（默认 64MB）限制，这是这条路上唯一的成本护栏。
 
 ### 6.5 视频首帧 —— 本方案的技术核心
 
