@@ -673,6 +673,10 @@ public static class DbInitializer
         ("max_client_upload_speed", "-1", SettingValueType.Number, SettingFlag.Public, 11, null),
         ("max_server_download_speed", "-1", SettingValueType.Number, SettingFlag.Private, 11, null),
         ("max_server_upload_speed", "-1", SettingValueType.Number, SettingFlag.Private, 11, null),
+        // 公开分享的并发流预算：同一个分享码同时最多 N 条流，超出返回 429 + Retry-After。
+        // 0 表示不限（默认，保持既有行为）。限速管「总量」，这个键管「单条链接」——
+        // 一条链接被几十个播放器同时拉时，只靠限速挡不住。
+        ("share_stream_max_concurrency", "0", SettingValueType.Number, SettingFlag.Private, 11, null),
         // Multipart 分片上传：multipart_chunk_size 单位为 MB；move_task_threads_num 对齐 Go 的 move_task_threads_num。
         ("multipart_enabled", "true", SettingValueType.Bool, SettingFlag.Public, 11, null),
         ("multipart_chunk_size", "10", SettingValueType.Number, SettingFlag.Public, 11, null),

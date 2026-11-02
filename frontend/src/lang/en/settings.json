@@ -124,6 +124,8 @@
   "share_preview": "Share preview",
   "share_preview_archives_by_default": "Share preview archives by default",
   "share_preview_download_by_default": "Share preview download by default",
+  "share_stream_max_concurrency": "Max concurrent streams per share",
+  "share_stream_max_concurrency-tips": "Upper bound on streams transferring at the same time for one share link. Excess requests get 429 with Retry-After so players back off. 0 means unlimited (default). Bandwidth limits cap the total; this key caps a single link.",
   "share_summary_content": "Share summary content",
   "show_disk_usage_in_plain_text": "Show disk usage in plain text",
   "sign_all": "Sign all",

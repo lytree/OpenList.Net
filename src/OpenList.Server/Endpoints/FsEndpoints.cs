@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Core.Security;
+using OpenList.Server.Middleware;
 using OpenList.Server.Models;
 using OpenList.Vfs;
 
@@ -268,7 +269,9 @@ public static class FsEndpoints
         // --- Upload ---
         // Go: handles.FsStream + middlewares.FsUp. Path from "File-Path" header (URL-encoded).
         // 套用 BasePath，并补 fsup 的 CanWriteContent + meta 写入校验（无权限返回 403）。
-        g.MapPut("/put", async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user) =>
+        g.MapPut("/put", async (
+            HttpContext ctx, IFileSystemService svc, IMetaService metaSvc,
+            ClaimsPrincipal user, RateLimitManager limits) =>
         {
             var path = ReadFilePathHeader(ctx);
             if (path is null)
@@ -276,12 +279,16 @@ public static class FsEndpoints
             var u = user.ToUser();
             if (JoinGuard(u, path, out var joined) is { } fail) return fail;
             if (await WriteGateAsync(metaSvc, u, joined, ctx.RequestAborted) is { } denied) return denied;
-            await using var stream = ctx.Request.Body;
+            // 客户端上传限速：按从请求体实际读出的字节扣令牌（不限速时是同一个流）。
+            await limits.EnsureFreshAsync(ctx.RequestAborted);
+            await using var stream = TrafficLimit.WrapUpload(ctx.Request.Body, limits.ClientUpload);
             return Results.Ok(await svc.PutStreamAsync(joined, stream, u, ctx.RequestAborted));
         });
 
         // Go: handles.FsForm + middlewares.FsUp. Multipart form upload. Path from "File-Path" header.
-        g.MapPut("/form", async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user) =>
+        g.MapPut("/form", async (
+            HttpContext ctx, IFileSystemService svc, IMetaService metaSvc,
+            ClaimsPrincipal user, RateLimitManager limits) =>
         {
             var path = ReadFilePathHeader(ctx);
             if (path is null)
@@ -289,6 +296,10 @@ public static class FsEndpoints
             var u = user.ToUser();
             if (JoinGuard(u, path, out var joined) is { } fail) return fail;
             if (await WriteGateAsync(metaSvc, u, joined, ctx.RequestAborted) is { } denied) return denied;
+            // 限速必须包在 ReadFormAsync 之前：表单解析直接从 Request.Body 读原始字节，
+            // 事后再包文件流只能限制磁盘读取，对入站带宽毫无作用。
+            await limits.EnsureFreshAsync(ctx.RequestAborted);
+            ctx.Request.Body = TrafficLimit.WrapUpload(ctx.Request.Body, limits.ClientUpload);
             var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
             foreach (var file in form.Files)
             {

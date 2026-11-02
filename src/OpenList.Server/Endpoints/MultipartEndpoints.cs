@@ -4,6 +4,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Core.Security;
 using OpenList.Infrastructure.Services;
+using OpenList.Server.Middleware;
 using OpenList.Server.Models;
 
 namespace OpenList.Server.Endpoints;
@@ -69,7 +70,8 @@ public static class MultipartEndpoints
         });
 
         // PUT /api/fs/multipart/chunk — 上传单个分片（X-Upload-Id + X-Chunk-Index，body 为分片字节）
-        g.MapPut("/chunk", async (HttpContext ctx, IMultipartUploadService svc, ClaimsPrincipal user) =>
+        g.MapPut("/chunk", async (
+            HttpContext ctx, IMultipartUploadService svc, ClaimsPrincipal user, RateLimitManager limits) =>
         {
             var uploadId = ReadHeader(ctx, "X-Upload-Id");
             if (string.IsNullOrWhiteSpace(uploadId))
@@ -85,6 +87,10 @@ public static class MultipartEndpoints
                 return Results.Ok(Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound));
             }
 
+            // 客户端上传限速：包在 Request.Body 上，下面的排空逻辑同样受限
+            // （排空是有界的，被限速最多让连接多停留一会儿，不会放大消耗）。
+            await limits.EnsureFreshAsync(ctx.RequestAborted);
+            ctx.Request.Body = TrafficLimit.WrapUpload(ctx.Request.Body, limits.ClientUpload);
             var resp = await svc.UploadChunkAsync(uploadId, idx.Value, ctx.Request.Body, ctx.RequestAborted);
 
             // 无论结果如何都要排空请求体——在 EVERY 路径上。流控（429）、被吸收的分片与校验错误

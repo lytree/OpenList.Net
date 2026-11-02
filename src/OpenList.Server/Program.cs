@@ -220,6 +220,8 @@ builder.Services.AddSingleton<IObjsUpdateHooks, ObjsUpdateHooks>();
 // Rate limiters — singleton manager holding the 4 byte-token-bucket limiters
 // (client/server × download/upload), refreshed from the settings table.
 builder.Services.AddSingleton<RateLimitManager>();
+// 公开分享的并发流预算（同一分享码同时在传的流数上限，设置项 share_stream_max_concurrency）。
+builder.Services.AddSingleton<ShareStreamBudget>();
 // ---------------------------------------------------------------------
 // 媒体域（独立模块 OpenList.Media）：DI 与路由都由模块自身提供，宿主只调用两行。
 // 注册细节、生命周期约定与依赖方向见 src/OpenList.Media/MediaModule.cs。

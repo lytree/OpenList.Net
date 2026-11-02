@@ -6,6 +6,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Services;
 using OpenList.Infrastructure.Thumbnails;
+using OpenList.Server.Middleware;
 using OpenList.Vfs;
 
 namespace OpenList.Server.Endpoints;
@@ -43,11 +44,12 @@ public static class SignEndpoints
             IFileSystemService fs,
             MountService mount,
             ISettingService settings,
+            RateLimitManager limits,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false, settings);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false, settings, limits);
         }).AllowAnonymous();
 
         // /p/{path}?sign=... — 代理下载：始终通过服务器流式传输文件
@@ -69,13 +71,14 @@ public static class SignEndpoints
             MountService mount,
             ThumbnailService thumbs,
             ISettingService settings,
+            RateLimitManager limits,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             if (IsThumbRequest(type))
                 return await ThumbnailAsync(thumbs, fullPath, w, h, at, fmt, q, ctx, head: false);
-            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true, settings);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true, settings, limits);
         }).AllowAnonymous();
 
         // HEAD /d/ 与 /p/ — Go 在 GET 之外同时注册了 HEAD。播放器与下载管理器
@@ -87,11 +90,12 @@ public static class SignEndpoints
             ISignService signs,
             MountService mount,
             ISettingService settings,
+            RateLimitManager limits,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false, settings);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: false, settings, limits);
         }).AllowAnonymous();
         app.MapMethods("/p/{**path}", new[] { "HEAD" }, async (
             string path,
@@ -103,13 +107,14 @@ public static class SignEndpoints
             MountService mount,
             ThumbnailService thumbs,
             ISettingService settings,
+            RateLimitManager limits,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
             if (IsThumbRequest(type))
                 return await ThumbnailAsync(thumbs, fullPath, w, h, null, null, null, ctx, head: true);
-            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true, settings);
+            return await DownloadAsync(mount, fullPath, ctx, preferProxy: true, settings, limits);
         }).AllowAnonymous();
 
         // --- 归档签名路由（对齐 Go /ad/、/ap/、/ae/）---
@@ -135,11 +140,12 @@ public static class SignEndpoints
             string? sign,
             ISignService signs,
             MountService mount,
+            RateLimitManager limits,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
+            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx, limits);
         }).AllowAnonymous();
 
         // /ae/{path}?sign=...&inner=/a/b.txt&pass=... — 归档内联访问（只读）。
@@ -155,6 +161,7 @@ public static class SignEndpoints
             string? pass,
             ISignService signs,
             IFileSystemService fs,
+            RateLimitManager limits,
             HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
@@ -176,31 +183,37 @@ public static class SignEndpoints
             var contentType = ContentTypeProvider.TryGetContentType(name, out var mapped)
                 ? mapped
                 : "application/octet-stream";
-            return Results.File(resp.Data, contentType, enableRangeProcessing: true);
+            // 归档条目由框架直接拷给客户端，只能从读端限速（对应服务端下载预算）。
+            await limits.EnsureFreshAsync(ctx.RequestAborted);
+            return Results.File(
+                TrafficLimit.LimitRead(resp.Data, limits.ServerDownload), contentType, enableRangeProcessing: true);
         }).AllowAnonymous();
 
         // HEAD /ad/、/ap/、/ae/ — 仅探测大小/Range 支持，不触发归档逻辑。
         // 注意：此处仍调用 StreamFileAsync，若目标是归档文件则实际输出其二进制流。
         app.MapMethods("/ad/{**path}", new[] { "HEAD" }, async (
-            string path, string? sign, ISignService signs, MountService mount, HttpContext ctx) =>
+            string path, string? sign, ISignService signs, MountService mount,
+            RateLimitManager limits, HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
+            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx, limits);
         }).AllowAnonymous();
         app.MapMethods("/ap/{**path}", new[] { "HEAD" }, async (
-            string path, string? sign, ISignService signs, MountService mount, HttpContext ctx) =>
+            string path, string? sign, ISignService signs, MountService mount,
+            RateLimitManager limits, HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
+            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx, limits);
         }).AllowAnonymous();
         app.MapMethods("/ae/{**path}", new[] { "HEAD" }, async (
-            string path, string? sign, ISignService signs, MountService mount, HttpContext ctx) =>
+            string path, string? sign, ISignService signs, MountService mount,
+            RateLimitManager limits, HttpContext ctx) =>
         {
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
-            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
+            return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx, limits);
         }).AllowAnonymous();
 
         return app;
@@ -320,7 +333,8 @@ public static class SignEndpoints
     /// <param name="preferProxy">true 走代理通道，false 优先直链。</param>
     /// <param name="settings">设置服务（直链参数转发规则）。</param>
     private static async Task<IResult> DownloadAsync(
-        MountService mount, string fullPath, HttpContext ctx, bool preferProxy, ISettingService settings)
+        MountService mount, string fullPath, HttpContext ctx, bool preferProxy,
+        ISettingService settings, RateLimitManager? limits = null)
     {
         if (mount.FindDriverForPath(fullPath) is IFileSystemLinkProvider linkProvider)
         {
@@ -360,13 +374,13 @@ public static class SignEndpoints
                 {
                     var entry = mount.Root.GetFileEntry(upath);
                     return await FileDownloadHelper.StreamViaProxyAsync(
-                        reader, entry.Length, entry.Name, new DateTimeOffset(entry.LastWriteTime), ctx);
+                        reader, entry.Length, entry.Name, new DateTimeOffset(entry.LastWriteTime), ctx, limits);
                 }
                 // 挂载视图里查不到该文件（例如驱动尚未挂载）时同样回退，由通用路径返回 404。
             }
         }
 
-        return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
+        return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx, limits);
     }
 
     /// <summary>

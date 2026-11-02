@@ -3,6 +3,7 @@ using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Core.Security;
 using OpenList.Infrastructure.Services;
+using OpenList.Server.Middleware;
 
 namespace OpenList.Server.Endpoints;
 
@@ -76,7 +77,9 @@ public static class ShareDownloadEndpoints
     private static async Task<IResult> HandleArchiveEntryAsync(
         HttpContext ctx,
         ISharingService shares,
-        IFileSystemService fs)
+        IFileSystemService fs,
+        RateLimitManager limits,
+        ShareStreamBudget budget)
     {
         var sid = ctx.GetRouteValue("sid")?.ToString();
         if (string.IsNullOrEmpty(sid)) return Results.NotFound();
@@ -118,11 +121,66 @@ public static class ShareDownloadEndpoints
             return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
         }
 
+        // 并发预算：放在所有校验之后申请 —— 前面任何一条 400/404 早退都不能吃掉名额。
+        // HEAD 只探大小，不占额度；GET 超限回 429 让客户端退避重试。
+        var lease = await AcquireOrNullAsync(budget, sid, ctx);
+        if (lease is null)
+        {
+            await stream.DisposeAsync();
+            return TooManyStreams(ctx);
+        }
+
         var name = segments[^1];
         var contentType = ContentTypes.TryGetContentType(name, out var mapped)
             ? mapped
             : "application/octet-stream";
-        return Results.File(stream, contentType, enableRangeProcessing: true);
+        await limits.EnsureFreshAsync(ctx.RequestAborted);
+        // 条目字节由框架直接拷给客户端：只能从读端施加服务端下载限速。
+        // 租约挂在「响应完成」上而不是流的 Dispose —— FileResult 是否释放流属于框架实现细节，
+        // 押在它上面一旦不释放就会永久漏算额度。
+        ReleaseOnResponseEnd(ctx, lease!);
+        var limited = TrafficLimit.LimitRead(stream, limits.ServerDownload);
+        return Results.File(limited, contentType, enableRangeProcessing: true);
+    }
+
+    /// <summary>
+    /// 在响应结束时归还并发额度（正常写完、客户端断开、异常都会触发）。
+    /// </summary>
+    private static void ReleaseOnResponseEnd(HttpContext ctx, IDisposable lease)
+        => ctx.Response.OnCompleted(() =>
+        {
+            lease.Dispose();
+            return Task.CompletedTask;
+        });
+
+    /// <summary>
+    /// 为公开分享流申请并发额度。HEAD 请求不占额度（只探测大小，不占带宽）；
+    /// 超限返回 <c>null</c>。
+    /// </summary>
+    private static async Task<IDisposable?> AcquireOrNullAsync(ShareStreamBudget budget, string sid, HttpContext ctx)
+    {
+        if (HttpMethods.IsHead(ctx.Request.Method)) return NoLease.Instance;
+        return await budget.TryAcquireAsync(sid, ctx.RequestAborted);
+    }
+
+    /// <summary>并发超限：429 + Retry-After，播放器/下载器会自动退避。</summary>
+    private static IResult TooManyStreams(HttpContext ctx)
+    {
+        ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        ctx.Response.Headers.RetryAfter = "1";
+        return Results.Json(
+            Resp.Fail("too many concurrent streams for this share", RespCodes.TooManyRequests),
+            statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
+    /// <summary>不占额度时的占位租约（HEAD 等无副作用请求）。</summary>
+    private sealed class NoLease : IDisposable
+    {
+        public static readonly NoLease Instance = new();
+
+        public void Dispose()
+        {
+        }
     }
 
     /// <summary>
@@ -166,7 +224,9 @@ public static class ShareDownloadEndpoints
     private static async Task<IResult> HandleAsync(
         HttpContext ctx,
         ISharingService shares,
-        MountService mount)
+        MountService mount,
+        RateLimitManager limits,
+        ShareStreamBudget budget)
     {
         var sid = ctx.GetRouteValue("sid")?.ToString();
         if (string.IsNullOrEmpty(sid))
@@ -188,7 +248,13 @@ public static class ShareDownloadEndpoints
         if (actualPath is null)
             return Results.NotFound("path not in share");
 
-        return await FileDownloadHelper.StreamFileAsync(mount, actualPath, ctx);
+        // 并发预算：同一分享码同时在传的流数超过设置上限即 429。
+        var lease = await AcquireOrNullAsync(budget, sid, ctx);
+        if (lease is null) return TooManyStreams(ctx);
+
+        // 流式输出在本方法内完成，但响应可能还在 flush：挂在完成回调上更准确。
+        ReleaseOnResponseEnd(ctx, lease);
+        return await FileDownloadHelper.StreamFileAsync(mount, actualPath, ctx, limits);
     }
 
     /// <summary>

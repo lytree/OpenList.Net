@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.StaticFiles;
 using OpenList.Core.Drivers;
 using OpenList.Drivers.Cloud;
 using OpenList.Infrastructure.Services;
+using OpenList.Server.Middleware;
 using OpenList.Vfs;
 
 namespace OpenList.Server.Endpoints;
@@ -17,11 +18,22 @@ internal static class FileDownloadHelper
     /// 将 挂载文件系统中的文件以流式输出（含 Content-Type、Accept-Ranges、Last-Modified
     /// 与 Range 206 部分内容响应）。文件不存在时返回 404。
     /// </summary>
-    public static async Task<IResult> StreamFileAsync(MountService mount, string path, HttpContext ctx)
+    /// <param name="mount">挂载服务。</param>
+    /// <param name="path">完整挂载路径。</param>
+    /// <param name="ctx">当前 HTTP 上下文。</param>
+    /// <param name="limits">
+    /// 限速器管理器。非 null 时按 <c>max_client_download_speed</c> 对写出字节扣令牌；
+    /// 为 null 或配置为不限速时不产生任何额外开销。
+    /// </param>
+    public static async Task<IResult> StreamFileAsync(
+        MountService mount, string path, HttpContext ctx, RateLimitManager? limits = null)
     {
         var upath = new UPath(path);
         if (!mount.Root.FileExists(upath))
             return Results.NotFound("file not found");
+
+        if (limits is not null) await limits.EnsureFreshAsync(ctx.RequestAborted);
+        var clientLimit = limits?.ClientDownload;
 
         var entry = mount.Root.GetFileEntry(upath);
         var contentType = GetContentType(entry.Name);
@@ -60,6 +72,8 @@ internal static class FileDownloadHelper
             var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(remaining, buffer.Length)), ctx.RequestAborted);
             if (read <= 0) break;
             await ctx.Response.Body.WriteAsync(buffer.AsMemory(0, read), ctx.RequestAborted);
+            // 客户端下载限速：按已写出的字节扣令牌。限速器为 null/不限速时是空操作。
+            await TrafficLimit.ThrottleAsync(clientLimit, read, ctx.RequestAborted);
             remaining -= read;
         }
         return Results.Empty;
@@ -78,17 +92,26 @@ internal static class FileDownloadHelper
     /// <param name="fileName">文件名（用于推断 Content-Type）。</param>
     /// <param name="lastModified">最后修改时间；未知时传 <see cref="DateTimeOffset.MinValue"/> 以省略该头。</param>
     /// <param name="ctx">当前 HTTP 上下文。</param>
+    /// <param name="limits">
+    /// 限速器管理器。非 null 时同时施加两道限速：从上游读出的字节扣
+    /// <c>max_server_download_speed</c>，写回客户端的字节扣 <c>max_client_download_speed</c>。
+    /// </param>
     /// <returns>空结果（响应体已直接写入 <see cref="HttpResponse.Body"/>）。</returns>
     public static async Task<IResult> StreamViaProxyAsync(
         ProxyRangeReader reader,
         long fileSize,
         string fileName,
         DateTimeOffset lastModified,
-        HttpContext ctx)
+        HttpContext ctx,
+        RateLimitManager? limits = null)
     {
         var rangeHeader = ctx.Request.Headers.Range.ToString();
         long start = 0, end = fileSize - 1;
         var isPartial = false;
+
+        if (limits is not null) await limits.EnsureFreshAsync(ctx.RequestAborted);
+        var clientLimit = limits?.ClientDownload;
+        var serverLimit = limits?.ServerDownload;
 
         if (!string.IsNullOrEmpty(rangeHeader) && RangeHeader.TryParse(rangeHeader, fileSize, out var r))
         {
@@ -140,7 +163,10 @@ internal static class FileDownloadHelper
                 var read = await stream.ReadAsync(
                     buffer.AsMemory(0, (int)Math.Min(remaining, buffer.Length)), ctx.RequestAborted);
                 if (read <= 0) break;
+                // 服务端下载限速：约束「从上游拉取」的速度，避免代理把远端带宽/回调配额吃满。
+                await TrafficLimit.ThrottleAsync(serverLimit, read, ctx.RequestAborted);
                 await ctx.Response.Body.WriteAsync(buffer.AsMemory(0, read), ctx.RequestAborted);
+                await TrafficLimit.ThrottleAsync(clientLimit, read, ctx.RequestAborted);
                 remaining -= read;
             }
         }

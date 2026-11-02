@@ -66,6 +66,8 @@ public static class RespCodes
     public const int NotFound = 404;
     /// <summary>冲突。</summary>
     public const int Conflict = 409;
+    /// <summary>请求过多/被流控（分片窗口已满、分享并发超限等）。</summary>
+    public const int TooManyRequests = 429;
     /// <summary>服务器内部错误。</summary>
     public const int InternalError = 500;
     /// <summary>尚未实现。</summary>

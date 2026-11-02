@@ -201,10 +201,38 @@ G12：`media_default_provider`（provider 选择未消费此键，实际注册�
 3. ✅ **列表行 40px 缩略图槽位** + 网格页 `src` 断言：新增 `components/ThumbIcon.tsx`（表格名称列 40px、手机卡片行 36px），网格断言进 E2E。视频在列表里仍不下发 thumb（防一屏 20 次远端抽帧），槽位直接显示图标；**PDF 自 2026-11-01 起在列表里下发**（成本与图片同档）。
 4. 文档标记已清理（本文件 + `thumbnail-service-plan.md` §0.1/§0.2/§14/§12）。**详情页占位图**与**指标**两项，`AGENTS.md` 与 plan 都只写了名字、没有定义口径（指标是命中率？是 dashboard 面板？），留待需求明确；媒体网格的「海报加载失败换占位块」已有实现（`components/MediaGrid.tsx`）。
 
+## 执行进度（第七批，2026-11-02）：G11 流量限速真正接线 + 公开分享并发预算
+
+起因是复核「`RateLimitManager` 有没有调用点」：**一处都没有**。四个令牌桶、两个流包装
+（`RateLimitedReadStream` / `RateLimitedWriteStream`）、设置热刷新全都写好了，但没有任何端点
+用它们 —— 下面「已确认正常」里那句「G11 限速 4 键：`RateLimitManager.cs` 消费」是**只看了
+类的存在、没看调用图**得出的结论，本轮改正。
+
+| 项 | 实现位置 | 说明 |
+|---|---|---|
+| ✅ 客户端下载限速 | `Endpoints/FileDownloadHelper.StreamFileAsync`（新增 `RateLimitManager?` 参数）+ `TrafficLimit.ThrottleAsync` | `/d`、`/ad`、`/ap`、`/ae`、`/sd`、`/sad`(HEAD) 的内容写出逐块扣令牌 |
+| ✅ 服务端下载限速 | 同文件 `StreamViaProxyAsync` | `/p`、`/ap` 的代理通道：从上游读出时扣 `max_server_download_speed`，写回客户端再扣 `max_client_download_speed`，两道独立 |
+| ✅ 归档条目限速 | `SignEndpoints`（`/ae`）、`ShareDownloadEndpoints`（`/sae`） | `Results.File` 由框架负责拷贝，只能包读端（`TrafficLimit.LimitRead` → 服务端下载预算） |
+| ✅ 客户端上传限速 | `FsEndpoints`（`/put`、`/form`）、`MultipartEndpoints`（`/chunk`） | `/put`、`/chunk` 包 `Request.Body`；`/form` **必须在 `ReadFormAsync` 之前**替换 `Request.Body`，否则只限制了磁盘读取、入站带宽不受控 |
+| ✅ 不限速零开销 | `TrafficLimit.WrapUpload` / `LimitRead` | `RateLimiter.IsUnlimited` 时原样返回同一个流，不包装、不加分支成本（默认值 `-1` 即此路径） |
+| ✅ 公开分享并发预算 | `Middleware/ShareStreamBudget.cs`（新）+ `DbInitializer` 新键 `share_stream_max_concurrency`（Group 11，默认 0） | 同一分享码同时在传的流数上限，超出回 **429 + `Retry-After: 1`**；额度挂在 `Response.OnCompleted` 上归还 |
+| ✅ 默认值不改变行为 | 同上 | 四个限速键默认 `-1`、并发键默认 `0`，接线后行为与接线前一致（遵守下文「接线纪律」） |
+
+两个实现要点值得记住：
+
+1. **额度不能押在流的 `Dispose` 上**。`Results.File(stream)` 是否释放流是框架实现细节；
+   一旦某版本不释放，额度就永久漏算，表现为「分享用过几次之后一直 429」。改挂
+   `HttpContext.Response.OnCompleted`（正常写完/客户端断开/异常都会触发）。
+2. **申请额度必须放在所有校验之后**。最初写在 `inner` 校验之前，`/sae?inner=..`、
+   条目不存在这两条早退路径都会吃掉一个名额却不归还 —— 同样是永久泄漏。
+
+验收：后端 651/651（新增 `TrafficLimitTests` 7 条：两次读的令牌桶延迟、不限速直通、
+限速下 `/sd` 与 `/sae` 内容完整、并发 1 时第二条流 429 且归还后恢复 200）；前端 252/252 + `tsc --noEmit`。
+
 ## 已确认正常、无需处理
 
 - G5 aria2/qBittorrent/Transmission：`AdminEndpoints.cs` 读取（连接测试）+ `GetOfflineDownloadToolsAsync`
-- G11 限速 4 键：`RateLimitManager.cs` 消费
+- G11 限速 4 键：`RateLimitManager.cs` + `TrafficLimit`（2026-11-02 第七批才真正接入端点，此前只有类、没有调用点）
 - G11 并发 8 键：`TaskConcurrencyProvider` + `ConcurrencyGate` 消费（2026-10-31 第三批）
 - G12：`media_tmdb_api_key`（TmdbMetadataProvider）、`media_metadata_language`（MediaMetadataService）、`media_opensubtitles_api_key`（OpenSubtitlesProvider）、`media_auto_scan_interval_hours`（MediaAutoScanHostedService）均已接线
 - G14 缩略图全组 11 键：`ThumbnailOptions.cs` 消费
