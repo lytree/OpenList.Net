@@ -29,7 +29,7 @@ public static class MultipartEndpoints
         // POST /api/fs/multipart/init — 初始化上传会话（幂等；相同 path+size 可续传）。
 
         // 头部：File-Path、X-File-Size、X-Chunk-Size，可选 X-File-Md5/Sha1/Sha256
-        g.MapPost("/init", async (HttpContext ctx, IMultipartUploadService svc, ISettingService settings, ClaimsPrincipal user) =>
+        g.MapPost("/init", async (HttpContext ctx, IMultipartUploadService svc, ISettingService settings, FileAccessService access, ClaimsPrincipal user) =>
         {
             // gating：multipart_enabled 关闭 → 403（镜像 Go MultipartInit）。
             var enabled = await GetSettingValueAsync(settings, "multipart_enabled");
@@ -46,21 +46,30 @@ public static class MultipartEndpoints
                 return Results.Ok(Resp<MultipartInitResp>.Fail("File-Path header is required", RespCodes.BadRequest));
             var size = ReadLongHeader(ctx, "X-File-Size") ?? 0;
             var chunkSize = ReadLongHeader(ctx, "X-Chunk-Size") ?? 0;
+            var u = user.ToUser();
+
+            // 目标路径既要做 BasePath 拼接，也要过写门禁：此前 init 只看 multipart_enabled，
+            // 于是任何登录用户都能给任意路径建会话并在 complete 时落盘。
+            var (fullPath, decision) = await access.ResolveAndAuthorizeAsync(
+                u, Uri.UnescapeDataString(path), FileOperation.ContentWrite, null, ctx.RequestAborted);
+            if (!decision.Allowed)
+                return Results.Ok(Resp<MultipartInitResp>.Fail(decision.Message, decision.Code));
+
             // 组装初始化请求：对 File-Path 做 URL 解码得到目标虚拟路径
             var req = new MultipartInitRequest
             {
-                Path = Uri.UnescapeDataString(path),
+                Path = fullPath,
                 Size = size,
                 ChunkSize = chunkSize,
                 Md5 = ReadHeader(ctx, "X-File-Md5"),
                 Sha1 = ReadHeader(ctx, "X-File-Sha1"),
                 Sha256 = ReadHeader(ctx, "X-File-Sha256"),
             };
-            return Results.Ok(await svc.InitAsync(req, user.ToUser(), chunkSizeCeilingBytes, ctx.RequestAborted));
+            return Results.Ok(await svc.InitAsync(req, u, chunkSizeCeilingBytes, ctx.RequestAborted));
         });
 
         // PUT /api/fs/multipart/chunk — 上传单个分片（X-Upload-Id + X-Chunk-Index，body 为分片字节）
-        g.MapPut("/chunk", async (HttpContext ctx, IMultipartUploadService svc) =>
+        g.MapPut("/chunk", async (HttpContext ctx, IMultipartUploadService svc, ClaimsPrincipal user) =>
         {
             var uploadId = ReadHeader(ctx, "X-Upload-Id");
             if (string.IsNullOrWhiteSpace(uploadId))
@@ -68,6 +77,13 @@ public static class MultipartEndpoints
             var idx = ReadIntHeader(ctx, "X-Chunk-Index");
             if (idx is null)
                 return Results.Ok(Resp<MultipartSnapshot>.Fail("X-Chunk-Index header is required", RespCodes.BadRequest));
+
+            // 会话归属：别人的 uploadId 一律按「不存在」处理。
+            if (!svc.IsOwner(uploadId, user.ToUser().Id))
+            {
+                await DrainBodyAsync(ctx, MultipartUploadService.DefaultChunkSize + 64 * 1024, ctx.RequestAborted);
+                return Results.Ok(Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound));
+            }
 
             var resp = await svc.UploadChunkAsync(uploadId, idx.Value, ctx.Request.Body, ctx.RequestAborted);
 
@@ -81,11 +97,13 @@ public static class MultipartEndpoints
         });
 
         // GET /api/fs/multipart/status?upload_id= — session snapshot (404 once reaped).
-        g.MapGet("/status", async (HttpContext ctx, IMultipartUploadService svc) =>
+        g.MapGet("/status", async (HttpContext ctx, IMultipartUploadService svc, ClaimsPrincipal user) =>
         {
             var uploadId = ctx.Request.Query["upload_id"].ToString();
             if (string.IsNullOrWhiteSpace(uploadId))
                 return Results.Ok(Resp<MultipartSnapshot>.Fail("upload_id is required", RespCodes.BadRequest));
+            if (!svc.IsOwner(uploadId, user.ToUser().Id))
+                return Results.Ok(Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound));
             return Results.Ok(await svc.StatusAsync(uploadId, ctx.RequestAborted));
         });
 
@@ -95,15 +113,21 @@ public static class MultipartEndpoints
             var uploadId = ReadHeader(ctx, "X-Upload-Id");
             if (string.IsNullOrWhiteSpace(uploadId))
                 return Results.Ok(Resp<MultipartSnapshot>.Fail("X-Upload-Id header is required", RespCodes.BadRequest));
-            return Results.Ok(await svc.CompleteAsync(uploadId, user.ToUser(), ctx.RequestAborted));
+            var u = user.ToUser();
+            if (!svc.IsOwner(uploadId, u.Id))
+                return Results.Ok(Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound));
+            // 服务内部在落盘前会再做一次目标目录写权限校验。
+            return Results.Ok(await svc.CompleteAsync(uploadId, u, ctx.RequestAborted));
         });
 
         // POST /api/fs/multipart/abort — header: X-Upload-Id. Discards the session.
-        g.MapPost("/abort", async (HttpContext ctx, IMultipartUploadService svc) =>
+        g.MapPost("/abort", async (HttpContext ctx, IMultipartUploadService svc, ClaimsPrincipal user) =>
         {
             var uploadId = ReadHeader(ctx, "X-Upload-Id");
             if (string.IsNullOrWhiteSpace(uploadId))
                 return Results.Ok(Resp.Fail("X-Upload-Id header is required", RespCodes.BadRequest));
+            if (!svc.IsOwner(uploadId, user.ToUser().Id))
+                return Results.Ok(Resp.Fail("session not found", RespCodes.NotFound));
             return Results.Ok(await svc.AbortAsync(uploadId, ctx.RequestAborted));
         });
 

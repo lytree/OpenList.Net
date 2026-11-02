@@ -57,10 +57,18 @@ export default defineComponent({
       default: undefined,
     },
     /**
-     * 只读上下文（分享页）。归档内条目的内联预览走 `/ae`，需要登录态签名，
-     * 游客拿不到，所以这里只列条目、不给点进去；解压也一并隐藏。
+     * 只读上下文（分享页）。以前它同时禁止「解压」和「点开条目」，
+     * 因为 `/ae` 要登录态签名。现在分享页注入 `innerLink`（`/sae` 只读端点），
+     * 所以只有**解压**受它约束，条目预览是否可用改由 `innerLink` 决定。
      */
     readOnly: { type: Boolean, default: false },
+    /** 归档内单条目的只读地址生成器（分享页注入 `/sae` 版本）。 */
+    innerLink: {
+      type: Function as PropType<
+        (archivePath: string, innerPath: string, opts?: { pass?: string }) => string
+      >,
+      default: undefined,
+    },
     /** 与主列表共用可配置扩展名（`audio_types` 等），供归档内条目判类型。 */
     typeExts: { type: Object as PropType<TypeExtMap>, default: () => ({}) },
   },
@@ -139,8 +147,9 @@ export default defineComponent({
 
     function openDir(node: ArchiveNode) {
       if (!node.isDir) {
-        // 只读上下文（分享）没有 `/ae` 访问权，点开只会 401，所以干脆不选中。
-        if (!props.readOnly) selected.value = node
+        // 只有能给出只读条目地址时才允许点开：登录态走 `/ae`（内置默认），
+        // 分享页由宿主注入 `/sae`；两者都没有时点开只会 401。
+        if (!props.readOnly || props.innerLink) selected.value = node
         return
       }
       dirPath.value = node.path.split("/").filter(Boolean)
@@ -170,10 +179,12 @@ export default defineComponent({
 
     const innerSrc = computed(() =>
       selected.value
-        ? archiveInnerLink(props.path, selected.value.path, {
-            pass: password.value,
-            sign: props.obj.sign,
-          })
+        ? props.innerLink
+          ? props.innerLink(props.path, selected.value.path, { pass: password.value })
+          : archiveInnerLink(props.path, selected.value.path, {
+              pass: password.value,
+              sign: props.obj.sign,
+            })
         : "",
     )
 

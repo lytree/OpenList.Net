@@ -25,6 +25,14 @@ public interface IMultipartUploadService
     /// <summary>获取会话快照。会话不存在时返回 code 404（完成后即被回收）。</summary>
     Task<Resp<MultipartSnapshot>> StatusAsync(string uploadId, CancellationToken ct = default);
 
+    /// <summary>
+    /// 判断会话是否属于给定用户。分片会话此前只凭 uploadId 就能操作，
+    /// 任何登录用户拿到别人的 uploadId 即可续传/完成/丢弃其上传；
+    /// 端点必须在 chunk / status / complete / abort 之前用本方法校验归属，
+    /// 不属于自己时统一按「会话不存在」返回，避免泄露 uploadId 是否有效。
+    /// </summary>
+    bool IsOwner(string uploadId, long userId);
+
     /// <summary>将所有已接收分片刷写到目标存储路径。</summary>
     Task<Resp<MultipartSnapshot>> CompleteAsync(string uploadId, User user, CancellationToken ct = default);
 

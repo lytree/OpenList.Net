@@ -147,6 +147,9 @@ builder.Services.AddScoped<ISsoService, SsoService>();
 builder.Services.AddScoped<IStorageService, StorageService>();
 builder.Services.AddScoped<ISettingService, SettingService>();
 builder.Services.AddScoped<IMetaService, MetaService>();
+// 统一授权服务（scoped）：WebDAV / S3 / FTP 之外的非 /api/fs 入口都经它做读写门禁，
+// 避免各协议自己写一份判定而与 /api/fs 漂移。
+builder.Services.AddScoped<OpenList.Infrastructure.Services.FileAccessService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
 builder.Services.AddSingleton<IBroadcastService, BroadcastService>();
 builder.Services.AddScoped<ISharingService, SharingService>();

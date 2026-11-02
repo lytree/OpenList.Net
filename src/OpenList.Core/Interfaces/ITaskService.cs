@@ -89,8 +89,20 @@ public interface ITaskService
     Task<Resp<Dictionary<string, string>>> DeleteSomeAsync(TaskType type, IReadOnlyList<string> tids, CancellationToken ct = default);
     /// <summary>批量重试任务；返回按 tid 组织的错误信息。</summary>
     Task<Resp<Dictionary<string, string>>> RetrySomeAsync(TaskType type, IReadOnlyList<string> tids, CancellationToken ct = default);
-    /// <summary>创建并开始一个新的异步任务，返回任务 id。</summary>
-    Task<string> CreateAsync(TaskType type, Func<IProgress<TaskProgress>, CancellationToken, Task> work, CancellationToken ct = default);
+    /// <summary>
+    /// 查询任务的创建者 id；任务不存在返回 null。
+    /// 任务此前对所有登录用户可见、可取消、可删除，普通用户能中断别人的复制/离线下载；
+    /// 端点必须先用本方法校验归属（管理员除外）。
+    /// </summary>
+    long? OwnerOf(string tid);
+    /// <summary>
+    /// 创建并开始一个新的异步任务，返回任务 id。
+    /// </summary>
+    /// <param name="type">任务类型。</param>
+    /// <param name="work">任务体。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <param name="ownerId">创建者用户 id（0 表示系统任务，仅管理员可见）。</param>
+    Task<string> CreateAsync(TaskType type, Func<IProgress<TaskProgress>, CancellationToken, Task> work, CancellationToken ct = default, long ownerId = 0);
 }
 
 /// <summary>
@@ -134,6 +146,13 @@ public sealed class TaskInfo
     /// <summary>任务创建者的用户名（前端字段 <c>creator</c>）。</summary>
     [JsonPropertyName("creator")]
     public string Creator { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 创建者用户 id。服务端用它判定任务归属（普通用户只能看/管自己的任务），
+    /// 不序列化给前端 —— 前端只展示 <see cref="Creator"/>。
+    /// </summary>
+    [JsonIgnore]
+    public long OwnerId { get; set; }
 
     /// <summary>创建者的角色。</summary>
     [JsonPropertyName("creator_role")]

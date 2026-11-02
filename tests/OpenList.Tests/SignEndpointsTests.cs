@@ -84,10 +84,10 @@ public class SignEndpointsTests
     }
 
     [Test]
-    public async Task Ae_Decompresses_Archive_With_Valid_Signature()
+    public async Task Ae_Rejects_Extraction_Without_Inner()
     {
-        // LocalDriver now implements IFileSystemArchiveDecompress (SharpCompress), so /ae/
-        // decompresses the archive into its parent directory instead of returning 501.
+        // /ae/ 是匿名签名路由，只读。不带 inner 的历史语义是「解压到归档所在目录」，
+        // 等于让任何持有链接的人写服务器存储；修复后必须 403，且不得产生解压产物。
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
@@ -96,9 +96,25 @@ public class SignEndpointsTests
             client.DefaultRequestHeaders.Authorization = null;
 
             var resp = await client.GetAsync($"/ae/test/a.zip?sign={sign}");
+            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+        }
+    }
+
+    [Test]
+    public async Task Ae_Streams_Inner_Entry_With_Valid_Signature()
+    {
+        // 只读的单条目预览仍然可用：带 inner 时流式返回条目内容，不落盘。
+        var (factory, client) = await SetupAsync();
+        await using (factory)
+        {
+            await factory.WriteFileAsync("a.zip", TestWebAppFactory.CreateZipBytes());
+            var sign = await SignAsync(client, "/test/a.zip");
+            client.DefaultRequestHeaders.Authorization = null;
+
+            var resp = await client.GetAsync($"/ae/test/a.zip?sign={sign}&inner=hello.txt");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
-            var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
+            var body = await resp.Content.ReadAsStringAsync();
+            await Assert.That(body).IsEqualTo("hello");
         }
     }
 

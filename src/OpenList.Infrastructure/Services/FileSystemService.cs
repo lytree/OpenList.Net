@@ -507,7 +507,7 @@ public sealed class FileSystemService : IFileSystemService
 
         // 任务化执行：依次把每条 src 移动到 dstDir 下。
         var tids = await Task.WhenAll(valid.Select(src => _tasks!.CreateAsync(TaskType.Move,
-            (progress, cancel) => DoMoveAsync(src, dstDir, progress, cancel), ct)));
+            (progress, cancel) => DoMoveAsync(src, dstDir, progress, cancel), ct, user.Id)));
         return Resp<FsManageResp>.Ok(new FsManageResp
         {
             Message = $"Successfully created {tids.Length} move task(s)",
@@ -572,7 +572,7 @@ public sealed class FileSystemService : IFileSystemService
             return Resp<FsManageResp>.Ok(new FsManageResp { Message = "Copy operations completed immediately", Tasks = [] });
 
         var tids = await Task.WhenAll(valid.Select(src => _tasks!.CreateAsync(TaskType.Copy,
-            (progress, cancel) => DoCopyAsync(src, dstDir, req.Merge, progress, cancel), ct)));
+            (progress, cancel) => DoCopyAsync(src, dstDir, req.Merge, progress, cancel), ct, user.Id)));
         return Resp<FsManageResp>.Ok(new FsManageResp
         {
             Message = $"Successfully created {tids.Length} copy task(s)",

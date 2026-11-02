@@ -54,7 +54,7 @@ public sealed class S3MultipartStore : IDisposable
     /// 创建一个新的分片上传会话（对应 S3 <c>CreateMultipartUpload</c>），
     /// 返回 uploadId。分片目录建在 <see cref="TempRoot"/> 下。
     /// </summary>
-    public string CreateUpload(string bucket, string objectKey)
+    public string CreateUpload(string bucket, string objectKey, long ownerId = 0)
     {
         Directory.CreateDirectory(TempRoot);
         var uploadId = Guid.NewGuid().ToString("N");
@@ -67,24 +67,34 @@ public sealed class S3MultipartStore : IDisposable
             UploadId = uploadId,
             Bucket = bucket,
             Object = objectKey,
+            OwnerId = ownerId,
             Dir = dir,
             Created = now,
             LastActivity = now,
         };
-        _logger.LogDebug("s3 multipart: created upload {UploadId} for {Bucket}/{Object}", uploadId, bucket, objectKey);
+        _logger.LogDebug("s3 multipart: created upload {UploadId} for {Bucket}/{Object} (owner {OwnerId})",
+            uploadId, bucket, objectKey, ownerId);
         return uploadId;
     }
+
+    /// <summary>
+    /// 会话是否属于给定用户。S3 分片会话此前只凭 uploadId 就能上传分片/完成/中止，
+    /// 任何拿到 uploadId 的用户都能改写别人的目标对象。
+    /// </summary>
+    public bool IsOwner(string uploadId, long ownerId)
+        => _uploads.TryGetValue(uploadId, out var s) && s.OwnerId == ownerId;
 
     /// <summary>按 uploadId 查询会话是否存在。</summary>
     public bool Contains(string uploadId) => _uploads.ContainsKey(uploadId);
 
-    /// <summary>列出（可选的）某个桶下的进行中上传。</summary>
-    public IReadOnlyList<S3UploadInfo> List(string? bucket = null)
+    /// <summary>列出（可选的）某个桶下、指定 owner 的进行中上传。</summary>
+    public IReadOnlyList<S3UploadInfo> List(string? bucket = null, long? ownerId = null)
         => _uploads.Values
-            .Where(u => bucket is null || string.Equals(u.Bucket, bucket, StringComparison.Ordinal))
+            .Where(u => (bucket is null || string.Equals(u.Bucket, bucket, StringComparison.Ordinal))
+                        && (ownerId is null || u.OwnerId == ownerId))
             .OrderBy(u => u.Object, StringComparer.Ordinal)
             .ThenBy(u => u.UploadId, StringComparer.Ordinal)
-            .Select(u => new S3UploadInfo(u.UploadId, u.Bucket, u.Object, u.Created))
+            .Select(u => new S3UploadInfo(u.UploadId, u.Bucket, u.Object, u.Created, u.OwnerId))
             .ToList();
 
     /// <summary>丢弃一个上传会话及其分片文件；幂等（不存在时静默返回）。</summary>
@@ -114,11 +124,15 @@ public sealed class S3MultipartStore : IDisposable
         int partNumber,
         Stream body,
         long? contentLength,
+        long ownerId,
         CancellationToken ct = default)
     {
         if (partNumber <= 0 || partNumber > MaxPartNumber)
             return UploadPartResult.Fail("InvalidPart", "part number must be between 1 and 10000");
         if (!_uploads.TryGetValue(uploadId, out var state))
+            return UploadPartResult.Fail("NoSuchUpload", "upload does not exist");
+        // 归属校验：不属于调用方时同样报 NoSuchUpload，不泄露他人 uploadId 的有效性。
+        if (state.OwnerId != ownerId)
             return UploadPartResult.Fail("NoSuchUpload", "upload does not exist");
 
         var partPath = Path.Combine(state.Dir, $"part-{partNumber:D5}");
@@ -178,9 +192,11 @@ public sealed class S3MultipartStore : IDisposable
     /// 校验项（对齐 Go <c>CompleteMultipartUpload</c>）：parts 必须升序、每个分片必须存在且 ETag 匹配。
     /// 失败时返回错误码（调用方应保留会话以便客户端重试）。
     /// </summary>
-    public CompletePrepareResult PrepareComplete(string uploadId, IReadOnlyList<(int PartNumber, string ETag)> requested)
+    public CompletePrepareResult PrepareComplete(string uploadId, IReadOnlyList<(int PartNumber, string ETag)> requested, long ownerId)
     {
         if (!_uploads.TryGetValue(uploadId, out var state))
+            return CompletePrepareResult.Fail("NoSuchUpload", "upload does not exist");
+        if (state.OwnerId != ownerId)
             return CompletePrepareResult.Fail("NoSuchUpload", "upload does not exist");
         if (requested.Count == 0)
             return CompletePrepareResult.Fail("MalformedXML", "complete multipart upload has no parts");
@@ -344,6 +360,8 @@ public sealed class S3MultipartStore : IDisposable
         public string UploadId { get; init; } = "";
         public string Bucket { get; init; } = "";
         public string Object { get; init; } = "";
+        /// <summary>会话创建者；part / complete / abort 都要校验归属。</summary>
+        public long OwnerId { get; init; }
         public string Dir { get; init; } = "";
         public DateTimeOffset Created { get; init; }
         public DateTimeOffset LastActivity { get; set; }
@@ -453,4 +471,4 @@ public sealed class CompletePrepareResult
 }
 
 /// <summary>进行中上传的摘要信息（用于 ListMultipartUploads）。</summary>
-public readonly record struct S3UploadInfo(string UploadId, string Bucket, string Object, DateTimeOffset Initiated);
+public readonly record struct S3UploadInfo(string UploadId, string Bucket, string Object, DateTimeOffset Initiated, long OwnerId = 0);

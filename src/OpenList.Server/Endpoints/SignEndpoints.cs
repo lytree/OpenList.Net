@@ -142,10 +142,12 @@ public static class SignEndpoints
             return await FileDownloadHelper.StreamFileAsync(mount, fullPath, ctx);
         }).AllowAnonymous();
 
-        // /ae/{path}?sign=...&inner=/a/b.txt&pass=... — 归档内联访问。
+        // /ae/{path}?sign=...&inner=/a/b.txt&pass=... — 归档内联访问（只读）。
         // - 带 `inner`：把归档内该条目流式返回（可 Range），供预览器直接渲染；
-        // - 不带 `inner`：解压到归档所在目录（对齐 Go 的 ArchiveInternalExtract）。
-        // 两种形态共用同一个签名校验，与旧前端 `getLinkByDirAndObj` 拼出的 URL 一致。
+        // - 不带 `inner`：**拒绝**。历史行为是「解压到归档所在目录」，但这条路由是匿名的，
+        //   只凭 URL 签名放行，等于让任何拿到链接的人（包括 <c>.strm</c>、播放器书签、
+        //   第三方下载器）在服务器上写文件。解压属于写操作，只能走登录态的
+        //   /api/fs/archive/decompress（带权限位 + meta 双重门禁）。
         app.MapGet("/ae/{**path}", async (
             string path,
             string? sign,
@@ -158,23 +160,23 @@ public static class SignEndpoints
             var fullPath = NormalizePath(path);
             if (!await IsAllowedAsync(signs, fullPath, sign, ctx)) return Results.Unauthorized();
 
-            if (!string.IsNullOrEmpty(inner))
+            if (string.IsNullOrEmpty(inner))
             {
-                var resp = await fs.OpenArchiveEntryAsync(fullPath, inner, pass, GuestUser);
-                if (resp.Code != 200 || resp.Data is null)
-                    return Results.NotFound(resp.Message);
-                // 用条目自身扩展名推 MIME，浏览器才能直接渲染图片/视频/PDF
-                var name = inner.TrimEnd('/').Split('/').Last();
-                var contentType = ContentTypeProvider.TryGetContentType(name, out var mapped)
-                    ? mapped
-                    : "application/octet-stream";
-                return Results.File(resp.Data, contentType, enableRangeProcessing: true);
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return Results.Json(
+                    Resp.Fail("archive extraction requires an authenticated session", RespCodes.Forbidden),
+                    statusCode: StatusCodes.Status403Forbidden);
             }
 
-            // 解压到归档所在目录（对齐 Go 的 ArchiveInternalExtract 行为）。
-            var parent = fullPath.TrimEnd('/').LastIndexOf('/');
-            var destDir = parent <= 0 ? "/" : fullPath[..parent];
-            return Results.Ok(await fs.ArchiveDecompressAsync(fullPath, destDir, pass, GuestUser));
+            var resp = await fs.OpenArchiveEntryAsync(fullPath, inner, pass, GuestUser);
+            if (resp.Code != 200 || resp.Data is null)
+                return Results.NotFound(resp.Message);
+            // 用条目自身扩展名推 MIME，浏览器才能直接渲染图片/视频/PDF
+            var name = inner.TrimEnd('/').Split('/').Last();
+            var contentType = ContentTypeProvider.TryGetContentType(name, out var mapped)
+                ? mapped
+                : "application/octet-stream";
+            return Results.File(resp.Data, contentType, enableRangeProcessing: true);
         }).AllowAnonymous();
 
         // HEAD /ad/、/ap/、/ae/ — 仅探测大小/Range 支持，不触发归档逻辑。

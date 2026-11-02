@@ -100,8 +100,16 @@ export interface PreviewChildProps extends PreviewProps {
   /** 仅归档预览使用：数据源（分享页注入带分享码的版本）。 */
   listArchive?: ArchiveListFn
   /**
-   * 只读上下文（分享页）：隐藏解压按钮，归档内条目也不做内联预览
-   * （`/ae` 需要登录态签名，游客拿不到）。
+   * 仅归档预览使用：归档内单条目的只读地址生成器。
+   *
+   * 登录态默认用 `/ae`（需要 URL 签名）；分享页注入 `/sae/{分享码}`。
+   * 有了它，只读上下文也能点开归档里的图片/文本/音视频，
+   * 而解压这类写操作仍然只属于登录态。
+   */
+  innerLink?: (archivePath: string, innerPath: string, opts?: { pass?: string }) => string
+  /**
+   * 只读上下文（分享页）：隐藏解压按钮。
+   * 归档内条目能否预览取决于是否注入 `innerLink`，不再由本标记一刀切。
    */
   readOnly?: boolean
 }

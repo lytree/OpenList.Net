@@ -15,6 +15,7 @@ import {
 } from "~/pages/home/previews/registry"
 import type { ArchiveListFn, PreviewEntry } from "~/pages/home/previews/types"
 import { humanSize, formatTime } from "~/utils/format"
+import { shareArchiveInnerLink } from "~/utils/link"
 import { t } from "~/i18n"
 
 /**
@@ -52,8 +53,8 @@ export default defineComponent({
      * 而分享页刻意保持极简（只有面包屑 + 下载）。单文件分享本来就是「一个文件」的页面，
      * 内联预览才有意义。
      *
-     * 归档（`share_archive_preview`）单独一个开关：它要额外请求归档条目，
-     * 而且游客点不进条目内部（`/ae` 需要登录态），价值比普通预览低。
+     * 归档（`share_archive_preview`）单独一个开关：它要额外请求归档条目列表，
+     * 代价比普通预览高；条目内部的只读预览走 `/sae`（带分享码），解压仍然不可用。
      * 编辑器恒排除：它会把内容写回磁盘，分享是只读上下文。
      */
     const typeExts = computed<TypeExtMap>(() => ({
@@ -258,6 +259,12 @@ export default defineComponent({
                   download_url: link("/"),
                   // 归档预览的数据源要换成带分享码的实现，否则游客请求只会 401
                   listArchive,
+                  // 归档内条目预览走只读的 /sae（带分享码），解压仍然不可用
+                  innerLink: (archivePath: string, innerPath: string, opts?: { pass?: string }) =>
+                    shareArchiveInnerLink(code.value, archivePath, innerPath, {
+                      pass: opts?.pass,
+                      pwd: pwd.value,
+                    }),
                   readOnly: true,
                   typeExts: typeExts.value,
                 })}

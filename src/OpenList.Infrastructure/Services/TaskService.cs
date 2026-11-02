@@ -210,7 +210,7 @@ public sealed class TaskService : ITaskService
     /// <param name="work">任务工作负载（通过 <see cref="IProgress{T}"/> 上报进度，可响应取消）。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>新建任务的任务 id。</returns>
-    public Task<string> CreateAsync(TaskType type, Func<IProgress<TaskProgress>, CancellationToken, Task> work, CancellationToken ct = default)
+    public Task<string> CreateAsync(TaskType type, Func<IProgress<TaskProgress>, CancellationToken, Task> work, CancellationToken ct = default, long ownerId = 0)
     {
         var id = Interlocked.Increment(ref _seq).ToString();
         var tid = type.ToString().ToLowerInvariant() + "-" + id;
@@ -226,6 +226,7 @@ public sealed class TaskService : ITaskService
                 Type = type,
                 Name = type.ToString(),
                 State = TaskState.Pending,
+                OwnerId = ownerId,
                 CreatedAt = now,
                 StartTime = now,
             },
@@ -237,6 +238,10 @@ public sealed class TaskService : ITaskService
         ScheduleRun(tid, rec);
         return Task.FromResult(tid);
     }
+
+    /// <summary>查询任务创建者；任务不存在返回 null。</summary>
+    public long? OwnerOf(string tid)
+        => _tasks.TryGetValue(tid, out var rec) ? rec.Info.OwnerId : null;
 
     /// <summary>
     /// 把任务体丢到线程池执行。

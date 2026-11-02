@@ -49,3 +49,23 @@ export function archiveInnerLink(
   if (opts.sign) params.set("sign", opts.sign)
   return `${location.origin}/ae${encodeFsPath(archivePath)}?${params.toString()}`
 }
+
+/**
+ * 公开分享页的归档内条目地址：`/sae/{分享码}{归档路径}?inner={条目路径}`。
+ *
+ * 分享访问没有登录态，`/ae` 要的是 URL 签名，游客拿不到；`/sae` 以分享码作为能力凭证，
+ * 且**只读**（不会像旧的 `/sad` 那样把归档解压写盘）。`pwd` 是分享密码，
+ * `pass` 才是加密归档的密码。
+ */
+export function shareArchiveInnerLink(
+  shareCode: string,
+  archivePath: string,
+  innerPath: string,
+  opts: { pass?: string; pwd?: string } = {},
+): string {
+  const params = new URLSearchParams()
+  params.set("inner", innerPath.startsWith("/") ? innerPath : `/${innerPath}`)
+  if (opts.pass) params.set("pass", opts.pass)
+  if (opts.pwd) params.set("pwd", opts.pwd)
+  return `${location.origin}/sae/${encodeURIComponent(shareCode)}${encodeFsPath(archivePath)}?${params.toString()}`
+}

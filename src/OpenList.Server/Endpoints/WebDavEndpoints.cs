@@ -48,9 +48,9 @@ public static class WebDavEndpoints
 
         // 不带路径参数的根路径路由
         g.MapMethods("/", ["OPTIONS"], (HttpContext ctx, MountService m, IStorageService s) => OptionsAsync("", ctx, m, s));
-        g.MapMethods("/", ["PROPFIND"], (HttpContext ctx, MountService m, IStorageService s) => PropfindAsync("", ctx, m, s));
-        g.MapGet("/", (HttpContext ctx, MountService m, IStorageService s) => GetAsync("", ctx, m, s));
-        g.MapMethods("/", ["HEAD"], (HttpContext ctx, MountService m, IStorageService s) => HeadAsync("", ctx, m, s));
+        g.MapMethods("/", ["PROPFIND"], (HttpContext ctx, MountService m, IStorageService s, FileAccessService a, IMetaService meta) => PropfindAsync("", ctx, m, s, a, meta));
+        g.MapGet("/", (HttpContext ctx, MountService m, IStorageService s, FileAccessService a) => GetAsync("", ctx, m, s, a));
+        g.MapMethods("/", ["HEAD"], (HttpContext ctx, MountService m, IStorageService s, FileAccessService a) => HeadAsync("", ctx, m, s, a));
         g.MapMethods("/", ["MKCOL"], (HttpContext ctx, MountService m, IStorageService s, IFileSystemService fs, IMetaService meta) => MkcolAsync("", ctx, m, s, fs, meta));
 
         return app;
@@ -69,12 +69,26 @@ public static class WebDavEndpoints
 
     // --- PROPFIND：列目录或取资源属性 ---
 
-    private static async Task<IResult> PropfindAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
+    private static async Task<IResult> PropfindAsync(
+        string path, HttpContext ctx, MountService mount, IStorageService storageSvc,
+        FileAccessService access, IMetaService meta)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
+        if (user.Disabled) return Results.Forbid();
 
-        var upath = NormalizePath(path);
+        // BasePath 越界 → 403，与写路径一致。
+        if (DavPathGuard(user, path, out var fullPath) is { } denied) return denied;
+
+        // 读门禁：隐藏条目 / ReadUsers / 目录密码。WebDAV 没有「目录密码」通道，
+        // 因此受密码保护的 meta 目录在 WebDAV 上按无权访问处理（与 Go 的
+        // CanAccess(user, meta, path, "") 一致，宁可不给也不静默放开）。
+        // meta 只取一次：PROPFIND 可能枚举上千个子项，逐项查库会把一次列举变成 N 次查询。
+        var metas = await access.LoadMetasAsync(ctx.RequestAborted);
+        if (!access.CanSee(user, fullPath, null, metas))
+            return DavDeny("password is incorrect or you have no permission");
+
+        var upath = NormalizePath(fullPath);
         var depth = ctx.Request.Headers["Depth"].ToString();
         var searchOption = depth == "0" ? SearchDepth.TopDirectoryOnly : SearchDepth.AllDirectories;
         if (string.IsNullOrEmpty(depth)) searchOption = SearchDepth.AllDirectories; // default infinity
@@ -84,28 +98,25 @@ public static class WebDavEndpoints
         // Self
         if (mount.Root.FileExists(upath))
         {
-            responses.Add(ToFileResponse(mount, upath));
+            responses.Add(ToFileResponse(mount, upath, user));
         }
         else if (mount.Root.DirectoryExists(upath))
         {
-            responses.Add(ToDirResponse(mount, upath));
-            if (searchOption == SearchDepth.AllDirectories)
+            responses.Add(ToDirResponse(mount, upath, user));
+            // 子项只能逐个判定：父目录可见不代表嵌套子项可见。
+            // 隐藏规则按「各自路径的父目录」匹配，因此必须逐项走同一套 CanAccess。
+            var children = searchOption == SearchDepth.AllDirectories
+                ? EnumerateAll(mount, upath)
+                : (depth == "1"
+                    ? mount.Root.EnumeratePaths(upath, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both)
+                    : Enumerable.Empty<UPath>());
+
+            foreach (var child in children)
             {
-                foreach (var child in EnumerateAll(mount, upath))
-                {
-                    responses.Add(mount.Root.FileExists(child)
-                        ? ToFileResponse(mount, child)
-                        : ToDirResponse(mount, child));
-                }
-            }
-            else if (searchOption == SearchDepth.TopDirectoryOnly && depth == "1")
-            {
-                foreach (var child in mount.Root.EnumeratePaths(upath, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both))
-                {
-                    responses.Add(mount.Root.FileExists(child)
-                        ? ToFileResponse(mount, child)
-                        : ToDirResponse(mount, child));
-                }
+                if (!access.CanSee(user, child.FullName, null, metas)) continue;
+                responses.Add(mount.Root.FileExists(child)
+                    ? ToFileResponse(mount, child, user)
+                    : ToDirResponse(mount, child, user));
             }
         }
         else
@@ -119,25 +130,37 @@ public static class WebDavEndpoints
 
     // --- PROPPATCH：未完整实现，返回成功 ---
 
-    private static Task<IResult> ProppatchAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
+    private static async Task<IResult> ProppatchAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
     {
-        var upath = NormalizePath(path);
+        // PROPPATCH 在本实现里是「接受但忽略」的兼容响应，仍然要求认证 + 路径门禁：
+        // 匿名请求不应拿到任何 207 响应，受限用户也不该探测自己范围外的路径。
+        var user = await ResolveUserAsync(ctx, storageSvc);
+        if (user is null) return Results.Unauthorized();
+        if (DavPathGuard(user, path, out _) is { } denied) return denied;
+
         var response = new DavResponse
         {
             Href = "/" + path.TrimStart('/'),
             Propstat = [new DavPropstat { Status = "HTTP/1.1 200 OK" }],
         };
-        return Task.FromResult(MultistatusResult(new DavMultistatus { Responses = [response] }));
+        return MultistatusResult(new DavMultistatus { Responses = [response] });
     }
 
     // --- GET：下载文件或返回目录的 HTML 列表 ---
 
-    private static async Task<IResult> GetAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
+    private static async Task<IResult> GetAsync(
+        string path, HttpContext ctx, MountService mount, IStorageService storageSvc, FileAccessService access)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
+        if (user.Disabled) return Results.Forbid();
 
-        var upath = NormalizePath(path);
+        if (DavPathGuard(user, path, out var fullPath) is { } denied) return denied;
+        var metas = await access.LoadMetasAsync(ctx.RequestAborted);
+        if (!access.CanSee(user, fullPath, null, metas))
+            return DavDeny("password is incorrect or you have no permission");
+
+        var upath = NormalizePath(fullPath);
 
         // 文件：直接返回字节流
         if (mount.Root.FileExists(upath))
@@ -149,20 +172,22 @@ public static class WebDavEndpoints
         }
 
         // 目录：返回简单的 HTML 目录列表
-            if (mount.Root.DirectoryExists(upath))
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine("<html><head><title>Index of /" + path + "</title></head><body>");
+        if (mount.Root.DirectoryExists(upath))
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("<html><head><title>Index of /" + path + "</title></head><body>");
             sb.AppendLine($"<h1>Index of /{path}</h1><hr><ul>");
-            if (upath != UPath.Root)
+            if (upath != NormalizePath(MetaAccess.Normalize(string.IsNullOrEmpty(user.BasePath) ? "/" : user.BasePath)))
             {
                 sb.AppendLine("<li><a href=\"../\">../</a></li>");
             }
             foreach (var child in mount.Root.EnumeratePaths(upath, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both))
             {
+                // 逐项过滤：与 PROPFIND 同一套可见性判定（meta 已预加载）。
+                if (!access.CanSee(user, child.FullName, null, metas)) continue;
                 var name = child.GetName();
                 var isDir = mount.Root.DirectoryExists(child);
-                var href = "/" + child.FullName.TrimStart('/') + (isDir ? "/" : "");
+                var href = DavHref(user, child);
                 sb.AppendLine($"<li><a href=\"{href}\">{name}{(isDir ? "/" : "")}</a></li>");
             }
             sb.AppendLine("</ul><hr></body></html>");
@@ -174,12 +199,18 @@ public static class WebDavEndpoints
 
     // --- HEAD：仅返回元数据 ---
 
-    private static async Task<IResult> HeadAsync(string path, HttpContext ctx, MountService mount, IStorageService storageSvc)
+    private static async Task<IResult> HeadAsync(
+        string path, HttpContext ctx, MountService mount, IStorageService storageSvc, FileAccessService access)
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
+        if (user.Disabled) return Results.Forbid();
 
-        var upath = NormalizePath(path);
+        if (DavPathGuard(user, path, out var fullPath) is { } denied) return denied;
+        if (!await access.CanSeeAsync(user, fullPath, null, ctx.RequestAborted))
+            return DavDeny("password is incorrect or you have no permission");
+
+        var upath = NormalizePath(fullPath);
 
         // 文件：填充大小等响应头返回，不写响应体
         if (mount.Root.FileExists(upath))
@@ -378,8 +409,10 @@ public static class WebDavEndpoints
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
+        if (user.Disabled) return Results.Forbid();
 
-        var fullPath = "/" + path.TrimStart('/');
+        // 锁按「完整虚拟路径」记账：受限用户不能给自己的路径上锁，也不能替别人的路径上锁。
+        if (DavPathGuard(user, path, out var fullPath) is { } denied) return denied;
         var depth = ctx.Request.Headers["Depth"].ToString();
         if (string.IsNullOrEmpty(depth)) depth = "infinity";
 
@@ -426,8 +459,9 @@ public static class WebDavEndpoints
     {
         var user = await ResolveUserAsync(ctx, storageSvc);
         if (user is null) return Results.Unauthorized();
+        if (user.Disabled) return Results.Forbid();
 
-        var fullPath = "/" + path.TrimStart('/');
+        if (DavPathGuard(user, path, out var fullPath) is { } denied) return denied;
 
         // 按 RFC 4918，Lock-Token 头以 <...> 包裹，先剥掉尖括号
         var rawToken = ctx.Request.Headers["Lock-Token"].ToString().Trim();
@@ -480,12 +514,12 @@ public static class WebDavEndpoints
         }
     }
 
-    private static DavResponse ToFileResponse(MountService mount, UPath path)
+    private static DavResponse ToFileResponse(MountService mount, UPath path, User user)
     {
         var entry = mount.Root.GetFileEntry(path);
         return new DavResponse
         {
-            Href = "/dav/" + path.FullName.TrimStart('/'),
+            Href = DavHref(user, path),
             Propstat = [new DavPropstat
             {
                 Prop = new DavProp
@@ -502,11 +536,11 @@ public static class WebDavEndpoints
         };
     }
 
-    private static DavResponse ToDirResponse(MountService mount, UPath path)
+    private static DavResponse ToDirResponse(MountService mount, UPath path, User user)
     {
         return new DavResponse
         {
-            Href = "/dav/" + path.FullName.TrimStart('/') + "/",
+            Href = DavHref(user, path) + (path.FullName == "/" ? "" : "/"),
             Propstat = [new DavPropstat
             {
                 Prop = new DavProp
@@ -520,6 +554,21 @@ public static class WebDavEndpoints
                 Status = "HTTP/1.1 200 OK",
             }],
         };
+    }
+
+    /// <summary>
+    /// 生成客户端可见的 href。受限用户（BasePath）看到的是**以自己根目录为根**的路径 ——
+    /// 直接回绝对路径会暴露 `/dav/other-user/...`，并且让客户端在错误的前缀下拼 URL。
+    /// </summary>
+    private static string DavHref(User user, UPath path)
+    {
+        var full = path.FullName;
+        var basePath = MetaAccess.Normalize(string.IsNullOrEmpty(user.BasePath) ? "/" : user.BasePath);
+        if (basePath != "/" && full.StartsWith(basePath, StringComparison.Ordinal))
+            full = full[basePath.Length..];
+        if (string.IsNullOrEmpty(full)) full = "/";
+        if (!full.StartsWith('/')) full = "/" + full;
+        return full == "/" ? "/dav/" : "/dav" + full;
     }
 
     private static string? ExtractPathFromUrl(string url, HttpContext ctx)

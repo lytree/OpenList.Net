@@ -366,7 +366,10 @@ public static class FsEndpoints
 
         // POST /fs/archive/decompress — body: { src_dir, dst_dir, name, archive_pass, ... }.
         // archivePath = join(src_dir + name[0]); destPath = join(dst_dir) (+ name folder if put_into_new_dir).
-        g.MapPost("/archive/decompress", async (ArchiveDecompressReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        // 这是**写操作**：源归档要可读，目标目录要满足「CanWriteContent（或 meta 显式开放写入）
+        // + meta WriteUsers」，与 mkdir / 上传走同一把尺子。此前这条端点只做了 BasePath 拼接，
+        // 于是任何登录用户都能把任意归档解压进任意目录。
+        g.MapPost("/archive/decompress", async (ArchiveDecompressReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
             var archiveRel = JoinPaths(req.SrcDir, req.Name).FirstOrDefault() ?? req.SrcDir;
@@ -381,7 +384,11 @@ public static class FsEndpoints
                 var folder = Path.GetFileNameWithoutExtension(fileName);
                 destDir = destDir.TrimEnd('/') + "/" + folder;
             }
-            return Results.Ok(await svc.ArchiveDecompressAsync(archivePath, destDir, req.ArchivePass, u));
+            // 源归档可读（ReadUsers / 隐藏 / 目录密码）—— 复用只读端点同一门禁。
+            if (await MetaReadGateAsync(metaSvc, u, archivePath, ct) is { } readDenied) return readDenied;
+            // 目标目录可写。
+            if (await ContentWriteGateAsync(metaSvc, u, destDir, ct) is { } writeDenied) return writeDenied;
+            return Results.Ok(await svc.ArchiveDecompressAsync(archivePath, destDir, req.ArchivePass, u, ct));
         });
 
         // --- Scan (admin-only) ---
@@ -395,12 +402,16 @@ public static class FsEndpoints
         });
 
         // --- Offline download (Phase 6) ---
-        g.MapPost("/add_offline_download", async (OfflineDownloadReq req, IFileSystemService svc, ClaimsPrincipal user) =>
+        g.MapPost("/add_offline_download", async (OfflineDownloadReq req, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var u = user.ToUser();
+            // 镜像 Go：权限位 2（可添加离线下载）+ 目标目录可写。缺一不可 ——
+            // 离线下载最终会把文件写进目标目录，只检查权限位会让「能提交任务」变成「能往只读目录写」。
+            if (PermissionGuard(u.CanAddOfflineDownload()) is { } denied) return denied;
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
+            if (await ContentWriteGateAsync(metaSvc, u, path, ct) is { } writeDenied) return writeDenied;
             req.Path = path;
-            return Results.Ok(await svc.AddOfflineDownloadAsync(req, u));
+            return Results.Ok(await svc.AddOfflineDownloadAsync(req, u, ct));
         });
 
         // POST /fs/other — driver-specific operations (e.g. aliyun video_preview).

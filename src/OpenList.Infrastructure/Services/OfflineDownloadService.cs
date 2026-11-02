@@ -53,6 +53,11 @@ public sealed class OfflineDownloadService : IOfflineDownloadService
         if (string.IsNullOrWhiteSpace(req.Path))
             return Resp<OfflineDownloadResp>.Fail("path is required", RespCodes.BadRequest);
 
+        // 权限位 2：可添加离线下载。端点层已查一次，这里再查一次是因为调用方不止 HTTP 一条
+        // （驱动/插件可能直接调服务），而「能提交任务」等于「能让服务器往目标目录写文件」。
+        if (!user.CanAddOfflineDownload())
+            return Resp<OfflineDownloadResp>.Fail("permission denied", RespCodes.Forbidden);
+
         var tool = (req.Tool ?? "").Trim().ToLowerInvariant();
         // 根据工具名选择对应的任务类型与其构建工厂（从未知工具返回 null 以兜底）。
         var (taskType, factory) = tool switch
@@ -82,7 +87,7 @@ public sealed class OfflineDownloadService : IOfflineDownloadService
             var tid = await _tasks.CreateAsync(taskType, async (progress, cancel) =>
             {
                 await RunDownloadAsync(capturedFactory, capturedUrl, req.Path, progress, cancel);
-            }, ct);
+            }, ct, user.Id);
             tids.Add(tid);
         }
 

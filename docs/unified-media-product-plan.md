@@ -3600,3 +3600,62 @@ PDF 的成本与**图片同一档**：整读一次源文件（受 `thumb_max_sou
 - 后端 **632 项全通过**（新增 14 条 `FtpServerSettingsTests`：host/port-range/证书解析/快照开关）。
 - A–H 全量回归见本轮记录；`ftp_pasv_port_range` 前端文案 zh/en 已补，删除键的文案同步移除。
 - 已知不变式（升级 FubarDev 必查）：55.3-1 的 `<>c` 判别、`ISslStreamWrapperFactory` 接口面。
+
+## 56. 统一文件访问授权与只读分享闭环
+
+本轮的主题不是新功能，而是**把授权从端点层收敛到文件操作边界**。触发原因是：多个非浏览器入口
+（WebDAV / S3 / FTP / 分片上传 / 任务 / 离线下载）直接调用 `MountService` 或 `IFileSystemService`，
+而权限判定只写在 `FsEndpoints` 里，于是出现「`/api/fs` 挡住了、别的协议没挡」的越权面。
+
+### 56.1 公开分享不再是写入口
+
+- `GET /sad/{sid}` 恒定返回 **403**：解压会写盘，匿名的分享码不构成写能力凭证。路由保留只为让旧客户端
+  拿到可读错误而不是 404；`HEAD` 仍然只探测大小。
+- `GET /ae/{path}` 不带 `inner` 时同样 **403**：这条路由只凭 URL 签名放行，等于让任何拿到链接的人
+  （`.strm`、播放器书签、第三方下载器）在服务器上写文件。带 `inner` 的只读条目预览保持不变。
+- `POST /api/fs/archive/decompress` 补上「源归档可读 + 目标目录可写内容 + `WriteUsers` 白名单」，
+  与 mkdir / 上传同一把尺子。
+- 分享路径解析改为「逐段拒绝 `.`/`..` → 规范化 → `IsSubPath` 包含检查」，不再用字符串拼接。
+
+### 56.2 授权收敛点：`FileAccessService`
+
+`src/OpenList.Infrastructure/Services/FileAccessService.cs`（scoped）返回**协议无关**的
+`AccessDecision`，由各协议自行映射错误格式（`HTTP 200 + Resp` / 真实状态码 / S3 XML / FTP 550）。
+判定本身仍复用 `MetaAccess` 纯函数，避免出现第二份语义。
+
+两条硬约束：
+
+1. **路径只能拼接一次**。对已拼接过的完整路径再调用 `User.TryJoinPath` 会产生双重 BasePath。
+2. `FileSystemService` 是单例，访问 meta 必须经作用域工厂（分片上传、FTP 均如此）。
+
+### 56.3 各协议接线
+
+| 协议 | 读门禁 | 写门禁 | 归属 |
+|---|---|---|---|
+| WebDAV `PROPFIND/GET/HEAD` | `CanAccess`，**逐子项**过滤 | 原有 PUT/MKCOL/DELETE/MOVE/COPY | href 按 BasePath 换算 |
+| S3 | 桶根 + 逐对象 `CanAccess` | `ContentWrite` / `MetaWrite` | 桶名相对 BasePath；key 相对桶 |
+| FTP | `GetEntriesAsync`/`OpenReadAsync` 逐项 | Create/Replace/Append/CreateDirectory/Unlink/Move | 会话根 = 用户 BasePath |
+| 分片上传 | — | init 校验 `ContentWrite`；complete 落盘前**重新授权** | `IsOwner(uploadId, userId)` |
+| 任务 | 列表按 `OwnerId` 过滤 | cancel/delete/retry 校验归属；批量清理先按归属筛选 | `TaskInfo.OwnerId`（不序列化） |
+| 离线下载 | — | 权限位 2 + 目标目录可写（端点与服务各一次） | 任务归属 |
+
+WebDAV / S3 / FTP 都没有「目录密码」通道，因此受密码保护的 meta 在它们上面按**无权访问**处理
+（与 Go `CanAccess(user, meta, path, "")` 一致）：宁可不给，也不静默放开。
+
+FTP 的权限展示也改为反映真实能力（此前对所有客户端固定宣告 `rwx`）。
+
+### 56.4 公开分享归档内单条目预览（新）
+
+`GET /sae/{sid}/{archive}?inner=...&pwd=...&pass=...`：只调用 `OpenArchiveEntryAsync`，绝不落盘；
+拒绝空 `inner`、目录结尾、`.`/`..` 段、绝对路径；支持 Range 与 MIME；单条目上限 512 MB。
+前端 `ArchivePreview` 新增 `innerLink` 注入：登录态默认 `/ae`，分享页注入 `/sae`，
+`readOnly` 只再约束「解压」，不再一刀切禁止条目预览。
+
+### 56.5 验收
+
+- 后端 644 项全通过（新增 `CrossProtocolAccessTests`：WebDAV 只读账号可浏览/不可写、PROPFIND 过滤隐藏项、
+  `ReadUsers` 拒绝、S3 key 相对桶、S3 只读账号 PUT 403、归档解压 403 且无产物、分片上传跨用户 404）；
+  `/sad` 旧用例改写为「拒绝且文件系统无变化」。
+- 前端 252 项通过，`tsc --noEmit` 通过。
+- 仍未做（下一阶段）：任务持久化、离线下载完整状态机、`proxy_types`、SMB/SFTP 服务端、
+  公开资源的并发/速率预算。

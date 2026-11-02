@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.DependencyInjection;
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
+using OpenList.Core.Security;
 
 namespace OpenList.Infrastructure.Services;
 
@@ -32,6 +34,7 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
 
     private readonly IFileSystemService _fs;
     private readonly TimeProvider _time;
+    private readonly IServiceScopeFactory? _scopes;
     private readonly ConcurrentDictionary<string, MultipartSession> _sessions = new();
     private readonly object _gcGate = new();
     private bool _gcStarted;
@@ -43,11 +46,22 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
     /// </summary>
     /// <param name="fs">文件系统服务，用于最终写入分片。</param>
     /// <param name="time">时间源（可选，默认系统时区；用于会话活动时间与 GC 判定）。</param>
-    public MultipartUploadService(IFileSystemService fs, TimeProvider? time = null)
+    /// <param name="scopes">
+    /// 作用域工厂（可选）。用于在 <see cref="CompleteAsync"/> 落盘前重新做一次
+    /// 「目标目录可写」授权 —— 本服务是单例，无法直接注入 scoped 的
+    /// <see cref="FileAccessService"/>。为 null 时跳过该二次校验（仅供单元测试）。
+    /// </param>
+    public MultipartUploadService(
+        IFileSystemService fs, TimeProvider? time = null, IServiceScopeFactory? scopes = null)
     {
         _fs = fs;
         _time = time ?? TimeProvider.System;
+        _scopes = scopes;
     }
+
+    /// <summary>会话是否属于给定用户（Id 相同）。见 <see cref="IMultipartUploadService.IsOwner"/>。</summary>
+    public bool IsOwner(string uploadId, long userId)
+        => _sessions.TryGetValue(uploadId, out var s) && s.OwnerId == userId;
 
     /// <summary>
     /// 启动会话 GC：清扫上次运行遗留的临时目录并启动周期回收。
@@ -121,8 +135,10 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
         var totalChunks = req.Size == 0 ? 1 : (int)Math.Max(1, (req.Size + chunkSize - 1) / chunkSize);
 
         // 断点续传：路径+大小相同、且未完成/未中止的会话 → 复用已缓冲的分片。
+        // 必须同时匹配 OwnerId：只按路径+大小匹配会让另一个用户（或另一个受限 BasePath 下的
+        // 同名路径）接管别人的会话，把自己的分片写进对方的文件。
         var existing = _sessions.Values.FirstOrDefault(s =>
-            s.Path == req.Path && s.Size == req.Size &&
+            s.OwnerId == user.Id && s.Path == req.Path && s.Size == req.Size &&
             (s.State == "receiving" || s.State == "failed_retriable"));
         if (existing is not null)
         {
@@ -143,6 +159,7 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
         var session = new MultipartSession
         {
             UploadId = Guid.NewGuid().ToString("N"),
+            OwnerId = user.Id,
             Path = req.Path,
             Size = req.Size,
             ChunkSize = chunkSize,
@@ -263,26 +280,37 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
     /// <param name="user">发起上传的用户。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>成功返回完成快照；分片不全或写入失败时返回错误并置为可重试状态。</returns>
-    public Task<Resp<MultipartSnapshot>> CompleteAsync(string uploadId, User user, CancellationToken ct = default)
+    public async Task<Resp<MultipartSnapshot>> CompleteAsync(string uploadId, User user, CancellationToken ct = default)
     {
         if (!_sessions.TryGetValue(uploadId, out var session))
-            return Task.FromResult(Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound));
+            return Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound);
+        // 会话归属：非本人一律按「不存在」处理，避免跨用户完成别人正在进行的上传。
+        if (session.OwnerId != user.Id)
+            return Resp<MultipartSnapshot>.Fail("session not found", RespCodes.NotFound);
 
         lock (session.Sync)
         {
             if (session.State == "completed")
-                return Task.FromResult(Resp<MultipartSnapshot>.Ok(ToSnapshot(session)));
+                return Resp<MultipartSnapshot>.Ok(ToSnapshot(session));
             if (session.State == "aborted")
-                return Task.FromResult(Resp<MultipartSnapshot>.Fail("session aborted", RespCodes.Conflict));
+                return Resp<MultipartSnapshot>.Fail("session aborted", RespCodes.Conflict);
 
             if (session.Received.Count < session.TotalChunks)
-                return Task.FromResult(Resp<MultipartSnapshot>.Fail(
-                    $"incomplete upload: {session.Received.Count}/{session.TotalChunks} chunks", RespCodes.BadRequest));
+                return Resp<MultipartSnapshot>.Fail(
+                    $"incomplete upload: {session.Received.Count}/{session.TotalChunks} chunks", RespCodes.BadRequest);
 
             session.State = "backending";
             session.StorageProgress = 0;
             session.Error = null;
             session.LastActive = _time.GetUtcNow();
+        }
+
+        // 落盘前重新授权：init 时的检查与真正写入之间可能隔了几十分钟，
+        // 期间目标目录的权限位、meta WriteUsers、BasePath 都可能变化。
+        if (!await CanWriteTargetAsync(user, session.Path, ct))
+        {
+            lock (session.Sync) { session.State = "receiving"; }
+            return Resp<MultipartSnapshot>.Fail("permission denied", RespCodes.Forbidden);
         }
 
         // 在锁外按顺序冲刷分片（涉及网络/存储 IO）。
@@ -292,7 +320,7 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
             for (var i = 0; i < session.TotalChunks; i++)
                 parts.Add(new FileStream(PartFile(session, i), FileMode.Open, FileAccess.Read));
             using var combined = new MultiStream(parts);
-            var result = _fs.PutStreamAsync(session.Path, combined, user, ct).GetAwaiter().GetResult();
+            var result = await _fs.PutStreamAsync(session.Path, combined, user, ct);
             if (result.Code != 200)
                 throw new InvalidOperationException(result.Message);
 
@@ -303,7 +331,7 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
                 session.Error = null;
             }
             TryCleanup(session);
-            return Task.FromResult(Resp<MultipartSnapshot>.Ok(ToSnapshot(session)));
+            return Resp<MultipartSnapshot>.Ok(ToSnapshot(session));
         }
         catch (Exception ex)
         {
@@ -312,12 +340,27 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
                 session.State = "failed_retriable";
                 session.Error = ex.Message;
             }
-            return Task.FromResult(Resp<MultipartSnapshot>.Fail(ex.Message, RespCodes.InternalError));
+            return Resp<MultipartSnapshot>.Fail(ex.Message, RespCodes.InternalError);
         }
         finally
         {
             foreach (var p in parts) p.Dispose();
         }
+    }
+
+    /// <summary>
+    /// 目标文件父目录是否可写。经独立作用域解析 scoped 的 <see cref="FileAccessService"/>，
+    /// 避免单例服务持有 scoped 依赖；未配置作用域工厂（单元测试）时放行。
+    /// </summary>
+    private async Task<bool> CanWriteTargetAsync(User user, string targetPath, CancellationToken ct)
+    {
+        if (_scopes is null) return true;
+        using var scope = _scopes.CreateScope();
+        var access = scope.ServiceProvider.GetService<FileAccessService>();
+        if (access is null) return true;
+        var decision = await access.AuthorizeAsync(
+            user, MetaAccess.Parent(targetPath), FileOperation.ContentWrite, null, ct);
+        return decision.Allowed;
     }
 
     /// <summary>
@@ -407,6 +450,8 @@ public sealed class MultipartUploadService : IMultipartUploadService, IDisposabl
     {
         public readonly object Sync = new();
         public string UploadId { get; init; } = "";
+        /// <summary>会话创建者；chunk / status / complete / abort 都要校验归属。</summary>
+        public long OwnerId { get; init; }
         public string Path { get; init; } = "";
         public long Size { get; init; }
         public long ChunkSize { get; init; }

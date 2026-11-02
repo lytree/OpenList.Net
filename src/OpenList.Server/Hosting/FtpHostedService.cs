@@ -7,11 +7,14 @@ using FubarDev.FtpServer.Features;
 using FubarDev.FtpServer.FileSystem;
 using FubarDev.FtpServer.FileSystem.Generic;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenList.Core.Configuration;
 using OpenList.Core.Interfaces;
+using OpenList.Core.Models;
+using OpenList.Core.Security;
 using OpenList.Infrastructure.Services;
 using OpenList.Vfs;
 
@@ -177,37 +180,113 @@ public sealed class OpenListFtpMembershipProvider : IMembershipProvider
 
 /// <summary>
 /// 为每个 FTP 会话创建基于 VFS 的 <see cref="IUnixFileSystem"/> 的工厂。
+/// <para>
+/// 关键点：**每个会话的文件系统以该用户的 BasePath 为根**。此前不论谁登录都从全局
+/// <c>UPath.Root</c> 开始，受限用户（甚至只有读权限的账号）都能在 FTP 里看到并改写整站文件，
+/// 登录身份只用于「是否放行」，从未转化为文件访问上下文。
+/// </para>
 /// </summary>
 public sealed class MountFtpFileSystemFactory : IFileSystemClassFactory
 {
     private readonly MountService _mount;
+    private readonly IServiceScopeFactory _scopes;
 
-    public MountFtpFileSystemFactory(MountService mount)
+    public MountFtpFileSystemFactory(MountService mount, IServiceScopeFactory scopes)
     {
         _mount = mount;
+        _scopes = scopes;
     }
 
-    /// <summary>为给定账户创建一个 <see cref="MountUnixFileSystem"/> 实例。</summary>
-    public Task<IUnixFileSystem> Create(IAccountInformation accountInformation)
+    /// <summary>为给定账户创建一个以该用户 BasePath 为根的 <see cref="MountUnixFileSystem"/>。</summary>
+    public async Task<IUnixFileSystem> Create(IAccountInformation accountInformation)
     {
-        var fs = new MountUnixFileSystem(_mount);
-        return Task.FromResult<IUnixFileSystem>(fs);
+        var user = await ResolveUserAsync(accountInformation);
+        return new MountUnixFileSystem(_mount, user, _scopes);
+    }
+
+    /// <summary>
+    /// 从 FTP 登录身份解析完整的 OpenList 用户（含 BasePath 与权限位）。
+    /// 解析失败时返回 <see cref="User.Disabled"/> 的占位用户 —— 宁可见不到任何文件，
+    /// 也不能退回全局根目录。
+    /// </summary>
+    private async Task<User> ResolveUserAsync(IAccountInformation accountInformation)
+    {
+        var fallback = new User
+        {
+            Id = 0,
+            Username = accountInformation.FtpUser?.Identity?.Name ?? "ftp",
+            Role = UserRole.Guest,
+            Permission = 0,
+            Disabled = true,
+        };
+
+        long? userId = null;
+        string? userName = null;
+        try
+        {
+            var principal = accountInformation.FtpUser;
+            var idClaim = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (long.TryParse(idClaim, out var parsed)) userId = parsed;
+            userName = principal?.Identity?.Name;
+        }
+        catch
+        {
+            // 兼容层行为变化时退回按用户名查找。
+            userName = accountInformation.FtpUser?.Identity?.Name;
+        }
+
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var users = scope.ServiceProvider.GetService<IUserService>();
+            if (users is null) return fallback;
+
+            if (userId is not null)
+            {
+                var byId = await users.GetAsync(userId.Value);
+                if (byId.Code == RespCodes.Ok && byId.Data is { } u) return u;
+            }
+            if (!string.IsNullOrEmpty(userName))
+            {
+                var byName = await users.GetByNameAsync(userName);
+                if (byName.Code == RespCodes.Ok && byName.Data is { } u) return u;
+            }
+        }
+        catch
+        {
+            // 数据库暂时不可用时同样按「拒绝」处理。
+        }
+        return fallback;
     }
 }
 
 /// <summary>
 /// 适配器：将 <see cref="MountFileSystem"/> 暴露为 FTP 服务器所需的
-/// <see cref="IUnixFileSystem"/>。
+/// <see cref="IUnixFileSystem"/>，并把根目录固定为登录用户的 BasePath。
+/// <para>
+/// 读写都要过 <see cref="FileAccessService"/>（与 <c>/api/fs</c>、WebDAV、S3 同一套判定）：
+/// 读 = 隐藏条目 / ReadUsers / 目录密码；写 = 权限位 + meta WriteUsers。
+/// 单例服务不能持有 scoped 依赖，因此每次判定用短生命周期作用域解析。
+/// </para>
 /// </summary>
 public sealed class MountUnixFileSystem : IUnixFileSystem
 {
     private readonly MountService _mount;
+    private readonly User _user;
+    private readonly IServiceScopeFactory? _scopes;
+    private readonly UPath _rootPath;
     private readonly MountUnixDirectoryEntry _root;
 
-    public MountUnixFileSystem(MountService mount)
+    /// <param name="mount">挂载服务。</param>
+    /// <param name="user">会话用户；为空按无权限访客处理。</param>
+    /// <param name="scopes">作用域工厂，用于解析 scoped 的授权服务。</param>
+    public MountUnixFileSystem(MountService mount, User? user = null, IServiceScopeFactory? scopes = null)
     {
         _mount = mount;
-        _root = new MountUnixDirectoryEntry(_mount, UPath.Root, "/");
+        _user = user ?? new User { Id = 0, Username = "", Role = UserRole.Guest, Permission = 0 };
+        _scopes = scopes;
+        _rootPath = new UPath(MetaAccess.Normalize(string.IsNullOrEmpty(_user.BasePath) ? "/" : _user.BasePath));
+        _root = new MountUnixDirectoryEntry(_mount, _user, _rootPath, "/", _rootPath);
     }
 
     public StringComparer FileSystemEntryComparer => StringComparer.OrdinalIgnoreCase;
@@ -215,29 +294,36 @@ public sealed class MountUnixFileSystem : IUnixFileSystem
     public bool SupportsAppend => true;
     public bool SupportsNonEmptyDirectoryDelete => true;
 
-    public Task<IReadOnlyList<IUnixFileSystemEntry>> GetEntriesAsync(
+    public async Task<IReadOnlyList<IUnixFileSystemEntry>> GetEntriesAsync(
         IUnixDirectoryEntry directoryEntry,
         CancellationToken cancellationToken)
     {
         var mountEntry = (MountUnixDirectoryEntry)directoryEntry;
         var entries = new List<IUnixFileSystemEntry>();
 
-        // 遍历目录下的文件与子目录，统一包装为对应的 Unix 条目。
+        // 一次 LIST 只用一个作用域 + 一次 meta 查询：逐项查库会让大目录列举退化成 N 次查询。
+        using var scope = _scopes?.CreateScope();
+        var access = scope?.ServiceProvider.GetService<FileAccessService>();
+        if (access is null) return entries;
+        var metas = await access.LoadMetasAsync(cancellationToken);
+
         if (_mount.Root.DirectoryExists(mountEntry.Path))
         {
             foreach (var child in _mount.Root.EnumeratePaths(mountEntry.Path, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both))
             {
+                // 逐项可见性：隐藏规则与 ReadUsers 同样约束 FTP 列表。
+                if (!access.CanSee(_user, child.FullName, null, metas)) continue;
                 entries.Add(_mount.Root.FileExists(child)
-                    ? new MountUnixFileEntry(_mount, child, child.GetName())
-                    : new MountUnixDirectoryEntry(_mount, child, child.GetName() + "/"));
+                    ? new MountUnixFileEntry(_mount, _user, child, child.GetName())
+                    : new MountUnixDirectoryEntry(_mount, _user, child, child.GetName() + "/", _rootPath));
             }
         }
 
-        return Task.FromResult<IReadOnlyList<IUnixFileSystemEntry>>(entries);
+        return entries;
     }
 
-    /// <summary>按名称在目录下查找子项（文件/目录），不存在时返回 null。</summary>
-    public Task<IUnixFileSystemEntry?> GetEntryByNameAsync(
+    /// <summary>按名称在目录下查找子项（文件/目录）；不可见时与不存在一样返回 null。</summary>
+    public async Task<IUnixFileSystemEntry?> GetEntryByNameAsync(
         IUnixDirectoryEntry directoryEntry,
         string name,
         CancellationToken cancellationToken)
@@ -245,28 +331,31 @@ public sealed class MountUnixFileSystem : IUnixFileSystem
         var mountEntry = (MountUnixDirectoryEntry)directoryEntry;
         var childPath = mountEntry.Path / name;
 
-        if (_mount.Root.FileExists(childPath))
-            return Task.FromResult<IUnixFileSystemEntry?>(new MountUnixFileEntry(_mount, childPath, name));
-        if (_mount.Root.DirectoryExists(childPath))
-            return Task.FromResult<IUnixFileSystemEntry?>(new MountUnixDirectoryEntry(_mount, childPath, name + "/"));
+        if (!await CanSeeAsync(childPath, cancellationToken)) return null;
 
-        return Task.FromResult<IUnixFileSystemEntry?>(null);
+        if (_mount.Root.FileExists(childPath))
+            return new MountUnixFileEntry(_mount, _user, childPath, name);
+        if (_mount.Root.DirectoryExists(childPath))
+            return new MountUnixDirectoryEntry(_mount, _user, childPath, name + "/", _rootPath);
+
+        return null;
     }
 
-    /// <summary>以只读方式打开文件（支持从指定偏移开始读取），供 FTP 下载使用。</summary>
-    public Task<Stream> OpenReadAsync(
+    /// <summary>以只读方式打开文件（支持从指定偏移开始读取），读取前先过读门禁。</summary>
+    public async Task<Stream> OpenReadAsync(
         IUnixFileEntry fileEntry,
         long startPosition,
         CancellationToken cancellationToken)
     {
         var mountEntry = (MountUnixFileEntry)fileEntry;
+        await EnsureAsync(mountEntry.Path, FileOperation.Read, cancellationToken);
         var stream = _mount.Root.OpenFile(mountEntry.Path, FileMode.Open, FileAccess.Read);
         if (startPosition > 0) stream.Position = startPosition;
-        return Task.FromResult(stream);
+        return stream;
     }
 
     /// <summary>在目标目录创建新文件（必要时先建父目录），返回后台传输会话用于写入。</summary>
-    public Task<IBackgroundTransfer?> CreateAsync(
+    public async Task<IBackgroundTransfer?> CreateAsync(
         IUnixDirectoryEntry targetDirectory,
         string fileName,
         Stream data,
@@ -274,65 +363,73 @@ public sealed class MountUnixFileSystem : IUnixFileSystem
     {
         var mountDir = (MountUnixDirectoryEntry)targetDirectory;
         var filePath = mountDir.Path / fileName;
+        await EnsureAsync(filePath, FileOperation.ContentWrite, cancellationToken);
 
         var dirPath = filePath.GetDirectory();
         if (!_mount.Root.DirectoryExists(dirPath))
             _mount.Root.CreateDirectory(dirPath);
 
         var fs = _mount.Root.OpenFile(filePath, FileMode.Create, FileAccess.Write);
-        return Task.FromResult<IBackgroundTransfer?>(new StreamBackgroundTransfer(data, fs));
+        return new StreamBackgroundTransfer(data, fs);
     }
 
     /// <summary>以覆盖方式替换文件内容，返回后台传输会话。</summary>
-    public Task<IBackgroundTransfer?> ReplaceAsync(
+    public async Task<IBackgroundTransfer?> ReplaceAsync(
         IUnixFileEntry fileEntry,
         Stream data,
         CancellationToken cancellationToken)
     {
         var mountEntry = (MountUnixFileEntry)fileEntry;
+        await EnsureAsync(mountEntry.Path, FileOperation.ContentWrite, cancellationToken);
         var fs = _mount.Root.OpenFile(mountEntry.Path, FileMode.Create, FileAccess.Write);
-        return Task.FromResult<IBackgroundTransfer?>(new StreamBackgroundTransfer(data, fs));
+        return new StreamBackgroundTransfer(data, fs);
     }
 
     /// <summary>以追加方式写入文件（支持续传），返回后台传输会话。</summary>
-    public Task<IBackgroundTransfer?> AppendAsync(
+    public async Task<IBackgroundTransfer?> AppendAsync(
         IUnixFileEntry fileEntry,
         long? startPosition,
         Stream data,
         CancellationToken cancellationToken)
     {
         var mountEntry = (MountUnixFileEntry)fileEntry;
+        await EnsureAsync(mountEntry.Path, FileOperation.ContentWrite, cancellationToken);
         var fs = _mount.Root.OpenFile(mountEntry.Path, FileMode.Append, FileAccess.Write);
-        return Task.FromResult<IBackgroundTransfer?>(new StreamBackgroundTransfer(data, fs));
+        return new StreamBackgroundTransfer(data, fs);
     }
 
     /// <summary>在目标目录下创建子目录并返回对应条目。</summary>
-    public Task<IUnixDirectoryEntry> CreateDirectoryAsync(
+    public async Task<IUnixDirectoryEntry> CreateDirectoryAsync(
         IUnixDirectoryEntry targetDirectory,
         string directoryName,
         CancellationToken cancellationToken)
     {
         var mountDir = (MountUnixDirectoryEntry)targetDirectory;
         var newPath = mountDir.Path / directoryName;
+        await EnsureAsync(newPath, FileOperation.ContentWrite, cancellationToken);
         _mount.Root.CreateDirectory(newPath);
-        return Task.FromResult<IUnixDirectoryEntry>(new MountUnixDirectoryEntry(_mount, newPath, directoryName + "/"));
+        return new MountUnixDirectoryEntry(_mount, _user, newPath, directoryName + "/", _rootPath);
     }
 
     /// <summary>删除文件或（递归）删除目录。</summary>
-    public Task UnlinkAsync(
+    public async Task UnlinkAsync(
         IUnixFileSystemEntry entry,
         CancellationToken cancellationToken)
     {
         var mountEntry = (IMountUnixEntry)entry;
+        // 权限位 7（可删除）+ 父目录 meta 写入白名单。
+        if (!_user.CanRemove() && !_user.IsAdmin())
+            throw new UnauthorizedAccessException("permission denied");
+        await EnsureAsync(mountEntry.Path, FileOperation.MetaWrite, cancellationToken);
+
         if (_mount.Root.FileExists(mountEntry.Path))
             _mount.Root.DeleteFile(mountEntry.Path);
         else if (_mount.Root.DirectoryExists(mountEntry.Path))
             _mount.Root.DeleteDirectory(mountEntry.Path, true);
-        return Task.CompletedTask;
     }
 
     /// <summary>将文件/目录移动（重命名）到目标目录下。</summary>
-    public Task<IUnixFileSystemEntry> MoveAsync(
+    public async Task<IUnixFileSystemEntry> MoveAsync(
         IUnixDirectoryEntry parent,
         IUnixFileSystemEntry source,
         IUnixDirectoryEntry target,
@@ -343,15 +440,20 @@ public sealed class MountUnixFileSystem : IUnixFileSystem
         var mountTarget = (MountUnixDirectoryEntry)target;
         var newPath = mountTarget.Path / fileName;
 
+        // MOVE 同时承担「移动」与「重命名」：任一权限位满足即可，但两端都要过 meta 写门禁。
+        if (!_user.CanMove() && !_user.CanRename() && !_user.IsAdmin())
+            throw new UnauthorizedAccessException("permission denied");
+        await EnsureAsync(mountSource.Path, FileOperation.MetaWrite, cancellationToken);
+        await EnsureAsync(newPath, FileOperation.MetaWrite, cancellationToken);
+
         if (_mount.Root.FileExists(mountSource.Path))
             _mount.Root.MoveFile(mountSource.Path, newPath);
         else if (_mount.Root.DirectoryExists(mountSource.Path))
             _mount.Root.MoveDirectory(mountSource.Path, newPath);
 
-        return Task.FromResult<IUnixFileSystemEntry>(
-            _mount.Root.FileExists(newPath)
-                ? new MountUnixFileEntry(_mount, newPath, fileName)
-                : new MountUnixDirectoryEntry(_mount, newPath, fileName + "/"));
+        return _mount.Root.FileExists(newPath)
+            ? new MountUnixFileEntry(_mount, _user, newPath, fileName)
+            : new MountUnixDirectoryEntry(_mount, _user, newPath, fileName + "/", _rootPath);
     }
 
     /// <summary>设置条目时间戳（各驱动对逐条目时间戳的更新支持并不统一，故为空操作）。</summary>
@@ -360,10 +462,27 @@ public sealed class MountUnixFileSystem : IUnixFileSystem
         DateTimeOffset? modify,
         DateTimeOffset? access,
         DateTimeOffset? create,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) => Task.FromResult(entry);
+
+    /// <summary>读可见性（与 PROPFIND / S3 列表同一判定）。</summary>
+    private async Task<bool> CanSeeAsync(UPath path, CancellationToken ct)
     {
-        // 当前抽象未提供跨驱动一致的逐条目时间戳更新接口。
-        return Task.FromResult(entry);
+        if (_scopes is null) return false;
+        using var scope = _scopes.CreateScope();
+        var access = scope.ServiceProvider.GetService<FileAccessService>();
+        if (access is null) return false;
+        return await access.CanSeeAsync(_user, path.FullName, null, ct);
+    }
+
+    /// <summary>授权校验；拒绝时抛 <see cref="UnauthorizedAccessException"/>（FubarDev 映射为 550）。</summary>
+    private async Task EnsureAsync(UPath path, FileOperation op, CancellationToken ct)
+    {
+        if (_scopes is null) throw new UnauthorizedAccessException("permission denied");
+        using var scope = _scopes.CreateScope();
+        var access = scope.ServiceProvider.GetService<FileAccessService>();
+        if (access is null) throw new UnauthorizedAccessException("permission denied");
+        var decision = await access.AuthorizeAsync(_user, path.FullName, op, null, ct);
+        if (!decision.Allowed) throw new UnauthorizedAccessException(decision.Message);
     }
 }
 
@@ -380,7 +499,7 @@ public sealed class MountUnixFileEntry : IUnixFileEntry, IMountUnixEntry
     public UPath Path { get; }
 
     /// <summary>从 VFS 文件条目读取大小与时间信息，构造对应的 FTP 文件条目。</summary>
-    public MountUnixFileEntry(MountService mount, UPath path, string name)
+    public MountUnixFileEntry(MountService mount, User user, UPath path, string name)
     {
         _mount = mount;
         Path = path;
@@ -389,19 +508,31 @@ public sealed class MountUnixFileEntry : IUnixFileEntry, IMountUnixEntry
         Size = entry.Length;
         LastWriteTime = new DateTimeOffset(entry.LastWriteTime.ToUniversalTime(), TimeSpan.Zero);
         CreatedTime = new DateTimeOffset(entry.CreationTime.ToUniversalTime(), TimeSpan.Zero);
+        Permissions = UnixPermissionsFor(user);
     }
 
     public string Name { get; }
     public long Size { get; }
     public DateTimeOffset? LastWriteTime { get; }
     public DateTimeOffset? CreatedTime { get; }
-    public IUnixPermissions Permissions { get; } = new GenericUnixPermissions(
-        new GenericAccessMode(true, true, true),
-        new GenericAccessMode(true, false, true),
-        new GenericAccessMode(true, false, true));
+    public IUnixPermissions Permissions { get; }
     public string Owner => "root";
     public string Group => "root";
     public long NumberOfLinks => 1;
+
+    /// <summary>
+    /// 权限展示必须反映真实能力：此前对所有客户端固定宣告 rwx，
+    /// 只读账号在资源管理器里看起来可以删除/改名，实际每次操作都失败。
+    /// </summary>
+    internal static IUnixPermissions UnixPermissionsFor(User user)
+    {
+        var canWrite = user.CanWriteContent() || user.IsAdmin();
+        var canModify = canWrite || user.CanRename() || user.CanMove() || user.CanRemove();
+        return new GenericUnixPermissions(
+            new GenericAccessMode(true, canModify, true),
+            new GenericAccessMode(true, false, true),
+            new GenericAccessMode(true, false, true));
+    }
 }
 
 /// <summary>FTP 会话中的目录条目，映射到 挂载文件系统的目录。</summary>
@@ -410,26 +541,24 @@ public sealed class MountUnixDirectoryEntry : IUnixDirectoryEntry, IMountUnixEnt
     private readonly MountService _mount;
     public UPath Path { get; }
 
-    /// <summary>构造目录条目；根路径（UPath.Root）被标记为 IsRoot。</summary>
-    public MountUnixDirectoryEntry(MountService mount, UPath path, string name)
+    /// <summary>构造目录条目；等于会话根（用户 BasePath）时标记为 IsRoot。</summary>
+    public MountUnixDirectoryEntry(MountService mount, User user, UPath path, string name, UPath rootPath)
     {
         _mount = mount;
         Path = path;
         Name = name;
-        IsRoot = path == UPath.Root;
+        IsRoot = path == rootPath;
+        Permissions = MountUnixFileEntry.UnixPermissionsFor(user);
     }
 
     public string Name { get; }
     public DateTimeOffset? LastWriteTime { get; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CreatedTime { get; } = DateTimeOffset.UtcNow;
-    public IUnixPermissions Permissions { get; } = new GenericUnixPermissions(
-        new GenericAccessMode(true, true, true),
-        new GenericAccessMode(true, false, true),
-        new GenericAccessMode(true, false, true));
+    public IUnixPermissions Permissions { get; }
     public string Owner => "root";
     public string Group => "root";
     public long NumberOfLinks => 1;
-    public bool IsDeletable => true;
+    public bool IsDeletable => !IsRoot;
     public bool IsRoot { get; }
 }
 

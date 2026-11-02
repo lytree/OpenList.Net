@@ -80,14 +80,18 @@ public static class S3Endpoints
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
 
+        // 桶可见范围 = 挂载点与用户 BasePath 的交集。受限用户只应看到自己根目录内的挂载点，
+        // 名字也按自己的根目录换算（/a/b1 对 BasePath=/a 的用户就是 b1）。
+        var basePath = MetaAccess.Normalize(string.IsNullOrEmpty(user.BasePath) ? "/" : user.BasePath);
         var storages = await storageSvc.ListAsync(ctx.RequestAborted);
         var buckets = storages.Data?.Content
-            .Where(s => !s.Disabled)
+            .Where(s => !s.Disabled && MetaAccess.IsSubPath(basePath, s.MountPath))
             .Select(s => new S3Bucket
             {
-                Name = s.MountPath.TrimStart('/'),
+                Name = RelativeBucketName(basePath, s.MountPath),
                 CreationDate = s.CreatedAt.UtcDateTime,
             })
+            .Where(b => !string.IsNullOrEmpty(b.Name))
             .ToList() ?? [];
 
         var result = new S3ListAllMyBucketsResult
@@ -97,6 +101,33 @@ public static class S3Endpoints
         };
 
         return XmlResult(result);
+    }
+
+    // --- 桶解析 ---
+
+    /// <summary>
+    /// 把 S3 bucket 名解析为当前用户可访问的挂载路径。
+    /// bucket 名是**相对于用户 BasePath** 的路径：BasePath=/a 的用户请求 <c>b1</c> 得到 /a/b1。
+    /// 不存在与越界都返回 false，调用方统一回 NoSuchBucket —— 区分开等于确认「桶存在但你没权限」。
+    /// </summary>
+    private static bool TryResolveBucket(User user, MountService mount, string bucket, out string bucketRoot)
+    {
+        bucketRoot = string.Empty;
+        if (string.IsNullOrWhiteSpace(bucket)) return false;
+        if (!user.TryJoinPath("/" + bucket.Trim('/'), out var joined)) return false;
+        if (!mount.Mounted.ContainsKey(joined)) return false;
+        bucketRoot = joined;
+        return true;
+    }
+
+    /// <summary>把挂载路径换算成用户视角的桶名（去掉自己的 BasePath 前缀）。</summary>
+    private static string RelativeBucketName(string basePath, string mountPath)
+    {
+        var name = MetaAccess.Normalize(mountPath).Trim('/');
+        if (basePath == "/") return name;
+        var bp = basePath.Trim('/');
+        if (string.Equals(name, bp, StringComparison.Ordinal)) return string.Empty;
+        return name.StartsWith(bp + "/", StringComparison.Ordinal) ? name[(bp.Length + 1)..] : name;
     }
 
     // --- Head bucket ---
@@ -112,8 +143,7 @@ public static class S3Endpoints
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
 
-        var mountPath = "/" + bucket;
-        if (!mount.Mounted.ContainsKey(mountPath))
+        if (!TryResolveBucket(user, mount, bucket, out _))
             return S3Error("NoSuchBucket", "bucket does not exist", 404);
 
         ctx.Response.Headers["x-amz-bucket-region"] = "us-east-1";
@@ -129,25 +159,27 @@ public static class S3Endpoints
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc,
-        S3MultipartStore multipart)
+        S3MultipartStore multipart,
+        FileAccessService access)
     {
         // ?uploads — 列出该桶进行中的分片上传
         if (ctx.Request.Query.ContainsKey("uploads"))
         {
             var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
             if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
-            if (!mount.Mounted.ContainsKey("/" + bucket))
+            if (!TryResolveBucket(user, mount, bucket, out _))
                 return S3Error("NoSuchBucket", "bucket does not exist", 404);
             return ListMultipartUploads(bucket, ctx, multipart, user);
         }
 
-        return await ListObjectsAsync(bucket, ctx, mount, storageSvc, authSvc, userSvc);
+        return await ListObjectsAsync(bucket, ctx, mount, storageSvc, authSvc, userSvc, access);
     }
 
     private static IResult ListMultipartUploads(string bucket, HttpContext ctx, S3MultipartStore store, User user)
     {
         var prefix = ctx.Request.Query["prefix"].ToString();
-        var uploads = store.List(bucket)
+        // 只列自己的会话：分片会话的 uploadId 对同站点其他用户不可见。
+        var uploads = store.List(bucket, user.Id)
             .Where(u => string.IsNullOrEmpty(prefix) || u.Object.StartsWith(prefix, StringComparison.Ordinal))
             .Select(u => new S3MultipartUpload
             {
@@ -176,14 +208,18 @@ public static class S3Endpoints
         MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
-        IUserService userSvc)
+        IUserService userSvc,
+        FileAccessService access)
     {
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
 
-        var mountPath = "/" + bucket;
-        if (!mount.Mounted.ContainsKey(mountPath))
+        if (!TryResolveBucket(user, mount, bucket, out var bucketRoot))
             return S3Error("NoSuchBucket", "bucket does not exist", 404);
+
+        // 桶根的读门禁：ReadUsers / 隐藏 / 目录密码同样约束 S3，否则 meta 只挡住了 /api/fs。
+        var decision = await access.AuthorizeAsync(user, bucketRoot, FileOperation.Read, null, ctx.RequestAborted);
+        if (!decision.Allowed) return S3Error("AccessDenied", decision.Message, 403);
 
         var query = ctx.Request.Query;
         var isV2 = query["list-type"].ToString() == "2";
@@ -197,8 +233,10 @@ public static class S3Endpoints
             : !string.IsNullOrEmpty(continuationToken) ? continuationToken
             : marker;
 
-        var rootPath = UPath.Root;
-        var searchBase = string.IsNullOrEmpty(prefix) ? rootPath : (rootPath / prefix.TrimEnd('/'));
+        // 桶根 = 该用户视角下的挂载点。此前用 UPath.Root 作搜索基址，等于把**整个站点根**
+        // 当成桶内容枚举：任何能读一个桶的用户都能看到其它挂载点下的文件。
+        var bucketRootPath = new UPath(bucketRoot);
+        var searchBase = string.IsNullOrEmpty(prefix) ? bucketRootPath : (bucketRootPath / prefix.TrimEnd('/'));
 
         var all = new List<S3Object>();
         var commonPrefixes = new List<string>();
@@ -207,7 +245,25 @@ public static class S3Endpoints
         {
             if (mount.Root.DirectoryExists(searchBase))
             {
-                all.AddRange(EnumerateRecursive(mount, searchBase, prefix));
+                var keyPrefix = bucketRootPath.FullName.TrimEnd('/') + "/";
+                // meta 只取一次：逐项查库会让一次列桶变成 N 次查询。
+                var metas = await access.LoadMetasAsync(ctx.RequestAborted);
+                foreach (var path in EnumerateFiles(mount, searchBase))
+                {
+                    // 逐项可见性：父目录可见不代表嵌套子项可见（隐藏规则按各自父目录匹配）。
+                    if (!access.CanSee(user, path.FullName, null, metas)) continue;
+                    var entry = mount.Root.GetFileEntry(path);
+                    var full = path.FullName;
+                    all.Add(new S3Object
+                    {
+                        // S3 的 key 是桶内相对路径，不能把挂载前缀暴露给客户端。
+                        Key = full.StartsWith(keyPrefix, StringComparison.Ordinal) ? full[keyPrefix.Length..] : full.TrimStart('/'),
+                        Size = entry.Length,
+                        LastModified = entry.LastWriteTime.ToUniversalTime(),
+                        ETag = $"\"{entry.Length:x}\"",
+                        StorageClass = "STANDARD",
+                    });
+                }
                 // 稳定排序，分页游标才有意义
                 all.Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
             }
@@ -271,28 +327,19 @@ public static class S3Endpoints
         return XmlResult(result);
     }
 
-    private static IEnumerable<S3Object> EnumerateRecursive(MountService mount, UPath dir, string prefix)
+    /// <summary>递归枚举目录下的所有**文件**路径（不含目录本身），供 ListObjects 逐项做可见性判定。</summary>
+    private static IEnumerable<UPath> EnumerateFiles(MountService mount, UPath dir)
     {
         foreach (var path in mount.Root.EnumeratePaths(dir, "*", SearchDepth.TopDirectoryOnly, SearchTarget.Both))
         {
-            var isDir = mount.Root.DirectoryExists(path);
-            var key = path.FullName.TrimStart('/');
-            if (isDir)
+            if (mount.Root.DirectoryExists(path))
             {
-                foreach (var sub in EnumerateRecursive(mount, path, prefix))
+                foreach (var sub in EnumerateFiles(mount, path))
                     yield return sub;
             }
             else
             {
-                var entry = mount.Root.GetFileEntry(path);
-                yield return new S3Object
-                {
-                    Key = key,
-                    Size = entry.Length,
-                    LastModified = entry.LastWriteTime.ToUniversalTime(),
-                    ETag = $"\"{entry.Length:x}\"",
-                    StorageClass = "STANDARD",
-                };
+                yield return path;
             }
         }
     }
@@ -306,16 +353,18 @@ public static class S3Endpoints
         MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
-        IUserService userSvc)
+        IUserService userSvc,
+        FileAccessService access)
     {
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
 
-        var mountPath = "/" + bucket;
-        if (!mount.Mounted.ContainsKey(mountPath))
+        if (!TryResolveBucket(user, mount, bucket, out var bucketRoot))
             return S3Error("NoSuchBucket", "bucket does not exist", 404);
 
-        var upath = UPath.Root / bucket / key;
+        var upath = new UPath(bucketRoot) / key;
+        var decision = await access.AuthorizeAsync(user, upath.FullName, FileOperation.Read, null, ctx.RequestAborted);
+        if (!decision.Allowed) return S3Error("AccessDenied", decision.Message, 403);
         if (!mount.Root.FileExists(upath))
             return S3Error("NoSuchKey", "key does not exist", 404);
 
@@ -352,16 +401,18 @@ public static class S3Endpoints
         MountService mount,
         IStorageService storageSvc,
         IAuthService authSvc,
-        IUserService userSvc)
+        IUserService userSvc,
+        FileAccessService access)
     {
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
 
-        var mountPath = "/" + bucket;
-        if (!mount.Mounted.ContainsKey(mountPath))
+        if (!TryResolveBucket(user, mount, bucket, out var bucketRoot))
             return S3Error("NoSuchBucket", "bucket does not exist", 404);
 
-        var upath = UPath.Root / bucket / key;
+        var upath = new UPath(bucketRoot) / key;
+        var decision = await access.AuthorizeAsync(user, upath.FullName, FileOperation.Read, null, ctx.RequestAborted);
+        if (!decision.Allowed) return S3Error("AccessDenied", decision.Message, 403);
         if (!mount.Root.FileExists(upath))
             return S3Error("NoSuchKey", "key does not exist", 404);
 
@@ -385,14 +436,14 @@ public static class S3Endpoints
         IAuthService authSvc,
         IUserService userSvc,
         IFileSystemService fs,
-        S3MultipartStore multipart)
+        S3MultipartStore multipart,
+        FileAccessService access)
     {
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
         if (user.Disabled) return S3Error("AccessDenied", "user disabled", 403);
 
-        var mountPath = "/" + bucket;
-        if (!mount.Mounted.ContainsKey(mountPath))
+        if (!TryResolveBucket(user, mount, bucket, out var bucketRoot))
             return S3Error("NoSuchBucket", "bucket does not exist", 404);
 
         // UploadPart：?partNumber=N&uploadId=X
@@ -403,7 +454,7 @@ public static class S3Endpoints
                 return S3Error("InvalidArgument", "partNumber is required", 400);
 
             var result = await multipart.UploadPartAsync(
-                uploadId, partNumber, ctx.Request.Body, ctx.Request.ContentLength, ctx.RequestAborted);
+                uploadId, partNumber, ctx.Request.Body, ctx.Request.ContentLength, user.Id, ctx.RequestAborted);
             if (!result.Success)
                 return S3Error(result.ErrorCode ?? "InternalError", result.ErrorMessage ?? "upload part failed",
                     MapStatus(result.ErrorCode));
@@ -415,26 +466,34 @@ public static class S3Endpoints
         // CopyObject：x-amz-copy-source: /srcBucket/srcKey
         var copySource = ctx.Request.Headers["x-amz-copy-source"].ToString();
         if (!string.IsNullOrEmpty(copySource))
-            return await CopyObjectAsync(copySource, bucket, key, ctx, mount, user, fs);
+            return await CopyObjectAsync(copySource, bucketRoot, key, ctx, mount, user, fs, access);
 
-        return await PutObjectCoreAsync(bucket, key, ctx, mount, user, fs);
+        return await PutObjectCoreAsync(bucketRoot, key, ctx, mount, user, fs, access);
     }
 
     private static async Task<IResult> PutObjectCoreAsync(
-        string bucket,
+        string bucketRoot,
         string key,
         HttpContext ctx,
         MountService mount,
         User user,
-        IFileSystemService fs)
+        IFileSystemService fs,
+        FileAccessService access)
     {
-        var path = "/" + bucket + "/" + key;
+        var path = bucketRoot.TrimEnd('/') + "/" + key.TrimStart('/');
+
+        // 写入目标父目录要过「可写内容 + WriteUsers」门禁。此前 S3 PUT 完全不做授权，
+        // 任何持有 token 的用户都能往任意挂载点写文件。
+        var parent = MetaAccess.Parent(path);
+        var decision = await access.AuthorizeAsync(user, parent, FileOperation.ContentWrite, null, ctx.RequestAborted);
+        if (!decision.Allowed) return S3Error("AccessDenied", decision.Message, 403);
+
         await using var stream = ctx.Request.Body;
         var resp = await fs.PutStreamAsync(path, stream, user, ctx.RequestAborted);
         if (resp.Code != 200)
             return S3Error("InternalError", resp.Message, 500);
 
-        var upath = UPath.Root / bucket / key;
+        var upath = new UPath(path);
         if (mount.Root.FileExists(upath))
         {
             var entry = mount.Root.GetFileEntry(upath);
@@ -445,12 +504,13 @@ public static class S3Endpoints
 
     private static async Task<IResult> CopyObjectAsync(
         string copySource,
-        string destBucket,
+        string destBucketRoot,
         string destKey,
         HttpContext ctx,
         MountService mount,
         User user,
-        IFileSystemService fs)
+        IFileSystemService fs,
+        FileAccessService access)
     {
         // x-amz-copy-source 形如 "/srcBucket/srcKey" 或 "srcBucket/srcKey"（可能 URL 编码）
         var unescaped = Uri.UnescapeDataString(copySource.TrimStart('/'));
@@ -459,21 +519,29 @@ public static class S3Endpoints
 
         var srcBucket = unescaped[..slash];
         var srcKey = unescaped[(slash + 1)..];
-        if (!mount.Mounted.ContainsKey("/" + srcBucket))
+        // 源桶也要受 BasePath 约束：否则可以把别人挂载点当复制源读出来。
+        if (!TryResolveBucket(user, mount, srcBucket, out var srcBucketRoot))
             return S3Error("NoSuchBucket", "source bucket does not exist", 404);
 
-        var srcPath = UPath.Root / srcBucket / srcKey;
+        var srcPath = new UPath(srcBucketRoot) / srcKey;
+        var readDecision = await access.AuthorizeAsync(user, srcPath.FullName, FileOperation.Read, null, ctx.RequestAborted);
+        if (!readDecision.Allowed) return S3Error("AccessDenied", readDecision.Message, 403);
         if (!mount.Root.FileExists(srcPath))
             return S3Error("NoSuchKey", "source key does not exist", 404);
 
+        var destPath = destBucketRoot.TrimEnd('/') + "/" + destKey.TrimStart('/');
+        var writeDecision = await access.AuthorizeAsync(
+            user, MetaAccess.Parent(destPath), FileOperation.ContentWrite, null, ctx.RequestAborted);
+        if (!writeDecision.Allowed) return S3Error("AccessDenied", writeDecision.Message, 403);
+
         await using (var src = mount.Root.OpenFile(srcPath, FileMode.Open, FileAccess.Read))
         {
-            var resp = await fs.PutStreamAsync("/" + destBucket + "/" + destKey, src, user, ctx.RequestAborted);
+            var resp = await fs.PutStreamAsync(destPath, src, user, ctx.RequestAborted);
             if (resp.Code != 200)
                 return S3Error("InternalError", resp.Message, 500);
         }
 
-        var entry = mount.Root.GetFileEntry(UPath.Root / destBucket / destKey);
+        var entry = mount.Root.GetFileEntry(destPath);
         return XmlResult(new S3CopyObjectResult
         {
             LastModified = entry.LastWriteTime.ToUniversalTime(),
@@ -492,32 +560,38 @@ public static class S3Endpoints
         IAuthService authSvc,
         IUserService userSvc,
         IFileSystemService fs,
-        S3MultipartStore multipart)
+        S3MultipartStore multipart,
+        FileAccessService access)
     {
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
         if (user.Disabled) return S3Error("AccessDenied", "user disabled", 403);
 
-        var mountPath = "/" + bucket;
-        if (!mount.Mounted.ContainsKey(mountPath))
+        if (!TryResolveBucket(user, mount, bucket, out var bucketRoot))
             return S3Error("NoSuchBucket", "bucket does not exist", 404);
+
+        var targetPath = bucketRoot.TrimEnd('/') + "/" + key.TrimStart('/');
+        // 目标父目录必须可写：分片会话的创建与完成都会最终落盘到这个路径。
+        var writeDecision = await access.AuthorizeAsync(
+            user, MetaAccess.Parent(targetPath), FileOperation.ContentWrite, null, ctx.RequestAborted);
+        if (!writeDecision.Allowed) return S3Error("AccessDenied", writeDecision.Message, 403);
 
         // CompleteMultipartUpload：?uploadId=X
         var uploadId = ctx.Request.Query["uploadId"].ToString();
         if (!string.IsNullOrEmpty(uploadId))
         {
-            if (!multipart.Contains(uploadId))
+            if (!multipart.IsOwner(uploadId, user.Id))
                 return S3Error("NoSuchUpload", "upload does not exist", 404);
 
             var parts = await ReadCompleteRequestAsync(ctx);
-            var prepared = multipart.PrepareComplete(uploadId, parts);
+            var prepared = multipart.PrepareComplete(uploadId, parts, user.Id);
             if (!prepared.Success)
                 return S3Error(prepared.ErrorCode ?? "InternalError", prepared.ErrorMessage ?? "complete failed",
                     MapStatus(prepared.ErrorCode));
 
             try
             {
-                var resp = await fs.PutStreamAsync(mountPath + "/" + key, prepared.Stream!, user, ctx.RequestAborted);
+                var resp = await fs.PutStreamAsync(targetPath, prepared.Stream!, user, ctx.RequestAborted);
                 if (resp.Code != 200)
                     return S3Error("InternalError", resp.Message, 500);
             }
@@ -541,7 +615,7 @@ public static class S3Endpoints
         // CreateMultipartUpload：?uploads
         if (ctx.Request.Query.ContainsKey("uploads"))
         {
-            var newId = multipart.CreateUpload(bucket, key);
+            var newId = multipart.CreateUpload(bucket, key, user.Id);
             return XmlResult(new S3InitiateMultipartUploadResult { Bucket = bucket, Key = key, UploadId = newId });
         }
 
@@ -557,24 +631,33 @@ public static class S3Endpoints
         IStorageService storageSvc,
         IAuthService authSvc,
         IUserService userSvc,
-        IFileSystemService fs)
+        IFileSystemService fs,
+        FileAccessService access)
     {
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
         if (user.Disabled) return S3Error("AccessDenied", "user disabled", 403);
 
-        var mountPath = "/" + bucket;
-        if (!mount.Mounted.ContainsKey(mountPath))
+        if (!TryResolveBucket(user, mount, bucket, out var bucketRoot))
             return S3Error("NoSuchBucket", "bucket does not exist", 404);
 
         if (!ctx.Request.Query.ContainsKey("delete"))
             return S3Error("NotImplemented", "unsupported bucket POST operation", 501);
 
+        // 桶根必须可写（WriteUsers）；逐项删除还要过各自的父目录门禁。
+        var rootDecision = await access.AuthorizeAsync(user, bucketRoot, FileOperation.MetaWrite, null, ctx.RequestAborted);
+        if (!rootDecision.Allowed) return S3Error("AccessDenied", rootDecision.Message, 403);
+
         var keys = await ReadDeleteRequestAsync(ctx);
         var result = new S3DeleteResult();
         foreach (var k in keys)
         {
-            var resp = await fs.RemoveAsync([mountPath + "/" + k], user, ctx.RequestAborted);
+            var path = bucketRoot.TrimEnd('/') + "/" + k.TrimStart('/');
+            var decision = await access.AuthorizeAsync(
+                user, MetaAccess.Parent(path), FileOperation.MetaWrite, null, ctx.RequestAborted);
+            var resp = decision.Allowed
+                ? await fs.RemoveAsync([path], user, ctx.RequestAborted)
+                : Resp.Fail(decision.Message, decision.Code);
             if (resp.Code == 200)
             {
                 result.Deleted.Add(new S3DeletedObject { Key = k });
@@ -583,7 +666,7 @@ public static class S3Endpoints
             {
                 result.Errors.Add(new S3Error
                 {
-                    Code = "InternalError",
+                    Code = resp.Code == RespCodes.Forbidden ? "AccessDenied" : "InternalError",
                     Message = resp.Message,
                     Resource = k,
                     RequestId = Guid.NewGuid().ToString("N"),
@@ -604,25 +687,34 @@ public static class S3Endpoints
         IAuthService authSvc,
         IUserService userSvc,
         IFileSystemService fs,
-        S3MultipartStore multipart)
+        S3MultipartStore multipart,
+        FileAccessService access)
     {
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
         if (user.Disabled) return S3Error("AccessDenied", "user disabled", 403);
 
-        var mountPath = "/" + bucket;
-        if (!mount.Mounted.ContainsKey(mountPath))
+        if (!TryResolveBucket(user, mount, bucket, out var bucketRoot))
             return S3Error("NoSuchBucket", "bucket does not exist", 404);
 
         // AbortMultipartUpload：?uploadId=X（幂等）
         var uploadId = ctx.Request.Query["uploadId"].ToString();
         if (!string.IsNullOrEmpty(uploadId))
         {
+            // 只能中止自己的会话（不属于自己时保持幂等语义：直接 NoContent 会掩盖探测，
+            // 这里统一按 NoSuchUpload 拒绝）。
+            if (!multipart.IsOwner(uploadId, user.Id))
+                return S3Error("NoSuchUpload", "upload does not exist", 404);
             multipart.Remove(uploadId);
             return Results.NoContent();
         }
 
-        var resp = await fs.RemoveAsync([mountPath + "/" + key], user, ctx.RequestAborted);
+        var path = bucketRoot.TrimEnd('/') + "/" + key.TrimStart('/');
+        var decision = await access.AuthorizeAsync(
+            user, MetaAccess.Parent(path), FileOperation.MetaWrite, null, ctx.RequestAborted);
+        if (!decision.Allowed) return S3Error("AccessDenied", decision.Message, 403);
+
+        var resp = await fs.RemoveAsync([path], user, ctx.RequestAborted);
         if (resp.Code != 200)
             return S3Error("InternalError", resp.Message, 500);
 
