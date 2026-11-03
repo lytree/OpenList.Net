@@ -234,16 +234,18 @@ builder.Services.AddMediaModule();
 // (for nearest-meta lookup in /fs/list and /fs/get); ITaskService enables the
 // task-based batch move/copy matching Go's FsMove/FsCopy semantics.
 builder.Services.AddSingleton<IFileSystemService>(sp =>
+    // 可选依赖在 FileSystemService 的构造签名里本就是可空（未注册即传 null）；
+    // 这里的 ! 只为让 ActivatorUtilities 的 params object[] 接受 null 元素。
     ActivatorUtilities.CreateInstance<FileSystemService>(sp,
         sp.GetRequiredService<MountService>(),
-        sp.GetService<ISignService>(),
-        sp.GetService<IOfflineDownloadService>(),
-        sp.GetService<IObjsUpdateHooks>(),
-        sp.GetService<IServiceScopeFactory>(),
-        sp.GetService<ITaskService>(),
-        sp.GetService<IPublicUrlResolver>(),
-        sp.GetService<IThumbnailUrlBuilder>(),
-        sp.GetService<ListFilterOptionsProvider>()));
+        sp.GetService<ISignService>()!,
+        sp.GetService<IOfflineDownloadService>()!,
+        sp.GetService<IObjsUpdateHooks>()!,
+        sp.GetService<IServiceScopeFactory>()!,
+        sp.GetService<ITaskService>()!,
+        sp.GetService<IPublicUrlResolver>()!,
+        sp.GetService<IThumbnailUrlBuilder>()!,
+        sp.GetService<ListFilterOptionsProvider>()!));
 // Multipart (chunked) upload sessions — singleton; depends only on IFileSystemService.
 builder.Services.AddSingleton<IMultipartUploadService, MultipartUploadService>();
 // S3 gateway multipart-upload sessions — singleton; parts staged on disk, TTL-reaped

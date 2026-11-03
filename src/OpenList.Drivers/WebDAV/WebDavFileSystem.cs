@@ -35,8 +35,11 @@ internal sealed class WebDavFileSystem : NetworkFileSystemBase
     }
 
     /// <summary>从资源 URI 中截取相对父级 URL 的最终名称。</summary>
-    private static string GetRelativeName(string uri, string parentUrl)
+    private static string GetRelativeName(string? uri, string parentUrl)
     {
+        // 服务器返回的资源可能没有 href（Uri 为 null）：没有 URL 也就没有名字，交给调用方跳过。
+        if (uri is null) return string.Empty;
+
         var name = uri.TrimEnd('/');
         var idx = name.LastIndexOf('/');
         return idx >= 0 ? name[(idx + 1)..] : name;
@@ -161,8 +164,13 @@ internal sealed class WebDavFileSystem : NetworkFileSystemBase
 
         // 首次 PROPFIND 不会返回目录自身，但仍过滤掉与当前 URL 相同的项以防重复。
         var resources = resp.Resources
-            .Where(r => !string.Equals(r.Uri, url, StringComparison.OrdinalIgnoreCase) &&
-                        !r.Uri.EndsWith(url + "/", StringComparison.OrdinalIgnoreCase))
+            .Where(r =>
+            {
+                var uri = r.Uri;
+                return uri is not null &&
+                       !string.Equals(uri, url, StringComparison.OrdinalIgnoreCase) &&
+                       !uri.EndsWith(url + "/", StringComparison.OrdinalIgnoreCase);
+            })
             .ToList();
 
         foreach (var res in resources)

@@ -122,7 +122,7 @@ public class AliyundriveOpenDriverTests
         var driver = new AliyundriveOpenDriver();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await driver.InitAsync(new DriverConfig { Addition = "{}" }));
-        await Assert.That(ex.Message).Contains("refresh_token");
+        await Assert.That(ex!.Message).Contains("refresh_token");
         // 配置校验失败时不挂载：挂一个空文件系统会让用户误以为云盘是空的。
         await Assert.That(driver.System).IsNull();
     }

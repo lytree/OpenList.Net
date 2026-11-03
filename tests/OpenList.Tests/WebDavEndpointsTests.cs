@@ -29,7 +29,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Options_ReturnsDavCapabilities()
+    public async Task Options_ReturnsDavCapabilities(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -45,7 +45,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Propfind_Depth0_ReturnsSelfOnly()
+    public async Task Propfind_Depth0_ReturnsSelfOnly(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -65,7 +65,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Propfind_Depth1_ReturnsChildren()
+    public async Task Propfind_Depth1_ReturnsChildren(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -84,7 +84,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Get_ReturnsFileContent()
+    public async Task Get_ReturnsFileContent(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -98,7 +98,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Get_Returns404_ForMissingFile()
+    public async Task Get_Returns404_ForMissingFile(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -109,7 +109,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Head_ReturnsHeaders_ForFile()
+    public async Task Head_ReturnsHeaders_ForFile(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -123,7 +123,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Put_Then_Get_RoundTrip()
+    public async Task Put_Then_Get_RoundTrip(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -140,7 +140,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Mkcol_CreatesDirectory()
+    public async Task Mkcol_CreatesDirectory(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -158,7 +158,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Delete_RemovesFile()
+    public async Task Delete_RemovesFile(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -173,7 +173,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Unauthorized_WithoutBasicAuth()
+    public async Task Unauthorized_WithoutBasicAuth(CancellationToken ct)
     {
         var (factory, _) = await SetupAsync();
         await using (factory)
@@ -187,7 +187,7 @@ public class WebDavEndpointsTests
     // --- LOCK / UNLOCK (in-memory lock store) ---
 
     [Test]
-    public async Task Lock_ReturnsToken_And_LockDiscovery()
+    public async Task Lock_ReturnsToken_And_LockDiscovery(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -207,7 +207,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Lock_Twice_SamePath_Returns423Locked()
+    public async Task Lock_Twice_SamePath_Returns423Locked(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -225,7 +225,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Unlock_WithMatchingToken_Returns204()
+    public async Task Unlock_WithMatchingToken_Returns204(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -248,7 +248,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Unlock_WithMismatchedToken_Returns409()
+    public async Task Unlock_WithMismatchedToken_Returns409(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -266,7 +266,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Unlock_WithoutLockTokenHeader_Returns400()
+    public async Task Unlock_WithoutLockTokenHeader_Returns400(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -278,7 +278,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Lock_Unauthorized_WithoutAuth()
+    public async Task Lock_Unauthorized_WithoutAuth(CancellationToken ct)
     {
         var (factory, _) = await SetupAsync();
         await using (factory)
@@ -296,7 +296,7 @@ public class WebDavEndpointsTests
     // 也没有 BasePath 越界检查；DELETE 对不存在的路径还会静默返回 204。下面按行为钉住。
 
     [Test]
-    public async Task Delete_MissingFile_ReturnsNotFound()
+    public async Task Delete_MissingFile_ReturnsNotFound(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -308,7 +308,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Delete_WithoutRemovePermission_IsForbidden()
+    public async Task Delete_WithoutRemovePermission_IsForbidden(CancellationToken ct)
     {
         var (factory, _) = await SetupAsync();
         await using (factory)
@@ -339,7 +339,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Copy_ToSameDirectory_HonoursDestinationName()
+    public async Task Copy_ToSameDirectory_HonoursDestinationName(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -361,7 +361,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Copy_ToOtherDirectory_UsesDestinationName()
+    public async Task Copy_ToOtherDirectory_UsesDestinationName(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -381,7 +381,7 @@ public class WebDavEndpointsTests
     }
 
     [Test]
-    public async Task Copy_OverwriteFalse_OnExistingTarget_Returns412()
+    public async Task Copy_OverwriteFalse_OnExistingTarget_Returns412(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)

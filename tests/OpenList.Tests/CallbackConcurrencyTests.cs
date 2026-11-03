@@ -203,7 +203,7 @@ public class CallbackConcurrencyTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await reader.OpenAsync(0, 5, CancellationToken.None));
         // 错误消息打码回调 URL（含签名），不能泄露。
-        await Assert.That(ex.Message).DoesNotContain("sign=x");
+        await Assert.That(ex!.Message).DoesNotContain("sign=x");
         await Assert.That(handler.RangeHeaders).Count().IsEqualTo(1);
     }
 

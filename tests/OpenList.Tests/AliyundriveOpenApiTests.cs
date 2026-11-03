@@ -387,7 +387,7 @@ public class AliyundriveOpenApiTests
             return Task.CompletedTask;
         });
 
-        await Assert.That(ex.Message).Contains("refresh token is invalid");
+        await Assert.That(ex!.Message).Contains("refresh token is invalid");
         await Assert.That(driver.Addition.AccessToken).IsEqualTo("");
     }
 
@@ -414,7 +414,7 @@ public class AliyundriveOpenApiTests
         });
 
         // sub 变化意味着 refresh_token 被换到别的账号上，必须拒绝。
-        await Assert.That(ex.Message).Contains("sub not match");
+        await Assert.That(ex!.Message).Contains("sub not match");
     }
 
     [Test]
@@ -433,7 +433,7 @@ public class AliyundriveOpenApiTests
             return Task.CompletedTask;
         });
 
-        await Assert.That(ex.Message).Contains("ClientID or ClientSecret");
+        await Assert.That(ex!.Message).Contains("ClientID or ClientSecret");
     }
 
     // ------------------------------------------------------------------

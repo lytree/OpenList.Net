@@ -142,7 +142,7 @@ public sealed class OpenListFtpMembershipProvider : IMembershipProvider
         if (ftp.MandatoryTls && !ftp.ImplicitTls)
         {
             var closeHook = _connectionAccessor.FtpConnection?.Features
-                .Get<ISecureConnectionFeature>().CloseEncryptedControlStream;
+                .Get<ISecureConnectionFeature>()?.CloseEncryptedControlStream;
             // AUTH TLS 完成后，库（TlsEnableServerCommandHandler）把这个委托从「无捕获的静态
             // lambda（Target 是 Roslyn 的缓存单例，类型名恰为 "<>c"）」换成「捕获了 feature 的
             // 闭包（类型名 "<>c__DisplayClass…"）」。为什么不用别的信号：

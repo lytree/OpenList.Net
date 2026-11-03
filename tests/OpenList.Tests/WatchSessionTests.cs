@@ -70,10 +70,10 @@ public class WatchSessionTests
         await Assert.That(jumped.Data.MaxPositionSeconds).IsEqualTo(1200L);
 
         var back = await Report(svc, "t1", a.Id, 60);       // 拖回来
-        await Assert.That(back.Data.WatchedSeconds).IsEqualTo(0L);
+        await Assert.That(back.Data!.WatchedSeconds).IsEqualTo(0L);
 
         var tick = await Report(svc, "t1", a.Id, 70);       // 恢复播放
-        await Assert.That(tick.Data.WatchedSeconds).IsEqualTo(10L);
+        await Assert.That(tick.Data!.WatchedSeconds).IsEqualTo(10L);
     }
 
     [Test]

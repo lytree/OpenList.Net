@@ -69,10 +69,12 @@ public sealed class SettingsPasvAddressResolver : IPasvAddressResolver
         CancellationToken cancellationToken)
     {
         var s = _settings.Get();
+        // 未配置 ftp_public_host 时 PublicAddress 为 null —— 相当于 FubarDev 默认解析器的
+        // 「不做改写、用连接本地地址」，是受支持的取值，这里只是补上可空标注。
         var options = new PasvListenerOptions(
             s.HasPortRange ? s.PasvMinPort : 0,
             s.HasPortRange ? s.PasvMaxPort : 0,
-            s.PublicAddress);
+            s.PublicAddress!);
         return Task.FromResult(options);
     }
 }
@@ -141,7 +143,9 @@ public sealed class SettingsImplicitTlsConnectionConfigurator : IFtpConnectionCo
         var s = _settings.Get();
         if (!s.ImplicitTls || s.Certificate is null) return Task.CompletedTask;
 
-        var serviceProvider = connection.Features.Get<IServiceProvidersFeature>().RequestServices;
+        // FtpConnection 在构造时始终挂载 IServiceProvidersFeature（见 FubarDev 的
+        // FtpConnection.ServiceProvidersFeature），取不到即为库契约被破坏。
+        var serviceProvider = connection.Features.Get<IServiceProvidersFeature>()!.RequestServices;
         var stateMachine = serviceProvider.GetRequiredService<IFtpLoginStateMachine>();
         var authTlsMechanism = serviceProvider
             .GetRequiredService<IEnumerable<IAuthenticationMechanism>>()

@@ -94,9 +94,9 @@ public static class Program
     /// 设置内置管理员密码。直接定位「内置且是管理员」的行并重写哈希 —— 走服务层需要把整个
     /// UserService 的依赖（配置 + TimeProvider）拉进来，而这里只需要 DbContext。
     /// </summary>
-    private static async Task<int> SetPasswordAsync(string password, CancellationToken ct)
+    private static async Task<int> SetPasswordAsync(string? password, CancellationToken ct)
     {
-        if (password.Length < MinPasswordLength)
+        if (password is null || password.Length < MinPasswordLength)
         {
             Console.Error.WriteLine($"password must be at least {MinPasswordLength} characters");
             return ExitFail;
@@ -211,8 +211,14 @@ public static class Program
         return ExitOk;
     }
 
-    private static async Task<int> DisableStorageAsync(string mountPath, CancellationToken ct)
+    private static async Task<int> DisableStorageAsync(string? mountPath, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(mountPath))
+        {
+            Console.Error.WriteLine("a mount path is required: openlist storage disable <mount-path>");
+            return ExitFail;
+        }
+
         var (db, _) = await OpenDbAsync();
         await using var _ = db;
 
@@ -269,8 +275,14 @@ public static class Program
         return cmd;
     }
 
-    private static async Task<int> Cancel2FaAsync(string username, CancellationToken ct)
+    private static async Task<int> Cancel2FaAsync(string? username, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(username))
+        {
+            Console.Error.WriteLine("a username is required: openlist cancel2fa <username>");
+            return ExitFail;
+        }
+
         var (db, _) = await OpenDbAsync();
         await using var _ = db;
 

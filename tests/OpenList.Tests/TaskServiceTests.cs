@@ -29,7 +29,7 @@ public class TaskServiceTests
             if (info.Data!.State is not (TaskState.Pending or TaskState.Running)) break;
             await Task.Delay(20);
         }
-        await Assert.That(info.Code).IsEqualTo(200);
+        await Assert.That(info!.Code).IsEqualTo(200);
         await Assert.That(info.Data!.State).IsEqualTo(TaskState.Succeeded);
         await Assert.That(info.Data.Progress).IsEqualTo(100);
     }

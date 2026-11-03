@@ -157,7 +157,7 @@ public class CloudDriverInfraTests
             await refresher.RefreshAsync());
 
         await Assert.That(calls).IsEqualTo(4); // 默认 4 次（1 + 3 次重试）
-        await Assert.That(ex.Message).Contains("after 4 attempt");
+        await Assert.That(ex!.Message).Contains("after 4 attempt");
         await Assert.That(ex.InnerException).IsNotNull();
     }
 
@@ -252,7 +252,7 @@ public class CloudDriverInfraTests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await refresher.RefreshAsync());
-        await Assert.That(ex.Message).Contains("400");
+        await Assert.That(ex!.Message).Contains("400");
     }
 
     [Test]
@@ -269,7 +269,7 @@ public class CloudDriverInfraTests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await refresher.RefreshAsync());
-        await Assert.That(ex.Message).Contains("invalid JSON");
+        await Assert.That(ex!.Message).Contains("invalid JSON");
     }
 
     // ------------------------------------------------------------------

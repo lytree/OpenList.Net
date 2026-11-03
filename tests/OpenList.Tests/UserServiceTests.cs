@@ -113,7 +113,7 @@ public class UserServiceTests
         await ctx.SaveChangesAsync();
 
         // Demotion is forbidden.
-        var demote = await svc.UpdateAsync(created.Data.Id, new UpdateUserReq { Role = UserRole.General });
+        var demote = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Role = UserRole.General });
         await Assert.That(demote.Code).IsEqualTo(403);
 
         // Rename is forbidden.

@@ -19,14 +19,14 @@ public class FtpServerSettingsTests
     // ------------------------------------------------------------ ftp_public_host
 
     [Test]
-    public async Task PublicHost_IpLiteral_IsAccepted()
+    public async Task PublicHost_IpLiteral_IsAccepted(CancellationToken ct)
     {
         var ip = FtpServerSettings.ParsePublicHost("203.0.113.7", Logger);
         await Assert.That(ip).IsEqualTo(IPAddress.Parse("203.0.113.7"));
     }
 
     [Test]
-    public async Task PublicHost_DomainName_IsRejected()
+    public async Task PublicHost_DomainName_IsRejected(CancellationToken ct)
     {
         // PASV 应答必须是 IP 字面量：域名交给客户端解析的兼容性太差，宁可明确拒绝。
         var ip = FtpServerSettings.ParsePublicHost("ftp.example.com", Logger);
@@ -34,7 +34,7 @@ public class FtpServerSettingsTests
     }
 
     [Test]
-    public async Task PublicHost_Empty_IsNull()
+    public async Task PublicHost_Empty_IsNull(CancellationToken ct)
     {
         await Assert.That(FtpServerSettings.ParsePublicHost("", Logger)).IsNull();
         await Assert.That(FtpServerSettings.ParsePublicHost("  ", Logger)).IsNull();
@@ -43,25 +43,25 @@ public class FtpServerSettingsTests
     // ------------------------------------------------------------ ftp_pasv_port_range
 
     [Test]
-    public async Task PortRange_Empty_IsUnset()
+    public async Task PortRange_Empty_IsUnset(CancellationToken ct)
     {
         await Assert.That(FtpServerSettings.ParsePortRange("", Logger)).IsEqualTo((0, 0));
     }
 
     [Test]
-    public async Task PortRange_SinglePort_IsMinEqualsMax()
+    public async Task PortRange_SinglePort_IsMinEqualsMax(CancellationToken ct)
     {
         await Assert.That(FtpServerSettings.ParsePortRange("50000", Logger)).IsEqualTo((50000, 50000));
     }
 
     [Test]
-    public async Task PortRange_Span_IsParsed()
+    public async Task PortRange_Span_IsParsed(CancellationToken ct)
     {
         await Assert.That(FtpServerSettings.ParsePortRange("50000-50100", Logger)).IsEqualTo((50000, 50100));
     }
 
     [Test]
-    public async Task PortRange_Garbage_IsIgnoredNotFatal()
+    public async Task PortRange_Garbage_IsIgnoredNotFatal(CancellationToken ct)
     {
         await Assert.That(FtpServerSettings.ParsePortRange("abc", Logger)).IsEqualTo((0, 0));
         await Assert.That(FtpServerSettings.ParsePortRange("0-100", Logger)).IsEqualTo((0, 0));
@@ -72,26 +72,26 @@ public class FtpServerSettingsTests
     // ------------------------------------------------------------ 证书
 
     [Test]
-    public async Task Certificate_NoneConfigured_IsNull()
+    public async Task Certificate_NoneConfigured_IsNull(CancellationToken ct)
     {
         await Assert.That(FtpServerSettings.LoadCertificate("", "", Logger)).IsNull();
     }
 
     [Test]
-    public async Task Certificate_HalfConfigured_IsNull()
+    public async Task Certificate_HalfConfigured_IsNull(CancellationToken ct)
     {
         await Assert.That(FtpServerSettings.LoadCertificate("/tmp/cert.pem", "", Logger)).IsNull();
     }
 
     [Test]
-    public async Task Certificate_MissingFile_IsNull()
+    public async Task Certificate_MissingFile_IsNull(CancellationToken ct)
     {
         // 配错路径不能把 FTP 服务打死：以明文继续，AUTH TLS 由库回 500。
         await Assert.That(FtpServerSettings.LoadCertificate("/no/such/cert.pem", "/no/such/key.pem", Logger)).IsNull();
     }
 
     [Test]
-    public async Task Certificate_PemPair_LoadsWithPrivateKey()
+    public async Task Certificate_PemPair_LoadsWithPrivateKey(CancellationToken ct)
     {
         var (certPem, keyPem) = GenerateSelfSignedPem();
         var dir = Path.Combine(Path.GetTempPath(), "openlist-ftp-test-" + Guid.NewGuid().ToString("N"));
@@ -115,7 +115,7 @@ public class FtpServerSettingsTests
     }
 
     [Test]
-    public async Task Certificate_Pfx_LoadsWithPrivateKey()
+    public async Task Certificate_Pfx_LoadsWithPrivateKey(CancellationToken ct)
     {
         var (certPem, keyPem) = GenerateSelfSignedPem();
         using var pem = X509Certificate2.CreateFromPem(certPem, keyPem);
@@ -137,7 +137,7 @@ public class FtpServerSettingsTests
     // ------------------------------------------------------------ 快照
 
     [Test]
-    public async Task FromSettings_TogglesAndSnapshot()
+    public async Task FromSettings_TogglesAndSnapshot(CancellationToken ct)
     {
         var dict = new Dictionary<string, string>
         {
@@ -155,7 +155,7 @@ public class FtpServerSettingsTests
     }
 
     [Test]
-    public async Task FromSettings_Empty_IsAllDefaults()
+    public async Task FromSettings_Empty_IsAllDefaults(CancellationToken ct)
     {
         var s = FtpServerSettings.FromSettings(new Dictionary<string, string>(), Logger);
         await Assert.That(s.PublicAddress).IsNull();
