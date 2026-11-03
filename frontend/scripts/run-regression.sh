@@ -13,6 +13,8 @@
 #
 # 前置：`dotnet build`、`pnpm -C frontend build`、`.e2e/venv`（openpyxl/python-docx/Pillow）、
 #      ffmpeg 在 PATH 里。
+#      phone / playlist-queue 两轮额外要 Microsoft Edge（脚本钉 `channel: "msedge"`，
+#      本机没有 Playwright 自管 Chromium）与已构建的 `frontend/dist`。
 set -uo pipefail
 
 # Windows 上 `pwd` 给的是 /f/... 形式，而 node / dotnet / python 拿到的是原生路径；
@@ -136,6 +138,42 @@ run_node() { # <log> <script> [env...]
 finish_round() { # <label> <code>
   stop_server
   if [ "$2" -eq 0 ]; then SUMMARY+=("PASS  $1"); else SUMMARY+=("FAIL  $1"); FAILED=1; fi
+}
+
+# 两个跑浏览器的新轮都钉死了 `channel: "msedge"`，且直接打开 `frontend/dist` 里的 SPA。
+# 缺条件时在这里给出可操作的报错并记 FAIL —— 否则现象是脚本在 `chromium.launch` 处抛异常
+# 或页面一直等到超时，看起来像「功能坏了」。
+require_msedge() {
+  local exe
+  for exe in "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" \
+             "/c/Program Files/Microsoft/Edge/Application/msedge.exe" \
+             "${LOCALAPPDATA:+$LOCALAPPDATA/Microsoft/Edge/Application/msedge.exe}"; do
+    [ -n "$exe" ] && [ -x "$exe" ] && return 0
+  done
+  echo "!! 未找到 Microsoft Edge：该轮用 channel=msedge（本机没有 Playwright 自管 Chromium）"
+  echo "   安装 Edge 后重跑，或显式给脚本传 BROWSER_CHANNEL=<本机可用的 channel>"
+  return 1
+}
+
+require_dist() {
+  if [ ! -f "$FE/dist/index.html" ]; then
+    echo "!! frontend/dist 未构建：该轮直接打开 dist 里的 SPA，先跑 pnpm -C frontend build"
+    return 1
+  fi
+  # 只查「存在」不够：旧产物里没有新组件时，症状是选择器一直等不到（很像功能坏了）。
+  if find "$FE/src" -type f -newer "$FE/dist/index.html" -print -quit 2>/dev/null | grep -q .; then
+    echo "!! frontend/dist 比 frontend/src 旧：先跑 pnpm -C frontend build 再重跑本轮"
+    return 1
+  fi
+  return 0
+}
+
+# 浏览器轮统一的「前置不满足就记 FAIL」写法。
+browser_round_preflight() { # <label>
+  if ! require_dist || ! require_msedge; then
+    finish_round "$1" 1
+    return 1
+  fi
 }
 
 # --------------------------------------------------------------------------- 轮次
@@ -339,10 +377,45 @@ round_upload() {
   finish_round "C/upload" $?
 }
 
+round_phone() {
+  say "round: phone (B 手机端列表卡片行)"
+  local dir root
+  dir="$(round_dir phone)"; mkdir -p "$dir"
+  browser_round_preflight "B/phone" || return 1
+  # 挂载由脚本自建（`/e2e-phone` → MOUNT_ROOT）；这里只备好装置：
+  # 3 行（1 个目录 + 2 个文件，含脚本挑中的 readme.txt 行）。
+  root="$RUNS/phone/storage-$STAMP"
+  mkdir -p "$root/docs"
+  printf 'phone list e2e\n' > "$root/readme.txt"
+  printf 'notes\n' > "$root/notes.txt"
+  printf 'guide\n' > "$root/docs/guide.md"
+  begin_round "$dir" || { finish_round "B/phone" 1; return 1; }
+  # 脚本读 ADMIN_PASSWORD（不是导出给其它轮的 ADMIN_PASS）；截图落在本轮日志目录里。
+  export MOUNT_ROOT="$root" SHOT_DIR="$dir/shots"
+  run_node "$dir/run.log" "$FE/scripts/verify-phone-list.mjs" ADMIN_PASSWORD="$PASS"
+  finish_round "B/phone" $?
+  unset MOUNT_ROOT SHOT_DIR
+}
+
+round_playlist_queue() {
+  say "round: playlist-queue (F 播放列表整单连播)"
+  local dir root
+  dir="$(round_dir playlist-queue)"; mkdir -p "$dir"
+  browser_round_preflight "F/playlist-queue" || return 1
+  # 装置自带：脚本在 FIXTURE_ROOT 里现录 webm + 写 NFO，并自建 /e2e 挂载与媒体库。
+  root="$RUNS/playlist-queue/fixture-$STAMP"
+  mkdir -p "$root"
+  begin_round "$dir" || { finish_round "F/playlist-queue" 1; return 1; }
+  export FIXTURE_ROOT="$root"
+  run_node "$dir/run.log" "$FE/scripts/verify-playlist-queue.mjs"
+  finish_round "F/playlist-queue" $?
+  unset FIXTURE_ROOT
+}
+
 # --------------------------------------------------------------------------- 入口
 
 WANT=("$@")
-[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage thumb dimensions scrape dashboard backup messenger webdav)
+[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage thumb dimensions scrape dashboard backup messenger webdav phone playlist-queue)
 
 for name in "${WANT[@]}"; do
   # 轮次名用连字符（preview-extra），函数名用下划线 —— 这里做一次映射

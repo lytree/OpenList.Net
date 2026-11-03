@@ -3393,8 +3393,13 @@ localStorage。`home_guest_access=false` 之后凡是「页面里登录、再用
 16/16 全绿（`bash frontend/scripts/run-regression.sh`，日志 `.e2e/regression-1101b.log`）。
 单测：后端 608 项（607 通过 / 1 跳过）、前端 vitest 252。
 
-手机端那轮不在编排器的默认清单里，单独跑：`verify-phone-list.mjs` 13/13 ——
+手机端那轮当时不在编排器的默认清单里，单独跑：`verify-phone-list.mjs` 13/13 ——
 其中「文件行更多菜单 7 项」正是 `package_download` 的哨兵，默认值改回 `true` 后仍是 7 项。
+
+> **已接入默认清单**：`phone` 与 `playlist-queue` 两轮已编进 `run-regression.sh`，
+> 全量轮次由 17 变 19（两轮排在末尾，不改变既有轮次顺序）。它们和既有轮次一样独立端口 / DB / 装置，
+> 但额外依赖 Microsoft Edge 与**已构建**的 `frontend/dist`；缺任一条件时编排器会在起后端之前
+> 打出明确报错并记该轮 FAIL，而不是静默跳过。
 
 ### 52.4 两个环境坑
 

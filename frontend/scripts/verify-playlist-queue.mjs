@@ -42,35 +42,63 @@ const browser = await chromium.launch({ channel: "msedge", headless: true })
  * 于是页面上根本没有 video 元素 —— 「自动连播」那条断言连事件都发不出去（表现为超时，
  * 而不是断言失败，很容易被误读成功能坏了）。这里用 canvas + MediaRecorder 现录一段
  * 1.2 秒的 webm，扫出来的条目就有可播放的源。
+ *
+ * MediaRecorder 偶发产出 **110 字节的空 webm**（只有 EBML 头、没有帧），正常是 1.5–6 KB。
+ * 空文件同样会触发上面的 onError，所以按字节数下界重录 —— 这只是装置生成的稳健性，
+ * 与断言/覆盖无关；成功路径只录一次，不附加任何等待。
  */
-async function recordTinyWebm() {
+const MIN_RECORDING_BYTES = 1024
+const RECORD_ATTEMPTS = 3
+
+/** 录一次（每次都开一个干净页面，避免上一次的编码器状态串味）。 */
+async function recordOnce() {
   const rec = await browser.newPage({ locale: "en-US" })
-  const b64 = await rec.evaluate(async () => {
-    const canvas = document.createElement("canvas")
-    canvas.width = 160
-    canvas.height = 120
-    const ctx = canvas.getContext("2d")
-    const chunks = []
-    const recorder = new MediaRecorder(canvas.captureStream(15), { mimeType: "video/webm;codecs=vp8" })
-    recorder.ondataavailable = (event) => chunks.push(event.data)
-    const stopped = new Promise((resolve) => (recorder.onstop = resolve))
-    recorder.start()
-    let tick = 0
-    const timer = setInterval(() => {
-      ctx.fillStyle = tick++ % 2 ? "#c0392b" : "#0a84ff"
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-    }, 60)
-    await new Promise((resolve) => setTimeout(resolve, 1200))
-    clearInterval(timer)
-    recorder.stop()
-    await stopped
-    const bytes = new Uint8Array(await new Blob(chunks, { type: "video/webm" }).arrayBuffer())
-    let binary = ""
-    for (const byte of bytes) binary += String.fromCharCode(byte)
-    return btoa(binary)
-  })
-  await rec.close()
-  return Buffer.from(b64, "base64")
+  try {
+    const b64 = await rec.evaluate(async () => {
+      const canvas = document.createElement("canvas")
+      canvas.width = 160
+      canvas.height = 120
+      const ctx = canvas.getContext("2d")
+      const chunks = []
+      const recorder = new MediaRecorder(canvas.captureStream(15), { mimeType: "video/webm;codecs=vp8" })
+      recorder.ondataavailable = (event) => chunks.push(event.data)
+      const stopped = new Promise((resolve) => (recorder.onstop = resolve))
+      recorder.start()
+      let tick = 0
+      const timer = setInterval(() => {
+        ctx.fillStyle = tick++ % 2 ? "#c0392b" : "#0a84ff"
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+      }, 60)
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      clearInterval(timer)
+      recorder.stop()
+      await stopped
+      const bytes = new Uint8Array(await new Blob(chunks, { type: "video/webm" }).arrayBuffer())
+      let binary = ""
+      for (const byte of bytes) binary += String.fromCharCode(byte)
+      return btoa(binary)
+    })
+    return Buffer.from(b64, "base64")
+  } finally {
+    await rec.close()
+  }
+}
+
+/** 现录 fixture 视频；产出不足阈值就重录，次数耗尽则明确报「录制失败」。 */
+async function recordTinyWebm() {
+  let last = Buffer.alloc(0)
+  for (let attempt = 1; attempt <= RECORD_ATTEMPTS; attempt++) {
+    last = await recordOnce()
+    if (last.length >= MIN_RECORDING_BYTES) {
+      if (attempt > 1) log(`recording retried: attempt ${attempt}, ${last.length} bytes`)
+      return last
+    }
+    log(`recording too small (${last.length} bytes), retry ${attempt}/${RECORD_ATTEMPTS}`)
+  }
+  throw new Error(
+    `fixture 录制失败：连续 ${RECORD_ATTEMPTS} 次产出 < ${MIN_RECORDING_BYTES} 字节的 webm` +
+      `（最后一次 ${last.length} 字节）—— 是 canvas+MediaRecorder 没录出帧，不是断言失败`,
+  )
 }
 
 // 文件名与 NFO 标题刻意不同：断言看的是 NFO 里的 title，能顺带证明「入库标题取自元数据」。
@@ -269,13 +297,34 @@ check(
 // ---------- 5.5 观看会话落库（§43） ----------
 // 会话是"看了多久"的事实来源：起播发一次、结束（换文件/播完/关播放器）收一次尾。
 // 这里只验链路打通：两条会话都写进去了、都能标出"看完"。
-const history = await api("get", "/media/watch/history?days=30&limit=12")
-const historyRows = history.data ?? []
+//
+// 收尾上报是即发即忘（见 utils/watchSession：失败只丢历史、不阻塞播放），所以「播完提示 /
+// 已看角标」出现时会话行可能还没落库。这里对同一个断言做**轮询**，等两条 completed 都到位
+// 或超时；超时后仍按原口径失败，只把原因标成「等待会话落库超时」，语义没有放宽。
+const HISTORY_WAIT_TIMEOUT_MS = 5000
+const HISTORY_WAIT_INTERVAL_MS = 300
+const HISTORY_EXPECTED_COMPLETED = 2
+
+let historyRows = []
+let historyTimedOut = false
+const historyDeadline = Date.now() + HISTORY_WAIT_TIMEOUT_MS
+while (true) {
+  const history = await api("get", "/media/watch/history?days=30&limit=12")
+  historyRows = history.data ?? []
+  if (historyRows.filter((row) => row.completed === true).length >= HISTORY_EXPECTED_COMPLETED) break
+  if (Date.now() >= historyDeadline) {
+    historyTimedOut = true
+    break
+  }
+  await new Promise((resolve) => setTimeout(resolve, HISTORY_WAIT_INTERVAL_MS))
+}
+
 check("观看历史 2 条", historyRows.length === 2, `got ${historyRows.length}`)
 check(
   "两条都标记为看完",
   historyRows.length === 2 && historyRows.every((row) => row.completed === true),
-  historyRows.map((row) => `${row.title}:${row.completed}`).join(" | "),
+  historyRows.map((row) => `${row.title}:${row.completed}`).join(" | ") +
+    (historyTimedOut ? `（等待会话落库超时 ${HISTORY_WAIT_TIMEOUT_MS}ms）` : ""),
 )
 
 const watchStats = await api("get", "/media/watch/stats?days=7")
