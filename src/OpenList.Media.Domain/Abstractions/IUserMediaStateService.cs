@@ -34,7 +34,8 @@ public interface IUserMediaStateService
     Task<Resp<PageResp<MediaItem>>> ListUnseenAsync(int page, int perPage, long? libraryId, User user, CancellationToken ct = default);
     /// <summary>
     /// 当前用户的口味画像（基于收藏/评分/观看记录统计）。
-    /// <paramref name="days"/> 限定"最近 N 天内动过状态"的条目，<c>null</c> 或 ≤0 表示全量。
+    /// <paramref name="days"/> 限定"最近 N 天内看过"的条目：有观看会话的以会话时间判定，
+    /// 没有任何会话的旧条目回退到状态行时间。<c>null</c> 或 ≤0 表示全量。
     /// </summary>
     Task<Resp<TasteProfile>> GetTasteProfileAsync(User user, int? days = null, CancellationToken ct = default);
 }

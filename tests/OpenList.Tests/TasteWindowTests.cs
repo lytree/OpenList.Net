@@ -79,6 +79,54 @@ public class TasteWindowTests
     public async Task InWindow_Is_Always_True_When_Unlimited()
     {
         await Assert.That(TasteWindow.InWindow(null, default, null)).IsTrue();
+        await Assert.That(TasteWindow.InWindow(true, false, null, default, null)).IsTrue();
+    }
+
+    /// <summary>有会话时完全按会话判定，状态行刚改过也不能把条目拉进窗口。</summary>
+    [Test]
+    public async Task InWindow_With_Sessions_Ignores_State_Row_Time()
+    {
+        var now = new DateTimeOffset(2026, 10, 28, 12, 0, 0, TimeSpan.Zero);
+        var cutoff = TasteWindow.Cutoff(30, now);
+
+        // 有会话但都在窗口外：即便状态行昨天刚改，也算"没有最近观看"
+        await Assert.That(TasteWindow.InWindow(true, false, now.AddDays(-1), now.AddDays(-1), cutoff)).IsFalse();
+        // 有会话在窗口内：即便状态行是两年前，也算
+        await Assert.That(TasteWindow.InWindow(true, true, now.AddDays(-700), now.AddDays(-700), cutoff)).IsTrue();
+        // 没有会话：回退到状态行时间
+        await Assert.That(TasteWindow.InWindow(false, false, now.AddDays(-1), now.AddDays(-1), cutoff)).IsTrue();
+    }
+
+    /// <summary>多次会话合并：窗口内时长累加，最近观看时间取 <c>EndedAt ?? LastAt</c> 的较大者。</summary>
+    [Test]
+    public async Task MergeSessions_Sums_InWindow_Seconds_And_Picks_Latest_Activity()
+    {
+        var started = new DateTimeOffset(2026, 10, 28, 12, 0, 0, TimeSpan.Zero);
+        var cutoff = started.AddDays(-30);
+        var sessions = new[]
+        {
+            Session(1, "s1", started.AddDays(-1), started.AddDays(-1).AddMinutes(5), 30, ended: true),
+            Session(1, "s2", started.AddDays(-3), started.AddDays(-3).AddMinutes(10), 50, ended: false),
+            Session(1, "s3", started.AddDays(-45), started.AddDays(-45).AddMinutes(5), 100, ended: true),
+        };
+
+        var merged = TasteWindow.MergeSessions(sessions, cutoff);
+
+        await Assert.That(merged.HasAny).IsTrue();
+        await Assert.That(merged.HasInWindow).IsTrue();
+        await Assert.That(merged.WatchedSeconds).IsEqualTo(80L);   // 只累加窗口内的 30 + 50
+        // 窗口内最近一次活动：第二段会话未结束，用最后心跳（-3d + 10min）；
+        // 第一段已结束，用 EndedAt（-1d + 5min）—— 后者更晚。
+        await Assert.That(merged.LastAt).IsEqualTo(started.AddDays(-1).AddMinutes(5));
+
+        var all = TasteWindow.MergeSessions(sessions, null);
+        await Assert.That(all.WatchedSeconds).IsEqualTo(180L);
+
+        var outOfWindow = TasteWindow.MergeSessions([sessions[2]], cutoff);
+        await Assert.That(outOfWindow.HasAny).IsTrue();
+        await Assert.That(outOfWindow.HasInWindow).IsFalse();
+        await Assert.That(outOfWindow.WatchedSeconds).IsEqualTo(0L);
+        await Assert.That(outOfWindow.LastAt).IsNull();
     }
 
     // ------------------------------------------------------------------
@@ -162,6 +210,124 @@ public class TasteWindowTests
         await Assert.That(p.Genres.Count).IsEqualTo(0);
     }
 
+    /// <summary>
+    /// 有会话时以会话为准：状态行时间既不把旧观看拉进窗口，也不把刚改收藏的旧会话拉进来。
+    /// 同时钉住"总时长用会话秒数而不是进度秒数"。
+    /// </summary>
+    [Test]
+    public async Task Taste_Profile_Uses_Watch_Sessions_For_Window()
+    {
+        using var ctx = BuildContext();
+        var now = DateTimeOffset.UtcNow;
+
+        var a = Item("A", "Comedy", now);
+        var b = Item("B", "Drama", now);
+        var c = Item("C", "Drama", now);
+        ctx.MediaItems.AddRange(a, b, c);
+        await ctx.SaveChangesAsync();
+
+        ctx.UserMediaStates.AddRange(
+            // A：状态行 40 天前，但 2 天前真的看过 → 计入窗口
+            new UserMediaState
+            {
+                UserId = AdminUser.Id, ItemId = a.Id, Watched = true, ProgressSeconds = 50,
+                LastPlayedAt = now.AddDays(-40), UpdatedAt = now.AddDays(-40),
+            },
+            // B：状态行昨天刚改（取消收藏），但最近一次会话在 45 天前 → 不计入
+            new UserMediaState
+            {
+                UserId = AdminUser.Id, ItemId = b.Id, Favorite = true, UpdatedAt = now.AddDays(-1),
+            },
+            // C：没有会话（旧数据）→ 回退到状态行时间，40 天前同样不计入
+            new UserMediaState
+            {
+                UserId = AdminUser.Id, ItemId = c.Id, Favorite = true, UpdatedAt = now.AddDays(-40),
+            });
+        ctx.MediaWatchSessions.AddRange(
+            Session(a.Id, "t-a", now.AddDays(-2), now.AddDays(-2), 60),
+            Session(b.Id, "t-b", now.AddDays(-45), now.AddDays(-45), 120));
+        await ctx.SaveChangesAsync();
+
+        var svc = new UserMediaStateService(ctx, new FakeLibraryService());
+
+        var recent = (await svc.GetTasteProfileAsync(AdminUser, days: 30)).Data!;
+        await Assert.That(recent.WindowDays).IsEqualTo(30);
+        await Assert.That(recent.FavoriteCount).IsEqualTo(0);   // B 的收藏不算"最近看过"
+        await Assert.That(recent.WatchedCount).IsEqualTo(1);    // A
+        await Assert.That(recent.TotalWatchSeconds).IsEqualTo(60L); // 会话秒数，不是进度 50
+        await Assert.That(recent.Genres.Count).IsEqualTo(1);
+        await Assert.That(recent.Genres[0].Genre).IsEqualTo("Comedy");
+        await Assert.That(recent.Genres[0].Weight).IsEqualTo(1);
+
+        var all = (await svc.GetTasteProfileAsync(AdminUser)).Data!;
+        await Assert.That(all.FavoriteCount).IsEqualTo(2);      // B + C
+        await Assert.That(all.WatchedCount).IsEqualTo(1);
+        await Assert.That(all.TotalWatchSeconds).IsEqualTo(180L); // A 60 + B 120
+        await Assert.That(all.Genres[0].Genre).IsEqualTo("Drama");
+        await Assert.That(all.Genres[0].Weight).IsEqualTo(4);   // B / C 收藏各 +2
+    }
+
+    /// <summary>同一条目多次观看：条目只计一次（计数/权重不叠加），时长按窗口内会话累加。</summary>
+    [Test]
+    public async Task Taste_Profile_Sums_Multiple_Sessions_For_The_Same_Item()
+    {
+        using var ctx = BuildContext();
+        var now = DateTimeOffset.UtcNow;
+        var item = Item("M", "Action", now);
+        ctx.MediaItems.Add(item);
+        await ctx.SaveChangesAsync();
+
+        ctx.UserMediaStates.Add(new UserMediaState
+        {
+            UserId = AdminUser.Id, ItemId = item.Id, Watched = true, ProgressSeconds = 100,
+            LastPlayedAt = now.AddDays(-1), UpdatedAt = now.AddDays(-1),
+        });
+        ctx.MediaWatchSessions.AddRange(
+            Session(item.Id, "t-1", now.AddDays(-1), now.AddDays(-1), 30),
+            Session(item.Id, "t-2", now.AddDays(-5), now.AddDays(-5), 50),
+            Session(item.Id, "t-3", now.AddDays(-50), now.AddDays(-50), 100));
+        await ctx.SaveChangesAsync();
+
+        var svc = new UserMediaStateService(ctx, new FakeLibraryService());
+
+        var recent = (await svc.GetTasteProfileAsync(AdminUser, days: 30)).Data!;
+        await Assert.That(recent.WatchedCount).IsEqualTo(1);       // 多次观看仍是"一个条目"
+        await Assert.That(recent.TotalWatchSeconds).IsEqualTo(80L); // 30 + 50，窗口外的 100 不算
+        await Assert.That(recent.Genres.Count).IsEqualTo(1);
+        await Assert.That(recent.Genres[0].Weight).IsEqualTo(1);   // 权重不按观看次数叠加
+
+        var all = (await svc.GetTasteProfileAsync(AdminUser)).Data!;
+        await Assert.That(all.TotalWatchSeconds).IsEqualTo(180L);
+    }
+
+    /// <summary>没有会话的旧条目回退到状态行时间与进度秒数，旧库不会直接变空。</summary>
+    [Test]
+    public async Task Taste_Profile_Falls_Back_To_State_Row_Without_Sessions()
+    {
+        using var ctx = BuildContext();
+        var now = DateTimeOffset.UtcNow;
+        var item = Item("L", "Drama", now);
+        ctx.MediaItems.Add(item);
+        await ctx.SaveChangesAsync();
+
+        ctx.UserMediaStates.Add(new UserMediaState
+        {
+            UserId = AdminUser.Id, ItemId = item.Id, Watched = true, ProgressSeconds = 60,
+            LastPlayedAt = now.AddDays(-2), UpdatedAt = now.AddDays(-2),
+        });
+        await ctx.SaveChangesAsync();
+
+        var svc = new UserMediaStateService(ctx, new FakeLibraryService());
+
+        var recent = (await svc.GetTasteProfileAsync(AdminUser, days: 30)).Data!;
+        await Assert.That(recent.WatchedCount).IsEqualTo(1);
+        await Assert.That(recent.TotalWatchSeconds).IsEqualTo(60L);
+
+        var narrow = (await svc.GetTasteProfileAsync(AdminUser, days: 1)).Data!;
+        await Assert.That(narrow.WatchedCount).IsEqualTo(0);
+        await Assert.That(narrow.TotalWatchSeconds).IsEqualTo(0L);
+    }
+
     // ------------------------------------------------------------------
     // 装置
     // ------------------------------------------------------------------
@@ -178,6 +344,24 @@ public class TasteWindowTests
         };
         item.SetGenres([genre]);
         return item;
+    }
+
+    /// <summary>构造一段观看会话；<paramref name="ended"/> 为 true 时把 <c>EndedAt</c> 写成最后心跳时间。</summary>
+    private static MediaWatchSession Session(
+        long itemId, string token, DateTimeOffset startedAt, DateTimeOffset lastAt,
+        long watchedSeconds, bool ended = true)
+    {
+        var session = new MediaWatchSession
+        {
+            UserId = AdminUser.Id,
+            ItemId = itemId,
+            Token = token,
+            StartedAt = startedAt,
+            LastAt = lastAt,
+            WatchedSeconds = watchedSeconds,
+        };
+        if (ended) session.EndedAt = lastAt;
+        return session;
     }
 
     private static OpenListDbContext BuildContext()

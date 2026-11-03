@@ -453,10 +453,10 @@ export const mediaStats = (libraryId?: number): Promise<Resp<MediaStats>> =>
   }) as Promise<Resp<MediaStats>>
 
 /**
- * 口味画像。`days` 是「最近 N 天内动过状态」的窗口，缺省/0 表示全量。
+ * 口味画像。`days` 是「最近 N 天内看过」的窗口，缺省/0 表示全量。
  *
- * 口径不是「最近 N 天标记为看过」——状态行没有事件时间，只有整行的更新时间，
- * 见后端 `TasteWindow`。
+ * 有观看会话的条目以 `x_media_watch_sessions` 为准；完全没有会话的旧条目
+ * 才回退到状态行时间（`LastPlayedAt`/`UpdatedAt`），见后端 `TasteWindow`。
  */
 export const mediaTaste = (days?: number): Promise<Resp<TasteProfile>> =>
   http.get<TasteProfile>("/media/taste", {

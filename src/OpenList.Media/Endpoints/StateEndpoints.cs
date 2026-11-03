@@ -37,7 +37,8 @@ internal static class StateEndpoints
             return Results.Ok(await states.ListInProgressAsync(page, perPage, principal.ToUser()));
         });
 
-        // GET /api/media/taste?days= — 口味画像（days 为"最近 N 天内动过"的窗口，缺省=全量）
+        // GET /api/media/taste?days= — 口味画像（days 为"最近 N 天内看过"的窗口，缺省=全量；
+        // 以观看会话为准，无会话的旧条目回退到状态行时间）
         g.MapGet("/taste", async (HttpContext ctx, ClaimsPrincipal principal, IUserMediaStateService states) =>
             Results.Ok(await states.GetTasteProfileAsync(
                 principal.ToUser(), MediaQuery.IntOrNull(ctx.Request.Query, "days"))));

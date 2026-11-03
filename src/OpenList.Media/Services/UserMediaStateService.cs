@@ -164,19 +164,40 @@ public sealed class UserMediaStateService : IUserMediaStateService
                           where s.UserId == user.Id
                           select new { State = s, Item = i }).ToListAsync(ct);
 
-        // 窗口过滤在内存里做：行数上限是"这个用户动过的条目数"，与库大小同阶，
-        // 而判定要取 LastPlayedAt/UpdatedAt 的较晚者，SQL 侧翻译成 CASE 反而更难读。
+        // 会话表是"真实看过"的唯一来源。SQLite 无法下推 DateTimeOffset 的比较，
+        // 所以整批取回后在内存里按条目合并；行数上限是"这个用户自己的会话"。
+        var sessions = await _db.MediaWatchSessions.AsNoTracking()
+            .Where(s => s.UserId == user.Id)
+            .ToListAsync(ct);
+
         var cutoff = TasteWindow.Cutoff(days, _time.GetUtcNow());
+        var sessionWindows = sessions
+            .GroupBy(s => s.ItemId)
+            .ToDictionary(g => g.Key, g => TasteWindow.MergeSessions(g, cutoff));
+
+        // 有会话的条目按会话判定窗口；没有任何会话的旧条目回退到状态行时间，
+        // 免得接通会话表之后老库的口味页直接变空。
         var visible = rows
             .Where(r => _libraries.CanSeeItem(user, r.Item))
-            .Where(r => TasteWindow.InWindow(r.State.LastPlayedAt, r.State.UpdatedAt, cutoff))
+            .Where(r =>
+            {
+                var w = sessionWindows.TryGetValue(r.Item.Id, out var found) ? found : default;
+                return TasteWindow.InWindow(
+                    w.HasAny, w.HasInWindow, r.State.LastPlayedAt, r.State.UpdatedAt, cutoff);
+            })
             .ToList();
+
         var profile = new TasteProfile
         {
             WindowDays = TasteWindow.Normalize(days),
             FavoriteCount = visible.Count(r => r.State.Favorite),
             WatchedCount = visible.Count(r => r.State.Watched),
-            TotalWatchSeconds = visible.Sum(r => r.State.ProgressSeconds),
+            // 时长也切到会话：窗口内所有会话累加；没有会话的旧条目退回进度秒数。
+            // 两者按条目互斥，不会重复计。
+            TotalWatchSeconds = visible.Sum(r =>
+                sessionWindows.TryGetValue(r.Item.Id, out var w) && w.HasAny
+                    ? w.WatchedSeconds
+                    : r.State.ProgressSeconds),
         };
 
         // 类型权重：收藏 +2、看过 +1、高分（≥8）+2。
