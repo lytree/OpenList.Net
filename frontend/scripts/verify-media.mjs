@@ -158,7 +158,61 @@ check(
 const stripCard = await page.locator(".ol-media-strip .ol-media-card", { hasText: "The Grand Budapest Hotel" }).count()
 check("继续观看条出现该条目", stripCard === 1, `strip=${stripCard}`)
 
+// ---------- 6.5 首页「查看全部 →」下钻 ----------
+// 三个 section（继续观看 / 最近入库 / 最近收藏）只在**有数据**时渲染，并各带一条
+// 「View all →」，点击预置库页筛选：state=in-progress / sort=created / state=favorite。
+const sectionByTitle = (title) => page.locator(".ol-media-section", { hasText: title })
+const viewAllButtons = page.locator(".ol-media-section-head .el-button")
+const viewAllCount = await viewAllButtons.count()
+const viewAllTexts = (await viewAllButtons.allTextContents()).map((s) => s.trim())
+check("三个有数据的 section 各带「查看全部」", viewAllCount === 3, `links=${viewAllCount}`)
+check("「查看全部」文案是 View all →", viewAllTexts.length === 3 && viewAllTexts.every((s) => s === "View all →"), JSON.stringify(viewAllTexts))
+
+const openViewAll = async (title) => {
+  await sectionByTitle(title).locator(".ol-media-section-head .el-button").click()
+  await page.waitForTimeout(1400)
+}
+
+// 继续观看 → #/media/library?state=in-progress
+await openViewAll("Continue watching")
+check("「继续观看」下钻落到媒体库页", /#\/media\/library/.test(page.url()), page.url())
+check("「继续观看」下钻 URL 带 state=in-progress", /state=in-progress/.test(page.url()), page.url())
+const inProgressCards = await page.locator(".ol-media-grid .ol-media-card").count()
+check("「继续观看」筛选后仍列出条目", inProgressCards === 1, `cards=${inProgressCards}`)
+
+// 登录用户多一行「Status: All / Favorite / Continue watching」，并高亮当前筛选
+const stateRow = page.locator(".ol-media-facet-row", { hasText: "Status" })
+check("登录用户可见「状态」筛选行", await stateRow.isVisible().catch(() => false), "")
+const activeStateChips = (await stateRow.locator(".ol-media-chip-tag.is-on").allTextContents()).map((s) => s.trim())
+check("「状态」行高亮当前筛选（继续观看）", activeStateChips.includes("Continue watching"), JSON.stringify(activeStateChips))
+
+await stateRow.locator(".ol-media-chip-tag", { hasText: "All" }).first().click()
+await page.waitForTimeout(1200)
+check("清除状态回「全部」时 URL 去掉 state", !/state=/.test(page.url()), page.url())
+const allCards = await page.locator(".ol-media-grid .ol-media-card").count()
+check("回「全部」后列出全部条目", allCards === 2, `cards=${allCards}`)
+const activeAllChips = (await stateRow.locator(".ol-media-chip-tag.is-on").allTextContents()).map((s) => s.trim())
+check("「状态」行高亮回到「全部」", activeAllChips.length === 1 && activeAllChips[0] === "All", JSON.stringify(activeAllChips))
+
+// 最近收藏 → #/media/library?state=favorite
+await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.waitForTimeout(1500)
+await openViewAll("Recently favorited")
+check("「最近收藏」下钻 URL 带 state=favorite", /state=favorite/.test(page.url()), page.url())
+const favoriteCards = await page.locator(".ol-media-grid .ol-media-card").count()
+check("「最近收藏」筛选后只列出收藏条目", favoriteCards === 1, `cards=${favoriteCards}`)
+
+// 最近入库 → #/media/library?sort=created
+await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.waitForTimeout(1500)
+await openViewAll("Recently added")
+check("「最近入库」下钻 URL 带 sort=created", /sort=created/.test(page.url()), page.url())
+const recentCards = await page.locator(".ol-media-grid .ol-media-card").count()
+check("「最近入库」下钻列出全部条目", recentCards === 2, `cards=${recentCards}`)
+
 // ---------- 7. 标记看完 ----------
+await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.waitForTimeout(1500)
 await page.locator(".ol-media-strip .ol-media-card", { hasText: "The Grand Budapest Hotel" }).first().click()
 await page.waitForTimeout(1200)
 await page.locator("button", { hasText: "Mark watched" }).first().click()
@@ -167,6 +221,21 @@ const stateAfterWatched = await apiGet("/media/items/1/state")
 check("看过标记落库且进度清零", stateAfterWatched.data?.watched === true && (stateAfterWatched.data?.progress_seconds ?? 0) === 0,
   JSON.stringify({ watched: stateAfterWatched.data?.watched, p: stateAfterWatched.data?.progress_seconds }))
 await page.screenshot({ path: `${SHOT}/media-detail.png` })
+
+// ---------- 8. 空 section 不渲染「查看全部」 ----------
+// 看完即 progress=0，继续观看段空掉：整段不渲染（连标题都没有），自然也不该有下钻链接，
+// 剩下两个有数据的段仍是 2 条链接。
+await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.waitForTimeout(1500)
+const titlesAfterWatched = (await page.locator(".ol-media-section-title").allTextContents()).map((s) => s.trim())
+check("看完后「继续观看」段消失", !titlesAfterWatched.includes("Continue watching"), JSON.stringify(titlesAfterWatched))
+const viewAllAfterWatched = await page.locator(".ol-media-section-head .el-button").count()
+const emptySectionCount = await sectionByTitle("Continue watching").count()
+check(
+  "空 section 不出「查看全部」（只剩最近入库/最近收藏）",
+  emptySectionCount === 0 && viewAllAfterWatched === 2,
+  `sections=${emptySectionCount} links=${viewAllAfterWatched}`,
+)
 
 // ---------- 汇总 ----------
 check("全程无控制台错误", errors.length === 0, errors.slice(0, 3).join(" | "))
