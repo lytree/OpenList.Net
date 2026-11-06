@@ -108,14 +108,15 @@ public sealed class MediaItemQuery
     [JsonPropertyName("series_id")]
     public long? SeriesId { get; set; }
     /// <summary>
-    /// 排序字段：<c>title</c>（默认）/ <c>year</c> / <c>rating</c> / <c>created</c> / <c>updated</c>。
+    /// 排序字段：<c>title</c>（默认）/ <c>year</c> / <c>rating</c> / <c>created</c> / <c>updated</c> /
+    /// <c>favorited</c>（按当前用户收藏时间；未收藏的排后面）。
     /// 认不出的值按 <c>title</c> 处理。
     /// </summary>
     [JsonPropertyName("sort")]
     public string? Sort { get; set; }
     /// <summary>
-    /// 是否倒序。未指定时：<c>year</c> / <c>rating</c> / <c>created</c> / <c>updated</c> 倒序（最新最高在前），
-    /// <c>title</c> 升序。
+    /// 是否倒序。未指定时：<c>year</c> / <c>rating</c> / <c>created</c> / <c>updated</c> / <c>favorited</c>
+    /// 倒序（最新最高在前），<c>title</c> 升序。
     /// </summary>
     [JsonPropertyName("desc")]
     public bool? Desc { get; set; }

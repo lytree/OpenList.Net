@@ -10,6 +10,7 @@ import {
   mediaUpdateState,
   type MediaFacets,
   type MediaItem,
+  type MediaItemQuery,
   type MediaLibrary,
 } from "~/api/media"
 import MediaGrid from "~/components/MediaGrid"
@@ -38,7 +39,8 @@ import { t } from "~/i18n"
 
 const PAGE_SIZE = 30
 
-type MediaSort = "created" | "updated" | "title" | "rating" | "year"
+/** 排序键直接复用 API 查询类型，避免两处联合类型漂移（后端新增排序键时只改 api/media.ts）。 */
+type MediaSort = NonNullable<MediaItemQuery["sort"]>
 
 /**
  * 个人状态筛选（value 对应后端 `state` 参数；空串 = 不筛）。
@@ -56,6 +58,8 @@ const STATES: { value: string; labelKey: string }[] = [
 /** 排序选项（value 对应后端 sort 参数）。 */
 const SORTS: { value: MediaSort; labelKey: string; desc: boolean }[] = [
   { value: "created", labelKey: "media.sort_added", desc: true },
+  // 按当前用户收藏时间倒序：与首页「最近收藏」同序（未收藏的不参与，筛选收藏时才有意义）
+  { value: "favorited", labelKey: "media.sort_favorited", desc: true },
   { value: "rating", labelKey: "media.sort_rating", desc: true },
   { value: "year", labelKey: "media.sort_year", desc: true },
   { value: "title", labelKey: "media.sort_title", desc: false },
@@ -75,12 +79,17 @@ export default defineComponent({
     const libraryId = ref(0) // 0 = 全部库
     const keyword = ref("")
     /** 初始排序/状态可来自 URL（媒体首页「查看全部」预置筛选），非法值一律退回默认。 */
-    const urlSort = String(route.query.sort ?? "")
-    const sort = ref<MediaSort>(
-      SORTS.some((item) => item.value === urlSort) ? (urlSort as MediaSort) : "created",
-    )
     const urlState = String(route.query.state ?? "")
     const state = ref(STATES.some((item) => item.value === urlState) ? urlState : "")
+    const urlSort = String(route.query.sort ?? "")
+    // 收藏筛选的默认排序是「按收藏时间」，与首页「最近收藏」同序；URL 显式给了 sort 则以 URL 为准
+    const sort = ref<MediaSort>(
+      SORTS.some((item) => item.value === urlSort)
+        ? (urlSort as MediaSort)
+        : state.value === "favorite"
+          ? "favorited"
+          : "created",
+    )
     const page = ref(1)
     const items = ref<MediaItem[]>([])
     const total = ref(0)
@@ -193,8 +202,20 @@ export default defineComponent({
       page.value = 1
       void loadItems()
     })
-    /** 状态筛选与库无关（收藏/在追跨库），切换库时保留，不做清空。 */
+    /**
+     * 状态筛选与库无关（收藏/在追跨库），切换库时保留，不做清空。
+     * 收藏筛选默认按收藏时间排序（与首页「最近收藏」同序）；离开收藏时退回默认入库排序。
+     * 排序真的变了就交给 `sort` 的 watcher 统一处理，避免一次切换发两轮请求。
+     */
     watch(state, () => {
+      const wanted: MediaSort =
+        state.value === "favorite"
+          ? sort.value === "created" ? "favorited" : sort.value
+          : sort.value === "favorited" ? "created" : sort.value
+      if (wanted !== sort.value) {
+        sort.value = wanted
+        return
+      }
       page.value = 1
       syncQuery()
       void loadItems()

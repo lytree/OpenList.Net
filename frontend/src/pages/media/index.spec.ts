@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import type { MediaItemQuery } from "~/api/media"
+import { setToken } from "~/api/client"
 import { setLocale } from "~/i18n"
 import MediaLibraryPage from "~/pages/media/index"
 
@@ -48,13 +49,14 @@ vi.mock("~/api/media", async (importOriginal) => {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 const firstQuery = () => listCalls.value[0] as MediaItemQuery
+const lastQuery = () => listCalls.value[listCalls.value.length - 1] as MediaItemQuery
 
 async function mountLibrary(query: Record<string, string>) {
   routeQuery.value = query
   const wrapper = mount(MediaLibraryPage)
   await flush()
   await flush()
-  wrapper.unmount()
+  return wrapper
 }
 
 describe("媒体库页 接收首页预置筛选", () => {
@@ -69,9 +71,40 @@ describe("媒体库页 接收首页预置筛选", () => {
     expect(firstQuery()).toMatchObject({ state: "favorite", page: 1 })
   })
 
-  it("?state=in-progress 透传给 /media/items", async () => {
+  it("?state=favorite 未带 sort 时默认按收藏时间（与首页「最近收藏」同序）", async () => {
+    await mountLibrary({ state: "favorite" })
+    expect(firstQuery()).toMatchObject({ state: "favorite", sort: "favorited", desc: true })
+  })
+
+  it("URL 显式给的 sort 优先于收藏筛选的默认排序", async () => {
+    await mountLibrary({ state: "favorite", sort: "created" })
+    expect(firstQuery()).toMatchObject({ state: "favorite", sort: "created" })
+  })
+
+  it("?state=in-progress 透传给 /media/items，排序仍是默认入库时间", async () => {
     await mountLibrary({ state: "in-progress" })
-    expect(firstQuery()).toMatchObject({ state: "in-progress" })
+    expect(firstQuery()).toMatchObject({ state: "in-progress", sort: "created" })
+  })
+
+  it("勾选「收藏」状态时排序切到收藏时间，取消后回到入库时间", async () => {
+    // 登录判定读的是 `client.ts` 里模块级缓存的 token，必须走 setToken 而不是 localStorage
+    setToken("test-token")
+    try {
+      const wrapper = await mountLibrary({})
+      // 点内层 `.el-tag`：test-utils 默认把 Transition 换成 stub，`ol-media-chip-tag`
+      // 这个 class 落在 stub 上，而 ElTag 的 click 事件由内层 span 发出
+      const chips = wrapper.findAll(".ol-media-facet-row .el-tag")
+      // 状态行：全部 / 收藏 / 继续观看
+      await chips[1]!.trigger("click")
+      await flush()
+      expect(lastQuery()).toMatchObject({ state: "favorite", sort: "favorited" })
+
+      await chips[0]!.trigger("click")
+      await flush()
+      expect(lastQuery()).toMatchObject({ state: undefined, sort: "created" })
+    } finally {
+      setToken(null)
+    }
   })
 
   it("?sort=rating 恢复排序并带 descending", async () => {

@@ -1068,7 +1068,7 @@ node scripts/verify-ops.mjs     # 后跑（会重建装置并改数据）
 |---|---|
 | 海报网格不能逐条 `fs/get` 取签名链接（一页 30 次）也无法自带 Authorization 头（`<img>` 的限制） | ① 专用图片端点：`GetItemAsync` 的 BasePath 过滤兜底可见性，VFS 路径整读（8MB 上限）、TMDB 外链 302；② JWT 回退读 `?access_token=`（header 优先，标准 ASP.NET Core 模式） |
 | 跨库列表 `library_id=0` 直接 404 | 先解析用户可见库集合，再按 id 集合过滤 |
-| 排序值口径 | 后端 `ApplySort` 认 `created/updated/title/rating/year`，不是想当然的 `added_at` |
+| 排序值口径 | 后端 `ApplySort` 认 `created/updated/title/rating/year/favorited`，不是想当然的 `added_at`（`favorited` 为后加：按当前用户收藏状态行的 `UpdatedAt`，未收藏/无状态行的排后面，见 §48.6） |
 
 ### 27.3 关键决策
 
@@ -3026,6 +3026,14 @@ e2e 脚本同步：`verify-media.mjs` 20 → 23 项（浏览页断言改走 `#/m
    最近收藏 → `?state=favorite`、最近入库 → `?sort=created`。库页新增「状态」筛选行
    （全部 / 收藏 / 在追，值透传给 `GET /media/items?state=`），`state`/`sort` 一并读写 URL
    （`sort` 默认 `created` 不回写、非法值静默退回默认），刷新与分享都保持当前视图；空 section 不渲染该链接。
+   排序口径也一并对齐了：`GET /media/items` 新增 `sort=favorited`，按当前用户收藏状态行的 `UpdatedAt`
+   排序 —— 这一列在每次状态写入时都会刷新（不止收藏动作，进度上报也会），而首页 `recently_favorited`
+   用的正是同一列，所以"同源对齐"是成立的（没有单独的 `favorited_at` 列，也不打算为此加迁移）。
+   **没有状态行 / 未收藏**的条目恒排在已收藏之后，尾部组按入库时间倒序（升/降序都一样，避免取消收藏后条目乱跳）。
+   它与 `state` 正交：`state=favorite` 时列表全是收藏条目，`state=played` 等组合则只影响"哪些条目入选"。
+   库页在 `?state=favorite` 且 URL 未给 `sort` 时默认用 `favorited`（勾/取消「收藏」筛选也会自动切换/回退），
+   因此从首页「最近收藏」点进来的列表与首页那一段同序。测试见 `tests/OpenList.Tests/MediaFavoriteSortTests.cs`
+   （含一条直接比对首页 `recently_favorited` 顺序的用例）与 `frontend/src/pages/media/index.spec.ts`。
 2. **顶部导航的「媒体」仍指向 `/media`**（首页），媒体库变成二级入口；如果产品上希望
    点「媒体」直达库列表，把 `BasicLayout` 的 `to="/media"` 改成 `/media/library` 即可，
    但那样「首页」就又少一个入口了。

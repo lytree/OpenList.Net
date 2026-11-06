@@ -106,6 +106,7 @@
   "sort_year": "年份",
   "sort_rating": "评分",
   "sort_added": "入库时间",
+  "sort_favorited": "收藏时间",
   "order_asc": "升序",
   "order_desc": "降序",
   "reset_filters": "重置",

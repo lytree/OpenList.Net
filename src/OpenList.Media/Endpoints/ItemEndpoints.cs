@@ -23,6 +23,7 @@ internal static class ItemEndpoints
         //                   &genre=&year_from=&year_to=&rating_min=&person_id=
         //                   &studio_id=&series_id=&sort=&desc=
         //                   &state=fresh|played|flagged|later|favorite|in-progress
+        // sort=favorited 按当前用户收藏时间倒序（未收藏/无状态行的排后面）
         g.MapGet("/items", async (HttpContext ctx, ClaimsPrincipal principal, IMediaLibraryService libraries) =>
         {
             var q = ctx.Request.Query;

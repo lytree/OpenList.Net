@@ -106,6 +106,7 @@
   "sort_year": "Year",
   "sort_rating": "Rating",
   "sort_added": "Added",
+  "sort_favorited": "Favorited",
   "order_asc": "Asc",
   "order_desc": "Desc",
   "reset_filters": "Reset",

@@ -186,7 +186,13 @@ public sealed class MediaLibraryService : IMediaLibraryService
             visible = visible.Where(i => i.HasGenre(genre));
         }
 
-        var ordered = ApplySort(visible, query.Sort, query.Desc);
+        // 「按收藏时间」排序需要用户状态行的时间戳：只有该排序键才多查一次状态表。
+        // 未收藏 / 没有状态行的条目不在字典里，由 ApplySort 统一排到已收藏之后。
+        var favorited = (query.Sort ?? "").Trim().ToLowerInvariant() == "favorited"
+            ? await LoadFavoriteTimesAsync(user.Id, ct)
+            : NoFavoriteTimes;
+
+        var ordered = ApplySort(visible, query.Sort, query.Desc, favorited);
 
         var page = Math.Max(1, query.Page);
         var perPage = Math.Clamp(query.PerPage, 1, 200);
@@ -195,14 +201,35 @@ public sealed class MediaLibraryService : IMediaLibraryService
         return Resp<PageResp<MediaItem>>.Ok(new PageResp<MediaItem> { Content = slice, Total = all.Count });
     }
 
+    /// <summary>没有收藏状态行时的空时间表（<c>sort=favorited</c> 之外的排序都复用它）。</summary>
+    private static readonly Dictionary<long, DateTimeOffset> NoFavoriteTimes = [];
+
     /// <summary>
-    /// 按请求的字段排序。认不出的字段按标题升序。<c>year</c>/<c>rating</c>/<c>created</c>/<c>updated</c>
-    /// 未显式指定方向时默认倒序（年份最新的、评分最高的、最近入库的都在前），标题默认升序。
+    /// 取当前用户的全部收藏时间（状态行 <c>UpdatedAt</c>）。
+    /// 只查 <c>Favorite = true</c> 的行：没有状态行或未收藏的条目查不到，排序时归入"尾部组"。
+    /// 不按待排条目 id 过滤 —— 收藏量天然有限，而一个超大媒体库的 id 集合会撑爆 SQL 参数上限。
     /// </summary>
-    private static IEnumerable<MediaItem> ApplySort(IEnumerable<MediaItem> items, string? sort, bool? desc)
+    private async Task<Dictionary<long, DateTimeOffset>> LoadFavoriteTimesAsync(long userId, CancellationToken ct)
+    {
+        var rows = await _db.UserMediaStates.AsNoTracking()
+            .Where(s => s.UserId == userId && s.Favorite)
+            .Select(s => new { s.ItemId, s.UpdatedAt })
+            .ToListAsync(ct);
+        return rows.ToDictionary(r => r.ItemId, r => r.UpdatedAt);
+    }
+
+    /// <summary>
+    /// 按请求的字段排序。认不出的字段按标题升序。<c>year</c>/<c>rating</c>/<c>created</c>/<c>updated</c>/<c>favorited</c>
+    /// 未显式指定方向时默认倒序（年份最新的、评分最高的、最近入库的、最近收藏的都在前），标题默认升序。
+    /// <c>favorited</c> 用 <paramref name="favoriteTimes"/> 里的收藏时间，缺项（未收藏 / 无状态行）
+    /// 恒排在已收藏之后，尾部组按入库时间倒序 —— 与首页「最近入库」同序，降/升序都一样。
+    /// </summary>
+    private static IEnumerable<MediaItem> ApplySort(
+        IEnumerable<MediaItem> items, string? sort, bool? desc,
+        IReadOnlyDictionary<long, DateTimeOffset> favoriteTimes)
     {
         var key = (sort ?? "title").Trim().ToLowerInvariant();
-        var descOrder = desc ?? key is "year" or "rating" or "created" or "updated";
+        var descOrder = desc ?? key is "year" or "rating" or "created" or "updated" or "favorited";
         return key switch
         {
             "year" => descOrder
@@ -217,11 +244,29 @@ public sealed class MediaLibraryService : IMediaLibraryService
             "updated" => descOrder
                 ? items.OrderByDescending(i => i.UpdatedAt).ThenBy(i => i.Title)
                 : items.OrderBy(i => i.UpdatedAt).ThenBy(i => i.Title),
+            "favorited" => SortByFavoriteTime(items, favoriteTimes, descOrder),
             "title" => descOrder
                 ? items.OrderByDescending(i => i.Title, StringComparer.CurrentCulture)
                 : items.OrderBy(i => i.Title, StringComparer.CurrentCulture),
             _ => items.OrderBy(i => i.Title, StringComparer.CurrentCulture),
         };
+    }
+
+    /// <summary>
+    /// <c>sort=favorited</c>：已收藏的按收藏时间（<see cref="UserMediaState.UpdatedAt"/>）排在前，
+    /// 未收藏 / 没有状态行的恒排在后面。尾部组与降/升序无关，一律按入库时间倒序，避免
+    /// 用户取消收藏后条目在列表里乱跳。
+    /// </summary>
+    private static IEnumerable<MediaItem> SortByFavoriteTime(
+        IEnumerable<MediaItem> items, IReadOnlyDictionary<long, DateTimeOffset> favoriteTimes, bool desc)
+    {
+        var grouped = items.OrderBy(i => favoriteTimes.ContainsKey(i.Id) ? 0 : 1);
+        var ordered = desc
+            ? grouped.ThenByDescending(i => favoriteTimes.GetValueOrDefault(i.Id))
+            : grouped.ThenBy(i => favoriteTimes.GetValueOrDefault(i.Id));
+        return ordered
+            .ThenByDescending(i => i.CreatedAt)
+            .ThenBy(i => i.Title, StringComparer.CurrentCulture);
     }
 
     /// <inheritdoc />

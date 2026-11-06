@@ -122,8 +122,11 @@ export interface MediaItemQuery {
   person_id?: number
   studio_id?: number
   series_id?: number
-  /** created（默认，最近入库）/ title / rating / year / updated —— 对齐后端 ApplySort。 */
-  sort?: "created" | "updated" | "title" | "rating" | "year"
+  /**
+   * created（默认，最近入库）/ title / rating / year / updated /
+   * favorited（按当前用户收藏时间，未收藏的排后面）—— 对齐后端 ApplySort。
+   */
+  sort?: "created" | "updated" | "title" | "rating" | "year" | "favorited"
   desc?: boolean
   /** fresh / played / flagged / later / favorite / in-progress。 */
   state?: string
