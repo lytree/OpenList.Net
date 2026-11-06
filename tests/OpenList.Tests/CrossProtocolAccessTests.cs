@@ -27,31 +27,31 @@ public class CrossProtocolAccessTests
         return (factory, client);
     }
 
-    private static async Task<string> LoginAsync(HttpClient client, string username, string password)
+    private static async Task<string> LoginAsync(HttpClient client, string username, string password, CancellationToken ct = default)
     {
-        var resp = await client.PostAsync("/api/auth/login", JsonContent.Create(new { username, password }));
+        var resp = await client.PostAsync("/api/auth/login", JsonContent.Create(new { username, password }), ct);
         var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
         return json!.RootElement.GetProperty("data").GetProperty("token").GetString()!;
     }
 
-    private static async Task CreateUserAsync(HttpClient client, string username, string password, int permission)
+    private static async Task CreateUserAsync(HttpClient client, string username, string password, int permission, CancellationToken ct = default)
     {
         var resp = await client.PostAsync("/api/admin/user/create",
-            JsonContent.Create(new { username, password, role = 0, permission }));
+            JsonContent.Create(new { username, password, role = 0, permission }), ct);
         var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
         await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
     }
 
-    private static async Task<JsonDocument> PostJsonAsync(HttpClient client, string route, object body)
+    private static async Task<JsonDocument> PostJsonAsync(HttpClient client, string route, object body, CancellationToken ct = default)
     {
-        var resp = await client.PostAsync(route, JsonContent.Create(body));
+        var resp = await client.PostAsync(route, JsonContent.Create(body), ct);
         return (await resp.Content.ReadFromJsonAsync<JsonDocument>())!;
     }
 
     // --- WebDAV ---
 
     [Test]
-    public async Task WebDav_ReadOnly_User_Can_Browse_But_Cannot_Write()
+    public async Task WebDav_ReadOnly_User_Can_Browse_But_Cannot_Write(CancellationToken ct)
     {
         // 只读账号（permission=0）不需要写权限位即可浏览；写必须 403。
         var (factory, client) = await SetupAsync();
@@ -66,16 +66,16 @@ public class CrossProtocolAccessTests
             client.DefaultRequestHeaders.Authorization =
                 new("Basic", Convert.ToBase64String("reader:pw"u8.ToArray()));
 
-            var get = await client.GetAsync("/dav/test/a.txt");
+            var get = await client.GetAsync("/dav/test/a.txt", ct);
             await Assert.That(get.StatusCode).IsEqualTo(HttpStatusCode.OK);
 
-            var put = await client.PutAsync("/dav/test/new.txt", new StringContent("x"));
+            var put = await client.PutAsync("/dav/test/new.txt", new StringContent("x"), ct);
             await Assert.That(put.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
         }
     }
 
     [Test]
-    public async Task WebDav_Propfind_Filters_Hidden_Entries()
+    public async Task WebDav_Propfind_Filters_Hidden_Entries(CancellationToken ct)
     {
         // 隐藏规则必须同样作用于 WebDAV：否则「/api/fs 看不到」的条目在资源管理器里照样列得出来。
         var (factory, client) = await SetupAsync();
@@ -93,7 +93,7 @@ public class CrossProtocolAccessTests
 
             var req = new HttpRequestMessage(new HttpMethod("PROPFIND"), "/dav/test");
             req.Headers.Add("Depth", "1");
-            var resp = await client.SendAsync(req);
+            var resp = await client.SendAsync(req, ct);
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.MultiStatus);
             var xml = await resp.Content.ReadAsStringAsync();
             await Assert.That(xml).Contains("visible.txt");
@@ -102,7 +102,7 @@ public class CrossProtocolAccessTests
     }
 
     [Test]
-    public async Task WebDav_Read_Denied_When_Meta_ReadUsers_Excludes_User()
+    public async Task WebDav_Read_Denied_When_Meta_ReadUsers_Excludes_User(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -117,7 +117,7 @@ public class CrossProtocolAccessTests
             client.DefaultRequestHeaders.Authorization =
                 new("Basic", Convert.ToBase64String("outsider:pw"u8.ToArray()));
 
-            var get = await client.GetAsync("/dav/test/a.txt");
+            var get = await client.GetAsync("/dav/test/a.txt", ct);
             await Assert.That(get.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
         }
     }
@@ -125,7 +125,7 @@ public class CrossProtocolAccessTests
     // --- S3 ---
 
     [Test]
-    public async Task S3_ListObjects_Returns_Keys_Relative_To_Bucket()
+    public async Task S3_ListObjects_Returns_Keys_Relative_To_Bucket(CancellationToken ct)
     {
         // key 必须是桶内相对路径：把挂载前缀（test/）暴露出去会让客户端拼出错误对象地址。
         var (factory, client) = await SetupAsync();
@@ -135,7 +135,7 @@ public class CrossProtocolAccessTests
             var token = await LoginAsync(client, "admin", "admin");
             client.DefaultRequestHeaders.Authorization = new("Bearer", token);
 
-            var resp = await client.GetAsync("/s3/test");
+            var resp = await client.GetAsync("/s3/test", ct);
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.OK);
             var xml = await resp.Content.ReadAsStringAsync();
             await Assert.That(xml).Contains("<Key>a.txt</Key>");
@@ -144,7 +144,7 @@ public class CrossProtocolAccessTests
     }
 
     [Test]
-    public async Task S3_Put_Denied_For_ReadOnly_User()
+    public async Task S3_Put_Denied_For_ReadOnly_User(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -155,7 +155,7 @@ public class CrossProtocolAccessTests
             var userToken = await LoginAsync(client, "s3reader", "pw");
             client.DefaultRequestHeaders.Authorization = new("Bearer", userToken);
 
-            var resp = await client.PutAsync("/s3/test/x.txt", new StringContent("x"));
+            var resp = await client.PutAsync("/s3/test/x.txt", new StringContent("x"), ct);
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
         }
     }
@@ -163,7 +163,7 @@ public class CrossProtocolAccessTests
     // --- 归档解压 ---
 
     [Test]
-    public async Task Archive_Decompress_Requires_Write_Permission_And_Writes_Nothing()
+    public async Task Archive_Decompress_Requires_Write_Permission_And_Writes_Nothing(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -187,7 +187,7 @@ public class CrossProtocolAccessTests
             // 副作用断言：管理员的视角里仍然只有 a.zip。
             var adminToken = await LoginAsync(client, "admin", "admin");
             client.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
-            var list = await PostJsonAsync(client, "/api/fs/list", new { path = "/test" });
+            var list = await PostJsonAsync(client, "/api/fs/list", new { path = "/test" }, ct);
             var names = list.RootElement.GetProperty("data").GetProperty("content")
                 .EnumerateArray().Select(e => e.GetProperty("name").GetString()).ToList();
             await Assert.That(names.Contains("hello.txt")).IsFalse();
@@ -197,7 +197,7 @@ public class CrossProtocolAccessTests
     // --- 分片上传归属 ---
 
     [Test]
-    public async Task Multipart_Chunk_Rejects_Foreign_Upload_Id()
+    public async Task Multipart_Chunk_Rejects_Foreign_Upload_Id(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -212,7 +212,7 @@ public class CrossProtocolAccessTests
             init.Headers.Add("X-File-Size", "10");
             init.Headers.Add("X-Chunk-Size", "1048576");
             init.Content = new StringContent("");
-            var initResp = await client.SendAsync(init);
+            var initResp = await client.SendAsync(init, ct);
             var initJson = await initResp.Content.ReadFromJsonAsync<JsonDocument>();
             var uploadId = initJson!.RootElement.GetProperty("data").GetProperty("upload_id").GetString()!;
 
@@ -223,14 +223,14 @@ public class CrossProtocolAccessTests
             chunk.Headers.Add("X-Upload-Id", uploadId);
             chunk.Headers.Add("X-Chunk-Index", "0");
             chunk.Content = new ByteArrayContent("0123456789"u8.ToArray());
-            var chunkResp = await client.SendAsync(chunk);
+            var chunkResp = await client.SendAsync(chunk, ct);
             var chunkJson = await chunkResp.Content.ReadFromJsonAsync<JsonDocument>();
             await Assert.That(chunkJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(404);
         }
     }
 
     [Test]
-    public async Task Multipart_Init_Rejects_Upload_Disabled_And_Missing_Write_Permission()
+    public async Task Multipart_Init_Rejects_Upload_Disabled_And_Missing_Write_Permission(CancellationToken ct)
     {
         var (factory, client) = await SetupAsync();
         await using (factory)
@@ -245,7 +245,7 @@ public class CrossProtocolAccessTests
             init.Headers.Add("File-Path", Uri.EscapeDataString("/test/big.bin"));
             init.Headers.Add("X-File-Size", "10");
             init.Content = new StringContent("");
-            var resp = await client.SendAsync(init);
+            var resp = await client.SendAsync(init, ct);
             var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
             await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
         }
