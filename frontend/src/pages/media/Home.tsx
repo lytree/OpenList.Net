@@ -1,6 +1,6 @@
 import { computed, defineComponent, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
-import { ElEmpty } from "element-plus"
+import { ElButton, ElEmpty } from "element-plus"
 import {
   mediaBatchStates,
   mediaHome,
@@ -107,11 +107,31 @@ export default defineComponent({
     /** 收藏是按用户的状态，游客只读，不渲染星标。 */
     const canFavorite = user.isLogin
 
-    function renderSection(title: string, items: MediaItem[], layout: "grid" | "strip") {
+    /**
+     * 「查看全部」跳到媒体库页并预置筛选：该页只认 `state` / `sort` 两个查询参数。
+     * 三个 section 各给一条（收藏 / 在追 / 最近入库），与 `/media/home` 的取数口径对齐。
+     */
+    function openLibrary(query: Record<string, string>) {
+      void router.push({ name: "media-library", query })
+    }
+
+    function renderSection(
+      title: string,
+      items: MediaItem[],
+      layout: "grid" | "strip",
+      linkQuery?: Record<string, string>,
+    ) {
       if (items.length === 0) return null
       return (
         <section class="ol-media-section">
-          <div class="ol-media-section-title">{title}</div>
+          <div class="ol-media-section-head">
+            <div class="ol-media-section-title">{title}</div>
+            {linkQuery ? (
+              <ElButton size="small" text={true} onClick={() => openLibrary(linkQuery)}>
+                {t("media.view_all")}
+              </ElButton>
+            ) : null}
+          </div>
           <MediaGrid
             items={items}
             layout={layout}
@@ -133,9 +153,13 @@ export default defineComponent({
         ) : (
           <>
             {/* 「继续观看」用横滑条：它是「接着上次看」的临时状态，不该占满整屏 */}
-            {renderSection(t("media.continue_watching"), continueWatching.value, "strip")}
-            {renderSection(t("media.home_recent"), recentlyAdded.value, "grid")}
-            {renderSection(t("media.home_favorites"), recentlyFavorited.value, "grid")}
+            {renderSection(t("media.continue_watching"), continueWatching.value, "strip", {
+              state: "in-progress",
+            })}
+            {renderSection(t("media.home_recent"), recentlyAdded.value, "grid", { sort: "created" })}
+            {renderSection(t("media.home_favorites"), recentlyFavorited.value, "grid", {
+              state: "favorite",
+            })}
           </>
         )}
       </div>

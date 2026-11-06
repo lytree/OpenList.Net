@@ -40,6 +40,19 @@ const PAGE_SIZE = 30
 
 type MediaSort = "created" | "updated" | "title" | "rating" | "year"
 
+/**
+ * 个人状态筛选（value 对应后端 `state` 参数；空串 = 不筛）。
+ *
+ * 媒体首页的「继续观看 / 最近收藏」段用「查看全部 →」带 `?state=in-progress|favorite`
+ * 跳到这里，所以本页必须认这两个值 —— 否则点进来看到的是未筛选的全量列表。
+ * 其余状态（fresh/played/flagged/later）没有入口，先不暴露。
+ */
+const STATES: { value: string; labelKey: string }[] = [
+  { value: "", labelKey: "media.filter_all" },
+  { value: "favorite", labelKey: "media.favorite" },
+  { value: "in-progress", labelKey: "media.continue_watching" },
+]
+
 /** 排序选项（value 对应后端 sort 参数）。 */
 const SORTS: { value: MediaSort; labelKey: string; desc: boolean }[] = [
   { value: "created", labelKey: "media.sort_added", desc: true },
@@ -61,7 +74,13 @@ export default defineComponent({
     const libraries = ref<MediaLibrary[]>([])
     const libraryId = ref(0) // 0 = 全部库
     const keyword = ref("")
-    const sort = ref<MediaSort>("created")
+    /** 初始排序/状态可来自 URL（媒体首页「查看全部」预置筛选），非法值一律退回默认。 */
+    const urlSort = String(route.query.sort ?? "")
+    const sort = ref<MediaSort>(
+      SORTS.some((item) => item.value === urlSort) ? (urlSort as MediaSort) : "created",
+    )
+    const urlState = String(route.query.state ?? "")
+    const state = ref(STATES.some((item) => item.value === urlState) ? urlState : "")
     const page = ref(1)
     const items = ref<MediaItem[]>([])
     const total = ref(0)
@@ -75,13 +94,15 @@ export default defineComponent({
     /** 收藏态缓存：网格卡片上直接点星切换，不用进详情页。 */
     const favorites = ref<Set<number>>(new Set())
 
-    /** URL `?library=` 记住当前库，刷新/返回不掉状态。 */
+    /** URL 记住当前库与筛选，刷新/返回不掉状态（排序/状态也回写，便于分享当前视图）。 */
     const syncQuery = () => {
       void router.replace({
         path: route.path,
         query: {
           ...route.query,
           library: libraryId.value ? String(libraryId.value) : undefined,
+          state: state.value || undefined,
+          sort: sort.value === "created" ? undefined : sort.value,
         },
       })
     }
@@ -110,6 +131,7 @@ export default defineComponent({
           year_from: year.value || undefined,
           year_to: year.value || undefined,
           rating_min: ratingMin.value || undefined,
+          state: state.value || undefined,
         })
         if (resp.code === 200) {
           items.value = resp.data?.content ?? []
@@ -171,9 +193,20 @@ export default defineComponent({
       page.value = 1
       void loadItems()
     })
+    /** 状态筛选与库无关（收藏/在追跨库），切换库时保留，不做清空。 */
+    watch(state, () => {
+      page.value = 1
+      syncQuery()
+      void loadItems()
+    })
     watch(page, () => void loadItems())
 
     const pages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
+
+    /** 题材/年份聚合为空时不渲染那两行（与现状一致）。 */
+    const showFacets = computed(
+      () => Boolean(facets.value && (facets.value.genres.length > 0 || facets.value.years.length > 0)),
+    )
 
     function openItem(item: MediaItem) {
       void router.push({ name: "media-item", params: { id: item.id } })
@@ -242,65 +275,88 @@ export default defineComponent({
           </div>
         </div>
 
-        {/* 筛选条：数据来自 /media/facets（只含当前库可见条目的聚合） */}
-        {facets.value && (facets.value.genres.length > 0 || facets.value.years.length > 0) ? (
+        {/* 筛选条：状态行来自首页「查看全部」的入口，题材/年份行来自 /media/facets */}
+        {showFacets.value || canPersonalize.value ? (
           <div class="ol-media-facets">
-            <div class="ol-media-facet-row">
-              <span class="ol-media-facet-label">{t("media.filter_genre")}</span>
-              <ElTag
-                size="small"
-                class={genre.value === "" ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
-                onClick={() => (genre.value = "")}
-              >
-                {t("media.filter_all")}
-              </ElTag>
-              {facets.value.genres.slice(0, 16).map((bucket) => (
-                <ElTag
-                  key={bucket.value}
-                  size="small"
-                  class={genre.value === bucket.value ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
-                  onClick={() => (genre.value = genre.value === bucket.value ? "" : bucket.value)}
-                >
-                  {bucket.value} <span class="ol-media-facet-count">{bucket.count}</span>
-                </ElTag>
-              ))}
-            </div>
-            <div class="ol-media-facet-row">
-              <span class="ol-media-facet-label">{t("media.filter_year")}</span>
-              <ElTag
-                size="small"
-                class={year.value === 0 ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
-                onClick={() => (year.value = 0)}
-              >
-                {t("media.filter_all")}
-              </ElTag>
-              {facets.value.years.slice(0, 16).map((bucket) => {
-                const value = Number(bucket.value)
-                return (
+            {canPersonalize.value ? (
+              <div class="ol-media-facet-row">
+                <span class="ol-media-facet-label">{t("media.filter_state")}</span>
+                {STATES.map((item) => (
                   <ElTag
-                    key={bucket.value}
+                    key={item.value || "all"}
                     size="small"
-                    class={year.value === value ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
-                    onClick={() => (year.value = year.value === value ? 0 : value)}
+                    class={state.value === item.value ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
+                    onClick={() => (state.value = item.value)}
                   >
-                    {bucket.value} <span class="ol-media-facet-count">{bucket.count}</span>
+                    {t(item.labelKey)}
                   </ElTag>
-                )
-              })}
-              <span class="ol-media-facet-label" style={{ marginLeft: "12px" }}>
-                {t("media.filter_rating")}
-              </span>
-              <ElSelect
-                modelValue={ratingMin.value}
-                size="small"
-                style={{ width: "90px" }}
-                onUpdate:modelValue={(value: number) => (ratingMin.value = Number(value))}
-              >
-                {[0, 6, 7, 8, 9].map((value) => (
-                  <ElOption key={value} label={value === 0 ? t("media.filter_all") : `≥ ${value}`} value={value} />
                 ))}
-              </ElSelect>
-            </div>
+              </div>
+            ) : null}
+            {showFacets.value && facets.value ? (
+              <>
+                <div class="ol-media-facet-row">
+                  <span class="ol-media-facet-label">{t("media.filter_genre")}</span>
+                  <ElTag
+                    size="small"
+                    class={genre.value === "" ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
+                    onClick={() => (genre.value = "")}
+                  >
+                    {t("media.filter_all")}
+                  </ElTag>
+                  {facets.value.genres.slice(0, 16).map((bucket) => (
+                    <ElTag
+                      key={bucket.value}
+                      size="small"
+                      class={genre.value === bucket.value ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
+                      onClick={() => (genre.value = genre.value === bucket.value ? "" : bucket.value)}
+                    >
+                      {bucket.value} <span class="ol-media-facet-count">{bucket.count}</span>
+                    </ElTag>
+                  ))}
+                </div>
+                <div class="ol-media-facet-row">
+                  <span class="ol-media-facet-label">{t("media.filter_year")}</span>
+                  <ElTag
+                    size="small"
+                    class={year.value === 0 ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
+                    onClick={() => (year.value = 0)}
+                  >
+                    {t("media.filter_all")}
+                  </ElTag>
+                  {facets.value.years.slice(0, 16).map((bucket) => {
+                    const value = Number(bucket.value)
+                    return (
+                      <ElTag
+                        key={bucket.value}
+                        size="small"
+                        class={year.value === value ? "ol-media-chip-tag is-on" : "ol-media-chip-tag"}
+                        onClick={() => (year.value = year.value === value ? 0 : value)}
+                      >
+                        {bucket.value} <span class="ol-media-facet-count">{bucket.count}</span>
+                      </ElTag>
+                    )
+                  })}
+                  <span class="ol-media-facet-label" style={{ marginLeft: "12px" }}>
+                    {t("media.filter_rating")}
+                  </span>
+                  <ElSelect
+                    modelValue={ratingMin.value}
+                    size="small"
+                    style={{ width: "90px" }}
+                    onUpdate:modelValue={(value: number) => (ratingMin.value = Number(value))}
+                  >
+                    {[0, 6, 7, 8, 9].map((value) => (
+                      <ElOption
+                        key={value}
+                        label={value === 0 ? t("media.filter_all") : `≥ ${value}`}
+                        value={value}
+                      />
+                    ))}
+                  </ElSelect>
+                </div>
+              </>
+            ) : null}
           </div>
         ) : null}
 

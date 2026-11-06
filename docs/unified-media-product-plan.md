@@ -3021,9 +3021,11 @@ e2e 脚本同步：`verify-media.mjs` 20 → 23 项（浏览页断言改走 `#/m
 
 ### 48.6 遗留
 
-1. **`/media` 与 `/media/library` 都不带筛选状态**：媒体首页点「最近入库」的条目走详情页，
-   没有「看全部」入口跳到库里对应的筛选（`GET /media/items?state=favorite|in-progress`
-   后端已支持，前端还没接）。要做的话是给 section 标题加「查看全部 →」。
+1. ~~**`/media` 与 `/media/library` 都不带筛选状态**~~ **已完成**：媒体首页三个 section 的标题行右侧
+   加了「查看全部 →」，跳 `#/media/library` 并预置筛选 —— 继续观看 → `?state=in-progress`、
+   最近收藏 → `?state=favorite`、最近入库 → `?sort=created`。库页新增「状态」筛选行
+   （全部 / 收藏 / 在追，值透传给 `GET /media/items?state=`），`state`/`sort` 一并读写 URL
+   （`sort` 默认 `created` 不回写、非法值静默退回默认），刷新与分享都保持当前视图；空 section 不渲染该链接。
 2. **顶部导航的「媒体」仍指向 `/media`**（首页），媒体库变成二级入口；如果产品上希望
    点「媒体」直达库列表，把 `BasicLayout` 的 `to="/media"` 改成 `/media/library` 即可，
    但那样「首页」就又少一个入口了。

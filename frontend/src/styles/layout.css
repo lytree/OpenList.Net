@@ -2685,6 +2685,19 @@ html.dark .ol-grid-check {
   margin-bottom: var(--ol-space-2);
 }
 
+/* 分栏标题行：标题靠左，「查看全部 →」靠右（媒体首页三个 section） */
+.ol-media-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-2);
+  margin-bottom: var(--ol-space-2);
+}
+
+.ol-media-section-head .ol-media-section-title {
+  margin-bottom: 0;
+}
+
 /* ---- 继续观看横滑条 ---- */
 .ol-media-strip {
   display: flex;
