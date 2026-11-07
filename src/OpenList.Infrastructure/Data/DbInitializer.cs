@@ -701,6 +701,9 @@ public static class DbInitializer
         ("media_subtitle_language", "zh-cn", SettingValueType.String, SettingFlag.Public, 12, "zh-cn,zh-tw,en"),
         // 自动增量扫描间隔（小时）；0 表示关闭，仅手动触发。
         ("media_auto_scan_interval_hours", "0", SettingValueType.Number, SettingFlag.Private, 12, null),
+        // 观看会话留存天数（x_media_watch_sessions）；0 表示永久保留。
+        // 默认 3650 与 TasteWindow.MaxDays 对齐 —— 口味页 ?days= 可查到的会话默认一条都不会被清掉。
+        ("media_watch_retention_days", "3650", SettingValueType.Number, SettingFlag.Private, 12, null),
 
         // --- Group 13: ACCESS（媒体与首页各自的访客开关） ---
         // 两个门面分开管：媒体是公开门面（默认放行游客），首页是文件浏览（默认要求登录）。

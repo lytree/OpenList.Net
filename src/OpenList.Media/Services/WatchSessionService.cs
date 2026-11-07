@@ -192,4 +192,26 @@ public sealed class WatchSessionService : IWatchSessionService
             Days = daysOut,
         });
     }
+
+    /// <inheritdoc />
+    public async Task<int> PruneAsync(DateTimeOffset cutoff, CancellationToken ct = default)
+    {
+        // 与读取侧同理：SQLite 不支持 DateTimeOffset 的下推比较。这里只取 Id + LastAt，
+        // 内存筛选后按批 ExecuteDelete —— 不做逐行删除，也不把整行会话读进内存。
+        var rows = await _db.MediaWatchSessions.AsNoTracking()
+            .Select(s => new { s.Id, s.LastAt })
+            .ToListAsync(ct);
+        var ids = rows.Where(r => r.LastAt < cutoff).Select(r => r.Id).ToList();
+        if (ids.Count == 0) return 0;
+
+        // SQLite 的参数上限是 999，500 一批留足余量。
+        var removed = 0;
+        foreach (var chunk in ids.Chunk(500))
+        {
+            removed += await _db.MediaWatchSessions
+                .Where(s => chunk.Contains(s.Id))
+                .ExecuteDeleteAsync(ct);
+        }
+        return removed;
+    }
 }

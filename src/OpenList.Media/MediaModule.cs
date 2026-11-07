@@ -60,6 +60,8 @@ public static class MediaModule
 
         // 定时增量扫描：间隔取自设置项 media_auto_scan_interval_hours，0 表示关闭（默认）。
         services.AddHostedService<MediaAutoScanHostedService>();
+        // 观看会话留存清理：天数取自 media_watch_retention_days，0 表示永久保留。
+        services.AddHostedService<WatchSessionRetentionHostedService>();
 
         return services;
     }

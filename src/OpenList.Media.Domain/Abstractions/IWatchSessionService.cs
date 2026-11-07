@@ -27,6 +27,13 @@ public interface IWatchSessionService
 
     /// <summary>最近 <paramref name="days"/> 天逐日的观看时长（缺数据的日子补 0，便于直接画图）。</summary>
     Task<Resp<WatchStats>> GetStatsAsync(int days, User user, CancellationToken ct = default);
+
+    /// <summary>
+    /// 删除最后活动时间早于 <paramref name="cutoff"/> 的会话，返回删除行数。
+    /// 由 <c>WatchSessionRetentionHostedService</c> 按设置项 <c>media_watch_retention_days</c> 调用；
+    /// 以 <c>LastAt</c>（最后心跳/结束时间）而非 <c>StartedAt</c> 判定，长会话不会在播放中被删掉。
+    /// </summary>
+    Task<int> PruneAsync(DateTimeOffset cutoff, CancellationToken ct = default);
 }
 
 /// <summary>上报一次播放心跳。</summary>

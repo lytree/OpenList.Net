@@ -76,6 +76,8 @@
   "max_server_upload_speed": "Max server upload speed",
   "media_guest_access": "Allow guests to browse media",
   "media_guest_access-tips": "On by default. When off, signed-out visitors are sent to the login page: the media home, library, details and posters all require an account.",
+  "media_watch_retention_days": "Watch history retention (days)",
+  "media_watch_retention_days-tips": "Watch sessions older than this are pruned periodically in the background. 0 keeps everything; the default 3650 matches the largest window the taste page can query, so nothing still reachable is deleted by default.",
   "move_task_threads_num": "Move task threads num",
   "move_task_threads_num-tips": "How many tasks of this type may run at the same time. Extra tasks stay queued as pending. 0 = unlimited.",
   "multipart_chunk_size": "Multipart upload chunk size (MB)",

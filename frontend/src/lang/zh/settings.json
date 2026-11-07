@@ -76,6 +76,8 @@
   "max_server_upload_speed": "服务端最大上传速度",
   "media_guest_access": "允许游客浏览媒体",
   "media_guest_access-tips": "默认开启。关闭后未登录用户会被送到登录页：媒体首页、媒体库、详情页与海报全部要求登录。",
+  "media_watch_retention_days": "观看记录留存天数",
+  "media_watch_retention_days-tips": "超过该天数的观看会话会被后台定时清理。0 表示永久保留；默认 3650 天，与口味页可查询的最大窗口一致，默认配置下不会删掉还能查到的记录。",
   "move_task_threads_num": "移动任务线程数",
   "move_task_threads_num-tips": "同类型任务同时运行的数量；超出上限的任务停在「等待中」，不会失败。0 表示不限。",
   "multipart_chunk_size": "分片上传块大小（MB）",

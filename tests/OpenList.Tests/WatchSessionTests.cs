@@ -185,6 +185,34 @@ public class WatchSessionTests
         await Assert.That(stats.TotalSeconds).IsEqualTo(180L);       // hidden 不计
     }
 
+    /// <summary>留存清理按 <c>LastAt</c> 判定：老会话删掉；开始很早但仍在心跳的会话保留。</summary>
+    [Test]
+    public async Task Prune_Removes_Sessions_Whose_LastActivity_Is_Too_Old()
+    {
+        using var ctx = BuildContext();
+        var (a, b, _) = await SeedItemsAsync(ctx);
+
+        ctx.MediaWatchSessions.AddRange(
+            Session(a.Id, "old", Now.AddDays(-60), 100, false),
+            Session(a.Id, "long-running", Now.AddDays(-60), 100, false),
+            Session(b.Id, "recent", Now.AddDays(-2), 100, true));
+        await ctx.SaveChangesAsync();
+
+        // 长会话：开始于 60 天前，但一小时前还有心跳、尚未结束 —— 不能被清理掉。
+        var longRunning = ctx.MediaWatchSessions.Single(s => s.Token == "long-running");
+        longRunning.LastAt = Now.AddHours(-1);
+        longRunning.EndedAt = null;
+        await ctx.SaveChangesAsync();
+
+        var removed = await NewService(ctx).PruneAsync(Now.AddDays(-30));
+
+        await Assert.That(removed).IsEqualTo(1);
+        var remaining = await ctx.MediaWatchSessions.AsNoTracking().Select(s => s.Token).ToListAsync();
+        await Assert.That(remaining.Count).IsEqualTo(2);
+        await Assert.That(remaining.Contains("long-running")).IsTrue();
+        await Assert.That(remaining.Contains("recent")).IsTrue();
+    }
+
     // ------------------------------------------------------------------
     // 装置
     // ------------------------------------------------------------------
