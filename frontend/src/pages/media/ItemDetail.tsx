@@ -40,10 +40,11 @@ import {
   type UserMediaState,
 } from "~/api/media"
 import { fsGet } from "~/api/fs"
-import { rawLink } from "~/utils/link"
+import { rawLink, thumbLink } from "~/utils/link"
 import { formatTime, humanSize } from "~/utils/format"
 import { createWatchTracker } from "~/utils/watchSession"
 import { useUserStore } from "~/stores/user"
+import { useSettingsStore } from "~/stores/settings"
 import { t } from "~/i18n"
 import MediaPlayer from "./MediaPlayer"
 
@@ -79,6 +80,7 @@ export default defineComponent({
     const route = useRoute()
     const router = useRouter()
     const user = useUserStore()
+    const settings = useSettingsStore()
 
     const item = ref<MediaItem | null>(null)
     const files = ref<MediaFile[]>([])
@@ -89,6 +91,8 @@ export default defineComponent({
     /** 正在播放的文件；null 表示播放器关着。 */
     const playing = ref<MediaFile | null>(null)
     const playerSrc = ref("")
+    /** 播放文件在 `play()` 里现签的签名（拼缩略图占位图复用，不额外发 fs/get）。 */
+    const playingSign = ref("")
     /** 续播位置（条目级进度，不区分文件 —— 见遗留说明）。 */
     const startAt = ref(0)
     let lastSavedSeconds = 0
@@ -132,6 +136,24 @@ export default defineComponent({
 
     // ---- 播放 -------------------------------------------------------------
 
+    /**
+     * 播放器占位图。
+     *
+     * 有海报就原样用海报（不覆盖）；没有海报时回退到文件缩略图 —— 视频取首帧、
+     * PDF 取首页，否则进播放器先是一块黑屏。
+     *
+     * 退化条件：条目还没加载出来、`thumb_enable` 关闭、或播放器还没打开时返回空串。
+     * `MediaPlayer` 把空串渲染成 `poster={undefined}`，所以既不会发请求，也不会有破图。
+     */
+    const playerPoster = computed(() => {
+      const current = item.value
+      if (!current) return ""
+      if (current.poster_path) return mediaImageLink(current.id)
+      if (!playing.value || !settings.getBool("thumb_enable")) return ""
+      const edge = settings.getNumber("thumb_max_size", 320)
+      return thumbLink(playing.value.path, playingSign.value, edge)
+    })
+
     async function play(file: MediaFile) {
       // 直链要靠 fs/get 拿 raw_url（签名代理 /p/...）；没有 raw_url 就退回 /d。
       const resp = await fsGet(file.path)
@@ -141,6 +163,8 @@ export default defineComponent({
       }
       playing.value = file
       playerSrc.value = rawLink(file.path, resp.data.raw_url, resp.data.sign)
+      // 缩略图占位图复用同一份签名（签名与路径绑定，无需再打一次 fs/get）
+      playingSign.value = resp.data.sign ?? ""
       // 条目级进度：只在播第一个文件时续播，切集从 0 开始（否则每集都从头几秒看起）
       startAt.value = playing.value.id === files.value[0]?.id ? (state.value?.progress_seconds ?? 0) : 0
       // 换文件就是新的一段会话：tracker 内部会先把上一段收尾。
@@ -152,6 +176,7 @@ export default defineComponent({
       watchSession.end(lastSavedSeconds)
       playing.value = null
       playerSrc.value = ""
+      playingSign.value = ""
     }
 
     function onProgress(seconds: number) {
@@ -457,7 +482,7 @@ export default defineComponent({
               key={playing.value.id}
               src={playerSrc.value}
               startAt={startAt.value}
-              poster={current.poster_path ? mediaImageLink(current.id) : ""}
+              poster={playerPoster.value}
               title={`${current.title} · ${playing.value.path.split("/").pop()}`}
               onProgress={onProgress}
               onEnded={onEnded}

@@ -188,6 +188,8 @@ builder.Services.AddSingleton<FfmpegProcessRunner>();
 builder.Services.AddSingleton<FfmpegTool>();
 builder.Services.AddSingleton<ThumbnailService>();
 builder.Services.AddSingleton<ThumbnailOptionsProvider>();
+// 缓存维护：按容量 LRU 淘汰 + 删除 30 天未访问的磁盘缓存（每天一轮）。
+builder.Services.AddHostedService<ThumbnailCacheMaintenanceHostedService>();
 // 列表过滤（hide_files / ignore_system_files）同样用 20s 快照，避免 fs/list 逐请求查库。
 builder.Services.AddSingleton<ListFilterOptionsProvider>();
 builder.Services.AddSingleton<IThumbnailUrlBuilder>(sp => new ThumbnailUrlBuilder(

@@ -19,8 +19,9 @@ import {
 } from "~/api/media"
 import { fsGet } from "~/api/fs"
 import { moveIdBy, nextQueuePos, prevQueuePos } from "~/utils/mediaCatalog"
-import { rawLink } from "~/utils/link"
+import { rawLink, thumbLink } from "~/utils/link"
 import { createWatchTracker } from "~/utils/watchSession"
+import { useSettingsStore } from "~/stores/settings"
 import { t } from "~/i18n"
 import MediaPlayer from "./MediaPlayer"
 
@@ -47,6 +48,7 @@ export default defineComponent({
   setup() {
     const route = useRoute()
     const router = useRouter()
+    const settings = useSettingsStore()
 
     const playlist = ref<MediaPlaylistDetail | null>(null)
     const loading = ref(true)
@@ -74,6 +76,8 @@ export default defineComponent({
     /** 当前条目内的文件下标。 */
     const filePos = ref(0)
     const playerSrc = ref("")
+    /** 当前文件在 `playAt()` 里现签的签名（拼缩略图占位图复用，不额外发 fs/get）。 */
+    const playerSign = ref("")
     const startAt = ref(0)
     const opening = ref(false)
     /**
@@ -108,6 +112,25 @@ export default defineComponent({
     const prevPos = computed(() =>
       playingItem.value ? prevQueuePos(pos.value, items.value.length) : null,
     )
+
+    /**
+     * 播放器占位图。
+     *
+     * 有海报就原样用海报（不覆盖）；没有海报时回退到当前文件缩略图 —— 视频取首帧、
+     * PDF 取首页，否则进播放器先是一块黑屏。
+     *
+     * 退化条件：当前条目/文件还没定位到、`thumb_enable` 关闭时返回空串。
+     * `MediaPlayer` 把空串渲染成 `poster={undefined}`，所以既不会发请求，也不会有破图。
+     */
+    const playerPoster = computed(() => {
+      const active = playingItem.value
+      if (!active) return ""
+      if (active.poster_path) return mediaImageLink(active.id)
+      const file = playingFiles.value[filePos.value]
+      if (!file || !settings.getBool("thumb_enable")) return ""
+      const edge = settings.getNumber("thumb_max_size", 320)
+      return thumbLink(file.path, playerSign.value, edge)
+    })
 
     async function load() {
       loading.value = true
@@ -183,6 +206,8 @@ export default defineComponent({
         playingFiles.value = files
         filePos.value = safeFile
         playerSrc.value = rawLink(file.path, link.data.raw_url, link.data.sign)
+        // 缩略图占位图复用同一份签名（签名与路径绑定，无需再打一次 fs/get）
+        playerSign.value = link.data.sign ?? ""
         lastSavedSeconds = state?.progress_seconds ?? 0
         lastSeenSeconds = lastSavedSeconds
         lastSavedAt = 0
@@ -205,6 +230,7 @@ export default defineComponent({
       playingFiles.value = []
       filePos.value = 0
       playerSrc.value = ""
+      playerSign.value = ""
       startAt.value = 0
       lastSeenSeconds = 0
       lastSavedSeconds = 0
@@ -420,7 +446,7 @@ export default defineComponent({
               key={activeFile?.id ?? `item-${active.id}`}
               src={playerSrc.value}
               startAt={startAt.value}
-              poster={active.poster_path ? mediaImageLink(active.id) : ""}
+              poster={playerPoster.value}
               title={
                 activeFile
                   ? `${active.title} · ${activeFile.path.split("/").pop()}`

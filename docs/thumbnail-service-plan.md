@@ -48,8 +48,8 @@
 + `tests/OpenList.Tests/ThumbnailEndpointTests.cs`（11 条，含「不传 type 时行为不变」「非法 w 不 400」「HEAD 不生成」「415/404 原因头」「真 ffmpeg 出图并二次命中缓存」）
 + `tests/OpenList.Tests/ThumbnailFfmpegTests.cs`（6 条，用仓库内 `.e2e/bin/ffmpeg.exe` 现录 3 秒 testsrc，断言产物是 320×320 的 JPEG）。
 
-**还没做**：PDF 首页（阻塞原因见 §0.2）、`thumb_cache_max_mb` 的定时清理
-（当前靠写入时每 64 次触发一次淘汰）。
+**这一批的遗留**：~~`thumb_cache_max_mb` 的定时清理~~ —— **已完成**（`ThumbnailCacheMaintenanceHostedService`：启动延迟 5 分钟，之后每 24 小时一轮，见 §7.5）；
+PDF 首页当时没做，已在下一批补齐（见 §0.3）。
 
 ---
 
@@ -58,10 +58,10 @@
 | 项 | 落点 | 说明 |
 |---|---|---|
 | 列表 40px 缩略图槽位 | `frontend/src/components/ThumbIcon.tsx`（新）+ `pages/home/index.tsx`（表格名称列）+ `pages/home/ListRows.tsx`（手机卡片行） | 统一成一个组件：有 `thumb` 画图，没有/加载失败退图标。**只做一级降级**（缩略图 → 图标），不像网格那样再退原图 —— 40px 的槽位为一张全尺寸图付流量不划算。手机行用 36px，好塞进 52px 的行高 |
-| E2E 轮次 `verify-thumb.mjs` | `frontend/scripts/verify-thumb.mjs` + `run-regression.sh` 的 `round_thumb`（`I/thumb`） | 28 条断言，覆盖 §12 的 9 条（并拆细）：默认关闭不下发 → 开启后下发 → 生成/命中/ETag → 改文件失效 → txt 415 → w=9999 夹到 1024 → 带封面 200 / 无封面 404 `no-cover` → PDF 415 → **不带 type 仍是原文件** → 表格/网格/手机三处槽位。fixture 由脚本用 ffmpeg 现造，PDF 用脚本内手拼的最小合法文件 |
+| E2E 轮次 `verify-thumb.mjs` | `frontend/scripts/verify-thumb.mjs` + `run-regression.sh` 的 `round_thumb`（`I/thumb`） | 28 条断言（PDF 首页补齐后为 33 条，见 §0.3），覆盖 §12 的 9 条（并拆细）：默认关闭不下发 → 开启后下发 → 生成/命中/ETag → 改文件失效 → txt 415 → w=9999 夹到 1024 → 带封面 200 / 无封面 404 `no-cover` → PDF 首页 200（第三批补齐，见 §0.3）→ **不带 type 仍是原文件** → 表格/网格/手机三处槽位。fixture 由脚本用 ffmpeg 现造，PDF 用脚本内手拼的最小合法文件 |
 | 资源 404 的口径 | 同上 | 列表对「无封面 mp3」必然发一次取不到图的请求（后端无法预知有没有内嵌封面），前端按约定降级为图标。E2E 把这类 404 与**脚本级异常**分开统计，否则这一轮永远红 |
 
-**PDF 首页为什么这轮没做**：不是取舍变化，是环境阻塞 —— 本机 NuGet 源不可达（`dotnet package search PDFtoImage` 直接报「无法加载服务索引」），本地缓存里也没有 PDFtoImage/PDFium；同时机器上没有任何可用的 PDF 渲染器（`pdftoppm`/`mutool`/`gs` 都不存在）。要么联网补包（PDFtoImage 5.4.0，含 PDFium + SkiaSharp native，Docker 运行时还要补 `libfontconfig1`/`libstdc++`），要么改用外部渲染器（`pdftoppm`，与现有「外部 ffmpeg」同构，镜像里补一个 poppler-utils）。两条路都要动 Dockerfile 与发布体积，属于需要拍板的取舍，留到下一批。
+**PDF 首页为什么第二轮没做**（本节只记录当时的判断，已在第三批推翻并补齐，见 §0.3）：不是取舍变化，是环境阻塞 —— 本机 NuGet 源不可达（`dotnet package search PDFtoImage` 直接报「无法加载服务索引」），本地缓存里也没有 PDFtoImage/PDFium；同时机器上没有任何可用的 PDF 渲染器（`pdftoppm`/`mutool`/`gs` 都不存在）。要么联网补包（PDFtoImage 5.4.0，含 PDFium + SkiaSharp native，Docker 运行时还要补 `libfontconfig1`/`libstdc++`），要么改用外部渲染器（`pdftoppm`，与现有「外部 ffmpeg」同构，镜像里补一个 poppler-utils）。两条路都要动 Dockerfile 与发布体积，属于需要拍板的取舍，留到下一批。
 
 ---
 
@@ -408,12 +408,12 @@ key = SHA1( $"v1|{path}|{size}|{mtimeUtcTicks}|{w}x{h}|{fmt}|{q}|{atKey}|{genera
 
 - 默认 `{dataDir}/thumbnails`，`dataDir` 的解析与 `Program.cs:235`（`DBFile` 所在目录）一致，桌面版自动落在 `DataDir` 设置下。
 - 设置项 `thumb_cache_folder` 可覆盖；**LocalDriver 里那个同名死配置应删掉**（否则管理端出现两个语义相同、互不生效的输入框），改为"驱动级 `thumbnail` 开关保留、缓存目录只认全局"。
-- 容量上限 `thumb_cache_max_mb`（默认 2048）。超限时按 `LastAccessTimeUtc` 从老到新淘汰。
+- 容量上限 `thumb_cache_max_mb`（默认 2048）。超限时按文件 **mtime** 从旧到新淘汰（mtime 在命中时被刷成"最后访问时间"，见 §7.3）。
 
 ### 7.3 两级查找
 
 1. **内存 LRU**（`MemoryCache`，默认 256 项 / 32MB）：只存"键 → 字节"，给翻页回看、刷新列表这类高频重复请求省一次磁盘读。
-2. **磁盘**：命中后回填内存，并 `File.SetLastAccessTimeUtc`（Windows 需先关掉 NTFS 的最后访问时间禁用策略才有效，因此**淘汰算法不能只依赖 atime**：写盘时把"最近使用时间"记在内存字典里，进程重启则退化为按 mtime 淘汰）。
+2. **磁盘**：命中后回填内存；"最后访问时间" **用文件 mtime 充当** —— 命中（含内存命中）时由 `ThumbnailCache.Touch` 把磁盘副本的 mtime 刷成当前时间，同一文件 **1 小时内最多写回一次**（避免把元数据写放大成每请求一次）。不依赖 atime（Windows 默认关闭 NTFS 的最后访问时间更新，跨平台不可靠），也不依赖重启即丢的内存字典；从未被访问过的新条目，mtime 就是写入（生成）时间。
 
 ### 7.4 单飞（single-flight）与负缓存
 
@@ -422,7 +422,12 @@ key = SHA1( $"v1|{path}|{size}|{mtimeUtcTicks}|{w}x{h}|{fmt}|{q}|{atKey}|{genera
 
 ### 7.5 清理任务
 
-注册到既有 `ITaskService`（后台任务），每天一次；或最简实现：`IHostedService` 里 `PeriodicTimer(24h)`。行为：容量超限淘汰 + 删除 30 天未使用项。**不做**：文件删除时同步清缓存（要遍历所有 key，得不偿失，靠容量淘汰即可）。
+**已实现**：`src/OpenList.Server/Hosting/ThumbnailCacheMaintenanceHostedService.cs`（`BackgroundService`）。启动后先等 **5 分钟**（避开启动期请求争抢磁盘），之后**每 24 小时**一轮（`Tick = TimeSpan.FromDays(1)`），每轮按顺序做两件事：
+
+1. `ThumbnailCache.TrimAsync` —— 缓存总量超过 `thumb_cache_max_mb` 时，按 **mtime** 从旧到新删，直到回落到上限以内；
+2. `ThumbnailCache.SweepExpiredAsync` —— 删掉 mtime 早于 30 天前的缓存文件（**含写入失败遗留的 `.tmp`**，`UnusedRetention = TimeSpan.FromDays(30)`），删除数量记一条 info 日志。
+
+单轮异常只记一条 warning，下一轮照常；收到取消即退出。**不做**：文件删除时同步清缓存（要遍历所有 key，得不偿失，靠容量淘汰即可）。
 
 ---
 
@@ -478,7 +483,7 @@ key = SHA1( $"v1|{path}|{size}|{mtimeUtcTicks}|{w}x{h}|{fmt}|{q}|{atKey}|{genera
 | `GridView.tsx` `<img>` | 加 `srcset`（`w=320 1x, w=480 2x`）+ `sizes`，高 DPI 屏不糊 |
 | 列表行（`ListRows`） | 新增 40×40 缩略图槽位（`obj.thumb` 为空则图标）。**行高固定 40px**，否则图片加载会让列表跳动 |
 | `AudioPreview.tsx:36` | 已用 `props.obj.thumb`，自动生效；补 `onerror` 隐藏 |
-| 详情/播放页（可选） | 用 `w=640` 作视频占位图，避免黑屏 |
+| 详情/播放页 | **已实现**（缩略图 P4 收尾）：`ItemDetail` / `PlaylistDetail` 的播放器 `poster` 在条目没有海报时回退 `/p/{path}?type=thumb&w=&h=`（边长取公开设置 `thumb_max_size`，签名复用 `fs/get` 已拿到的那一份，不额外请求）；`thumb_enable=false` 时保持空串，`<video poster>` 为空即不发请求、不破图。有海报时仍用 `mediaImageLink`，不被覆盖 |
 | 设置页 | 无需改渲染逻辑（后端下发即渲染），只补 `SettingGroups` 分组与 i18n 文案 |
 | `Obj` 类型 | `thumb: string` 已存在（`api/types.ts:29`），无改动 |
 
@@ -514,7 +519,7 @@ key = SHA1( $"v1|{path}|{size}|{mtimeUtcTicks}|{w}x{h}|{fmt}|{q}|{atKey}|{genera
 8. 超限：源文件 > `thumb_max_source_mb` → `too-large`，不读内容。
 9. 读取预算：伪造 RangeReader 累计字节 > budget → 中止（断言抛出的异常类型）。
 
-**E2E（`frontend/scripts/verify-thumb.mjs`，新增一轮 `thumb`）—— 已落地，见 §0.2（实际 28 条断言，下列 9 条为原始清单）**
+**E2E（`frontend/scripts/verify-thumb.mjs`，新增一轮 `thumb`）—— 已落地，见 §0.2（本轮 28 条，PDF 首页补齐后 33 条（§0.3）；下列 9 条为原始清单）**
 
 -fixture 用 `gen_fixtures.py` 现成的图片/音频/PDF；视频用 `ffmpeg` 造 3s 的 `testsrc`（回归脚本已把 ffmpeg 放进 PATH）。
 
@@ -552,7 +557,7 @@ key = SHA1( $"v1|{path}|{size}|{mtimeUtcTicks}|{w}x{h}|{fmt}|{q}|{atKey}|{genera
 | **P1 音频封面** | ATL + `CoverCrop` | 单元 + E2E 6 |
 | **P2 PDF** | PDFtoImage + `ReadOnlySeekableStream` | E2E 7 |
 | **P3 视频** | `RangeReaderSeekableSource`、Sdcb.FFmpeg 接线、预算护栏、`Dockerfile` 依赖、`build.cs` RID 包 | 单元 7/8/9 + 手工验阿里云盘 |
-| **P4 收尾** | 清理任务、列表行 40px 缩略图（§0.2 已完成）、详情页占位图、指标、`AGENTS.md` 与两份 docs 的遗留项标记为已完成 | 全量回归 15 轮 + 新增 1 轮（`I/thumb` 已落地，现为 16 轮） |
+| **P4 收尾** | 列表行 40px 缩略图（§0.2 已完成）、详情/播放页占位图（前端已实现，见 §10）、缓存定时清理（**已完成**，`ThumbnailCacheMaintenanceHostedService`：启动延迟 5 分钟、之后每 24 小时一轮，先按容量淘汰再删 30 天未访问项，见 §7.5） | `I/thumb` 轮已落地（`verify-thumb.mjs`，见 §0.2）；PDF 首页已在第三批补齐（§0.3）。仍待做：命中率指标 |
 
 **P0 就能独立上线**（图片是收益最大的那一档：网格与图墙覆盖了绝大多数浏览场景），后面每阶段都可单独回滚（关 `thumb_video_enable` → 关 `thumb_enable`）。
 

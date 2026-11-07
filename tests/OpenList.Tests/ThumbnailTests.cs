@@ -318,8 +318,77 @@ public class ThumbnailTests
         await Assert.That(result.Reason is "no-seekable-source" or "ffmpeg-unavailable").IsTrue();
     }
 
+    // ---- 磁盘缓存维护 ----
+
+    [Test]
+    public async Task SweepExpired_DeletesOnlyFilesOlderThanRetention()
+    {
+        var folder = NewTempFolder();
+        try
+        {
+            var fresh = Path.Combine(folder, "fresh.jpg");
+            var stale = Path.Combine(folder, "stale.jpg");
+            await File.WriteAllBytesAsync(fresh, [1]);
+            await File.WriteAllBytesAsync(stale, [1]);
+            File.SetLastWriteTimeUtc(fresh, DateTime.UtcNow.AddHours(-1));
+            File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-40));
+
+            var removed = await new ThumbnailCache()
+                .SweepExpiredAsync(folder, ThumbnailCache.UnusedRetention, CancellationToken.None);
+
+            await Assert.That(removed).IsEqualTo(1);
+            await Assert.That(File.Exists(fresh)).IsTrue();
+            await Assert.That(File.Exists(stale)).IsFalse();
+        }
+        finally { DeleteTempFolder(folder); }
+    }
+
+    /// <summary>命中会刷新 mtime：30 天未访问的判定必须跟着"最后访问"走，而不是"最近生成"。</summary>
+    [Test]
+    public async Task Touch_RefreshesLastAccess_SoHotFilesSurviveSweep()
+    {
+        var folder = NewTempFolder();
+        try
+        {
+            var path = ThumbnailCache.PathFor(folder, "abcdef", "jpg");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, [1]);
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-40));
+
+            new ThumbnailCache().Touch(folder, "abcdef", ["jpg"]);
+
+            var lastWrite = File.GetLastWriteTimeUtc(path);
+            await Assert.That(DateTime.UtcNow - lastWrite).IsLessThan(TimeSpan.FromMinutes(1));
+
+            var removed = await new ThumbnailCache()
+                .SweepExpiredAsync(folder, ThumbnailCache.UnusedRetention, CancellationToken.None);
+            await Assert.That(removed).IsEqualTo(0);
+        }
+        finally { DeleteTempFolder(folder); }
+    }
+
+    [Test]
+    public async Task SweepExpired_IsNoOp_WhenFolderMissing()
+    {
+        var removed = await new ThumbnailCache().SweepExpiredAsync(
+            Path.Combine(Path.GetTempPath(), "openlist-thumb-missing-" + Guid.NewGuid().ToString("N")),
+            ThumbnailCache.UnusedRetention, CancellationToken.None);
+        await Assert.That(removed).IsEqualTo(0);
+    }
+
     // ---- 装配 ----
 
+    private static string NewTempFolder()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "openlist-thumb-cache-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        return folder;
+    }
+
+    private static void DeleteTempFolder(string folder)
+    {
+        try { if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true); } catch { /* 忽略 */ }
+    }
     private static ThumbnailOptions EnabledOptions() => new()
     {
         Enabled = true,

@@ -24,6 +24,12 @@ public sealed class ThumbnailCache
     /// <summary>每写这么多次盘做一次容量检查 —— 不必每次都扫目录。</summary>
     private const int TrimEveryWrites = 64;
 
+    /// <summary>超过该时长未访问的缓存文件由维护宿主删除。</summary>
+    public static readonly TimeSpan UnusedRetention = TimeSpan.FromDays(30);
+
+    /// <summary>命中时刷新 mtime 的最小间隔：避免每次请求都触发一次元数据写。</summary>
+    private static readonly TimeSpan TouchInterval = TimeSpan.FromHours(1);
+
     private readonly ConcurrentDictionary<string, byte[]> _memory = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _memoryOrder = new();
     private long _memoryBytes;
@@ -72,6 +78,62 @@ public sealed class ThumbnailCache
         catch { return null; }
     }
 
+    /// <summary>
+    /// 记录一次缓存命中：把磁盘副本的 mtime 刷新为当前时间（"最后访问时间"）。
+    /// </summary>
+    /// <remarks>
+    /// 内存命中也必须调这里：否则长期只走内存的热图会被 30 天未访问清理误删，
+    /// 重启后白白重新生成。1 小时内的重复命中不再写回，避免把元数据写放大成每请求一次。
+    /// 候选扩展名按顺序探测（与读取侧的 webp→jpg 回退一致）。
+    /// </remarks>
+    public void Touch(string folder, string key, IEnumerable<string> extensions)
+    {
+        var now = DateTime.UtcNow;
+        foreach (var extension in extensions)
+        {
+            var path = PathFor(folder, key, extension);
+            try
+            {
+                var info = new FileInfo(path);
+                if (!info.Exists) continue;
+                if (now - info.LastWriteTimeUtc < TouchInterval) return;
+                info.LastWriteTimeUtc = now;
+                return;
+            }
+            catch { return; }
+        }
+    }
+
+    /// <summary>
+    /// 按「最后访问时间」清理：删除 mtime 早于 <paramref name="maxAge"/> 的缓存文件
+    /// （含失败写入遗留的 <c>.tmp</c>）。返回删除数量。
+    /// </summary>
+    public async Task<int> SweepExpiredAsync(string folder, TimeSpan maxAge, CancellationToken ct)
+    {
+        if (!Directory.Exists(folder)) return 0;
+
+        var cutoff = DateTime.UtcNow - maxAge;
+        var removed = 0;
+        try
+        {
+            foreach (var file in new DirectoryInfo(folder).EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    if (file.LastWriteTimeUtc >= cutoff) continue;
+                    file.Delete();
+                    removed++;
+                }
+                catch { /* 单个文件删不掉不影响整体 */ }
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { /* 目录不可读时放弃本轮清理 */ }
+        await Task.CompletedTask.ConfigureAwait(false);
+        return removed;
+    }
+
     /// <summary>写磁盘缓存；失败只记日志不影响请求（例如缓存目录被配到了只读盘）。</summary>
     /// <param name="folder">缓存根目录。</param>
     /// <param name="key">缓存键。</param>
@@ -105,8 +167,9 @@ public sealed class ThumbnailCache
     /// 按容量淘汰：总量超过 <paramref name="maxBytes"/> 时，从「最久未修改」开始删。
     /// </summary>
     /// <remarks>
-    /// 用 mtime 而不是 atime：Windows 默认关闭 NTFS 的最后访问时间更新，跨平台不可靠；
-    /// 而缩略图一旦命中就不该再被改写，mtime 在这里正好等于「最近一次生成」。
+    /// 用 mtime 而不是 atime：Windows 默认关闭 NTFS 的最后访问时间更新，跨平台不可靠。
+    /// 命中时 <see cref="Touch"/> 会把 mtime 刷成最后访问时间，因此这里等同于按 LRU 淘汰；
+    /// 从未被访问过的新条目，mtime 就是写入（生成）时间。
     /// </remarks>
     public async Task TrimAsync(string folder, long maxBytes, CancellationToken ct)
     {

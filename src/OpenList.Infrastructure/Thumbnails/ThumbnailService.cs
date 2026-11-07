@@ -178,7 +178,12 @@ public sealed class ThumbnailService : IDisposable
         }
 
         var cached = _cache.TryGetMemory(key);
-        if (cached is not null) return ThumbnailResult.Ok(cached, ContentTypeOfBytes(cached, format), true);
+        if (cached is not null)
+        {
+            // 内存命中也要刷新磁盘副本的"最后访问时间"，否则 30 天未访问清理会误删热图。
+            _cache.Touch(options.CacheFolder, key, Candidates(format).Select(ExtensionOfFormat));
+            return ThumbnailResult.Ok(cached, ContentTypeOfBytes(cached, format), true);
+        }
 
         var fromDisk = await ReadCacheAsync(options, key, format, ct).ConfigureAwait(false);
         if (fromDisk is not null)
@@ -601,7 +606,9 @@ public sealed class ThumbnailService : IDisposable
         foreach (var candidate in Candidates(format))
         {
             var data = await _cache.ReadAsync(options.CacheFolder, key, ExtensionOfFormat(candidate), ct).ConfigureAwait(false);
-            if (data is not null) return data;
+            if (data is null) continue;
+            _cache.Touch(options.CacheFolder, key, [ExtensionOfFormat(candidate)]);
+            return data;
         }
         return null;
     }

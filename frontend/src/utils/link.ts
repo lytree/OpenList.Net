@@ -32,6 +32,25 @@ export function rawLink(
 }
 
 /**
+ * 缩略图地址：`/p/{path}?type=thumb&w=&h=`。
+ *
+ * 挂在 `/p/` 上而不是另开前缀：签名、匿名放行、限流、Range 语义全部复用既有下载通道
+ * （见 `docs/thumbnail-service-plan.md` §3.4）。后端按扩展名决定生成方式：
+ * 视频取首帧、PDF 取首页、图片/音频缩放；不支持的类型回 415。
+ *
+ * **调用方必须先判断 `thumb_enable`**：关闭时后端对一切类型都不生成，
+ * 这时发请求只会白拿一次失败（`<video>` 的 `poster` 不会破图，但仍是无效流量）。
+ */
+export function thumbLink(path: string, sign?: string | null, edge = 320): string {
+  const params = new URLSearchParams()
+  params.set("type", "thumb")
+  params.set("w", String(edge))
+  params.set("h", String(edge))
+  if (sign) params.set("sign", sign)
+  return `${location.origin}/p${encodeFsPath(path)}?${params.toString()}`
+}
+
+/**
  * 归档内单个条目的访问地址：`/ae{归档路径}?inner={条目路径}`。
  *
  * 后端 `/ae/{path}` 在带 `inner` 时直接流式返回该条目（支持 Range），
