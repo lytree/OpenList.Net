@@ -221,6 +221,8 @@
     "scrape_started": "Scraping \"{{name}}\" in the background",
     "scrape_running": "A scrape is already running for this library",
     "scrape_nothing": "Nothing to scrape - every item already has metadata",
+    "scrape_cancel": "Cancel scraping",
+    "scrape_cancelled": "Requested to cancel scraping of \"{{name}}\"",
     "scrape_left": "{{count}} left",
     "scrape_matched": "{{count}} matched",
     "scrape_pending": "{{count}} pending",

@@ -45,15 +45,15 @@ public sealed class TransmissionTool : IOfflineDownloadTool
     /// 通过 torrent-add 添加下载任务，并返回任务的 hashString（缺失时退化为 transmission-<c>id</c>）。
     /// </summary>
     /// <param name="url">磁力链或种子链接。</param>
-    /// <param name="destPath">下载保存目录。</param>
+    /// <param name="downloadDir">Transmission 本机可写的下载目录（不是 VFS 路径）。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>成功返回任务标识（hashString 或合成 id）。</returns>
-    public async Task<Resp<string>> AddDownloadAsync(string url, string destPath, CancellationToken ct = default)
+    public async Task<Resp<string>> AddDownloadAsync(string url, string downloadDir, CancellationToken ct = default)
     {
         var args = new Dictionary<string, object?>
         {
             ["filename"] = url,
-            ["download-dir"] = destPath,
+            ["download-dir"] = downloadDir,
         };
         var (ok, result, err) = await CallAsync("torrent-add", args, ct);
         if (!ok) return Resp<string>.Fail(err ?? "transmission error", RespCodes.InternalError);
@@ -113,7 +113,7 @@ public sealed class TransmissionTool : IOfflineDownloadTool
         var args = new Dictionary<string, object?>
         {
             ["ids"] = new[] { taskId },
-            ["fields"] = new[] { "status", "totalSize", "haveValid", "errorString", "error" },
+            ["fields"] = new[] { "status", "totalSize", "haveValid", "errorString", "error", "downloadDir", "files" },
         };
         var (ok, result, err) = await CallAsync("torrent-get", args, ct);
         if (!ok) return Resp<OfflineDownloadStatus>.Fail(err ?? "transmission error", RespCodes.InternalError);
@@ -130,12 +130,22 @@ public sealed class TransmissionTool : IOfflineDownloadTool
             Downloaded = t.TryGetProperty("haveValid", out var hv) && hv.ValueKind == JsonValueKind.Number ? hv.GetInt64() : 0,
         };
         // Transmission 状态码：0=stopped,1=check-wait,2=checking,3=dl-wait,4=downloading,5=seed-wait,6=seeding
-        if (t.TryGetProperty("status", out var s) && s.ValueKind == JsonValueKind.Number)
+        //
+        // 完成判据优先看实际字节数：用户常把 Transmission 配成「完成后停止」，
+        // 那时 status 会变成 0(stopped)；只看状态码会一直停在 paused，永远等不到 complete。
+        var complete = st.Total > 0 && st.Downloaded >= st.Total;
+        if (complete)
+        {
+            st.State = "complete";
+        }
+        else if (t.TryGetProperty("status", out var s) && s.ValueKind == JsonValueKind.Number)
         {
             st.State = s.GetInt32() switch
             {
                 0 => "paused",
                 4 => "running",
+                // 5/6 是做种 —— 对 torrent 而言只有 100% 才会进这两个状态，但当 totalSize
+                // 为 0（元数据未到）时仍按上面字节判据兜底，这里保留 complete 语义。
                 5 or 6 => "complete",
                 _ => "pending",
             };
@@ -144,6 +154,21 @@ public sealed class TransmissionTool : IOfflineDownloadTool
         {
             var msg = es.GetString();
             if (!string.IsNullOrEmpty(msg)) st.Error = msg;
+        }
+
+        // 产物：files[].name 是相对 downloadDir 的路径（BT 多文件时为各自文件）。
+        var dir = t.TryGetProperty("downloadDir", out var dd) && dd.ValueKind == JsonValueKind.String
+            ? dd.GetString() ?? ""
+            : "";
+        if (t.TryGetProperty("files", out var files) && files.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var f in files.EnumerateArray())
+            {
+                if (!f.TryGetProperty("name", out var nm) || nm.ValueKind != JsonValueKind.String) continue;
+                var name = nm.GetString();
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                st.Files.Add(string.IsNullOrEmpty(dir) ? name! : Path.Combine(dir, name));
+            }
         }
         return Resp<OfflineDownloadStatus>.Ok(st);
     }

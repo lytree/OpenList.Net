@@ -112,6 +112,13 @@ internal static class ItemEndpoints
         g.MapPost("/libraries/{id:long}/scrape", async (long id, ClaimsPrincipal principal, IMediaMetadataService metadata) =>
             Results.Ok(await metadata.ScrapeLibraryAsync(id, principal.ToUser())));
 
+        // POST /api/media/libraries/{id}/scrape/cancel — 中止整库刮削
+        //
+        // 批量刮削每条之间 sleep 250ms、上限 2000 条，一轮可能要跑 8 分钟；
+        // 没有这个入口的话「开始」之后就只能等它自己跑完。
+        g.MapPost("/libraries/{id:long}/scrape/cancel", async (long id, ClaimsPrincipal principal, IMediaMetadataService metadata) =>
+            Results.Ok(await metadata.CancelScrapeAsync(id, principal.ToUser())));
+
         return g;
     }
 }

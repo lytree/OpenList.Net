@@ -17,6 +17,57 @@ namespace OpenList.Migrations.Sqlite.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
+            modelBuilder.Entity("OpenList.Core.Models.BackgroundTask", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Creator")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CreatorRole")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("EndTime")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("OwnerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Progress")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("StartTime")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Total")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Type");
+
+                    b.ToTable("x_tasks", (string)null);
+                });
+
             modelBuilder.Entity("OpenList.Core.Models.Message", b =>
                 {
                     b.Property<long>("Id")

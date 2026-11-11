@@ -65,6 +65,8 @@ public sealed class OpenListDbContext : DbContext
     public DbSet<MediaStudio> MediaStudios => Set<MediaStudio>();
     /// <summary>系列表（番号域聚合维度）。</summary>
     public DbSet<MediaSeries> MediaSeries => Set<MediaSeries>();
+    /// <summary>后台任务持久化记录表。</summary>
+    public DbSet<BackgroundTask> BackgroundTasks => Set<BackgroundTask>();
 
     /// <summary>
     /// 配置实体到数据表的映射关系（表名、主键、唯一索引等）。
@@ -129,6 +131,13 @@ public sealed class OpenListDbContext : DbContext
             // Credential ids must be unique per user so re-registering a key
             // with the same authenticator replaces rather than duplicates.
             e.HasIndex(c => new { c.UserId, c.CredentialId }).IsUnique();
+        });
+        b.Entity<BackgroundTask>(e =>
+        {
+            e.ToTable(prefix + "tasks");
+            e.HasKey(t => t.Id);
+            e.Property(t => t.Id).HasMaxLength(64);
+            e.HasIndex(t => t.Type);
         });
         // 媒体域映射单独归档（表名/索引/列宽集中在 Infrastructure，领域实体不沾 EF 特性）。
         MediaModelConfiguration.Apply(b, prefix);

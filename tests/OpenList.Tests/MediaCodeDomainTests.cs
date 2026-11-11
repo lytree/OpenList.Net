@@ -241,6 +241,75 @@ public class MediaCodeDomainTests
     }
 
     [Test]
+    public async Task ScanSession_Interrupted_Before_Finalize_Never_Deletes_Untraversed_Files()
+    {
+        // 断点续跑的核心安全性质：增量落库只"补写已遍历到的"，删除清理必须留到完整
+        // 遍历结束。若每批都清理，中断后的重跑会把还没遍历到的文件全部误删。
+        await using var ctx = BuildContext();
+        var scanner = new MediaLibraryScanner(fs: null!);
+        var now = DateTimeOffset.UtcNow;
+        const string root = "/f/media";
+
+        // 第一轮：完整扫描，三个条目各一个文件。
+        var all = new List<MediaFileCandidate>
+        {
+            new("/f/media/A-001/movie.mp4", 1, now),
+            new("/f/media/B-002/movie.mp4", 2, now),
+            new("/f/media/C-003/movie.mp4", 3, now),
+        };
+        await scanner.PersistAsync(ctx, 1, root, MediaLibraryType.Mixed, all, now, ct: default);
+        await Assert.That(await ctx.MediaFiles.CountAsync()).IsEqualTo(3);
+
+        // 第二轮模拟中断：只遍历到 A-001 就先落库，随后进程退出（**不调用** FinalizeAsync）。
+        var interrupted = await MediaScanSession.CreateAsync(ctx, fs: null!, 1, root, MediaLibraryType.Mixed);
+        await interrupted.FlushAsync([new("/f/media/A-001/movie.mp4", 1, now)], now);
+
+        // B-002 / C-003 的文件记录必须原样保留。
+        await Assert.That(await ctx.MediaFiles.CountAsync()).IsEqualTo(3);
+        await Assert.That(await ctx.MediaItems.CountAsync()).IsEqualTo(3);
+
+        // 续跑：新一轮把 A/B 遍历完（C 已在源目录消失），收尾时才清理 C。
+        var resumed = await MediaScanSession.CreateAsync(ctx, fs: null!, 1, root, MediaLibraryType.Mixed);
+        await resumed.FlushAsync(
+        [
+            new("/f/media/A-001/movie.mp4", 1, now),
+            new("/f/media/B-002/movie.mp4", 2, now),
+        ], now);
+        var changes = await resumed.FinalizeAsync(sidecars: null, now);
+
+        // C 消失 = 1 个文件记录 + 1 个空条目，两处都计入 Removed。
+        await Assert.That(changes.Removed).IsEqualTo(2);
+        await Assert.That(await ctx.MediaFiles.CountAsync()).IsEqualTo(2);
+        await Assert.That(await ctx.MediaItems.CountAsync()).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task ScanSession_Flush_Is_Idempotent_Across_Batches()
+    {
+        // 重跑时同一批文件会被再写一遍：必须按路径判重，不能产生重复的条目/文件记录。
+        await using var ctx = BuildContext();
+        var scanner = new MediaLibraryScanner(fs: null!);
+        var now = DateTimeOffset.UtcNow;
+        const string root = "/f/media";
+
+        var batch = new List<MediaFileCandidate>
+        {
+            new("/f/media/A-001/movie.mp4", 1, now),
+            new("/f/media/A-001/extra.mp4", 1, now),
+        };
+        await scanner.PersistAsync(ctx, 1, root, MediaLibraryType.Mixed, batch, now, ct: default);
+
+        var rerun = await MediaScanSession.CreateAsync(ctx, fs: null!, 1, root, MediaLibraryType.Mixed);
+        var (addedAgain, updatedAgain) = await rerun.FlushAsync(batch, now);
+        await rerun.FinalizeAsync(sidecars: null, now);
+
+        await Assert.That(addedAgain).IsEqualTo(0);
+        await Assert.That(updatedAgain).IsEqualTo(0);
+        await Assert.That(await ctx.MediaItems.CountAsync()).IsEqualTo(1);
+        await Assert.That(await ctx.MediaFiles.CountAsync()).IsEqualTo(2);
+    }
+
+    [Test]
     public async Task TaxonomySync_Resolve_Is_Idempotent_Per_Name()
     {
         await using var ctx = BuildContext();

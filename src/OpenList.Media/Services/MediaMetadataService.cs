@@ -182,6 +182,8 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
         // POST /items/{id}/scrape?provider=code，或保持 local 元数据不被覆盖。
         _ = Task.Run(async () =>
         {
+            // 本轮的中止令牌：管理员可通过 POST /libraries/{id}/scrape/cancel 停掉整批。
+            var token = run?.Token ?? CancellationToken.None;
             try
             {
                 using var scope = _scopeFactory.CreateScope();
@@ -198,12 +200,12 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
                     .Where(i => i.LibraryId == libraryId && i.Status == MediaItemStatus.Pending)
                     .OrderBy(i => i.Id)
                     .Take(MediaScrapeCoordinator.MaxBatch)
-                    .ToListAsync(CancellationToken.None);
+                    .ToListAsync(token);
 
                 var language = library.MetadataLanguage;
                 if (string.IsNullOrWhiteSpace(language))
                 {
-                    var langResp = await settings.GetAsync("media_metadata_language", CancellationToken.None);
+                    var langResp = await settings.GetAsync("media_metadata_language", token);
                     language = langResp.Code == 200 && !string.IsNullOrWhiteSpace(langResp.Data?.Value) ? langResp.Data!.Value : "zh-CN";
                 }
 
@@ -212,40 +214,51 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
                     // 连续失败达到阈值就收工：API key 失效时每条都会抛，不熔断的话整批
                     // 会在 8 分钟里静默跑完，什么都没写，界面还以为在正常推进。
                     if (run is not null && run.ShouldAbort) break;
+                    token.ThrowIfCancellationRequested();
 
                     try
                     {
-                        var results = await provider.SearchAsync(item.Title, item.Year, item.Type, language, CancellationToken.None);
+                        var results = await provider.SearchAsync(item.Title, item.Year, item.Type, language, token);
                         var best = PickBest(item, results);
                         if (best is null)
                         {
                             // provider 正常响应、只是没有匹配项 —— 这不算失败，
                             // 否则冷门库连撞 5 条不匹配就会被误伤熔断。
                             item.Status = MediaItemStatus.Unmatched;
-                            await db.SaveChangesAsync(CancellationToken.None);
+                            await db.SaveChangesAsync(token);
                             run?.RecordSuccess();
-                            await Task.Delay(250, CancellationToken.None);
+                            await Task.Delay(250, token);
                             continue;
                         }
-                        var meta = await provider.GetAsync(best.Id, item.Type, language, CancellationToken.None);
+                        var meta = await provider.GetAsync(best.Id, item.Type, language, token);
                         if (meta is null)
                         {
                             run?.RecordFailure($"provider returned no detail for {best.Id}");
-                            await Task.Delay(250, CancellationToken.None);
+                            await Task.Delay(250, token);
                             continue;
                         }
 
                         // 批量刮削只挑 Pending 条目（local 条目已是 Matched 不会进来），按覆盖处理。
-                        await ApplyCoreAsync(db, fs, provider, _time, item, meta, overwrite: true, CancellationToken.None);
+                        await ApplyCoreAsync(db, fs, provider, _time, item, meta, overwrite: true, token);
                         run?.RecordSuccess();
                     }
-                    catch (Exception ex)
+                    // 取消不是失败：不记失败计数、不把它算进熔断。
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
                         // 单条失败不影响整批；条目保持 Pending 以便下次重试。
                         run?.RecordFailure(ex.Message);
                     }
-                    await Task.Delay(250, CancellationToken.None);
+                    await Task.Delay(250, token);
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                // 管理员请求中止（或本轮被替换）：已刮削的条目都已落库，
+                // 剩下的仍为 Pending —— 下次点「整库刮削」自然从断点继续。
+            }
+            catch (Exception ex)
+            {
+                run?.RecordFailure(ex.Message);
             }
             finally
             {
@@ -255,6 +268,17 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
         }, CancellationToken.None);
 
         return Resp.Ok();
+    }
+
+    /// <inheritdoc />
+    public Task<Resp> CancelScrapeAsync(long libraryId, User user, CancellationToken ct = default)
+    {
+        if (!user.CanManageMediaLibrary()) return Task.FromResult(Resp.Fail("permission denied", 403));
+        // 只校验「有没有在跑」：库已存在这一点由 ScrapeLibraryAsync 入口保证，
+        // 取消动作本身只作用于内存里的运行态。
+        return Task.FromResult(_scrape.Cancel(libraryId)
+            ? Resp.Ok()
+            : Resp.Fail("scrape not running", RespCodes.BadRequest));
     }
 
     /// <inheritdoc />

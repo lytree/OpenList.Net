@@ -17,8 +17,9 @@ import {
   ElTag,
 } from "element-plus"
 import { VexTable, VexColumn } from "~/components/table"
-import { Delete, Edit, List, MagicStick, Plus, Refresh, VideoPause, VideoPlay } from "@element-plus/icons-vue"
+import { Close, Delete, Edit, List, MagicStick, Plus, Refresh, VideoPause, VideoPlay } from "@element-plus/icons-vue"
 import {
+  mediaCancelScrape,
   mediaCreateLibrary,
   mediaDeleteLibrary,
   mediaListLibraries,
@@ -266,6 +267,25 @@ export default defineComponent({
       await loadTasks()
     }
 
+    /**
+     * 中止正在跑的一轮整库刮削。
+     *
+     * 后端只是发出取消请求：轮询里每条之间隔 250ms，所以最迟约 250ms 后
+     * `running` 才会变 false。这里立刻刷新一次让按钮切回「刮削」，进度列
+     * 由 2.5s 的轮询接管，避免用户以为没生效而连点。
+     */
+    async function onCancelScrape(row: MediaLibrary) {
+      const resp = await mediaCancelScrape(row.id)
+      if (resp.code !== 200) {
+        // 400＝这一轮刚好自己跑完了：不是错误，刷新即可
+        ElMessage.warning(resp.message)
+        await loadTasks()
+        return
+      }
+      ElMessage.success(t("media.manage.scrape_cancelled", { name: row.name }))
+      await loadTasks()
+    }
+
     async function openLogs(row: MediaLibrary) {
       logsFor.value = row
       logsVisible.value = true
@@ -484,21 +504,32 @@ export default defineComponent({
                           </ElButton>
                         </span>
                       )}
-                      <span title={scrapeTitle(r)}>
-                        <ElButton
-                          class="ol-manage-scrape"
-                          size="small"
-                          text={true}
-                          type="primary"
-                          disabled={scrapeDisabled(r)}
-                          loading={scrapeOf(r)?.running === true}
-                          onClick={() => void onScrape(r)}
-                        >
-                          <ElIcon>
-                            <MagicStick />
-                          </ElIcon>
-                        </ElButton>
-                      </span>
+                      {/* 刮削中复用同一个按钮位：显示「取消」而不是置灰的刮削按钮 ——
+                          批量刮削要跑好几分钟，没有停止入口时用户只能干等。 */}
+                      {scrapeOf(r)?.running === true ? (
+                        <span title={t("media.manage.scrape_cancel")}>
+                          <ElButton size="small" text={true} type="warning" onClick={() => void onCancelScrape(r)}>
+                            <ElIcon>
+                              <Close />
+                            </ElIcon>
+                          </ElButton>
+                        </span>
+                      ) : (
+                        <span title={scrapeTitle(r)}>
+                          <ElButton
+                            class="ol-manage-scrape"
+                            size="small"
+                            text={true}
+                            type="primary"
+                            disabled={scrapeDisabled(r)}
+                            onClick={() => void onScrape(r)}
+                          >
+                            <ElIcon>
+                              <MagicStick />
+                            </ElIcon>
+                          </ElButton>
+                        </span>
+                      )}
                       <span title={t("media.manage.logs")}>
                         <ElButton size="small" text={true} onClick={() => openLogs(r)}>
                           <ElIcon>

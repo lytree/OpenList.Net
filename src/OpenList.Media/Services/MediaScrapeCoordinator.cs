@@ -67,6 +67,24 @@ public sealed class MediaScrapeCoordinator
         if (_runs.TryGetValue(libraryId, out var run)) run.Finish();
     }
 
+    /// <summary>
+    /// 请求中止正在跑的一轮刮削。
+    /// <para>
+    /// 批量刮削每条之间固定 sleep 250ms，2000 条要跑 8 分钟；此前后台任务全程用
+    /// <c>CancellationToken.None</c>，一旦开始就只能等它自己跑完。现在把它换成
+    /// <see cref="MediaScrapeRun.Token"/>，这里 <see cref="MediaScrapeRun.Cancel"/> 后
+    /// 最迟 250ms 内就会退出。
+    /// </para>
+    /// </summary>
+    /// <param name="libraryId">媒体库 id。</param>
+    /// <returns>确实有一轮在跑并已发出取消请求时返回 <c>true</c>。</returns>
+    public bool Cancel(long libraryId)
+    {
+        if (!_runs.TryGetValue(libraryId, out var run) || !run.Running) return false;
+        run.Cancel();
+        return true;
+    }
+
     /// <summary>取运行态（含上一轮已结束的记录）；该库从未刮过返回 <c>null</c>。</summary>
     /// <param name="libraryId">媒体库 id。</param>
     public MediaScrapeRun? Get(long libraryId) => _runs.TryGetValue(libraryId, out var run) ? run : null;
@@ -82,6 +100,8 @@ public sealed class MediaScrapeRun
     private int _consecutiveFailures;
     private string? _error;
     private volatile bool _running = true;
+    private volatile bool _cancelled;
+    private readonly CancellationTokenSource _cts = new();
 
     /// <summary>创建一轮运行态。</summary>
     /// <param name="startPending">开始时待刮削条目数。</param>
@@ -107,6 +127,24 @@ public sealed class MediaScrapeRun
     /// <summary>最近一次失败的错误信息，可为空。</summary>
     public string? Error => _error;
 
+    /// <summary>本轮是否已被管理员请求中止。</summary>
+    public bool Cancelled => _cancelled;
+
+    /// <summary>
+    /// 本轮的中止令牌。批量刮削内部的所有 await 都传它（此前一律传
+    /// <c>CancellationToken.None</c>，导致整批无法中途停止）。
+    /// </summary>
+    public CancellationToken Token => _cts.Token;
+
+    /// <summary>请求中止：把 <see cref="Error"/> 记成 <c>cancelled</c>，让管理台能区分「取消」与「失败」。</summary>
+    public void Cancel()
+    {
+        _cancelled = true;
+        _error = "cancelled";
+        try { _cts.Cancel(); }
+        catch (ObjectDisposedException) { /* 已结束（Finish 已释放）—— 无可取消 */ }
+    }
+
     /// <summary>
     /// 是否应当中止：连续失败达到 <see cref="MediaScrapeCoordinator.AbortAfterConsecutiveFailures"/>。
     /// 存在的理由是「配置错」与「个别条目匹配不到」必须区分开 ——
@@ -115,8 +153,13 @@ public sealed class MediaScrapeRun
     public bool ShouldAbort =>
         Volatile.Read(ref _consecutiveFailures) >= MediaScrapeCoordinator.AbortAfterConsecutiveFailures;
 
-    /// <summary>标记本轮结束。</summary>
-    public void Finish() => _running = false;
+    /// <summary>标记本轮结束，并释放中止令牌。</summary>
+    public void Finish()
+    {
+        _running = false;
+        try { _cts.Dispose(); }
+        catch (ObjectDisposedException) { /* 并发 Cancel 已释放 —— 无害 */ }
+    }
 
     /// <summary>记录一次成功（重置连续失败计数）。</summary>
     public void RecordSuccess() => Interlocked.Exchange(ref _consecutiveFailures, 0);

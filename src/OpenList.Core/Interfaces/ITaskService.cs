@@ -103,6 +103,19 @@ public interface ITaskService
     /// <param name="ct">取消令牌。</param>
     /// <param name="ownerId">创建者用户 id（0 表示系统任务，仅管理员可见）。</param>
     Task<string> CreateAsync(TaskType type, Func<IProgress<TaskProgress>, CancellationToken, Task> work, CancellationToken ct = default, long ownerId = 0);
+
+    /// <summary>
+    /// 启动期恢复：把持久化的任务记录读回内存，让服务重启后仍能查询历史任务。
+    /// <para>
+    /// 重启时仍未完成的任务（等待中/执行中/取消中）的工作负载已随进程丢失、无法续跑，
+    /// 一律标记为出错（错误信息为「interrupted by server restart」），而不是留下永远
+    /// 停在「执行中」的幽灵任务。
+    /// </para>
+    /// <para>
+    /// 未接入数据库（无 <c>IServiceScopeFactory</c>）时为空操作；重复调用无副作用。
+    /// </para>
+    /// </summary>
+    Task RestoreAsync(CancellationToken ct = default);
 }
 
 /// <summary>

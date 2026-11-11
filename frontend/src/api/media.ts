@@ -268,6 +268,15 @@ export const mediaScrapeItem = (id: number): Promise<Resp<unknown>> =>
 export const mediaScrapeLibrary = (id: number): Promise<Resp<unknown>> =>
   http.post(`/media/libraries/${id}/scrape`, {}) as Promise<Resp<unknown>>
 
+/**
+ * 中止正在跑的一轮整库刮削。
+ *
+ * 后端只发取消请求（轮询每条之间隔 250ms），`running` 会在下一次轮询时变 false；
+ * 已刮削的条目都已落库，中断后重新点「刮削」会从剩余的 Pending 继续。
+ */
+export const mediaCancelScrape = (id: number): Promise<Resp<unknown>> =>
+  http.post(`/media/libraries/${id}/scrape/cancel`, {}) as Promise<Resp<unknown>>
+
 // ---- 个人状态 ------------------------------------------------------------
 
 export const mediaGetState = (id: number): Promise<Resp<UserMediaState | null>> =>

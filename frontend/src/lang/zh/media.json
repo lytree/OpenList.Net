@@ -221,6 +221,8 @@
     "scrape_started": "正在后台刮削「{{name}}」",
     "scrape_running": "该媒体库已有刮削在进行",
     "scrape_nothing": "无需刮削 —— 所有条目都已有元数据",
+    "scrape_cancel": "取消刮削",
+    "scrape_cancelled": "已请求取消「{{name}}」的刮削",
     "scrape_left": "剩余 {{count}} 个",
     "scrape_matched": "已匹配 {{count}} 个",
     "scrape_pending": "待刮削 {{count}} 个",

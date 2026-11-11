@@ -23,6 +23,15 @@ public interface IMediaMetadataService
     /// </summary>
     Task<Resp> ScrapeLibraryAsync(long libraryId, User user, CancellationToken ct = default);
     /// <summary>
+    /// 中止正在跑的一轮整库刮削。
+    /// <para>
+    /// 已刮削的条目都已在 <see cref="ScrapeLibraryAsync"/> 的循环里逐条落库，
+    /// 剩下的仍为 Pending —— 之后再点「整库刮削」会自然从断点继续。
+    /// 没有正在跑的一轮时返回 400。
+    /// </para>
+    /// </summary>
+    Task<Resp> CancelScrapeAsync(long libraryId, User user, CancellationToken ct = default);
+    /// <summary>
     /// 各库的刮削状态（管理台「整库刮削」按钮的数据源）。
     /// 一次返回全部可见库，而不是按库逐个查 —— 管理台 2.5 秒轮询一次，
     /// 逐库请求会有 N 倍开销。

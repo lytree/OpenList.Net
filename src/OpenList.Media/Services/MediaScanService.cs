@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
 using OpenList.Media.Domain;
@@ -162,22 +163,47 @@ public sealed class MediaScanService : IMediaScanService
         return Resp<List<MediaScanTask>>.Ok(ordered);
     }
 
-    /// <summary>扫描主流程（后台）。</summary>
+    /// <summary>
+    /// 扫描主流程（后台）。
+    /// <para>
+    /// 采用**增量落库**（<see cref="MediaScanSession"/>）：遍历中每攒满一批就写库，
+    /// 因此中断（取消 / 进程退出）时已完成的部分已经留在库里，重跑会自动从增量开始 ——
+    /// 这就是扫描的断点续跑。注意中断时**不做删除清理**（否则会误删还没遍历到的文件）。
+    /// </para>
+    /// </summary>
     private async Task RunAsync(long libraryId, string rootPath, MediaLibraryType libraryType, CancellationToken ct)
     {
         var progress = _progress[libraryId];
-        var discovered = new List<MediaFileCandidate>();
+        var pending = new List<MediaFileCandidate>();
         var sidecars = new List<MediaSidecarCandidate>();
         var log = new MediaScanLog { LibraryId = libraryId, StartedAt = _time.GetUtcNow() };
 
         try
         {
-            await _scanner.WalkAsync(rootPath, discovered, progress, ct, sidecars);
-
+            // 全程复用同一个 DbContext：会话依赖 EF 变更跟踪在批次之间维持实体身份。
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
-            var changes = await _scanner.PersistAsync(
-                db, libraryId, rootPath, libraryType, discovered, _time.GetUtcNow(), ct, sidecars);
+            var fs = scope.ServiceProvider.GetRequiredService<IFileSystemService>();
+            var session = await MediaScanSession.CreateAsync(db, fs, libraryId, rootPath, libraryType, ct);
+
+            await _scanner.WalkAsync(rootPath, pending, progress, ct, sidecars, async (batch, token) =>
+            {
+                var (added, updated) = await session.FlushAsync(batch, _time.GetUtcNow(), token);
+                // 实时刷新进度，让管理台看到"边遍历边落库"的推进。
+                progress.Added = added;
+                progress.Updated = updated;
+            });
+
+            // 尾部不足一批的剩余文件也要落库。
+            if (pending.Count > 0)
+            {
+                var (added, updated) = await session.FlushAsync(pending, _time.GetUtcNow(), ct);
+                progress.Added = added;
+                progress.Updated = updated;
+            }
+
+            // 只有完整遍历结束才做收尾（sidecar + 清理已消失文件/空条目）。
+            var changes = await session.FinalizeAsync(sidecars, _time.GetUtcNow(), ct);
 
             log.Added = changes.Added;
             log.Updated = changes.Updated;
@@ -204,6 +230,9 @@ public sealed class MediaScanService : IMediaScanService
             progress.State = "cancelled";
             progress.FinishedAt = _time.GetUtcNow();
             log.Error = "cancelled";
+            // 中断前的增量已经落库，把已处理条数带进历史，用户才知道"这次扫到哪儿了"。
+            log.Added = progress.Added;
+            log.Updated = progress.Updated;
             log.FinishedAt = progress.FinishedAt;
             await TryWriteLogAsync(log);
         }
@@ -212,6 +241,8 @@ public sealed class MediaScanService : IMediaScanService
             progress.State = "failed";
             progress.FinishedAt = _time.GetUtcNow();
             log.Error = ex.Message;
+            log.Added = progress.Added;
+            log.Updated = progress.Updated;
             log.FinishedAt = progress.FinishedAt;
             await TryWriteLogAsync(log);
         }

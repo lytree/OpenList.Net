@@ -41,16 +41,16 @@ public sealed class Aria2Tool : IOfflineDownloadTool
     /// 通过 aria2.addUri 添加下载任务。
     /// </summary>
     /// <param name="url">待下载的链接。</param>
-    /// <param name="destPath">保存目录。</param>
+    /// <param name="downloadDir">aria2 本机可写的下载目录（不是 VFS 路径）。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>成功时返回 aria2 分配的 GID；失败返回错误信息。</returns>
-    public async Task<Resp<string>> AddDownloadAsync(string url, string destPath, CancellationToken ct = default)
+    public async Task<Resp<string>> AddDownloadAsync(string url, string downloadDir, CancellationToken ct = default)
     {
         // aria2.addUri 参数：[secret, [url], {dir: ...}]
         var args = new List<object>();
         if (!string.IsNullOrEmpty(_secret)) args.Add("token:" + _secret);
         args.Add(new[] { url });
-        args.Add(new Dictionary<string, string> { ["dir"] = destPath });
+        args.Add(new Dictionary<string, string> { ["dir"] = downloadDir });
 
         var (ok, result, err) = await CallAsync("aria2.addUri", args, ct);
         if (!ok) return Resp<string>.Fail(err ?? "aria2 error", RespCodes.InternalError);
@@ -82,7 +82,7 @@ public sealed class Aria2Tool : IOfflineDownloadTool
         var args = new List<object>();
         if (!string.IsNullOrEmpty(_secret)) args.Add("token:" + _secret);
         args.Add(taskId);
-        args.Add(new[] { "gid", "status", "totalLength", "completedLength", "errorCode", "errorMessage" });
+        args.Add(new[] { "gid", "status", "totalLength", "completedLength", "errorCode", "errorMessage", "files" });
 
         var (ok, result, err) = await CallAsync("aria2.tellStatus", args, ct);
         if (!ok) return Resp<OfflineDownloadStatus>.Fail(err ?? "aria2 error", RespCodes.InternalError);
@@ -107,6 +107,18 @@ public sealed class Aria2Tool : IOfflineDownloadTool
                     {
                         var s = p.Value.GetString();
                         if (!string.IsNullOrEmpty(s)) st.Error = s;
+                    }
+                    break;
+                // files: [{ index, path, length, completedLength, ... }]
+                // 只有 aria2 侧确实产出了文件才有 path；BT 多文件任务会有多条。
+                case "files" when p.Value.ValueKind == JsonValueKind.Array:
+                    foreach (var file in p.Value.EnumerateArray())
+                    {
+                        if (file.TryGetProperty("path", out var fp) && fp.ValueKind == JsonValueKind.String)
+                        {
+                            var path = fp.GetString();
+                            if (!string.IsNullOrWhiteSpace(path)) st.Files.Add(path);
+                        }
                     }
                     break;
             }

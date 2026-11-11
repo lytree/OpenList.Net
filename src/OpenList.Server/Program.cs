@@ -162,8 +162,9 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IWebAuthnService, WebAuthnService>();
 builder.Services.AddSingleton<IScanService, ScanService>();
 builder.Services.AddSingleton<ISearchService, SearchService>();
-// 任务并发上限（copy_task_threads_num 等 8 个键）：与缩略图同一套 20s 快照，
-// TaskService 创建任务时只读内存，不查库。必须先于 ITaskService 注册（构造注入）。
+// 任务并发上限（copy_task_threads_num 等 8 个键）：与缩略图同一套 20s 快照。
+// TaskService 是单例：运行态只在内存，状态快照落 x_tasks（持久化失败不影响任务本身），
+// 重启后由 RestoreAsync 读回历史任务并把未完成的标记为失败。必须先于 ITaskService 注册（构造注入）。
 builder.Services.AddSingleton<ITaskConcurrencyProvider, TaskConcurrencyProvider>();
 builder.Services.AddSingleton<ITaskService, TaskService>();
 // SignService must be singleton (matches MountService lifetime) so FileSystemService
@@ -202,6 +203,11 @@ builder.Services.AddSingleton<IThumbnailUrlBuilder>(sp => new ThumbnailUrlBuilde
 builder.Services.AddHttpClient("offline_download_aria2");
 builder.Services.AddHttpClient("offline_download_qbit");
 builder.Services.AddHttpClient("offline_download_transmission");
+// SimpleHttp 是服务端自带的直连下载器：它把响应流直接交给 VFS 上传（边下边传），
+// 大文件可能远超默认 100s 超时，因此单独配一个无整体超时的客户端
+// （真正的时长由任务的取消令牌控制）。
+builder.Services.AddHttpClient("offline_download_simple_http")
+    .ConfigureHttpClient(c => c.Timeout = Timeout.InfiniteTimeSpan);
 // Provide a lazy IFileSystemService factory for OfflineDownloadService. This breaks
 // the construction-time cycle between IFileSystemService (resolves IOfflineDownloadService
 // in its singleton factory below) and IOfflineDownloadService (depends on IFileSystemService).
@@ -505,6 +511,11 @@ using (var scope = app.Services.CreateScope())
     // 只 Console.WriteLine 的话用户根本看不到自己第一次的登录密码。
     await DbInitializer.InitializeAsync(
         db, appConfig, app.Environment.IsDevelopment(), logger: startupLogger);
+
+    // Restore persisted task records (x_tasks). Tasks left unfinished by the previous
+    // shutdown cannot resume (the workload is a closure), so they are marked failed here —
+    // otherwise /api/task would list phantom "running" tasks forever.
+    await scope.ServiceProvider.GetRequiredService<ITaskService>().RestoreAsync();
 
     // Load all enabled storages into the mount filesystem.
     var storageSvc = scope.ServiceProvider.GetRequiredService<IStorageService>();

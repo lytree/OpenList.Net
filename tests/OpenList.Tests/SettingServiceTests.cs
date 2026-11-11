@@ -102,13 +102,36 @@ public class SettingServiceTests
     }
 
     [Test]
-    public async Task GetOfflineDownloadToolsAsync_Returns_Empty_List()
+    public async Task GetOfflineDownloadToolsAsync_Always_Offers_SimpleHttp()
     {
+        // SimpleHttp 是服务端自带、无需任何配置的直连下载器，必须始终可用；
+        // 此前这里恒返回空数组，前端据此把「提交」按钮全部禁用，离线下载在 UI 上不可用。
         await using var ctx = BuildContext();
         var svc = BuildService(ctx);
         var r = await svc.GetOfflineDownloadToolsAsync();
         await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(r.Data!).IsEmpty();
+        await Assert.That(r.Data!).Contains("SimpleHttp");
+    }
+
+    [Test]
+    public async Task GetOfflineDownloadToolsAsync_Exposes_Only_Configured_Tools()
+    {
+        await using var ctx = BuildContext();
+        // 只配置 aria2，其余两个工具地址留空。
+        ctx.Settings.Add(new SettingItem { Key = "aria2_uri", Value = "http://localhost:6800/jsonrpc", Group = 5 });
+        ctx.Settings.Add(new SettingItem { Key = "qbittorrent_url", Value = "", Group = 5 });
+        ctx.Settings.Add(new SettingItem { Key = "transmission_uri", Value = "   ", Group = 5 });
+        await ctx.SaveChangesAsync();
+
+        var svc = BuildService(ctx);
+        var r = await svc.GetOfflineDownloadToolsAsync();
+
+        await Assert.That(r.Code).IsEqualTo(200);
+        await Assert.That(r.Data!).Contains("SimpleHttp");
+        await Assert.That(r.Data).Contains("aria2");
+        // 空字符串/纯空白都视为未启用。
+        await Assert.That(r.Data).DoesNotContain("qBittorrent");
+        await Assert.That(r.Data).DoesNotContain("Transmission");
     }
 
     [Test]

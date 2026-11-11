@@ -170,6 +170,14 @@ describe("libraryState", () => {
     expect(libraryState(scrapeRow({ error: "invalid api key", pending: 5 }))).toBe("failed")
   })
 
+  it("管理员中止刮削不算失败（error 为字面量 cancelled）", () => {
+    // 取消后剩下未刮的条目仍是 Pending，重跑就能续上 —— 该显示「待刮削」而不是「失败」
+    expect(libraryState(scrapeRow({ error: "cancelled", pending: 3 }))).toBe("pending")
+    expect(libraryState(scrapeRow({ error: "cancelled", matched: 2, pending: 0 }))).toBe("clean")
+    // failed 计数仍是真失败，不能被取消掩盖
+    expect(libraryState(scrapeRow({ error: "cancelled", failed: 2 }))).toBe("failed")
+  })
+
   it("有待刮削 / 有未匹配 / 已干净 / 空库", () => {
     expect(libraryState(scrapeRow({ pending: 3 }))).toBe("pending")
     expect(libraryState(scrapeRow({ unmatched: 2 }))).toBe("unmatched")

@@ -135,7 +135,10 @@ export type LibraryState = "running" | "failed" | "pending" | "unmatched" | "cle
  */
 export function libraryState(row: MediaScrapeStatus): LibraryState {
   if (row.running) return "running"
-  if (row.failed > 0 || (row.error ?? "").length > 0) return "failed"
+  // 「已取消」不是失败：刮削随时可被管理员中止，把它算成 failed 会让运维
+  // 以为 provider 出了问题（后端的取消路径把 Error 记为字面量 "cancelled"）。
+  const error = row.error ?? ""
+  if (row.failed > 0 || (error.length > 0 && error !== "cancelled")) return "failed"
   if (row.pending > 0) return "pending"
   if (row.unmatched > 0) return "unmatched"
   return row.matched > 0 ? "clean" : "empty"

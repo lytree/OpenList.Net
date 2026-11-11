@@ -156,15 +156,38 @@ public sealed class SettingService : ISettingService
     }
 
     /// <summary>
-    /// 返回已启用的离线下载工具名称列表。当前为空数组，实际工具集成（aria2、qBittorrent 等）
-    /// 将在后续阶段加入。
+    /// 返回已启用的离线下载工具名称列表。
+    /// <para>
+    /// 判定口径是「地址已配置」——与 <c>OfflineDownloadService</c> 各 <c>Build*Async</c>
+    /// 构建工具时的 <c>Enabled</c> 判据一致（<c>aria2_uri</c> / <c>qbittorrent_url</c> /
+    /// <c>transmission_uri</c> 非空即启用）。此前这里恒返回空数组，前端据此把提交按钮
+    /// 全部禁用，离线下载在 UI 上完全不可用。
+    /// </para>
+    /// <para>
+    /// <c>SimpleHttp</c> 是服务端自带的直连下载器（无需任何配置），因此排在最前、
+    /// 永远可用；它不支持 BT/磁力链接，前端据此隐藏「边下边传」以外的差异提示。
+    /// </para>
     /// </summary>
-    public Task<Resp<string[]>> GetOfflineDownloadToolsAsync(CancellationToken ct = default)
+    public async Task<Resp<string[]>> GetOfflineDownloadToolsAsync(CancellationToken ct = default)
     {
-        // 返回已启用的离线下载工具名。实际工具集成（aria2、qBittorrent 等）将在后续阶段加入。
-        var tools = Array.Empty<string>();
-        return Task.FromResult(Resp<string[]>.Ok(tools));
+        // 每次直查数据库而不是走 _cache：本服务是 Scoped，缓存只在单请求内有效，
+        // 而公开端点可能被频繁调用，缓存反而增加「读到的不是最新配置」的风险面。
+        var values = await _db.Settings.AsNoTracking()
+            .Where(s => s.Key == "aria2_uri" || s.Key == "qbittorrent_url" || s.Key == "transmission_uri")
+            .ToDictionaryAsync(s => s.Key, s => s.Value ?? "", ct);
+
+        var tools = new List<string> { "SimpleHttp" };
+        // 名称必须能被 OfflineDownloadService 的 switch 命中（它按小写比较，
+        // 因此这里的大小写只影响 UI 展示，不影响路由）。
+        if (IsConfigured(values, "aria2_uri")) tools.Add("aria2");
+        if (IsConfigured(values, "qbittorrent_url")) tools.Add("qBittorrent");
+        if (IsConfigured(values, "transmission_uri")) tools.Add("Transmission");
+        return Resp<string[]>.Ok(tools.ToArray());
     }
+
+    /// <summary>工具地址是否已配置（空/空白视为未启用）。</summary>
+    private static bool IsConfigured(Dictionary<string, string> values, string key)
+        => values.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v);
 
     /// <summary>
     /// 返回归档读取器支持的压缩包扩展名列表。

@@ -536,6 +536,10 @@ public static class DbInitializer
         // --- Group 0: SINGLE (token + offline-download tool temp dirs, shown on /settings/other) ---
         ("token", "", SettingValueType.String, SettingFlag.Private, 0, null),
         ("webauthn_login_enabled", "false", SettingValueType.Bool, SettingFlag.Public, 0, null),
+        // 本机临时目录：离线下载工具（aria2 / qBittorrent / Transmission / SimpleHttp）先下到这里，
+        // 再由 transfer 阶段经 VFS 上传进目标存储。留空则用系统临时目录。
+        // 独立可配是因为大文件任务会吃掉可观的磁盘，运维通常希望它落在专门的大盘上。
+        ("offline_download_temp_dir", "", SettingValueType.String, SettingFlag.Private, 0, null),
         ("115_temp_dir", "", SettingValueType.String, SettingFlag.Private, 0, null),
         ("115_open_temp_dir", "", SettingValueType.String, SettingFlag.Private, 0, null),
         ("123_pan_temp_dir", "", SettingValueType.String, SettingFlag.Private, 0, null),
