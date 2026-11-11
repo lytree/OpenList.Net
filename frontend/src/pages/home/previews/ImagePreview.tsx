@@ -1,7 +1,8 @@
-import { defineComponent, ref, type PropType } from "vue"
+import { computed, defineComponent, ref, watch, type PropType } from "vue"
 import { ElButton, ElButtonGroup, ElIcon } from "element-plus"
 import { RefreshLeft, RefreshRight, ZoomIn, ZoomOut } from "@element-plus/icons-vue"
 import { t } from "~/i18n"
+import type { Obj } from "~/api/types"
 import type { PreviewChildProps } from "./types"
 
 /**
@@ -10,12 +11,17 @@ import type { PreviewChildProps } from "./types"
  * 不用 `el-image` 自带的 `preview-src-list` 灯箱：灯箱是「覆盖全屏的另一个图层」，
  * 会丢掉宿主工具栏（切换预览器/下载）。这里在同一块舞台里做缩放/旋转/平移，
  * 双击在「适应窗口」与 1:1 之间切换。
+ *
+ * 「上一张 / 下一张」的列表由宿主注入（同目录图片），导航本身也由宿主改 URL 完成，
+ * 因此本组件不需要知道路径拼接与预览器保持逻辑。
  */
 export default defineComponent({
   name: "ImagePreview",
   props: {
     obj: { type: Object as PropType<PreviewChildProps["obj"]>, required: true },
     src: { type: String, required: true },
+    playlist: { type: Array as PropType<Obj[]>, default: () => [] },
+    playlistPlay: { type: Function as PropType<(index: number) => void>, default: undefined },
   },
   setup(props) {
     const scale = ref(1)
@@ -41,6 +47,37 @@ export default defineComponent({
       rotate.value = 0
       tx.value = 0
       ty.value = 0
+    }
+
+    // 切到同目录的下一张时组件实例不变（只有 props 变化），视图状态必须归零，
+    // 否则会带着上一张的缩放/旋转看新图。
+    watch(
+      () => props.obj.name,
+      () => {
+        reset()
+        failed.value = false
+      },
+    )
+
+    // 播放列表里找不到当前文件时（目录列表尚未就绪）隐藏切图按钮
+    const currentIndex = computed(() =>
+      props.playlist.findIndex((item) => item.name === props.obj.name),
+    )
+
+    function playAt(index: number) {
+      props.playlistPlay?.(index)
+    }
+
+    function playPrev() {
+      const total = props.playlist.length
+      if (total <= 1 || currentIndex.value < 0) return
+      playAt((currentIndex.value - 1 + total) % total)
+    }
+
+    function playNext() {
+      const total = props.playlist.length
+      if (total <= 1 || currentIndex.value < 0) return
+      playAt((currentIndex.value + 1) % total)
     }
 
     function onWheel(e: WheelEvent) {
@@ -96,6 +133,17 @@ export default defineComponent({
             </ElButton>
             <ElButton onClick={reset}>{t("home.preview.reset_zoom")}</ElButton>
           </ElButtonGroup>
+          {currentIndex.value >= 0 && props.playlist.length > 1 && (
+            <ElButtonGroup size="small">
+              <ElButton onClick={playPrev}>{t("home.preview.prev")}</ElButton>
+              <ElButton onClick={playNext}>{t("home.preview.next")}</ElButton>
+            </ElButtonGroup>
+          )}
+          {currentIndex.value >= 0 && props.playlist.length > 1 && (
+            <span class="ol-preview-hint">
+              {currentIndex.value + 1} / {props.playlist.length}
+            </span>
+          )}
           <span class="ol-preview-hint">{Math.round(scale.value * 100)}%</span>
         </div>
 

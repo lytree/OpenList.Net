@@ -5,17 +5,27 @@ import { pathDir, pathJoin } from "~/utils/path"
 import { humanSize } from "~/utils/format"
 import { useSettingsStore } from "~/stores/settings"
 import { t } from "~/i18n"
+import type { Obj } from "~/api/types"
 import type { PreviewChildProps } from "./types"
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const AUTO_NEXT_KEY = "preview_video_auto_next"
 
+/** 播放列表条目：优先用宿主注入的完整列表，退回后端 `related` 的序列信息。 */
+interface PlaylistEntry {
+  name: string
+  size?: number
+}
+
 /**
  * 视频预览。
  *
  * 媒体源直接用 `/p/{path}`（后端签名代理，支持 Range，拖动进度条不会整份重下）。
- * 不做 HLS/ASS/artplayer：后端下发的 `related` 只覆盖「同目录同前缀的兄弟视频」，
- * 先把「能播、能切集、能自动连播」做稳，字幕/多轨等交给后续 milestone。
+ * 不做 HLS/ASS/artplayer：先把「能播、能切集、能自动连播」做稳，
+ * 字幕/多轨等交给后续 milestone。
+ *
+ * 播放列表：宿主会注入「同目录全部视频」，这是切上一集/下一集的主来源；
+ * 后端 `related`（同目录同前缀兄弟）只在目录列表拿不到时兜底。
  */
 export default defineComponent({
   name: "VideoPreview",
@@ -23,6 +33,8 @@ export default defineComponent({
     obj: { type: Object as PropType<PreviewChildProps["obj"]>, required: true },
     src: { type: String, required: true },
     path: { type: String, required: true },
+    playlist: { type: Array as PropType<Obj[]>, default: () => [] },
+    playlistPlay: { type: Function as PropType<(index: number) => void>, default: undefined },
   },
   setup(props) {
     const route = useRoute()
@@ -37,27 +49,53 @@ export default defineComponent({
     const autoNext = ref(localStorage.getItem(AUTO_NEXT_KEY) !== "false")
     const failed = ref(false)
 
-    /** 播放列表 = 当前文件 + 后端给的同系列兄弟，按名字排序保证顺序稳定。 */
-    const playlist = computed(() => {
-      const names = [props.obj.name, ...(props.obj.related ?? []).map((item) => item.name)]
-      return [...new Set(names)].sort((a, b) => a.localeCompare(b, "zh-CN", { numeric: true }))
+    /** 播放列表 = 宿主给的「同目录视频」，拿不到时退回后端 related，按名字排序保证顺序稳定。 */
+    const playlist = computed<PlaylistEntry[]>(() => {
+      const host = props.playlist
+      if (host && host.length > 0) {
+        return host.map((item) => ({ name: item.name, size: item.size }))
+      }
+      const related = props.obj.related ?? []
+      return [...new Set([props.obj.name, ...related.map((item) => item.name)])]
+        .sort((a, b) => a.localeCompare(b, "zh-CN", { numeric: true }))
+        .map((name) => ({
+          name,
+          size:
+            name === props.obj.name
+              ? props.obj.size
+              : related.find((item) => item.name === name)?.size,
+        }))
     })
 
-    const currentIndex = computed(() => playlist.value.indexOf(props.obj.name))
+    const currentIndex = computed(() =>
+      playlist.value.findIndex((item) => item.name === props.obj.name),
+    )
 
     function playAt(index: number) {
-      const name = playlist.value[index]
-      if (!name) return
-      const target = pathJoin(pathDir(props.path), name)
+      const item = playlist.value[index]
+      if (!item) return
+      // 宿主注入的列表由宿主完成导航（路径拼接 + 保持预览器）
+      if (props.playlistPlay) {
+        props.playlistPlay(index)
+        return
+      }
+      const target = pathJoin(pathDir(props.path), item.name)
       void router.replace({
         path: route.path,
         query: { ...route.query, path: target, preview: "video" },
       })
     }
 
+    function playPrev() {
+      const total = playlist.value.length
+      if (total <= 1 || currentIndex.value < 0) return
+      playAt((currentIndex.value - 1 + total) % total)
+    }
+
     function playNext() {
-      if (playlist.value.length <= 1) return
-      playAt((currentIndex.value + 1) % playlist.value.length)
+      const total = playlist.value.length
+      if (total <= 1 || currentIndex.value < 0) return
+      playAt((currentIndex.value + 1) % total)
     }
 
     function onEnded() {
@@ -119,6 +157,9 @@ export default defineComponent({
                 <ElOption key={value} label={`${value}x`} value={value} />
               ))}
             </ElSelect>
+            <ElButton size="small" disabled={playlist.value.length <= 1} onClick={playPrev}>
+              {t("home.preview.prev")}
+            </ElButton>
             <ElButton size="small" disabled={playlist.value.length <= 1} onClick={playNext}>
               {t("home.preview.next")}
             </ElButton>
@@ -127,17 +168,14 @@ export default defineComponent({
 
         {playlist.value.length > 1 && (
           <div class="ol-playlist">
-            {props.obj.related?.map((item) => (
+            {playlist.value.map((item, index) => (
               <ElTag
                 key={item.name}
                 size="small"
                 class="ol-playlist-item"
-                onClick={() => {
-                  const index = playlist.value.indexOf(item.name)
-                  if (index >= 0) playAt(index)
-                }}
+                onClick={() => playAt(index)}
               >
-                <span title={`${item.name} · ${humanSize(item.size)}`}>{item.name}</span>
+                <span title={`${item.name} · ${humanSize(item.size ?? 0)}`}>{item.name}</span>
               </ElTag>
             ))}
           </div>

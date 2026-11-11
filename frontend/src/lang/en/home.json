@@ -32,6 +32,7 @@
     "playback_rate": "Speed",
     "loop": "Loop",
     "next": "Next",
+    "prev": "Previous",
     "word_wrap": "Wrap lines",
     "truncated": "Only the beginning of the file is shown",
     "too_large": "File is too large to preview. Please download it.",

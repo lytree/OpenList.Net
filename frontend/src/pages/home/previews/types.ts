@@ -1,5 +1,5 @@
 import type { Component } from "vue"
-import type { FsGetData, ObjType, Resp } from "~/api/types"
+import type { FsGetData, Obj, ObjType, Resp } from "~/api/types"
 
 /**
  * 预览器契约。
@@ -112,4 +112,13 @@ export interface PreviewChildProps extends PreviewProps {
    * 归档内条目能否预览取决于是否注入 `innerLink`，不再由本标记一刀切。
    */
   readOnly?: boolean
+  /**
+   * 仅图片/视频预览使用：同目录同类型文件构成的播放列表（按名字自然排序）。
+   *
+   * 由 `PreviewHost` 拉取父目录列表后注入 —— 图片/视频预览器据此实现「上一张 / 下一张」，
+   * 数据来源不依赖后端的 `related`（后者只覆盖同前缀的视频兄弟）。
+   */
+  playlist?: Obj[]
+  /** 仅图片/视频预览使用：切到播放列表的指定下标（真正的导航由宿主改 URL 完成）。 */
+  playlistPlay?: (index: number) => void
 }

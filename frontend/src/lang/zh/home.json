@@ -32,6 +32,7 @@
     "playback_rate": "倍速",
     "loop": "循环",
     "next": "下一个",
+    "prev": "上一个",
     "word_wrap": "自动换行",
     "truncated": "仅显示文件开头部分",
     "too_large": "文件太大，无法预览，请下载后查看。",
