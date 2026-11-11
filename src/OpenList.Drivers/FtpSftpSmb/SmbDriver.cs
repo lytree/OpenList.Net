@@ -1,22 +1,20 @@
 using System.Text.Json.Serialization;
 using OpenList.Core.Drivers;
 using OpenList.Core.Drivers.Base;
-using OpenList.Vfs;
+using SMBLibrary;
+using SMBLibrary.Client;
 
 namespace OpenList.Drivers.FtpSftpSmb;
 
 /// <summary>
-/// SMB 存储驱动（基础存根）。
-/// 完整实现需集成 SMBLibrary 客户端，因该库 API 较底层而颇具复杂度。此存根提供
-/// 配置字段元数据，使驱动可被发现，但所有文件系统操作在完整实现前将抛出
-/// NotImplementedException。
+/// 基于 SMBLibrary 客户端（SMB2）的 SMB 存储驱动。
 /// </summary>
 public sealed class SmbDriver : DriverBase
 {
     /// <summary>驱动名称。</summary>
     public override string DriverName => "SMB";
-    /// <summary>未实现写入，当前按只读对待。</summary>
-    public override bool ReadOnly => true;
+    /// <summary>SMB 驱动支持写入。</summary>
+    public override bool ReadOnly => false;
     /// <summary>SMB 不属于云存储驱动器。</summary>
     public override bool IsCloudDriver => false;
 
@@ -38,12 +36,12 @@ public sealed class SmbDriver : DriverBase
     private SmbAddition Addition { get; set; } = new();
 
     /// <summary>
-    /// 初始化 SMB 驱动（存根）：当前仅校验必填字段，并以只读内存文件系统占位挂载。
+    /// 初始化 SMB 驱动：连接服务器、登录、建立共享树连接并挂载 SMB 文件系统。
     /// </summary>
     /// <param name="config">包含 host、share 等字段的驱动配置。</param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>表示初始化完成的任务。</returns>
-    /// <exception cref="InvalidOperationException">未配置 <c>host</c> 或 <c>share</c> 时抛出。</exception>
+    /// <exception cref="InvalidOperationException">必填字段缺失、端口非 445 或连接/登录失败时抛出。</exception>
     public override Task InitAsync(DriverConfig config, CancellationToken ct = default)
     {
         Addition = config.GetAddition<SmbAddition>();
@@ -51,11 +49,32 @@ public sealed class SmbDriver : DriverBase
             throw new InvalidOperationException("host is required");
         if (string.IsNullOrWhiteSpace(Addition.Share))
             throw new InvalidOperationException("share is required");
+        // SMBLibrary 的 SMB2Client 固定连接 445 端口，无法指定自定义端口。
+        if (Addition.Port is not (0 or 445))
+            throw new InvalidOperationException("only the default SMB port 445 is supported");
 
-        // TODO: 使用 SMBLibrary.Client.SMB2Client 实现 SMB 文件系统。
-        // 现阶段先用只读内存文件系统占位，使驱动能正常加载而不引发崩溃。
-        System = new MemoryFileSystem();
-        return Task.CompletedTask;
+        var client = new SMB2Client();
+        try
+        {
+            if (!client.Connect(Addition.Host, SMBTransportType.DirectTCPTransport))
+                throw new InvalidOperationException($"failed to connect to SMB server {Addition.Host}:445");
+
+            var login = client.Login(Addition.Domain ?? "", Addition.Username ?? "", Addition.Password ?? "");
+            if (login != NTStatus.STATUS_SUCCESS)
+                throw new InvalidOperationException($"SMB login failed: {login}");
+
+            var store = client.TreeConnect(Addition.Share, out var treeStatus);
+            if (treeStatus != NTStatus.STATUS_SUCCESS)
+                throw new InvalidOperationException($"failed to connect to SMB share '{Addition.Share}': {treeStatus}");
+
+            System = new SmbFileSystem(client, store, Addition.RootFolderPath);
+            return Task.CompletedTask;
+        }
+        catch
+        {
+            client.Disconnect();
+            throw;
+        }
     }
 }
 

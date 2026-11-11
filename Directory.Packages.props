@@ -59,6 +59,9 @@
     <!-- FTP/SFTP Server -->
     <PackageVersion Include="FubarDev.FtpServer" Version="3.1.2" />
     <PackageVersion Include="FubarDev.FtpServer.FileSystem.DotNet" Version="3.1.2" />
+    <!-- SFTP 服务端：DevTunnels.Ssh 提供 SSH 传输/密码认证，JustSFTP.Server 提供 SFTP v3 协议 -->
+    <PackageVersion Include="Microsoft.DevTunnels.Ssh" Version="3.10.9" />
+    <PackageVersion Include="JustSFTP.Server" Version="1.3.3" />
 
     <!-- Desktop (AvaloniaUI) -->
     <PackageVersion Include="Avalonia" Version="12.1.4" />

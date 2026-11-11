@@ -3681,8 +3681,7 @@ FTP 的权限展示也改为反映真实能力（此前对所有客户端固定�
   `ReadUsers` 拒绝、S3 key 相对桶、S3 只读账号 PUT 403、归档解压 403 且无产物、分片上传跨用户 404）；
   `/sad` 旧用例改写为「拒绝且文件系统无变化」。
 - 前端 252 项通过，`tsc --noEmit` 通过。
-- 仍未做（下一阶段）：离线下载完整状态机、`proxy_types`、SMB/SFTP 服务端、
-  公开资源的并发/速率预算。
+- 仍未做（下一阶段）：离线下载完整状态机、`proxy_types`、SMB/SFTP 服务端（SFTP 服务端与 SMB 驱动见 §59）。
 
 ## 57. 流量限速接线与公开分享并发预算（2026-11-02）
 
@@ -3740,7 +3739,7 @@ FTP 的权限展示也改为反映真实能力（此前对所有客户端固定�
   并发上限 1 时第二条流 429 且**归还后立刻恢复 200**（专门守泄漏）。
 - 前端 252/252 通过，`tsc --noEmit` 通过（仅新增设置项中英文案，设置页按 `group`+`type`
   动态渲染，不需要硬编码键）。
-- 仍未做：`proxy_types` 代理策略、离线下载完整状态机、SMB/SFTP 服务端。
+- 仍未做：`proxy_types` 代理策略、离线下载完整状态机、SMB/SFTP 服务端（SFTP 服务端与 SMB 驱动见 §59）。
 
 ## 58. 任务持久化（2026-11-03）
 
@@ -3789,3 +3788,89 @@ FTP 的权限展示也改为反映真实能力（此前对所有客户端固定�
   删除后行确实消失。
 - 遗留：表会随使用增长（没有自动裁剪，靠 UI 的「清空/删除」）；扫描/刮削的**断点续跑**
   （§5 的「任务断点续跑」）仍未做 —— 那需要把扫描进度也序列化，与本节无关。
+
+## 59. SFTP 服务端落地 + SMB 驱动补全（2026-11-11）
+
+§56.5 / §57.4 里那句「SMB/SFTP 服务端」的欠账，这一节把能做的部分做掉：**SFTP 服务端**（原先
+`SftpHostedService` 只有占位）与 **SMB 驱动**（原先 `SmbDriver` 是 `MemoryFileSystem` 存根）。
+SMB **服务端**被否决 —— OpenList 的密码是 `SHA256(password + 固定后缀)`，而 SMB2 NTLM 需要明文
+或 NT 哈希，无法用现有账号体系验收。
+
+### 59.1 SFTP 服务端
+
+| 关注点 | 实现 |
+|---|---|
+| 传输 / 认证 | `Microsoft.DevTunnels.Ssh` 3.10.9：`SshServerSession` + `Authenticating`，只接受 `ClientPassword` |
+| 协议 | `JustSFTP.Server` 1.3.3：`SFTPServer(SshStream, SshStream, ISFTPHandler, TraceSource, 32K)` |
+| 账号 | 复用 `IUserService.GetByNameAsync` + `UserService.VerifyPassword`，禁用用户拒绝（与 FTP 相同） |
+| 会话根 | 用户 `BasePath`（`SftpSessionFileSystem._root`），`..`/`.` 逐段规范化并拒绝越界 |
+| 授权 | 读写全部经作用域内的 `FileAccessService`（`Read` / `ContentWrite` / `MetaWrite`），逐条目 `CanSee` 过滤隐藏项 |
+| 权限位 | `Mkdir`=位 3、`Rename`=位 4/5、`Remove`/`Rmdir`=位 7，与 `/api/fs` 的管理端点一致 |
+| 主机密钥 | 持久化在数据库同目录的 `sftp_host_key`（PKCS#8 PEM，Unix 下 600）。首次启动生成 ECDSA P-256（失败回退 RSA-2048）并写盘；之后复用，重启后指纹不变。文件损坏/无法解析时告警并重新生成，删除文件即轮换 |
+
+`SFTP:Enable` / `SFTP:Listen`（默认 `:5222`）沿用既有配置；监听复用 `FtpListenParser.Parse`。
+
+**主机密钥持久化（`sftp_host_key`）**
+
+- **路径**：取 `Database.DBFile` 的目录（`Path.GetFullPath` 后取父目录；取不到时回退
+  `AppContext.BaseDirectory`），拼上 `sftp_host_key` —— 与 `jwt_secret` 同一位置约定。
+  容器部署只要挂载数据目录，密钥就随卷持久化；**不挂卷则容器重建后指纹仍会变**。
+- **格式**：PKCS#8 PEM（`-----BEGIN PRIVATE KEY-----`，可直接备份/迁移），Unix 下 `chmod 600`。
+- **生命周期**：文件存在且可解析 → 复用，日志 `SFTP host key loaded from <path> (SHA256:...)`；
+  不存在 → 生成 ECDSA P-256（环境不支持时 RSA-2048）、写盘，日志
+  `generated and saved to <path> (SHA256:...)`。
+- **容错**：损坏 / 只有公钥 / 写盘失败都不阻断启动 —— 前两者告警后重新生成并覆盖，
+  写盘失败仅本次使用内存密钥（下次启动会再生成）。
+- **轮换**：停服 → 删 `sftp_host_key` → 启动；客户端 `known_hosts` 里旧条目需同步清理。
+- **升级提示**：本机制上线前部署的实例，升级后第一次启动会生成并落盘新密钥（指纹变一次），此后稳定。
+- **指纹**：与 OpenSSH 一致 —— `SHA256(公钥 blob)` 的 base64（去 `=`），可直接与
+  `ssh-keygen -lf` / `ssh-keyscan` 的结果比对。
+- **兼容细节**：部分平台的 `ECDsa.ExportParameters` 只给曲线 OID 不给 `Oid.FriendlyName`，
+  而 DevTunnels 的 `ImportParameters` 要求具名曲线 —— 加载时按 OID（`1.2.840.10045.3.1.7` /
+  `1.3.132.0.34` / `1.3.132.0.35`）回填 nistP256/384/521。
+
+### 59.2 三个实现坑（都会表现为「连上了但一直卡住」）
+
+1. **`SshServerSession` 的 `TraceSource` 不能为 null**：DevTunnels 的构造函数直接把它塞进
+   `SshSession`，null 会在首个连接上抛 `ArgumentNullException`，客户端只看到「连接被关闭」。
+   现在整个服务共用一个 `TraceSource("OpenList.Sftp", Warning)`。
+2. **`ReadDir` 必须按句柄游标返回**。JustSFTP 每次 readdir 只取 128 项、然后**丢弃枚举器**，
+   并以「空枚举」作为 EOF 信号。初版每次都从头重建列表，客户端永远读不到 EOF，
+   于是对同一批条目无限 readdir（实测 1 秒内 38 MB 日志）。现在目录内容在句柄上缓存一次，
+   游标（`ReadDirIndex`）随句柄推进，读完即 EOF。
+3. **不可寻址的驱动流**：SFTP 的 read/write 都是「带偏移」的。`SeekTo` 对可寻址流直接
+   `Position = offset`；不可寻址的云端流只允许顺序访问，乱序请求回 `OP_UNSUPPORTED`
+   （而不是把 `NotSupportedException` 泄漏成 `FAILURE`）。
+
+客户端断开时协议读取器抛 `EndOfStreamException` 属正常收尾，按 Debug 忽略，不再刷 Warning 栈。
+
+### 59.3 SMB 驱动（客户端）
+
+`src/OpenList.Drivers/FtpSftpSmb/SmbDriver.cs` 由存根改为真实实现（SMBLibrary 1.5.8.1）：
+
+- `InitAsync`：`SMB2Client.Connect(host, DirectTCPTransport)` → `Login(domain, user, password)` →
+  `TreeConnect(share)`，任一失败清理并抛 `InvalidOperationException`；`System = new SmbFileSystem(...)`。
+  **端口固定 445**（SMBLibrary 不支持自定义端口），`port` 只接受 0/445，其余直接拒绝。
+- `SmbFileSystem`（`NetworkFileSystemBase`）：列目录用 `QueryDirectory`，读/写按
+  `MaxReadSize`/`MaxWriteSize` 分片；删除走 `FileDispositionInformation`、改名走
+  `FileRenameInformationType2`、截断走 `FileEndOfFileInformation`；句柄在 `Dispose` 时关闭。
+- `ReadOnly` 由 `true` 改为 `false`（写路径已实现）；`ConfigItems` 不变
+  （`host`/`port`/`username`/`password`/`share`/`domain`/`root_folder_path`）。
+
+### 59.4 验收
+
+- 后端 **670/670** 通过。`SmbDriver` 的两条旧用例按新语义改写：`ReadOnly` 断言改为 `false`；
+  「合法配置即建成 System」改为「非 445 端口被拒绝」——单测环境连不到真实 SMB 服务器，
+  原用例测的其实是存根行为。
+- SFTP 用 SSH.NET 客户端做了两轮冒烟（临时脚本，未入库）：
+  - 管理员：错误口令被拒（`SshAuthenticationException`）→ 连接 → 列根 → MKDIR → 写读回环 →
+    流式上传/下载 → `GetAttributes` → 列目录 → 改名 → 删除 → 清理，全部通过；
+  - 受限账号（`base_path=/local`、`permission=0`）：根目录即挂载内容、`MKDIR` 与 `/../`
+    均返回 `PermissionDenied`、读取正常 —— BasePath 隔离与权限位生效。
+  - 主机密钥：首次启动日志 `generated and saved ... (SHA256:...)`，重启后
+    `loaded from ... (SHA256:...)` 指纹一致；把文件写成乱码重启则告警并重新生成。
+- 遗留：只支持密码认证（未接公钥）；SMB 仅 445 端口、无 DFS/多通道。
+  `sftp_disable_password_login` 仍不接线（§55 删除的种子）——
+  当前只有密码一种登录方式，接上这个开关等于把 SFTP 关死，等公钥认证落地后再补。
+
+

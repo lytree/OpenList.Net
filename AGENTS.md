@@ -133,6 +133,12 @@ openlist cancel2fa <username>
 - **Config validation**: `AppConfiguration.Validate()` runs at startup and throws on invalid db type / HTTP·HTTPS port / MaxConnections / search_index backend / log params.
 - **Swagger**: at `/swagger` + Scalar at `/scalar` (both Development only; Scalar points at `/swagger/v1/swagger.json`).
 - **FTP/SFTP servers**: hosted services, disabled by default (`FTP.Enable`/`SFTP.Enable` in config).
+  SFTP is real (not a stub): `Microsoft.DevTunnels.Ssh` handles the SSH transport + password auth,
+  `JustSFTP.Server` speaks SFTP v3, and every session maps onto the VFS rooted at the user's `BasePath`
+  (same `FileAccessService` gates as `/api/fs`). The host key is persisted to `sftp_host_key` next to the
+  database file (PKCS#8 PEM, mode 600 on Unix), so the client-trusted fingerprint survives restarts —
+  delete that file to rotate, and the startup log prints the OpenSSH-style `SHA256:` fingerprint.
+  A corrupt key file is reported and regenerated. Only password auth is supported.
 - **Kestrel body limit**: 10 GB (for WebDAV uploads).
 - **SPA fallback**: serves `index.html` from `DistDir` (`../../frontend/dist` by default).
 - **Environment variables**: use `OpenList__` prefix (e.g. `OpenList__Database__Type=postgres`).

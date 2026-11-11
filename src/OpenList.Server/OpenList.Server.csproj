@@ -17,6 +17,8 @@
     <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="FubarDev.FtpServer" />
     <PackageReference Include="FubarDev.FtpServer.FileSystem.DotNet" />
+    <PackageReference Include="Microsoft.DevTunnels.Ssh" />
+    <PackageReference Include="JustSFTP.Server" />
     <PackageReference Include="SSH.NET" />
   </ItemGroup>
   <ItemGroup>

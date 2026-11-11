@@ -174,7 +174,7 @@ public class DriverTests
     {
         var driver = new SmbDriver();
         await Assert.That(driver.DriverName).IsEqualTo("SMB");
-        await Assert.That(driver.ReadOnly).IsTrue();
+        await Assert.That(driver.ReadOnly).IsFalse();
     }
 
     [Test]
@@ -207,14 +207,14 @@ public class DriverTests
     }
 
     [Test]
-    public async Task SmbDriver_InitAsync_WithValidConfig_CreatesSystem()
+    public async Task SmbDriver_InitAsync_RejectsNonDefaultPort()
     {
         var driver = new SmbDriver();
         var config = new DriverConfig
         {
-            Addition = """{"host":"smb.example.com","share":"shared","username":"u","password":"p"}"""
+            Addition = """{"host":"smb.example.com","share":"shared","port":139}"""
         };
-        await driver.InitAsync(config);
-        await Assert.That(driver.System).IsNotNull();
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await driver.InitAsync(config));
     }
 }
