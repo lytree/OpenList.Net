@@ -58,7 +58,7 @@
   "empty_dir": "这个文件夹是空的",
   "shared_by_link": "分享链接",
   "back_home": "站点首页",
-  "powered_by": "Powered by",
+  "powered_by": "由 {{name}} 提供支持",
   "share_disabled": "该分享已被创建者禁用",
   "share_expired": "该分享已过期",
   "share_exhausted": "该分享已达到最大访问次数",

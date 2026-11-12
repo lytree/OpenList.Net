@@ -48,7 +48,10 @@
       "back": "文件夹置底"
     },
     "enable_sign": "启用签名",
-    "disable_index": "关闭索引"
+    "disable_index": "关闭索引",
+    "storage_disabled": "禁用存储",
+    "common_section": "通用配置",
+    "additional_section": "额外配置"
   },
   "table_fields": {
     "status": {

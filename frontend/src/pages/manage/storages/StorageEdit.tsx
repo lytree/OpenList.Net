@@ -28,7 +28,7 @@ import type {
   DriverMap,
   StorageWithDriver,
 } from "~/api/types"
-import DriverForm from "~/components/DriverForm"
+import DriverForm, { DRIVER_ALIAS } from "~/components/DriverForm"
 import { t } from "~/i18n"
 
 /**
@@ -200,11 +200,20 @@ export default defineComponent({
       info.value ? info.value.common.filter((i) => !EXPLICIT.has(i.name)) : [],
     )
 
+    /** 驱动告警取 drivers.config.<driver>.alert 的译文，缺译文时回退后端原文。 */
+    function driverAlert(): string {
+      const raw = info.value?.config.alert ?? ""
+      const name = DRIVER_ALIAS[driver.value] ?? driver.value
+      const key = `drivers.config.${name}.alert`
+      const mapped = t(key)
+      return (mapped !== key ? mapped : raw).split("|")[0]
+    }
+
     init()
 
     return () => {
       if (loading.value) {
-        return <ElAlert type="info" showIcon={true} title="Loading…" />
+        return <ElAlert type="info" showIcon={true} title={t("global.loading")} />
       }
       if (loadError.value) {
         return <ElAlert type="error" showIcon={true} title={loadError.value} closable={false} />
@@ -226,7 +235,7 @@ export default defineComponent({
               <ElAlert
                 type="warning"
                 showIcon={true}
-                title={info.value.config.alert.split("|")[0]}
+                title={driverAlert()}
                 closable={false}
               />
             )}
@@ -277,7 +286,7 @@ export default defineComponent({
                   ),
                 }}
               </ElFormItem>
-              <ElFormItem label="Disabled (storage off)">
+              <ElFormItem label={t("storages.common.storage_disabled")}>
                 {{
                   default: () => (
                     <ElSwitch
@@ -291,14 +300,16 @@ export default defineComponent({
 
             {info.value && (
               <>
-                <h3 class="ol-manage-section">{t("storages.common.mount_path")} · Common</h3>
+                <h3 class="ol-manage-section">{t("storages.common.common_section")}</h3>
                 <DriverForm
+                  driver={driver.value}
                   items={commonForForm.value}
                   model={formModel}
                   onChange={(name: string, value: unknown) => (formModel[name] = value)}
                 />
-                <h3 class="ol-manage-section">Additional</h3>
+                <h3 class="ol-manage-section">{t("storages.common.additional_section")}</h3>
                 <DriverForm
+                  driver={driver.value}
                   items={info.value.additional}
                   model={formModel}
                   onChange={(name: string, value: unknown) => (formModel[name] = value)}

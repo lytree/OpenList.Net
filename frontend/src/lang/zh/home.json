@@ -119,9 +119,9 @@
     "torrent_files": "{{count}} 个文件",
     "torrent_private": "私有种子",
     "torrent_cas_hint": "包含 CAS 秒传信息（网盘：{{cloud}}）",
-    "torrent_hash": "Info hash",
+    "torrent_hash": "信息哈希",
     "torrent_pieces": "分块",
-    "torrent_trackers": "Tracker",
+    "torrent_trackers": "Tracker 服务器",
     "torrent_created_by": "创建者",
     "torrent_created_at": "创建时间",
     "torrent_comment": "备注",
@@ -337,7 +337,7 @@
     "success": "下载完成"
   },
   "footer": {
-    "powered_by": "Powered by OpenList",
+    "powered_by": "由 OpenList 提供支持",
     "manage": "管理"
   },
   "search": {

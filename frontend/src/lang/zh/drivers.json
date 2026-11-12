@@ -554,7 +554,7 @@
     "username-tips": "你的 Degoo 账号邮箱"
   },
   "Doge": {
-    "access_key_id": "Access Key ID",
+    "access_key_id": "访问密钥 ID",
     "add_filename_to_disposition": "在 disposition 中附加文件名",
     "add_filename_to_disposition-tips": "在 Content-Disposition 头里附加文件名。",
     "bucket": "存储桶",
@@ -574,7 +574,7 @@
     "remove_bucket": "去掉存储桶名",
     "remove_bucket-tips": "使用自定义主机时，从路径中去掉存储桶名。",
     "root_folder_path": "根目录路径",
-    "secret_access_key": "Secret Access Key",
+    "secret_access_key": "访问密钥 Secret",
     "session_token": "会话令牌",
     "sign_url_expire": "签名链接有效期",
     "user_agent": "User-Agent",
@@ -610,10 +610,10 @@
     "dpop_key_secret": "DPoP 密钥",
     "dpop_key_secret-tips": "生成 DPoP 令牌用的密钥",
     "ignore_jwt_check": "忽略 JWT 校验",
-    "ignore_jwt_check-tips": "Whether to ignore JWT check to prevent time issue",
+    "ignore_jwt_check-tips": "是否忽略 JWT 校验，以避免时间不同步带来的问题",
     "root_folder_id": "根目录 ID",
     "share_link": "分享链接",
-    "share_link-tips": "Whether to use share link for download"
+    "share_link-tips": "是否使用分享链接下载"
   },
   "DoubaoShare": {
     "cookie": "Cookie",
@@ -649,8 +649,14 @@
     "cwd_list": "使用当前目录列目录",
     "cwd_list-tips": "列目录前先进入该目录",
     "encoding": "编码",
+    "host": "主机",
+    "host-tips": "FTP 服务器地址",
     "password": "密码",
+    "port": "端口",
+    "port-tips": "FTP 服务器端口",
     "root_folder_path": "根目录路径",
+    "use_tls": "启用 TLS",
+    "use_tls-tips": "使用 FTPS（TLS 加密）",
     "username": "用户名"
   },
   "FebBox": {
@@ -1021,8 +1027,14 @@
   },
   "PikPak": {
     "captcha_token": "验证码令牌",
+    "client_id": "客户端 ID",
+    "client_id-tips": "留空则使用内置 Web 客户端",
+    "client_secret": "客户端密钥",
+    "client_secret-tips": "留空则使用内置 Web 客户端",
     "device_id": "设备 ID",
     "disable_media_link": "关闭媒体直链",
+    "limit_rate": "限速",
+    "limit_rate-tips": "每秒请求数上限（0 表示不限）",
     "password": "密码",
     "platform": "平台",
     "platforms": {
@@ -1124,7 +1136,7 @@
     "root_folder_id": "根目录 ID"
   },
   "S3": {
-    "access_key_id": "Access Key ID",
+    "access_key_id": "访问密钥 ID",
     "add_filename_to_disposition": "在 disposition 中附加文件名",
     "add_filename_to_disposition-tips": "在 Content-Disposition 头里附加文件名。",
     "bucket": "存储桶",
@@ -1144,25 +1156,41 @@
     "remove_bucket": "去掉存储桶名",
     "remove_bucket-tips": "使用自定义主机时，从路径中去掉存储桶名。",
     "root_folder_path": "根目录路径",
-    "secret_access_key": "Secret Access Key",
+    "secret_access_key": "访问密钥 Secret",
     "session_token": "会话令牌",
     "sign_url_expire": "签名链接有效期",
+    "use_ssl": "使用 SSL",
+    "use_ssl-tips": "使用 HTTPS",
     "user_agent": "User-Agent",
     "user_agent-tips": "S3 请求使用的自定义 User-Agent。"
   },
   "SFTP": {
     "address": "地址",
+    "host": "主机",
+    "host-tips": "SFTP 服务器地址",
     "ignore_symlink_error": "忽略软链接错误",
     "passphrase": "口令",
     "password": "密码",
+    "port": "端口",
+    "port-tips": "SFTP 服务器端口",
     "private_key": "私钥",
+    "private_key_passphrase": "私钥密码",
+    "private_key_passphrase-tips": "加密私钥的密码",
     "root_folder_path": "根目录路径",
     "username": "用户名"
   },
   "SMB": {
     "address": "地址",
+    "domain": "域",
+    "domain-tips": "域（可选）",
+    "host": "主机",
+    "host-tips": "SMB 服务器地址",
     "password": "密码",
+    "port": "端口",
+    "port-tips": "SMB 服务器端口（默认 445）",
     "root_folder_path": "根目录路径",
+    "share": "共享名",
+    "share-tips": "共享名",
     "share_name": "分享名称",
     "username": "用户名"
   },
@@ -1492,9 +1520,13 @@
   },
   "WebDav": {
     "address": "地址",
+    "endpoint": "端点",
+    "endpoint-tips": "WebDAV 服务器地址（如 https://dav.example.com）",
     "password": "密码",
     "root_folder_path": "根目录路径",
     "tls_insecure_skip_verify": "TLS 跳过证书校验",
+    "use_basic_auth": "使用 Basic 认证",
+    "use_basic_auth-tips": "使用 Basic 认证",
     "username": "用户名",
     "vendor": "厂商",
     "vendors": {

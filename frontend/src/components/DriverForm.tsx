@@ -22,21 +22,32 @@ import { t } from "~/i18n"
  * 渲染对应 Element Plus 控件，不持有任何状态——值统一存在父级的 `model` 上，
  * 变更通过 `onChange(name, value)` 回传（避免直接改 props 触发 readonly 警告）。
  *
- * `select` 的 `options` 是逗号分隔字符串；选项标签优先取
- * `storages.common.<name>s.<opt>` 翻译（如 webdav_policys / order_bys），
+ * 标签 / 帮助 / 选项文案都走 i18n：字段标签取 `drivers.<driver>.<name>`，
+ * 帮助取 `drivers.<driver>.<name>-tips`（两者都回退后端原始值）；`select` 的
+ * `options` 是逗号分隔字符串，选项标签优先取 `drivers.<driver>.<name>s.<opt>`，
+ * 再取 `storages.common.<name>s.<opt>`（如 webdav_policys / order_bys），
  * 取不到则回退原始值。
  */
 
-function optionLabel(item: DriverInfoItem, opt: string): string {
-  const mapped = t(`storages.common.${item.name}s.${opt}`)
-  if (mapped !== `storages.common.${item.name}s.${opt}`) return mapped
-  return opt
+/** 取翻译；缺键时 t() 会原样返回 key，因此与 key 相同即视为未命中。 */
+function lookup(key: string, fallback: string): string {
+  if (!key) return fallback
+  const mapped = t(key)
+  return mapped === key ? fallback : mapped
+}
+
+/** 词条沿用上游驱动名，与后端 DriverName 存在少量拼写差异。 */
+export const DRIVER_ALIAS: Record<string, string> = {
+  WebDAV: "WebDav",
+  "115": "115 Cloud",
 }
 
 export default defineComponent({
   name: "DriverForm",
   props: {
     items: { type: Array as PropType<DriverInfoItem[]>, required: true },
+    /** 驱动名（= 后端 driver 字段），用于在 drivers.<driver> 下查字段文案。 */
+    driver: { type: String, default: "" },
     /** 值容器：key = item.name。只读（渲染时取值），写入走 onChange。 */
     model: { type: Object as PropType<Record<string, unknown>>, required: true },
     disabled: { type: Boolean, default: false },
@@ -46,6 +57,26 @@ export default defineComponent({
     },
   },
   setup(props) {
+    const prefix = () => {
+      if (!props.driver) return ""
+      const name = DRIVER_ALIAS[props.driver] ?? props.driver
+      return `drivers.${name}`
+    }
+
+    function fieldLabel(item: DriverInfoItem): string {
+      return lookup(prefix() && `${prefix()}.${item.name}`, item.name)
+    }
+
+    function fieldHelp(item: DriverInfoItem): string {
+      return lookup(prefix() && `${prefix()}.${item.name}-tips`, item.help ?? "")
+    }
+
+    function optionLabel(item: DriverInfoItem, opt: string): string {
+      const driverLabel = lookup(prefix() && `${prefix()}.${item.name}s.${opt}`, "")
+      if (driverLabel) return driverLabel
+      return lookup(`storages.common.${item.name}s.${opt}`, opt)
+    }
+
     function renderControl(item: DriverInfoItem) {
       const value = props.model[item.name]
       const set = (v: unknown) => props.onChange(item.name, v)
@@ -111,13 +142,13 @@ export default defineComponent({
         {props.items.map((item) => (
           <ElFormItem
             key={item.name}
-            label={`${item.name}${item.required ? " *" : ""}`}
+            label={`${fieldLabel(item)}${item.required ? " *" : ""}`}
           >
             {{
               default: () => (
                 <div class="ol-driver-field">
                   {renderControl(item)}
-                  {item.help && <div class="ol-field-help">{item.help}</div>}
+                  {fieldHelp(item) && <div class="ol-field-help">{fieldHelp(item)}</div>}
                 </div>
               ),
             }}

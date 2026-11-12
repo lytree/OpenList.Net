@@ -9,7 +9,7 @@
   "write": "写入内容绕过权限",
   "write_help": "写入内容（新建/上传/修改）时跳过用户权限检查。谨慎使用。",
   "hide": "隐藏",
-  "readme": "Readme",
+  "readme": "说明",
   "readme_help": "在页面底部渲染一段 Markdown，可填内容或链接",
   "header": "页头",
   "header_help": "在页面顶部渲染一段 Markdown，可填内容或链接",

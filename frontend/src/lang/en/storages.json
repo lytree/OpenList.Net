@@ -48,7 +48,10 @@
       "back": "Folders at Bottom"
     },
     "enable_sign": "Enable sign",
-    "disable_index": "Disable index"
+    "disable_index": "Disable index",
+    "storage_disabled": "Disabled (storage off)",
+    "common_section": "Common",
+    "additional_section": "Additional"
   },
   "table_fields": {
     "status": {

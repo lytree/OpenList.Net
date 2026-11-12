@@ -394,7 +394,7 @@ export default defineComponent({
           )}
         </ElCard>
         <div class="ol-share-footer">
-          {t("shares.powered_by")} {settings.siteTitle}
+          {t("shares.powered_by", { name: settings.siteTitle })}
         </div>
       </div>
     )

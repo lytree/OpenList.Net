@@ -58,7 +58,7 @@
   "empty_dir": "This folder is empty",
   "shared_by_link": "Shared link",
   "back_home": "Site home",
-  "powered_by": "Powered by",
+  "powered_by": "Powered by {{name}}",
   "share_disabled": "This share has been disabled by its owner",
   "share_expired": "This share has expired",
   "share_exhausted": "This share has reached its maximum access count",
