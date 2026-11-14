@@ -709,9 +709,20 @@ public sealed class FileSystemService : IFileSystemService
     {
         try
         {
+            // 服务层兜底校验。端点层已有完整门禁（权限位 + JoinGuard + meta 白名单），
+            // 但 WebDAV / S3 等协议入口各自实现了一遍，新增入口很容易漏 —— 服务层至少要拦住：
+            // ① 没有删除权限位的账号；② 删除目标越出用户 BasePath。
+            // 调用方传进来的应是「已套过 BasePath」的完整路径，因此这里只做包含性校验、
+            // 绝不再 join：二次 join 会把 /home/bob/x 变成 /home/bob/home/bob/x。
+            if (!user.CanRemove() && !user.IsAdmin())
+                return Task.FromResult(Resp.Fail("permission denied", RespCodes.Forbidden));
+
+            var basePath = UPath.FixAndCleanPath(user.BasePath);
             foreach (var p in paths)
             {
                 var upath = Normalize(p);
+                if (!MetaAccess.IsSubPath(basePath, upath.FullName))
+                    return Task.FromResult(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
                 if (_mount.Root.FileExists(upath)) _mount.Root.DeleteFile(upath);
                 else if (_mount.Root.DirectoryExists(upath)) _mount.Root.DeleteDirectory(upath, true);
             }
@@ -723,7 +734,13 @@ public sealed class FileSystemService : IFileSystemService
     /// <summary>删除空目录；目录非空或不存在时返回错误。</summary>
     public Task<Resp> RemoveEmptyDirectoryAsync(string path, User user, CancellationToken ct = default)
     {
+        // 与 RemoveAsync 同一套服务层兜底：权限位 + BasePath 包含性（端点层已各自校验）。
+        if (!user.CanRemove() && !user.IsAdmin())
+            return Task.FromResult(Resp.Fail("permission denied", RespCodes.Forbidden));
+
         var upath = Normalize(path);
+        if (!MetaAccess.IsSubPath(UPath.FixAndCleanPath(user.BasePath), upath.FullName))
+            return Task.FromResult(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
         if (!_mount.Root.DirectoryExists(upath))
             return Task.FromResult(Resp.Fail("not found", RespCodes.NotFound));
 

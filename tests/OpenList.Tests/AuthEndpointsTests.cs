@@ -143,8 +143,10 @@ public class AuthEndpointsTests
             var logoutResp = await client.PostAsync("/api/auth/logout", null);
             await Assert.That(logoutResp.StatusCode).IsEqualTo(HttpStatusCode.OK);
 
-            // Token should still work at HTTP level (JWT is stateless) — logout is advisory.
-            // The real revocation is checked via ValidateTokenAsync in JwtServiceTests.
+            // 登出即刻生效：JwtBearer 的 OnTokenValidated 会查进程级吊销表（RevokedTokenRegistry），
+            // 同一 token 的后续请求必须被拒。
+            var meResp = await client.GetAsync("/api/auth/me");
+            await Assert.That(meResp.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
         }
     }
 
@@ -162,6 +164,13 @@ public class AuthEndpointsTests
             var getResp = await client.GetAsync("/api/auth/logout");
             await Assert.That(getResp.StatusCode).IsEqualTo(HttpStatusCode.OK);
 
+            // GET 已吊销该 token，同一 token 再用 POST 会被 401（登出真的生效了）。
+            var revokedResp = await client.PostAsync("/api/auth/logout", null);
+            await Assert.That(revokedResp.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+
+            // POST 同样可用：换一个新 token 验证。
+            var fresh = await LoginAsync(client);
+            Authed(client, fresh);
             var postResp = await client.PostAsync("/api/auth/logout", null);
             await Assert.That(postResp.StatusCode).IsEqualTo(HttpStatusCode.OK);
         }

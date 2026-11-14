@@ -65,6 +65,26 @@ public class JwtServiceTests
     }
 
     [Test]
+    public async Task LogoutAsync_Revokes_Token_Across_Instances()
+    {
+        // JwtService 在 DI 里是 Scoped：登出与后续请求的校验发生在不同实例上。
+        // 吊销表若挂在实例上，登出就等于没做（这是修复前的真实缺陷）。
+        var (_, db) = await BuildAsync();
+        var registry = new RevokedTokenRegistry();
+        var config = new AppConfiguration { JwtSecret = Secret, TokenExpiresIn = 1 };
+        var users = new UserService(db, new AppConfiguration());
+        var logoutScope = new JwtService(users, config, revokedTokens: registry);
+        var laterRequest = new JwtService(users, config, revokedTokens: registry);
+
+        var token = logoutScope.IssueToken(new User { Id = 3, Username = "alice", Role = UserRole.General });
+        await Assert.That(await laterRequest.ValidateTokenAsync(token)).IsEqualTo(3L);
+
+        await logoutScope.LogoutAsync(token);
+
+        await Assert.That(await laterRequest.ValidateTokenAsync(token)).IsNull();
+    }
+
+    [Test]
     public async Task ValidateTokenAsync_Returns_Null_For_Garbage()
     {
         var (svc, _) = await BuildAsync();

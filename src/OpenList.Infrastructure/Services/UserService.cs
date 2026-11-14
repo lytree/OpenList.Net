@@ -244,9 +244,11 @@ public sealed class UserService : IUserService
         // Role / Permission / BasePath 会被签进 token（见 JwtService.IssueToken），是签发时刻的
         // 权限快照。这三者一旦变化，既有 token 就不再反映最新权限 —— 必须让它们失效，
         // 否则旧 token 会带着旧权限继续有效到期。改动前的值先记下，改后再比对。
+        // Disabled 同理：禁用后旧 token 若不失效，被禁账号仍能继续操作到过期。
         var oldRole = u.Role;
         var oldPermission = u.Permission;
         var oldBasePath = u.BasePath;
+        var oldDisabled = u.Disabled;
 
         if (!string.IsNullOrWhiteSpace(req.Username)) u.Username = req.Username;
         if (!string.IsNullOrWhiteSpace(req.Password)) u.PasswordHash = HashPassword(req.Password);
@@ -264,7 +266,8 @@ public sealed class UserService : IUserService
 
         if (_cutoffs is not null &&
             (u.Role != oldRole || u.Permission != oldPermission ||
-             !string.Equals(u.BasePath, oldBasePath, StringComparison.Ordinal)))
+             !string.Equals(u.BasePath, oldBasePath, StringComparison.Ordinal) ||
+             u.Disabled != oldDisabled))
         {
             _cutoffs.InvalidateUser(id, _time.GetUtcNow());
         }
@@ -285,6 +288,9 @@ public sealed class UserService : IUserService
             return Resp.Fail("cannot delete built-in admin", RespCodes.Forbidden);
         _db.Users.Remove(u);
         await _db.SaveChangesAsync(ct);
+        // 已删账号的既有 token 必须立即失效：JWT 是无状态的，不做这一步的话
+        // 被删用户还能凭旧 token 操作到过期（详见 UserTokenCutoffRegistry）。
+        _cutoffs?.InvalidateUser(id, _time.GetUtcNow());
         return Resp.Ok();
     }
 

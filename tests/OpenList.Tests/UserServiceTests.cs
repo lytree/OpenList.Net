@@ -214,6 +214,36 @@ public class UserServiceTests
         await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsFalse();
     }
 
+    [Test]
+    public async Task UpdateAsync_Invalidates_Tokens_When_Disabled()
+    {
+        // 禁用必须让既有 token 失效，否则被禁账号还能凭旧 token 操作到过期。
+        await using var ctx = BuildContext();
+        var cutoffs = new UserTokenCutoffRegistry();
+        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
+        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw" });
+        var before = DateTime.UtcNow.AddMinutes(-1);
+
+        await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Disabled = true });
+
+        await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsTrue();
+    }
+
+    [Test]
+    public async Task DeleteAsync_Invalidates_Tokens()
+    {
+        // 删除后旧 token 必须立即失效：JWT 无状态，服务端不会每请求查库确认用户存在。
+        await using var ctx = BuildContext();
+        var cutoffs = new UserTokenCutoffRegistry();
+        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
+        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw" });
+        var before = DateTime.UtcNow.AddMinutes(-1);
+
+        await svc.DeleteAsync(created.Data!.Id);
+
+        await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsTrue();
+    }
+
     private static OpenListDbContext BuildContext()
     {
         var conn = new SqliteConnection("DataSource=:memory:");

@@ -22,7 +22,8 @@ public sealed class JwtService : IAuthService
     private readonly ILdapAuthenticator? _ldap;
     private readonly UserTokenCutoffRegistry? _cutoffs;
     private readonly ISettingService? _settings;
-    private readonly HashSet<string> _revoked = new(StringComparer.Ordinal);
+    // 必须是进程级单例（DI 注入），否则登出只影响当前请求的作用域 —— 详见 RevokedTokenRegistry。
+    private readonly RevokedTokenRegistry _revoked;
 
     /// <summary>
     /// 创建 JWT 服务实例。
@@ -33,9 +34,10 @@ public sealed class JwtService : IAuthService
     /// <param name="ldap">LDAP 认证器（可选，未配置时 LDAP 登录不可用）。</param>
     /// <param name="cutoffs">token 失效登记表（可选；用于 BasePath/权限位变更后即时失效既有 token）。</param>
     /// <param name="settings">设置服务（可选；用于读取 LDAP 自动开通用户的默认目录与权限位）。</param>
+    /// <param name="revokedTokens">已吊销 token 登记表（可选；生产环境注入进程级单例）。</param>
     public JwtService(IUserService users, AppConfiguration config, TimeProvider? time = null,
         ILdapAuthenticator? ldap = null, UserTokenCutoffRegistry? cutoffs = null,
-        ISettingService? settings = null)
+        ISettingService? settings = null, RevokedTokenRegistry? revokedTokens = null)
     {
         _users = users;
         _config = config;
@@ -43,6 +45,7 @@ public sealed class JwtService : IAuthService
         _ldap = ldap;
         _cutoffs = cutoffs;
         _settings = settings;
+        _revoked = revokedTokens ?? new RevokedTokenRegistry();
     }
 
     /// <summary>
@@ -235,11 +238,11 @@ public sealed class JwtService : IAuthService
     }
 
     /// <summary>
-    /// 登出：将指定 Token 加入内存中的已吊销集合，使其后续无法通过校验。
+    /// 登出：将指定 Token 登记到进程级已吊销表，使其后续无法通过校验。
     /// </summary>
     public Task<Resp> LogoutAsync(string token, CancellationToken ct = default)
     {
-        _revoked.Add(token);
+        _revoked.Revoke(token, RevokedTokenRegistry.ResolveExpiry(token, TimeSpan.FromHours(_config.TokenExpiresIn)));
         return Task.FromResult(Resp.Ok());
     }
 
@@ -251,7 +254,7 @@ public sealed class JwtService : IAuthService
     /// <returns>有效时返回 Token 中声明的用户 Id，否则返回 null。</returns>
     public Task<long?> ValidateTokenAsync(string token, CancellationToken ct = default)
     {
-        if (_revoked.Contains(token)) return Task.FromResult<long?>(null);
+        if (_revoked.IsRevoked(token)) return Task.FromResult<long?>(null);
         try
         {
             var handler = new JwtSecurityTokenHandler();
@@ -287,6 +290,9 @@ public sealed class JwtService : IAuthService
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Name, user.Username),
             new Claim(ClaimTypes.Role, ((int)user.Role).ToString()),
+            // jti：同一秒内为同一用户重复签发时，其它 claim 完全相同、JWT 字符串也会一模一样，
+            // 于是「登出后立刻重新登录」拿回的还是被吊销的那串 token；带一个随机 id 才能保证每次签发唯一。
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             // BasePath 与 Permission 是每个文件系统请求都要用的权限输入（目录隔离 + 权限位），
             // 而 .NET 侧刻意保持无状态 JWT（不每请求查库），因此必须随身份一起签进 token。
             // BasePath 先规范化：Go 的 JoinBasePath 对 null/空是按 "/" 处理的，这里统一成同一形式。

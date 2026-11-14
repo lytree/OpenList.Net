@@ -138,6 +138,9 @@ builder.Services.AddSingleton<ILdapAuthenticator, LdapAuthenticator>();
 // fields (BasePath/Permission/Role) change, and the JwtBearer OnTokenValidated hook reads from
 // it. Must be a singleton so both sides share the same instance.
 builder.Services.AddSingleton<UserTokenCutoffRegistry>();
+// RevokedTokenRegistry（登出吊销）同样必须是单例：JwtService 是 Scoped，若吊销集合挂在它身上，
+// 登出请求一结束集合就丢了，后续请求仍然放行该 token（详见 RevokedTokenRegistry）。
+builder.Services.AddSingleton<RevokedTokenRegistry>();
 builder.Services.AddScoped<IAuthService, JwtService>();
 // ISsoService depends on IUserService + IAuthService (both scoped) so it's scoped too.
 // It reads SSO config from the settings table at request time — admins can toggle
@@ -287,6 +290,8 @@ if (string.IsNullOrWhiteSpace(appConfig.JwtSecret))
     }
 }
 var jwtSecret = appConfig.JwtSecret;
+// OnMessageReceived 把原始 token 存进 HttpContext.Items，供 OnTokenValidated 查登出吊销表。
+const string RawTokenItemKey = "openlist.raw-token";
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -310,6 +315,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     // Header takes precedence, so normal clients are unaffected.
                     ctx.Token = ctx.Request.Query["access_token"].ToString();
                 }
+                // OnTokenValidated needs the raw string to consult the logout revocation list;
+                // JwtBearerContext does not expose it there.
+                if (!string.IsNullOrEmpty(ctx.Token)) ctx.HttpContext.Items[RawTokenItemKey] = ctx.Token;
                 return Task.CompletedTask;
             },
             OnTokenValidated = ctx =>
@@ -321,6 +329,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var cutoffs = ctx.HttpContext.RequestServices.GetRequiredService<UserTokenCutoffRegistry>();
                 var idClaim = ctx.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (long.TryParse(idClaim, out var userId) && cutoffs.IsStale(userId, ctx.SecurityToken.ValidFrom))
+                    ctx.Fail("token revoked");
+
+                // 登出吊销：吊销集合是进程级单例，跨请求生效。
+                var revoked = ctx.HttpContext.RequestServices.GetRequiredService<RevokedTokenRegistry>();
+                if (ctx.HttpContext.Items[RawTokenItemKey] is string rawToken && revoked.IsRevoked(rawToken))
                     ctx.Fail("token revoked");
                 return Task.CompletedTask;
             },

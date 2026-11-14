@@ -205,6 +205,59 @@ public class FileSystemServiceTests
     }
 
     [Test]
+    public async Task RemoveAsync_Denies_Path_Outside_BasePath()
+    {
+        // 服务层兜底：即便调用方漏了 JoinGuard，也不能删到用户 BasePath 之外。
+        var (mount, svc, _) = Setup();
+        await WriteFileAsync(mount, "/test/secret.txt", new byte[] { 1 });
+        var user = new User { Id = 2, Role = UserRole.General, Permission = 0x71FF, BasePath = "/home/bob" };
+
+        var r = await svc.RemoveAsync(["/test/secret.txt"], user);
+
+        await Assert.That(r.Code).IsEqualTo(403);
+        await Assert.That(mount.Root.FileExists("/test/secret.txt")).IsTrue();
+    }
+
+    [Test]
+    public async Task RemoveAsync_Allows_Path_Inside_BasePath()
+    {
+        var (mount, svc, _) = Setup();
+        await WriteFileAsync(mount, "/test/inside.txt", new byte[] { 1 });
+        var user = new User { Id = 2, Role = UserRole.General, Permission = 0x71FF, BasePath = "/test" };
+
+        var r = await svc.RemoveAsync(["/test/inside.txt"], user);
+
+        await Assert.That(r.Code).IsEqualTo(200);
+        await Assert.That(mount.Root.FileExists("/test/inside.txt")).IsFalse();
+    }
+
+    [Test]
+    public async Task RemoveAsync_Denies_User_Without_Remove_Permission()
+    {
+        var (mount, svc, _) = Setup();
+        await WriteFileAsync(mount, "/test/a.txt", new byte[] { 1 });
+        var user = new User { Id = 3, Role = UserRole.General, Permission = 0 };
+
+        var r = await svc.RemoveAsync(["/test/a.txt"], user);
+
+        await Assert.That(r.Code).IsEqualTo(403);
+        await Assert.That(mount.Root.FileExists("/test/a.txt")).IsTrue();
+    }
+
+    [Test]
+    public async Task RemoveEmptyDirectoryAsync_Denies_Path_Outside_BasePath()
+    {
+        var (mount, svc, _) = Setup();
+        mount.Root.CreateDirectory("/test/empty");
+        var user = new User { Id = 2, Role = UserRole.General, Permission = 0x71FF, BasePath = "/home/bob" };
+
+        var r = await svc.RemoveEmptyDirectoryAsync("/test/empty", user);
+
+        await Assert.That(r.Code).IsEqualTo(403);
+        await Assert.That(mount.Root.DirectoryExists("/test/empty")).IsTrue();
+    }
+
+    [Test]
     public async Task PutStreamAsync_Writes_File()
     {
         var (mount, svc, _) = Setup();
