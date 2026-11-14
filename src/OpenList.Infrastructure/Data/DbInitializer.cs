@@ -559,7 +559,7 @@ public static class DbInitializer
 
         // --- Group 2: STYLE ---
         ("logo", "", SettingValueType.String, SettingFlag.Public, 2, null),
-        ("main_color", "#1890ff", SettingValueType.String, SettingFlag.Public, 2, null),
+        ("main_color", "#722ed1", SettingValueType.String, SettingFlag.Public, 2, null),
         ("home_icon", "", SettingValueType.String, SettingFlag.Public, 2, null),
         ("share_icon", "", SettingValueType.String, SettingFlag.Public, 2, null),
         ("share_summary_content", "", SettingValueType.Text, SettingFlag.Public, 2, null),

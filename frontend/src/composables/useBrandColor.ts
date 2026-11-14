@@ -38,19 +38,57 @@ function mix(from: string, to: string, weight: number): string {
 
 const LIGHT_STEPS = [3, 5, 7, 8, 9] as const
 
+/** 站点没配 `main_color` 时的兜底：antd 的 purple-6。 */
+export const DEFAULT_BRAND = "#722ed1"
+
+/**
+ * antd 官方 purple 阶梯中与 EP `light-3/5/7/8/9` 语义对应的几档。
+ * 线性混白只能近似：`#722ed1` 混 90% 白得到 `#f1eafb`，而 antd 的 `colorPrimaryBg`
+ * 是 `#f9f0ff`（HSV 提亮，不是 RGB 混合）。默认色走这张表，自定义色才退回混色。
+ *
+ * 深色不是「把浅色阶混黑」：antd dark 的 hover 比主色更亮（purple-8 #854eca），
+ * active 更深（purple-5 #51258f），只有 tinted 底色才往暗处走（purple-1 #1a1325）。
+ */
+interface AntPalette {
+  primary: string
+  dark2: string
+  steps: Record<number, string>
+}
+
+const ANT_PURPLE_LIGHT: AntPalette = {
+  primary: "#722ed1",
+  dark2: "#531dab",
+  steps: { 3: "#9254de", 5: "#b37feb", 7: "#d3adf7", 8: "#efdbff", 9: "#f9f0ff" },
+}
+
+const ANT_PURPLE_DARK: AntPalette = {
+  primary: "#642ab5",
+  dark2: "#51258f",
+  steps: { 3: "#854eca", 5: "#ab7ae0", 7: "#301c4d", 8: "#1a1325", 9: "#1a1325" },
+}
+
 export function applyBrandColor(color: string, dark: boolean) {
   const root = document.documentElement.style
   const valid = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)
-  const primary = valid ? color : "#1890ff"
+  const seed = valid ? color : DEFAULT_BRAND
+  const palette =
+    seed.toLowerCase() === DEFAULT_BRAND ? (dark ? ANT_PURPLE_DARK : ANT_PURPLE_LIGHT) : null
+  // 自定义色没有官方阶梯，只能按主题混向容器底色
+  const base = dark ? "#141414" : "#ffffff"
+  const primary = palette ? palette.primary : seed
 
   root.setProperty("--ol-brand", primary)
   root.setProperty("--el-color-primary", primary)
-  root.setProperty("--el-color-primary-dark-2", mix(primary, "#000000", 0.2))
+  root.setProperty(
+    "--el-color-primary-dark-2",
+    palette ? palette.dark2 : mix(seed, "#000000", 0.2),
+  )
 
-  // 深色模式下 EP 的浅色阶是「向背景色靠拢」，混白会刺眼，改混深底。
-  const base = dark ? "#141414" : "#ffffff"
   for (const step of LIGHT_STEPS) {
-    root.setProperty(`--el-color-primary-light-${step}`, mix(primary, base, step / 10))
+    root.setProperty(
+      `--el-color-primary-light-${step}`,
+      palette ? palette.steps[step] : mix(seed, base, step / 10),
+    )
   }
 }
 

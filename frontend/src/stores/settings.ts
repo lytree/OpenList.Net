@@ -43,7 +43,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const siteTitle = computed(() => get("site_title") || "OpenList")
   const logo = computed(() => get("logo"))
   const mainColor = computed(
-    () => window.OPENLIST_CONFIG?.main_color || get("main_color") || "#1890ff",
+    () => window.OPENLIST_CONFIG?.main_color || get("main_color") || "#722ed1",
   )
   const ldapEnabled = computed(() => getBool("ldap_login_enabled"))
   /** LDAP 登录提示文案（设置项 `ldap_login_tips`）；为空时登录页回退 i18n 文案。 */

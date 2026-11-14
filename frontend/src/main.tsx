@@ -15,7 +15,6 @@ import "./styles/backup-extra.css"
 import "./styles/dashboard-extra.css"
 import "./styles/about-extra.css"
 import "./styles/responsive.css"
-import "./style.css"
 
 import App from "./App"
 import router from "./router"

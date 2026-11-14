@@ -15,16 +15,18 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: var(--ol-bg-page);
+  /* antd 的布局底色由 body 的 colorBgLayout 提供，这里保持透明 */
+  background: transparent;
 }
 
+/* 顶栏：antd Layout.Header —— 纯白容器 + 1px 次级描边，不用磨砂也不用投影。
+ * antd 的层级靠"容器白 / 布局灰"的对比建立，加玻璃效果反而会跑出自己的语言。 */
 .ol-view-header {
   position: sticky;
   top: 0;
   z-index: 100;
-  /* 参考前端的头部底色 == 页面底色（没有分隔线也没有卡片感），
-   * 靠 sticky 自身的背景遮住滚动内容即可。 */
-  background: var(--ol-bg-page);
+  background: var(--ol-bg-surface);
+  border-bottom: 1px solid var(--el-border-color-light);
 }
 
 .ol-view-header-inner {
@@ -36,22 +38,26 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: var(--ol-space-4);
+  gap: var(--ol-space-5);
 }
 
 .ol-view-brand {
   display: flex;
   align-items: center;
-  gap: var(--ol-space-2);
+  gap: 10px;
   flex: none;
   text-decoration: none;
+  min-width: 0;
 }
 
+/* 站点名：antd 的标题字重是 600，字距不收紧（antd 不走编辑感路线） */
 .ol-view-site {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--ol-text);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ol-view-logo {
@@ -62,13 +68,15 @@
   display: block;
 }
 
+/* 无 logo 时的首字母方块：antd 的实色主色块 + 小圆角，不加光晕 */
 .ol-view-logo-mark {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--ol-radius-md);
-  background: var(--el-color-primary);
+  background: var(--ol-brand);
   color: #fff;
-  font-weight: 700;
+  font-weight: 600;
+  font-size: 16px;
   display: grid;
   place-items: center;
 }
@@ -80,23 +88,48 @@
   min-width: 0;
 }
 
+/* 导航项：antd 水平菜单 —— 常态透明、hover 一层淡填充、选中用主色文字 + 2px 主色底边 */
 .ol-view-link {
-  padding: 4px 8px;
-  border-radius: var(--ol-radius-lg);
-  font-size: 15px;
-  color: var(--ol-text);
+  position: relative;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  border-radius: var(--ol-radius-md);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ol-text-secondary);
   text-decoration: none;
   white-space: nowrap;
+  transition:
+    color var(--ol-dur) var(--ol-ease),
+    background var(--ol-dur) var(--ol-ease);
+}
+
+.ol-view-link::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 2px;
+  background: var(--el-color-primary);
+  opacity: 0;
+  transition: opacity var(--ol-dur) var(--ol-ease);
 }
 
 .ol-view-link:hover {
+  color: var(--ol-text);
   background: var(--ol-bg-hover);
 }
 
 .ol-view-link.is-active {
   color: var(--el-color-primary);
-  font-weight: 600;
-  background: var(--el-color-primary-light-9);
+  font-weight: 500;
+}
+
+.ol-view-link.is-active::after {
+  opacity: 1;
 }
 
 .ol-view-header-right {
@@ -125,7 +158,7 @@
  * 2% 必须挂在**定宽容器内部**才等于 19.6px —— 直接写在 .ol-view-body 上会按
  * 1440 的视口算成 28.8px，内容列凭空窄了 20px。 */
 .ol-view-inner {
-  padding: 4px 2% 0;
+  padding: var(--ol-space-4) 2% 0;
 }
 
 /* 媒体库这类多列页面放宽到 1280px，否则 4 列海报会被压成 2 列 */
@@ -138,7 +171,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 16px;
+  padding: 28px 16px 20px;
   font-size: 13px;
   color: var(--ol-text-secondary);
 }
@@ -146,6 +179,7 @@
 .ol-view-footer a {
   color: inherit;
   text-decoration: none;
+  transition: color var(--ol-dur) var(--ol-ease);
 }
 
 .ol-view-footer a:hover {
@@ -193,11 +227,8 @@
   place-items: center;
   overflow: hidden;
   padding: var(--ol-space-4);
-  background: #a9c6ff;
-}
-
-html.dark .ol-auth {
-  background: #062b74;
+  /* antd 的登录页底色就是布局底 colorBgLayout，不再用 Pro 的 #f0f2f5 */
+  background: var(--ol-bg-page);
 }
 
 .ol-auth-bg {
@@ -228,11 +259,11 @@ html.dark .ol-auth {
   position: relative;
   z-index: 1;
   box-sizing: border-box;
-  width: min(90vw, 364px);
-  padding: 24px;
-  border-radius: var(--ol-radius-xl);
+  width: min(90vw, 368px);
+  padding: 32px 28px;
+  border-radius: var(--ol-radius-lg);
   background: var(--ol-bg-surface);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--ol-shadow-md);
   display: flex;
   flex-direction: column;
   gap: var(--ol-space-4);
@@ -489,12 +520,14 @@ html.dark .ol-auth {
   gap: var(--ol-space-4);
 }
 
-/* 参考前端的列表/网格是一张浮在底色上的白卡片：无边框、圆角 8、极淡投影 */
+/* antd Card：1px 次级描边 + 8px 圆角，默认不带投影。
+ * 层级完全靠「白容器 / #f6f4fb 淡紫布局底」的明度差，这是 antd 最核心的一条观感规则。 */
 .ol-view-body .el-card {
-  border: none;
+  border: 1px solid var(--el-border-color-light);
   border-radius: var(--ol-radius-lg);
-  box-shadow: var(--ol-shadow-card);
+  box-shadow: none;
   background: var(--ol-bg-surface);
+  overflow: hidden;
 }
 
 .ol-files-bar {
@@ -523,20 +556,20 @@ html.dark .ol-auth {
   width: 96px;
 }
 
-/* 批量选择条：浮在视口底部中间（旧前端 Center 工具条），不挤压列表高度 */
+/* 批量选择条：antd 的浮层观感 —— 白底、8px 圆角、一层 boxShadowSecondary，无描边光晕 */
 .ol-batch-bar {
   position: fixed;
   left: 50%;
-  bottom: 20px;
+  bottom: 24px;
   transform: translateX(-50%);
   z-index: 1800;
   display: flex;
   align-items: center;
   gap: var(--ol-space-3);
-  padding: 8px 12px;
+  padding: 10px 16px;
   border-radius: var(--ol-radius-lg);
   background: var(--ol-bg-surface);
-  border: 1px solid var(--ol-border);
+  border: 1px solid var(--el-border-color-light);
   box-shadow: var(--ol-shadow-md);
 }
 
@@ -567,24 +600,36 @@ html.dark .ol-auth {
   color: var(--ol-text);
 }
 
-/* 表格排版对齐参考前端：行更高、正文更大、表头是小的灰色粗体、行 hover 用中性底色 */
+/* 表格排版对齐 antd Table：表头 14px/600、底色 #fafafa、行高 12px 内边距、
+ * 行分隔线 #f0f0f0、hover 一行淡填充。不做大写字距处理 —— 那是编辑风，不是 antd。 */
 .ol-files .el-table {
-  --el-table-border-color: var(--ol-border);
-  --el-table-header-text-color: var(--ol-text-muted);
-  --el-table-row-hover-bg-color: var(--ol-bg-hover);
+  --el-table-border-color: var(--el-border-color-light);
+  --el-table-header-text-color: var(--ol-text);
+  --el-table-row-hover-bg-color: var(--ol-bg-subtle);
+  --el-table-tr-bg-color: transparent;
+  --el-table-bg-color: transparent;
+  --el-table-header-bg-color: var(--ol-bg-subtle);
   background: transparent;
-  font-size: 14.5px;
+  font-size: 14px;
 }
 
 .ol-files .el-table th.el-table__cell {
-  background: transparent;
-  font-size: 13px;
+  background: var(--ol-bg-subtle);
+  font-size: 14px;
   font-weight: 600;
-  padding: 10px 0;
+  color: var(--ol-text);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--el-border-color-light);
 }
 
 .ol-files .el-table td.el-table__cell {
-  padding: 10px 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+/* 最后一行不再画分隔线：卡片自己的描边已经是边界了 */
+.ol-files .el-table__body tr:last-child td.el-table__cell {
+  border-bottom: none;
 }
 
 .ol-files .el-table tr {
@@ -795,7 +840,8 @@ html.dark .ol-auth {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--ol-bg-page);
+  /* antd Layout：外层用 colorBgLayout，容器（Header/Sider）才铺白 */
+  background: transparent;
 }
 
 .ol-manage-header {
@@ -805,10 +851,9 @@ html.dark .ol-auth {
   align-items: center;
   justify-content: space-between;
   gap: var(--ol-space-3);
-  padding: 0 var(--ol-space-4);
+  padding: 0 var(--ol-space-6);
   background: var(--ol-bg-surface);
-  /* 参考前端管理台头部没有分隔线，只有一层 $md 阴影把头部"抬"起来 */
-  box-shadow: var(--ol-shadow-md);
+  border-bottom: 1px solid var(--el-border-color-light);
   z-index: 30;
 }
 
@@ -826,10 +871,10 @@ html.dark .ol-auth {
 
 .ol-manage-title {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.5;
   font-weight: 600;
-  color: var(--el-color-primary);
+  color: var(--ol-text);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -850,39 +895,42 @@ html.dark .ol-auth {
 
 .ol-manage-side {
   flex: none;
-  width: 224px;
+  width: var(--ol-aside-width);
   display: flex;
   flex-direction: column;
+  /* antd Sider 默认就是白底 + 右侧 1px 次级描边，不做渐变 */
   background: var(--ol-bg-surface);
-  border-right: 1px solid var(--ol-border);
+  border-right: 1px solid var(--el-border-color-light);
   overflow-y: auto;
 }
 
 .ol-manage-menu {
   flex: none;
-  padding: 10px 8px;
+  padding: 8px;
   border-right: none;
   background: transparent;
-  /* EP 的菜单默认 56px 行高 + 3px 左边框，在 224px 的侧栏里太重；
-   * 收成 36px、无边框，只靠圆角底色表达选中态（对齐旧前端的 SideMenu）。 */
-  --el-menu-item-height: 36px;
+  /* antd Menu（light）：行高 40、圆角 8、选中态是「主色浅底 + 主色文字」 */
+  --el-menu-item-height: 40px;
   --el-menu-bg-color: transparent;
   --el-menu-hover-bg-color: var(--ol-bg-hover);
   --el-menu-text-color: var(--ol-text);
   --el-menu-active-color: var(--el-color-primary);
-  --el-menu-item-font-size: 14.5px;
+  --el-menu-item-font-size: 14px;
 }
 
 .ol-manage-menu .el-menu-item {
-  border-radius: var(--ol-radius-md);
-  margin: 1px 0;
-  padding-left: 10px !important;
+  border-radius: var(--ol-radius-lg);
+  margin: 2px 0;
+  padding-left: 12px !important;
   gap: 10px;
+  transition:
+    background var(--ol-dur) var(--ol-ease),
+    color var(--ol-dur) var(--ol-ease);
 }
 
 .ol-manage-menu .el-menu-item.is-active {
   background: var(--el-color-primary-light-9);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .ol-manage-menu .el-menu-item:hover {
@@ -901,23 +949,26 @@ html.dark .ol-auth {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--ol-radius-md);
-  font-size: 14.5px;
-  color: var(--ol-text);
+  padding: 8px 12px;
+  border-radius: var(--ol-radius-lg);
+  font-size: 14px;
+  color: var(--ol-text-secondary);
   text-decoration: none;
   white-space: nowrap;
+  transition:
+    background var(--ol-dur) var(--ol-ease),
+    color var(--ol-dur) var(--ol-ease);
 }
 
 .ol-manage-item:hover {
-  background: var(--el-fill-color-light);
+  background: var(--ol-bg-hover);
   color: var(--ol-text);
 }
 
 .ol-manage-item.is-active {
   background: var(--el-color-primary-light-9);
   color: var(--el-color-primary);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .ol-manage-item-icon {
@@ -944,7 +995,7 @@ html.dark .ol-auth {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: var(--ol-space-4) var(--ol-space-4) var(--ol-space-8);
+  padding: var(--ol-space-6) var(--ol-space-6) var(--ol-space-8);
 }
 
 .ol-manage-scrim {
@@ -990,8 +1041,8 @@ html.dark .ol-auth {
 }
 
 .ol-manage-page {
-  /* 表格类页面（users/metas）固定列宽合计约 1150px，980 会横向截断；1280 兼顾留白。 */
-  max-width: 1280px;
+  /* 表格类页面（users/metas）固定列宽合计约 1150px，980 会横向截断；1320 兼顾留白。 */
+  max-width: 1320px;
   margin: 0 auto;
 }
 
@@ -1022,13 +1073,14 @@ html.dark .ol-auth {
   gap: 2px;
 }
 
+/* 分组小标题：antd 的 section 标题 —— 14px/600 + 一条次级描边分隔 */
 .ol-manage-section {
   margin: var(--ol-space-5) 0 var(--ol-space-3);
   font-size: 14px;
   font-weight: 600;
-  color: var(--ol-text-secondary);
-  border-bottom: 1px solid var(--ol-border);
-  padding-bottom: 6px;
+  color: var(--ol-text);
+  border-bottom: 1px solid var(--el-border-color-light);
+  padding-bottom: 8px;
 }
 
 .ol-manage-form-actions {
@@ -1790,8 +1842,9 @@ a.ol-share-entry:hover {
   z-index: 200;
   padding: 8px;
   background: var(--ol-bg-surface);
+  border: 1px solid var(--ol-border);
   border-radius: var(--ol-radius-lg);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--ol-shadow-md);
 }
 
 .ol-home-main {
@@ -1802,8 +1855,8 @@ a.ol-share-entry:hover {
   gap: var(--ol-space-3);
 }
 
-/* 容器 980 + 两侧留白 < 196+20 时藏起目录树：宁可少一个面板，也不压住列表 */
-@media (max-width: 1239px) {
+/* 容器 1040 + 两侧留白 < 196+20 时藏起目录树：宁可少一个面板，也不压住列表 */
+@media (max-width: 1299px) {
   .ol-home-aside {
     display: none;
   }
@@ -1846,30 +1899,29 @@ a.ol-share-entry:hover {
   grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
 }
 
+/* antd Card hoverable：hover 只加一层投影，不位移、不加外圈色环 */
 .ol-grid-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--ol-border);
-  border-radius: 10px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--ol-radius-lg);
   overflow: hidden;
   background: var(--ol-bg-surface);
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.15s ease;
+    border-color var(--ol-dur) var(--ol-ease),
+    box-shadow var(--ol-dur) var(--ol-ease);
 }
 
 .ol-grid-card:hover {
-  border-color: var(--el-color-primary-light-5);
-  box-shadow: var(--el-box-shadow-light);
-  transform: translateY(-1px);
+  border-color: var(--el-border-color-light);
+  box-shadow: var(--ol-shadow-md);
 }
 
 .ol-grid-card.is-selected {
   border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 2px var(--el-color-primary-light-8);
+  box-shadow: 0 0 0 1px var(--el-color-primary);
 }
 
 .ol-grid-thumb {
@@ -2088,15 +2140,16 @@ html.dark .ol-grid-check {
 
 .ol-pager-current {
   font-weight: 600;
-  text-decoration: underline;
+  color: var(--el-color-primary);
+  text-decoration: none;
 }
 
 /* ---- 目录 README ---- */
 .ol-readme {
-  padding: 14px 18px;
+  padding: 16px 20px;
   background: var(--ol-bg-surface);
-  border: 1px solid var(--ol-border);
-  border-radius: var(--ol-radius-md);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--ol-radius-lg);
 }
 
 .ol-readme-head {
@@ -2116,15 +2169,14 @@ html.dark .ol-grid-check {
   line-height: 1.7;
 }
 
-/* ---- 站点公告（设置项 announcement） ---- */
+/* ---- 站点公告（设置项 announcement）：antd Alert type="info" ---- */
 .ol-announcement {
-  padding: 10px 16px;
+  padding: 9px 14px;
   margin-bottom: var(--ol-space-3, 12px);
-  background: var(--ol-bg-surface);
-  border: 1px solid var(--ol-border);
-  /* 左侧强调色竖条：与 README 区分开，一眼能看出是「站点公告」而不是目录说明 */
-  border-left: 3px solid var(--el-color-primary);
-  border-radius: var(--ol-radius-md);
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: var(--ol-radius-lg);
+  color: var(--ol-text-secondary);
 }
 
 .ol-announcement-body {
@@ -2757,7 +2809,7 @@ html.dark .ol-grid-check {
   padding: 1px 6px;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.65);
-  color: #ffd04b;
+  color: var(--el-color-warning);
   font-size: 12px;
 }
 
@@ -2979,4 +3031,77 @@ html.dark .ol-grid-check {
   font-size: 12px;
   color: var(--ol-text-muted);
   word-break: break-all;
+}
+
+/* ==========================================================================
+ * 通用组件细节（跨页生效）
+ * 只处理「一屏里反复出现」的几类元素：卡片 / 主按钮 / 输入框 / 对话框 / 页签。
+ * 全部走 token，深浅色自动跟随；不改任何 DOM 结构。
+ * ========================================================================== */
+
+.el-card {
+  border-radius: var(--ol-radius-lg);
+  border-color: var(--el-border-color-light);
+}
+
+.el-card__header {
+  border-bottom-color: var(--el-border-color-light);
+}
+
+/* antd 的主按钮是纯色扁平块：不加高光、不加投影，hover 只换底色 */
+.el-button--primary:not(.is-text):not(.is-link) {
+  box-shadow: none;
+}
+
+/* 输入框：antd 的描边式 —— 白底 + 1px #d9d9d9，hover 转主色浅一档，focus 主色描边。
+ * EP 内部就是从这几个变量取值，改变量即可，不要去覆写 .el-input__wrapper 的 box-shadow。 */
+.el-input,
+.el-textarea,
+.el-select {
+  --el-input-border-color: var(--el-border-color);
+  --el-input-hover-border-color: var(--el-color-primary-light-3);
+  --el-input-focus-border-color: var(--el-color-primary);
+  --el-input-bg-color: var(--ol-bg-surface);
+}
+
+/* 对话框：antd Modal —— 8px 圆角、无描边、boxShadowSecondary，头/尾不画分隔线 */
+.el-dialog {
+  border-radius: var(--ol-radius-lg);
+  border: none;
+  box-shadow: var(--ol-shadow-md);
+  overflow: hidden;
+}
+
+.el-dialog__header {
+  padding: var(--ol-space-5) var(--ol-space-6) var(--ol-space-3);
+  margin-right: 0;
+}
+
+.el-dialog__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.el-dialog__body {
+  padding: var(--ol-space-3) var(--ol-space-6) var(--ol-space-5);
+}
+
+.el-dialog__footer {
+  padding: 0 var(--ol-space-6) var(--ol-space-5);
+}
+
+/* 页签：antd Tabs —— 2px 主色实心条，不做渐变 */
+.el-tabs__active-bar {
+  height: 2px;
+  background: var(--el-color-primary);
+}
+
+.el-tabs__item.is-active {
+  font-weight: 500;
+}
+
+/* 空态与提示文字统一压到次级灰，避免每页各写一套颜色 */
+.el-empty__description p {
+  color: var(--ol-text-muted);
 }

@@ -44,7 +44,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #d0d3d9;
+  color: var(--el-text-color-placeholder);
   font-size: 13px;
   pointer-events: none;
 }
@@ -105,7 +105,7 @@
   top: 50%;
   transform: translateY(-50%);
   text-align: center;
-  color: #d0d3d9;
+  color: var(--el-text-color-placeholder);
   font-size: 13px;
   pointer-events: none;
 }

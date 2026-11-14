@@ -20,7 +20,7 @@
 
 .ol-media-page-sub {
   font-size: 12px;
-  color: var(--ol-text-muted);
+  color: var(--ol-text-secondary);
 }
 
 /* ---- 媒体域页面导航（首页 / 媒体库 / 维度页） ---- */
@@ -87,14 +87,16 @@
   align-items: center;
   gap: 6px;
   padding: var(--ol-space-3) var(--ol-space-2);
-  border: 1px solid var(--ol-border);
-  border-radius: var(--ol-radius-md);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--ol-radius-lg);
   background: var(--ol-bg-surface);
-  transition: border-color 0.15s ease;
+  transition:
+    border-color var(--ol-dur) var(--ol-ease),
+    box-shadow var(--ol-dur) var(--ol-ease);
 }
 
 .ol-media-person-card:hover {
-  border-color: var(--el-color-primary-light-5);
+  box-shadow: var(--ol-shadow-md);
 }
 
 .ol-media-avatar {
@@ -224,21 +226,22 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: var(--ol-space-3);
-  border: 1px solid var(--ol-border);
-  border-radius: var(--ol-radius-md);
+  padding: 16px 20px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--ol-radius-lg);
   background: var(--ol-bg-surface);
 }
 
 .ol-media-stat-value {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 600;
   color: var(--ol-text);
+  font-variant-numeric: tabular-nums;
 }
 
 .ol-media-stat-label {
   font-size: 12px;
-  color: var(--ol-text-muted);
+  color: var(--ol-text-secondary);
 }
 
 .ol-media-two-col {
@@ -248,9 +251,9 @@
 }
 
 .ol-media-panel {
-  padding: var(--ol-space-3);
-  border: 1px solid var(--ol-border);
-  border-radius: var(--ol-radius-md);
+  padding: var(--ol-space-4);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--ol-radius-lg);
   background: var(--ol-bg-surface);
 }
 
@@ -352,10 +355,15 @@
 .ol-media-playlist-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--ol-border);
-  border-radius: var(--ol-radius-md);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--ol-radius-lg);
   overflow: hidden;
   background: var(--ol-bg-surface);
+  transition: box-shadow var(--ol-dur) var(--ol-ease);
+}
+
+.ol-media-playlist-card:hover {
+  box-shadow: var(--ol-shadow-md);
 }
 
 .ol-media-playlist-cover {
