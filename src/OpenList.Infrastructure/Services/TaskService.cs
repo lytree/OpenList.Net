@@ -416,7 +416,6 @@ public sealed class TaskService : ITaskService
             row.EndTime = rec.Info.EndTime;
             row.Error = rec.Info.Error;
             row.Creator = rec.Info.Creator;
-            row.CreatorRole = rec.Info.CreatorRole;
             row.OwnerId = rec.Info.OwnerId;
             await db.SaveChangesAsync().ConfigureAwait(false);
         }
@@ -491,7 +490,6 @@ public sealed class TaskService : ITaskService
         EndTime = row.EndTime,
         Error = row.Error,
         Creator = row.Creator,
-        CreatorRole = row.CreatorRole,
         OwnerId = row.OwnerId,
         CreatedAt = row.CreatedAt,
         CompletedAt = row.EndTime,

@@ -10,8 +10,8 @@ namespace OpenList.Tests;
 /// </summary>
 public class MoveCopyBatchTests
 {
-    private static readonly User MoveUser = new() { Id = 1, Username = "u", Role = UserRole.General, Permission = 0xFF };
-    private static readonly User NoPermUser = new() { Id = 2, Username = "n", Role = UserRole.General, Permission = 0 };
+    private static readonly User MoveUser = new() { Id = 1, Username = "u" };
+    private static readonly User GuestUser = new() { Id = 0, Username = "guest" };
 
     private static (FileSystemService svc, ITaskService tasks, MemoryFileSystem mem) Setup()
     {
@@ -58,7 +58,7 @@ public class MoveCopyBatchTests
     }
 
     [Test]
-    public async Task MoveBatchAsync_Rejects_NonWritableUser()
+    public async Task MoveBatchAsync_Rejects_Anonymous_Guest()
     {
         var (svc, _, mem) = Setup();
         mem.CreateDirectory("/dest");
@@ -68,7 +68,7 @@ public class MoveCopyBatchTests
             SrcDir = "/test",
             DstDir = "/test/dest",
             Names = ["a.txt"],
-        }, NoPermUser);
+        }, GuestUser);
         await Assert.That(r.Code).IsEqualTo(403);
     }
 

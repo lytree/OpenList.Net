@@ -80,15 +80,13 @@ public static class S3Endpoints
         var user = await ResolveUserAsync(ctx, storageSvc, authSvc, userSvc);
         if (user is null) return S3Error("AccessDenied", "unauthorized", 401);
 
-        // 桶可见范围 = 挂载点与用户 BasePath 的交集。受限用户只应看到自己根目录内的挂载点，
-        // 名字也按自己的根目录换算（/a/b1 对 BasePath=/a 的用户就是 b1）。
-        var basePath = MetaAccess.Normalize(string.IsNullOrEmpty(user.BasePath) ? "/" : user.BasePath);
+        // 桶 = 挂载点（单用户产品没有 BasePath 隔离）。
         var storages = await storageSvc.ListAsync(ctx.RequestAborted);
         var buckets = storages.Data?.Content
-            .Where(s => !s.Disabled && MetaAccess.IsSubPath(basePath, s.MountPath))
+            .Where(s => !s.Disabled)
             .Select(s => new S3Bucket
             {
-                Name = RelativeBucketName(basePath, s.MountPath),
+                Name = RelativeBucketName("/", s.MountPath),
                 CreationDate = s.CreatedAt.UtcDateTime,
             })
             .Where(b => !string.IsNullOrEmpty(b.Name))
@@ -106,29 +104,21 @@ public static class S3Endpoints
     // --- 桶解析 ---
 
     /// <summary>
-    /// 把 S3 bucket 名解析为当前用户可访问的挂载路径。
-    /// bucket 名是**相对于用户 BasePath** 的路径：BasePath=/a 的用户请求 <c>b1</c> 得到 /a/b1。
-    /// 不存在与越界都返回 false，调用方统一回 NoSuchBucket —— 区分开等于确认「桶存在但你没权限」。
+    /// 把 S3 bucket 名解析为对应挂载点。不存在返回 false，调用方统一回 NoSuchBucket。
     /// </summary>
     private static bool TryResolveBucket(User user, MountService mount, string bucket, out string bucketRoot)
     {
         bucketRoot = string.Empty;
         if (string.IsNullOrWhiteSpace(bucket)) return false;
-        if (!user.TryJoinPath("/" + bucket.Trim('/'), out var joined)) return false;
+        var joined = UPath.FixAndCleanPath("/" + bucket.Trim('/'));
         if (!mount.Mounted.ContainsKey(joined)) return false;
         bucketRoot = joined;
         return true;
     }
 
-    /// <summary>把挂载路径换算成用户视角的桶名（去掉自己的 BasePath 前缀）。</summary>
+    /// <summary>把挂载路径换算成用户视角的桶名。</summary>
     private static string RelativeBucketName(string basePath, string mountPath)
-    {
-        var name = MetaAccess.Normalize(mountPath).Trim('/');
-        if (basePath == "/") return name;
-        var bp = basePath.Trim('/');
-        if (string.Equals(name, bp, StringComparison.Ordinal)) return string.Empty;
-        return name.StartsWith(bp + "/", StringComparison.Ordinal) ? name[(bp.Length + 1)..] : name;
-    }
+        => MetaAccess.Normalize(mountPath).Trim('/');
 
     // --- Head bucket ---
 

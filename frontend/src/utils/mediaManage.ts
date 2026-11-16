@@ -75,7 +75,7 @@ export function taskOfLibrary(tasks: MediaScanTask[], libraryId: number): MediaS
   return tasks.find((t) => t.library_id === libraryId) ?? null
 }
 
-/** 从刮削状态列表里取指定库的状态；没有记录返回 null（非管理员或库不可见）。 */
+/** 从刮削状态列表里取指定库的状态；没有记录返回 null（未登录或库不可见）。 */
 export function scrapeOfLibrary(
   statuses: MediaScrapeStatus[],
   libraryId: number,

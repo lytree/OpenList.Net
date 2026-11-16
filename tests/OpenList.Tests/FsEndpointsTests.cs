@@ -184,179 +184,17 @@ public class FsEndpointsTests
     }
 
     [Test]
-    public async Task List_Respects_User_BasePath_Isolation()
+    public async Task DirectUpload_Info_Rejects_NonName_FileName()
     {
-        // 镜像 Go：user.JoinPath 把请求路径钉在用户 BasePath 之内，越界相对路径返回 403。
-        // 这里验证非 admin 用户的根请求落在自己的 BasePath 内，且看不到兄弟目录。
-        var (factory, client) = await SetupAsync();
-        await using (factory)
-        {
-            await factory.WriteFileAsync("writable/a.txt", "a"u8.ToArray());
-            await factory.WriteFileAsync("other/b.txt", "b"u8.ToArray());
-
-            // 以 admin 造一个 BasePath=/test/writable 的普通用户（权限位全开，避免权限位干扰路径断言）。
-            await factory.SeedUserAsync("bob", "pw", 0x71FF, "/test/writable");
-
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "bob", "pw"));
-
-            // 根路径请求被套到 bob 的 BasePath 内：只看得到自己的文件，看不到兄弟目录内容。
-            var resp = await client.PostAsync("/api/fs/list", JsonContent.Create(new { path = "/" }));
-            var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
-            var names = json.RootElement.GetProperty("data").GetProperty("content")
-                .EnumerateArray().Select(e => e.GetProperty("name").GetString()).ToList();
-            await Assert.That(names.Any(n => n == "a.txt")).IsTrue();
-            await Assert.That(names.Any(n => n == "other")).IsFalse();
-
-            // 越界相对路径被拒绝（镜像 Go utils.JoinBasePath → errs.RelativePath）。
-            var esc = await client.PostAsync("/api/fs/list", JsonContent.Create(new { path = "../other" }));
-            var escJson = await esc.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(escJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
-        }
-    }
-
-    [Test]
-    public async Task Management_Endpoints_Deny_User_Without_Permission_Bits()
-    {
-        // 镜像 Go 各管理端点内联的 user.CanXxx() 检查：无相应权限位的用户一律 403。
-        var (factory, client) = await SetupAsync();
-        await using (factory)
-        {
-            await factory.WriteFileAsync("base/a.txt", "a"u8.ToArray());
-            await factory.WriteFileAsync("base/empty/.keep", "k"u8.ToArray());
-
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
-            await CreateUserAsync(factory, "noperm", "pw", permission: 0);
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "noperm", "pw"));
-
-            var calls = new (string Route, object Body)[]
-            {
-                ("/api/fs/mkdir", new { path = "/test/base/newdir" }),
-                ("/api/fs/rename", new { path = "/test/base/a.txt", name = "z.txt" }),
-                ("/api/fs/batch_rename", new { src_dir = "/test/base", rename_objects = new[] { new { src_name = "a.txt", new_name = "bz.txt" } } }),
-                ("/api/fs/regex_rename", new { src_dir = "/test/base", src_name_regex = "a", new_name_regex = "b" }),
-                ("/api/fs/move", new { src_dir = "/test/base", dst_dir = "/test/base", names = new[] { "a.txt" } }),
-                ("/api/fs/copy", new { src_dir = "/test/base", dst_dir = "/test/base", names = new[] { "a.txt" } }),
-                ("/api/fs/remove", new { dir = "/test/base", names = new[] { "a.txt" } }),
-                ("/api/fs/remove_empty_directory", new { path = "/test/base/empty" }),
-                ("/api/fs/recursive_move", new { src_dir = "/test/base", dst_dir = "/test/base" }),
-            };
-
-            foreach (var (route, body) in calls)
-            {
-                var json = await PostJsonAsync(client, route, body);
-                var code = json.RootElement.GetProperty("code").GetInt32();
-                // 权限门禁先于任何文件操作，故即便路径不存在也应是 403。
-                await Assert.That(code).IsEqualTo(403);
-            }
-        }
-    }
-
-    [Test]
-    public async Task Management_Endpoints_Allow_User_With_Required_Permission_Bit()
-    {
-        // 单一位用户的正/负控制：持有该端点所需位可放行（非 403），缺位则 403。
-        var (factory, client) = await SetupAsync();
-        await using (factory)
-        {
-            var cases = new (int Bit, (string Route, object Body) Allowed, (string Route, object Body) Denied)[]
-            {
-                (1 << 3, ("/api/fs/mkdir", (object)new { path = "/test/base/newdir" }),
-                         ("/api/fs/rename", new { path = "/test/base/a.txt", name = "r.txt" })),
-                (1 << 4, ("/api/fs/rename", (object)new { path = "/test/base/a.txt", name = "r.txt" }),
-                         ("/api/fs/mkdir", new { path = "/test/base/newdir" })),
-                (1 << 5, ("/api/fs/move", (object)new { src_dir = "/test/base", dst_dir = "/test/base/moved", names = new[] { "m.txt" } }),
-                         ("/api/fs/copy", new { src_dir = "/test/base", dst_dir = "/test/base/moved", names = new[] { "m.txt" } })),
-                (1 << 6, ("/api/fs/copy", (object)new { src_dir = "/test/base", dst_dir = "/test/base/copied", names = new[] { "c.txt" } }),
-                         ("/api/fs/remove", new { dir = "/test/base", names = new[] { "c.txt" } })),
-                (1 << 7, ("/api/fs/remove", (object)new { dir = "/test/base", names = new[] { "d.txt" } }),
-                         ("/api/fs/move", new { src_dir = "/test/base", dst_dir = "/test/base/moved", names = new[] { "d.txt" } })),
-            };
-
-            var i = 0;
-            foreach (var c in cases)
-            {
-                // 每个 case 前重建夹具，避免上一个 case 的移动/删除影响后续断言。
-                await factory.WriteFileAsync("base/a.txt", "a"u8.ToArray());
-                await factory.WriteFileAsync("base/m.txt", "m"u8.ToArray());
-                await factory.WriteFileAsync("base/c.txt", "c"u8.ToArray());
-                await factory.WriteFileAsync("base/d.txt", "d"u8.ToArray());
-                await factory.WriteFileAsync("base/moved/.keep", "k"u8.ToArray());
-                await factory.WriteFileAsync("base/copied/.keep", "k"u8.ToArray());
-
-                var name = $"bit{i++}";
-                client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
-                await CreateUserAsync(factory, name, "pw", c.Bit);
-                client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, name, "pw"));
-
-                var allowed = await PostJsonAsync(client, c.Allowed.Route, c.Allowed.Body);
-                // 放行断言只要求绕过权限门禁（非 403）；后续服务层结果不在本测试关注域。
-                await Assert.That(allowed.RootElement.GetProperty("code").GetInt32()).IsNotEqualTo(403);
-                // move/copy 是任务化端点：200 只代表已入队，文件操作在后台跑。
-                // 不等它结束就重建 base/m.txt，会和正在进行的移动撞上
-                // （Windows 上直接抛 "file is being used by another process"）。
-                if (c.Allowed.Route.EndsWith("/move", StringComparison.Ordinal))
-                    await WaitTasksAsync(client, "move");
-                else if (c.Allowed.Route.EndsWith("/copy", StringComparison.Ordinal))
-                    await WaitTasksAsync(client, "copy");
-
-                var denied = await PostJsonAsync(client, c.Denied.Route, c.Denied.Body);
-                await Assert.That(denied.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
-            }
-        }
-    }
-
-    [Test]
-    public async Task Mkdir_Denied_When_Meta_WriteUsers_Excludes_User()
-    {
-        // 镜像 Go common.CanWrite：meta 的 write_users 白名单非空、不含该用户且覆盖该路径时拒绝，
-        // 即便用户拥有 CanWriteContent 权限位。
-        var (factory, client) = await SetupAsync();
-        await using (factory)
-        {
-            await factory.WriteFileAsync("meta_dir/.keep", "k"u8.ToArray());
-
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
-            var metaResp = await client.PostAsync("/api/admin/meta/create", JsonContent.Create(new
-            {
-                path = "/test/meta_dir",
-                write = false,
-                write_users = new[] { 999L },
-                write_users_sub = true,
-            }));
-            var metaJson = await metaResp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(metaJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
-
-            await CreateUserAsync(factory, "metawriter", "pw", permission: 1 << 3);
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "metawriter", "pw"));
-
-            var json = await PostJsonAsync(client, "/api/fs/mkdir", new { path = "/test/meta_dir/sub" });
-            await Assert.That(json.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
-        }
-    }
-
-    [Test]
-    public async Task DirectUpload_Info_Applies_Go_Gate()
-    {
-        // 镜像 Go FsGetDirectUploadInfo 门禁：无 CanWriteContent 位 403；file_name 非纯名称 403；
-        // 权限位齐备 + 合法 file_name 则通过门禁（当前无驱动实现直传，服务层回 501，非 403）。
+        // 镜像 Go FsGetDirectUploadInfo 的 checkRelativePath：file_name 必须是纯名称。
         var (factory, client) = await SetupAsync();
         await using (factory)
         {
             await factory.WriteFileAsync("base/.keep", "k"u8.ToArray());
 
             client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
-            await CreateUserAsync(factory, "nowrite", "pw", permission: 0);
-            await CreateUserAsync(factory, "canwrite", "pw", permission: 1 << 3); // CanWriteContent
 
-            // 无 CanWriteContent 权限位 → 403。
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "nowrite", "pw"));
-            var denied = await PostJsonAsync(client, "/api/fs/get_direct_upload_info",
-                new { path = "/test/base", file_name = "a.txt", file_size = 10 });
-            await Assert.That(denied.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
-
-            // 有权限位但 file_name 含路径成分（/ \、. ..、空）→ 403（镜像 Go checkRelativePath）。
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "canwrite", "pw"));
+            // file_name 含路径成分（/ \、. ..、空）→ 403。
             foreach (var bad in new[] { "../evil.txt", "sub/evil.txt", @"..\evil.txt", "", "..", "." })
             {
                 var invalid = await PostJsonAsync(client, "/api/fs/get_direct_upload_info",
@@ -364,49 +202,10 @@ public class FsEndpointsTests
                 await Assert.That(invalid.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
             }
 
-            // 权限位齐备 + 合法 file_name → 通过门禁（非 403）。
+            // 合法 file_name → 通过门禁（当前无驱动实现直传，服务层回 501，非 403）。
             var ok = await PostJsonAsync(client, "/api/fs/get_direct_upload_info",
                 new { path = "/test/base", file_name = "a.txt", file_size = 10 });
             await Assert.That(ok.RootElement.GetProperty("code").GetInt32()).IsNotEqualTo(403);
-        }
-    }
-
-    [Test]
-    public async Task Copy_Denied_When_Source_Meta_ReadUsers_Excludes_User()
-    {
-        // 镜像 Go FsCopy：CanCopy 之外，源目录还要过 common.CanRead（meta 的 read_users 白名单）。
-        var (factory, client) = await SetupAsync();
-        await using (factory)
-        {
-            await factory.WriteFileAsync("copysrc/a.txt", "a"u8.ToArray());
-            await factory.WriteFileAsync("plain/a.txt", "a"u8.ToArray());
-            await factory.WriteFileAsync("out/.keep", "k"u8.ToArray());
-
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
-            // 源目录 meta：read_users 仅含 999（非调用者）。
-            var metaResp = await client.PostAsync("/api/admin/meta/create", JsonContent.Create(new
-            {
-                path = "/test/copysrc",
-                read_users = new[] { 999L },
-                read_users_sub = true,
-            }));
-            var metaJson = await metaResp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(metaJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
-
-            await CreateUserAsync(factory, "copier", "pw", permission: 1 << 6); // CanCopy
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "copier", "pw"));
-
-            // 有 CanCopy 位，但源目录 meta 的 read_users 白名单不含该用户 → 403。
-            var denied = await PostJsonAsync(client, "/api/fs/copy",
-                new { src_dir = "/test/copysrc", dst_dir = "/test/out", names = new[] { "a.txt" } });
-            await Assert.That(denied.RootElement.GetProperty("code").GetInt32()).IsEqualTo(403);
-
-            // 源目录换成无读限制的路径 → 通过读门禁进入服务层（非 403）。
-            var ok = await PostJsonAsync(client, "/api/fs/copy",
-                new { src_dir = "/test/plain", dst_dir = "/test/out", names = new[] { "a.txt" } });
-            await Assert.That(ok.RootElement.GetProperty("code").GetInt32()).IsNotEqualTo(403);
-            // 同上：后台复制还在写 out/a.txt 时销毁夹具，删目录会因文件被占用失败。
-            await WaitTasksAsync(client, "copy");
         }
     }
 
@@ -435,16 +234,6 @@ public class FsEndpointsTests
         var resp = await client.PostAsync("/api/auth/login", JsonContent.Create(new { username, password }));
         var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
         return json!.RootElement.GetProperty("data").GetProperty("token").GetString()!;
-    }
-
-    private static async Task CreateUserAsync(
-        TestWebAppFactory factory,
-        string username,
-        string password,
-        int permission,
-        string basePath = "/")
-    {
-        await factory.SeedUserAsync(username, password, permission, basePath);
     }
 
     private static async Task<JsonDocument> PostJsonAsync(HttpClient client, string route, object body)

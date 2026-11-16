@@ -16,7 +16,7 @@ namespace OpenList.Tests;
 /// </summary>
 public class MountFileSystemVirtualDirTests
 {
-    private static readonly User TestUser = new() { Id = 1, Username = "test", Role = UserRole.Admin };
+    private static readonly User TestUser = new() { Id = 1, Username = "test" };
 
     [Test]
     public async Task Root_Has_Metadata_Even_When_No_Mount_At_Root()

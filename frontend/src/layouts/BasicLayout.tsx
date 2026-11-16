@@ -195,7 +195,7 @@ export default defineComponent({
                     ),
                     dropdown: () => (
                       <ElDropdownMenu>
-                        {user.isAdmin && (
+                        {user.isLogin && (
                           <ElDropdownItem command="manage">{t("global.nav_manage")}</ElDropdownItem>
                         )}
                         <ElDropdownItem command="password">
@@ -303,7 +303,7 @@ export default defineComponent({
                 </ElAvatar>
                 <span class="ol-user-name">{user.username}</span>
               </div>
-              {user.isAdmin && (
+              {user.isLogin && (
                 <div class="ol-view-drawer-link" onClick={goManage}>
                   {t("global.nav_manage")}
                 </div>

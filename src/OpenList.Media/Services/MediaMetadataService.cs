@@ -22,7 +22,7 @@ namespace OpenList.Media.Services;
 public sealed partial class MediaMetadataService : IMediaMetadataService
 {
     /// <summary>写文件时使用的内部管理员身份。</summary>
-    private static readonly User WriterUser = new() { Id = 0, Username = "media-scraper", Role = UserRole.Admin };
+    private static readonly User WriterUser = User.System("media-scraper");
 
     private readonly OpenListDbContext _db;
     private readonly IMediaLibraryService _libraries;
@@ -157,7 +157,7 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
     /// <inheritdoc />
     public async Task<Resp> ScrapeLibraryAsync(long libraryId, User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Resp.Fail("permission denied", 403);
+        if (!user.IsAdmin()) return Resp.Fail("permission denied", 403);
         var library = await _db.MediaLibraries.AsNoTracking().FirstOrDefaultAsync(l => l.Id == libraryId, ct);
         if (library is null) return Resp.Fail("library not found", RespCodes.NotFound);
         if (!await _provider.IsConfiguredAsync(ct))
@@ -273,7 +273,7 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
     /// <inheritdoc />
     public Task<Resp> CancelScrapeAsync(long libraryId, User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Task.FromResult(Resp.Fail("permission denied", 403));
+        if (!user.IsAdmin()) return Task.FromResult(Resp.Fail("permission denied", 403));
         // 只校验「有没有在跑」：库已存在这一点由 ScrapeLibraryAsync 入口保证，
         // 取消动作本身只作用于内存里的运行态。
         return Task.FromResult(_scrape.Cancel(libraryId)
@@ -284,7 +284,7 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
     /// <inheritdoc />
     public async Task<Resp<List<MediaScrapeStatus>>> ListScrapeTasksAsync(User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Resp<List<MediaScrapeStatus>>.Fail("permission denied", 403);
+        if (!user.IsAdmin()) return Resp<List<MediaScrapeStatus>>.Fail("permission denied", 403);
 
         var libraries = await _db.MediaLibraries.AsNoTracking().OrderBy(l => l.Id).ToListAsync(ct);
 

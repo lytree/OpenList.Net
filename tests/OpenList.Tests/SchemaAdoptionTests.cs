@@ -133,7 +133,7 @@ public class SchemaAdoptionTests
         await using (var seed = NewContext(path, withMigrations: false))
         {
             await seed.Database.EnsureCreatedAsync();
-            seed.Users.Add(new User { Username = "keeper", Password = "", PasswordHash = "", Role = UserRole.General });
+            seed.Users.Add(new User { Username = "keeper", Password = "", PasswordHash = "" });
             await seed.SaveChangesAsync();
         }
 

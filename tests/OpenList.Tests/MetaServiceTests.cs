@@ -18,7 +18,7 @@ public class MetaServiceTests
     {
         await using var ctx = BuildContext();
         var svc = new MetaService(ctx);
-        var r = await svc.CreateAsync(new Meta { Path = "/test", Password = "secret", Write = true });
+        var r = await svc.CreateAsync(new Meta { Path = "/test", Password = "secret" });
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!.Path).IsEqualTo("/test");
         await Assert.That(r.Data.Password).IsEqualTo("secret");
@@ -85,31 +85,21 @@ public class MetaServiceTests
         {
             Path = "/u2",
             Password = "pw",
-            Write = true,
             Hide = "hidden",
             Readme = "updated",
             PSub = true,
             Header = "X-Test: 1",
-            WSub = true,
             HideSub = true,
             RSub = true,
             HeaderSub = true,
-            ReadUsers = [1, 2],
-            ReadUsersSub = true,
-            WriteUsers = [3],
-            WriteUsersSub = false,
         });
         await Assert.That(r.Code).IsEqualTo(200);
         var meta = (await svc.GetAsync("/u2")).Data!;
         await Assert.That(meta.Password).IsEqualTo("pw");
-        await Assert.That(meta.Write).IsTrue();
         await Assert.That(meta.Hide).IsEqualTo("hidden");
         await Assert.That(meta.Readme).IsEqualTo("updated");
         await Assert.That(meta.PSub).IsTrue();
-        await Assert.That(meta.WSub).IsTrue();
-        await Assert.That(meta.ReadUsers.Count).IsEqualTo(2);
-        await Assert.That(meta.ReadUsers).Contains(1L);
-        await Assert.That(meta.ReadUsers).Contains(2L);
+        await Assert.That(meta.Header).IsEqualTo("X-Test: 1");
     }
 
     [Test]

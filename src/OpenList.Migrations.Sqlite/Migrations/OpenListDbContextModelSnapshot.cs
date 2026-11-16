@@ -30,9 +30,6 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("CreatorRole")
-                        .HasColumnType("INTEGER");
-
                     b.Property<DateTimeOffset?>("EndTime")
                         .HasColumnType("TEXT");
 
@@ -106,21 +103,9 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasJsonPropertyName("r_sub");
 
-                    b.Property<string>("ReadUsersJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("ReadUsersSub")
-                        .HasColumnType("INTEGER")
-                        .HasJsonPropertyName("read_users_sub");
-
                     b.Property<string>("Readme")
                         .HasColumnType("TEXT")
                         .HasJsonPropertyName("readme");
-
-                    b.Property<bool>("WSub")
-                        .HasColumnType("INTEGER")
-                        .HasJsonPropertyName("w_sub");
 
                     b.Property<int>("WebdavManagement")
                         .HasColumnType("INTEGER");
@@ -133,18 +118,6 @@ namespace OpenList.Migrations.Sqlite.Migrations
 
                     b.Property<int>("WebdavWrite")
                         .HasColumnType("INTEGER");
-
-                    b.Property<bool>("Write")
-                        .HasColumnType("INTEGER")
-                        .HasJsonPropertyName("write");
-
-                    b.Property<string>("WriteUsersJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("WriteUsersSub")
-                        .HasColumnType("INTEGER")
-                        .HasJsonPropertyName("write_users_sub");
 
                     b.HasKey("Id");
 
@@ -339,19 +312,11 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasJsonPropertyName("allow_ldap");
 
-                    b.Property<string>("BasePath")
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("base_path");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("Disabled")
                         .HasColumnType("INTEGER");
-
-                    b.Property<bool>("IsBuiltIn")
-                        .HasColumnType("INTEGER")
-                        .HasJsonPropertyName("is_built_in");
 
                     b.Property<string>("Password")
                         .IsRequired()
@@ -360,12 +325,6 @@ namespace OpenList.Migrations.Sqlite.Migrations
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("TEXT");
-
-                    b.Property<int>("Permission")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Role")
-                        .HasColumnType("INTEGER");
 
                     b.Property<string>("SsoID")
                         .HasColumnType("TEXT")

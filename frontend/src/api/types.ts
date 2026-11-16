@@ -68,65 +68,20 @@ export type RenameObj = {
   new_name: string
 }
 
-export enum UserRole {
-  GENERAL,
-  GUEST,
-  ADMIN,
-}
-
+/**
+ * 单用户产品：登录即内置管理员，匿名访客的 `id` 为 0。
+ * 角色 / 权限位 / BasePath 已从后端移除，这里也不再保留对应字段。
+ */
 export interface User {
   id: number
   username: string
   password: string
-  base_path: string
-  role: UserRole
-  permission: number
   sso_id: string
   disabled: boolean
   allow_ldap: boolean
 }
 
 export type Me = User & { otp: boolean }
-
-/**
- * 权限位映射 —— 以本仓库后端 `OpenList.Core/Models/User.cs` 为唯一真源。
- *
- * 注意：不要再用「数组下标」当位号（旧 SolidJS 前端的 `UserPermissions.indexOf`
- * 就是这种写法，且其 14/15 位与本仓库后端不一致）。这里显式写死位号，
- * 后端新增位时只需在下表加一行。
- *
- * 位 8–13 在 User.cs 注释中标注为 WebDAV / FTP / 归档 / 分享保留位，
- * 后端尚未提供对应 Has* 判定，故这里先不暴露给 UI。
- */
-export const PermissionBits = {
-  see_hides: 0,
-  access_without_password: 1,
-  offline_download: 2,
-  write_content: 3,
-  rename: 4,
-  move: 5,
-  copy: 6,
-  delete: 7,
-  /** 媒体库管理（创建/更新/删除库、触发扫描与刮削），对应 CanManageMediaLibrary。 */
-  manage_media: 14,
-} as const
-
-export type Permission = keyof typeof PermissionBits
-
-export const UserMethods = {
-  isGuest: (user: User | null) => user?.role === UserRole.GUEST,
-  isAdmin: (user: User | null) => user?.role === UserRole.ADMIN,
-  isGeneral: (user: User | null) => user?.role === UserRole.GENERAL,
-  /**
-   * 纯位判断，与后端 `Can*(Permission & mask)` 保持同构 —— 不做「管理员放行」特判，
-   * 否则前端会显示出后端实际会拒绝的操作按钮。
-   */
-  can: (user: User | null, permission: Permission) => {
-    if (!user) return false
-    const bit = PermissionBits[permission]
-    return ((user.permission >> bit) & 1) === 1
-  },
-}
 
 // ---------------------------------------------------------------------------
 // Admin / Storage / Driver（M2 管理台）
@@ -213,20 +168,10 @@ export interface PageResp<T> {
 }
 
 // ---------------------------------------------------------------------------
-// 用户 / 元数据 / 索引 / 任务（M2 第二批）
+// 元数据 / 索引 / 任务（M2 第二批）
 // 字段名真源：后端全局 `PropertyNamingPolicy = CamelCase`（Program.cs:83），
-// 仅带 `[JsonPropertyName]` 的字段用 snake_case（如 base_path、allow_ldap、p_sub）。
+// 仅带 `[JsonPropertyName]` 的字段用 snake_case（如 allow_ldap、p_sub）。
 // ---------------------------------------------------------------------------
-
-/** `/admin/user/list` 的行。比公开 `User` 多出 2FA / 内置标记。 */
-export interface AdminUser extends User {
-  /** 是否开启 2FA（后端 `TwoFactorEnabled` → `otp`）。 */
-  otp?: boolean
-  /** 内置管理员：不可删除 / 改名 / 降权。 */
-  is_built_in?: boolean
-  createdAt?: string
-  updatedAt?: string
-}
 
 /**
  * 路径元数据（`/admin/meta/list` 的行）。
@@ -238,13 +183,6 @@ export interface Meta {
   password?: string | null
   /** 密码是否对子目录生效。 */
   p_sub: boolean
-  read_users: number[]
-  read_users_sub: boolean
-  write_users: number[]
-  write_users_sub: boolean
-  /** 写入豁免（跳过用户权限检查）。 */
-  write: boolean
-  w_sub: boolean
   hide?: string | null
   h_sub: boolean
   readme?: string | null
@@ -294,7 +232,6 @@ export interface TaskInfo {
   end_time?: string | null
   error?: string | null
   creator: string
-  creator_role?: number
 }
 
 // ---------------------------------------------------------------------------

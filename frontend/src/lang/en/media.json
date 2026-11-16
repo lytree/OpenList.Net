@@ -191,7 +191,7 @@
 
   "manage": {
     "title": "Media Libraries",
-    "hint": "Libraries are global: scanning discovers video files under the library path and builds items. Regular users only see libraries whose path is visible to them.",
+    "hint": "Libraries are global: scanning discovers video files under the library path and builds items.",
     "col_state": "Scan state",
     "state_idle": "Idle",
     "state_running": "Scanning",

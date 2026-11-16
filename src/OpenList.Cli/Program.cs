@@ -106,12 +106,8 @@ public static class Program
         var (db, _) = await OpenDbAsync();
         await using var _ = db;
 
-        // 判据必须带 Role == Admin：guest 同样带 IsBuiltIn 标记，只按标记查会改掉游客的密码。
-        // 老库尚未回填时退回「最早的管理员」。
-        var admin = await db.Users.FirstOrDefaultAsync(u => u.IsBuiltIn && u.Role == UserRole.Admin, ct)
-                    ?? await db.Users.Where(u => u.Role == UserRole.Admin)
-                                     .OrderBy(u => u.Id)
-                                     .FirstOrDefaultAsync(ct);
+        // 单用户产品：库里至多一个账号，直接取 Id 最小的那条。
+        var admin = await db.Users.OrderBy(u => u.Id).FirstOrDefaultAsync(ct);
         if (admin is null)
         {
             Console.Error.WriteLine(
@@ -140,7 +136,6 @@ public static class Program
         await using var _ = db;
 
         var admin = await db.Users.AsNoTracking()
-            .Where(u => u.Role == UserRole.Admin)
             .OrderBy(u => u.Id)
             .FirstOrDefaultAsync(ct);
         if (admin is null)
@@ -152,7 +147,6 @@ public static class Program
         }
 
         Console.WriteLine($"Admin user's username: {admin.Username}");
-        Console.WriteLine($"  built-in: {(admin.IsBuiltIn ? "yes" : "no")}");
         Console.WriteLine($"  disabled: {(admin.Disabled ? "yes" : "no")}");
         Console.WriteLine("The password is stored as a hash and cannot be recovered.");
         Console.WriteLine("Reset it with a random value:  openlist admin random");

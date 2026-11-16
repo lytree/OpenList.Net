@@ -35,8 +35,6 @@ public sealed class BackgroundTask
     public string? Error { get; set; }
     /// <summary>创建者用户名。</summary>
     public string Creator { get; set; } = string.Empty;
-    /// <summary>创建者角色。</summary>
-    public int CreatorRole { get; set; }
     /// <summary>创建者用户 id（0 = 系统任务）。</summary>
     public long OwnerId { get; set; }
 }

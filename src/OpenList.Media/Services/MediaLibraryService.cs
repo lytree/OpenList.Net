@@ -30,7 +30,7 @@ public sealed class MediaLibraryService : IMediaLibraryService
     /// <inheritdoc />
     public async Task<Resp<MediaLibrary>> CreateAsync(CreateMediaLibraryReq req, User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Resp<MediaLibrary>.Fail("permission denied", 403);
+        if (!user.IsAdmin()) return Resp<MediaLibrary>.Fail("permission denied", 403);
         if (string.IsNullOrWhiteSpace(req.Name)) return Resp<MediaLibrary>.Fail("name is required", RespCodes.BadRequest);
         if (string.IsNullOrWhiteSpace(req.Path) || !req.Path.StartsWith('/'))
             return Resp<MediaLibrary>.Fail("path must be an absolute virtual path", RespCodes.BadRequest);
@@ -59,7 +59,7 @@ public sealed class MediaLibraryService : IMediaLibraryService
     /// <inheritdoc />
     public async Task<Resp> UpdateAsync(long id, UpdateMediaLibraryReq req, User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Resp.Fail("permission denied", 403);
+        if (!user.IsAdmin()) return Resp.Fail("permission denied", 403);
         var lib = await _db.MediaLibraries.FindAsync([id], ct);
         if (lib is null) return Resp.Fail("library not found", RespCodes.NotFound);
 
@@ -75,7 +75,7 @@ public sealed class MediaLibraryService : IMediaLibraryService
     /// <inheritdoc />
     public async Task<Resp> DeleteAsync(long id, User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Resp.Fail("permission denied", 403);
+        if (!user.IsAdmin()) return Resp.Fail("permission denied", 403);
         var lib = await _db.MediaLibraries.FindAsync([id], ct);
         if (lib is null) return Resp.Fail("library not found", RespCodes.NotFound);
 
@@ -293,27 +293,13 @@ public sealed class MediaLibraryService : IMediaLibraryService
     }
 
     /// <inheritdoc />
-    public bool CanSeeLibrary(User user, MediaLibrary library)
-    {
-        if (user.IsAdmin()) return true;
-        if (string.IsNullOrEmpty(user.BasePath) || user.BasePath == "/") return true;
-        var basePath = NormalizePath(user.BasePath);
-        var libPath = NormalizePath(library.Path);
-        // 库在用户根目录之下，或用户根目录在库之下（共享库场景），均视为可见；
-        // 具体条目再由 IsPathVisible 过滤。
-        return IsUnder(libPath, basePath) || IsUnder(basePath, libPath);
-    }
+    public bool CanSeeLibrary(User user, MediaLibrary library) => true;
 
-    /// <summary>判断条目路径是否在用户根目录范围内（管理员与根用户恒可见）。</summary>
+    /// <summary>判断条目路径是否在用户根目录范围内（单用户产品下恒可见）。</summary>
     public bool CanSeeItem(User user, MediaItem item) => IsPathVisible(user, item.DirectoryPath);
 
-    /// <summary>判断条目路径是否在用户根目录范围内（管理员与根用户恒可见）。</summary>
-    internal static bool IsPathVisible(User user, string path)
-    {
-        if (user.IsAdmin()) return true;
-        if (string.IsNullOrEmpty(user.BasePath) || user.BasePath == "/") return true;
-        return IsUnder(NormalizePath(path), NormalizePath(user.BasePath));
-    }
+    /// <summary>判断条目路径是否在用户根目录范围内（单用户产品下恒可见）。</summary>
+    internal static bool IsPathVisible(User user, string path) => true;
 
     /// <summary>判断 <paramref name="path"/> 是否等于 <paramref name="basePath"/> 或位于其下。</summary>
     internal static bool IsUnder(string path, string basePath)

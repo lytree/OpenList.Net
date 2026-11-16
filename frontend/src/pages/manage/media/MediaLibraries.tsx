@@ -53,7 +53,7 @@ import { t } from "~/i18n"
  * 媒体库管理台（M4 · manage）。
  *
  * 后端契约要点（都以 C# 为真源，别想当然）：
- * 1. 库 CRUD / 触发扫描 / 触发刮削需要 `manage_media` 权限位；扫描进度 `GET /libraries/{id}/scan`
+ * 1. 库 CRUD / 触发扫描 / 触发刮削需要登录；扫描进度 `GET /libraries/{id}/scan`
  *    无鉴权（挂在库 id 粒度上）。行内状态徽标统一走跨库的 `GET /media/tasks`
  *    —— 一次取回全部库的运行进度 + 最近结果，避免逐行轮询。
  * 2. 重复触发同库扫描返回 409（Resp.code != 200），按普通失败提示即可，不需要特殊分支。
@@ -81,7 +81,6 @@ export default defineComponent({
   name: "MediaLibrariesPage",
   setup() {
     const user = useUserStore()
-    const canManage = computed(() => user.can("manage_media"))
 
     const rows = ref<MediaLibrary[]>([])
     const tasks = ref<MediaScanTask[]>([])
@@ -120,7 +119,7 @@ export default defineComponent({
       // 逐库请求的话，一个库两条，20 个库每 2.5s 就是 40 个请求。
       const [taskResp, scrapeResp] = await Promise.all([mediaListScanTasks(), mediaListScrapeTasks()])
 
-      // 非管理员拿不到刮削状态（403），此时保持空数组，列显示 "-"、按钮整列不渲染。
+      // 未登录拿不到刮削状态（403），此时保持空数组，列显示 "-"、按钮整列不渲染。
       if (scrapeResp.code === 200) scrapes.value = scrapeResp.data
 
       if (taskResp.code !== 200) return
@@ -328,7 +327,7 @@ export default defineComponent({
                 </ElIcon>
                 {t("global.refresh")}
               </ElButton>
-              {canManage.value && (
+              {user.isLogin && (
                 <ElButton size="small" type="primary" onClick={openCreate}>
                   <ElIcon>
                     <Plus />
@@ -483,7 +482,7 @@ export default defineComponent({
               {{
                 default: ({ row }) => {
                   const r = row as MediaLibrary
-                  if (!canManage.value) return <span class="ol-muted">-</span>
+                  if (!user.isLogin) return <span class="ol-muted">-</span>
                   const running = taskOf(r)?.state === "running"
                   return (
                     <div class="ol-manage-row-ops">

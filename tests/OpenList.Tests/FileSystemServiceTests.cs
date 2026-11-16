@@ -21,7 +21,7 @@ public class FileSystemServiceTests
         return (mount, svc, mem);
     }
 
-    private static readonly User TestUser = new() { Id = 1, Username = "test", Role = UserRole.Admin };
+    private static readonly User TestUser = new() { Id = 1, Username = "test" };
 
     /// <summary>Helper: write a file with the given bytes via the mount root (handles mount point translation).</summary>
     private static async Task WriteFileAsync(MountService mount, string path, byte[] bytes)
@@ -205,53 +205,27 @@ public class FileSystemServiceTests
     }
 
     [Test]
-    public async Task RemoveAsync_Denies_Path_Outside_BasePath()
+    public async Task RemoveAsync_Denies_Anonymous_Guest()
     {
-        // 服务层兜底：即便调用方漏了 JoinGuard，也不能删到用户 BasePath 之外。
-        var (mount, svc, _) = Setup();
-        await WriteFileAsync(mount, "/test/secret.txt", new byte[] { 1 });
-        var user = new User { Id = 2, Role = UserRole.General, Permission = 0x71FF, BasePath = "/home/bob" };
-
-        var r = await svc.RemoveAsync(["/test/secret.txt"], user);
-
-        await Assert.That(r.Code).IsEqualTo(403);
-        await Assert.That(mount.Root.FileExists("/test/secret.txt")).IsTrue();
-    }
-
-    [Test]
-    public async Task RemoveAsync_Allows_Path_Inside_BasePath()
-    {
-        var (mount, svc, _) = Setup();
-        await WriteFileAsync(mount, "/test/inside.txt", new byte[] { 1 });
-        var user = new User { Id = 2, Role = UserRole.General, Permission = 0x71FF, BasePath = "/test" };
-
-        var r = await svc.RemoveAsync(["/test/inside.txt"], user);
-
-        await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(mount.Root.FileExists("/test/inside.txt")).IsFalse();
-    }
-
-    [Test]
-    public async Task RemoveAsync_Denies_User_Without_Remove_Permission()
-    {
+        // 服务层兜底：未登录身份（Id=0）不得删除（端点层已各有门禁）。
         var (mount, svc, _) = Setup();
         await WriteFileAsync(mount, "/test/a.txt", new byte[] { 1 });
-        var user = new User { Id = 3, Role = UserRole.General, Permission = 0 };
+        var guest = new User { Id = 0, Username = "guest" };
 
-        var r = await svc.RemoveAsync(["/test/a.txt"], user);
+        var r = await svc.RemoveAsync(["/test/a.txt"], guest);
 
         await Assert.That(r.Code).IsEqualTo(403);
         await Assert.That(mount.Root.FileExists("/test/a.txt")).IsTrue();
     }
 
     [Test]
-    public async Task RemoveEmptyDirectoryAsync_Denies_Path_Outside_BasePath()
+    public async Task RemoveEmptyDirectoryAsync_Denies_Anonymous_Guest()
     {
         var (mount, svc, _) = Setup();
         mount.Root.CreateDirectory("/test/empty");
-        var user = new User { Id = 2, Role = UserRole.General, Permission = 0x71FF, BasePath = "/home/bob" };
+        var guest = new User { Id = 0, Username = "guest" };
 
-        var r = await svc.RemoveEmptyDirectoryAsync("/test/empty", user);
+        var r = await svc.RemoveEmptyDirectoryAsync("/test/empty", guest);
 
         await Assert.That(r.Code).IsEqualTo(403);
         await Assert.That(mount.Root.DirectoryExists("/test/empty")).IsTrue();

@@ -10,7 +10,7 @@ namespace OpenList.Tests;
 
 /// <summary>
 /// UserService tests against in-memory SQLite. Verifies account queries, updates,
-/// password hashing and initial-admin protection.
+/// password hashing and the single-account bootstrap/reset paths.
 /// </summary>
 public class UserServiceTests
 {
@@ -24,153 +24,106 @@ public class UserServiceTests
     }
 
     [Test]
-    public async Task CreateAsync_Persists_User_And_Hashes_Password()
-    {
-        await using var ctx = BuildContext();
-        var svc = NewUserService(ctx);
-        var r = await svc.CreateAsync(new CreateUserReq
-        {
-            Username = "alice",
-            Password = "pw",
-            Role = UserRole.General,
-        });
-        await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(r.Data!.Username).IsEqualTo("alice");
-        await Assert.That(r.Data.Role).IsEqualTo(UserRole.General);
-        await Assert.That(UserService.VerifyPassword("pw", ctx.Users.First().PasswordHash)).IsTrue();
-    }
-
-    [Test]
-    public async Task CreateAsync_Rejects_Duplicate_Username()
-    {
-        await using var ctx = BuildContext();
-        var svc = NewUserService(ctx);
-        await svc.CreateAsync(new CreateUserReq { Username = "bob", Password = "pw" });
-        var dup = await svc.CreateAsync(new CreateUserReq { Username = "bob", Password = "pw" });
-        await Assert.That(dup.Code).IsEqualTo(409);
-    }
-
-    [Test]
     public async Task GetByNameAsync_Returns_User()
     {
         await using var ctx = BuildContext();
         var svc = NewUserService(ctx);
-        await svc.CreateAsync(new CreateUserReq { Username = "carol", Password = "pw" });
+        await svc.CreateInitialAdminAsync("carol", "pw");
         var r = await svc.GetByNameAsync("carol");
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!.Username).IsEqualTo("carol");
     }
 
     [Test]
-    public async Task UpdateAsync_Updates_Password_And_Role()
+    public async Task UpdateAsync_Updates_Password()
     {
         await using var ctx = BuildContext();
         var svc = NewUserService(ctx);
-        var created = await svc.CreateAsync(new CreateUserReq { Username = "dave", Password = "pw" });
-        var r = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq
-        {
-            Password = "newpw",
-            Role = UserRole.Admin,
-        });
+        var created = await svc.CreateInitialAdminAsync("dave", "pw");
+        var r = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Password = "newpw" });
         await Assert.That(r.Code).IsEqualTo(200);
         var u = (await svc.GetAsync(created.Data.Id)).Data!;
-        await Assert.That(u.Role).IsEqualTo(UserRole.Admin);
         await Assert.That(UserService.VerifyPassword("newpw", u.PasswordHash)).IsTrue();
     }
 
     [Test]
-    public async Task BuiltInAdmin_Cannot_Be_Demoted_Or_Renamed()
-    {
-        await using var ctx = BuildContext();
-        var config = new AppConfiguration { AdminUsername = "root", AdminPassword = "rootpw" };
-        var svc = new UserService(ctx, config);
-
-        // 内置管理员由 IsBuiltIn 标记识别（不再依赖与配置用户名比对）。
-        var created = await svc.CreateAsync(new CreateUserReq
-        {
-            Username = "root",
-            Password = "rootpw",
-            Role = UserRole.Admin,
-        });
-        var user = ctx.Users.First(u => u.Id == created.Data!.Id);
-        user.IsBuiltIn = true;
-        await ctx.SaveChangesAsync();
-
-        // Demotion is forbidden.
-        var demote = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Role = UserRole.General });
-        await Assert.That(demote.Code).IsEqualTo(403);
-
-        // Rename is forbidden.
-        var rename = await svc.UpdateAsync(created.Data.Id, new UpdateUserReq { Username = "hacker" });
-        await Assert.That(rename.Code).IsEqualTo(403);
-
-        // Disable is forbidden.
-        var disable = await svc.UpdateAsync(created.Data.Id, new UpdateUserReq { Disabled = true });
-        await Assert.That(disable.Code).IsEqualTo(403);
-    }
-
-    [Test]
-    public async Task GetAdminAsync_Returns_404_When_No_Admin_Exists()
+    public async Task GetAdminAsync_Returns_404_When_No_Account_Exists()
     {
         // Mirrors Go op.GetAdmin returning gorm.ErrRecordNotFound — the init wizard
         // relies on this to decide whether the system still needs setup.
         await using var ctx = BuildContext();
         var svc = NewUserService(ctx);
-        await svc.CreateAsync(new CreateUserReq { Username = "plain", Password = "pw", Role = UserRole.General });
         var r = await svc.GetAdminAsync();
         await Assert.That(r.Code).IsEqualTo(404);
     }
 
     [Test]
-    public async Task GetAdminAsync_Returns_First_Admin_By_Id()
+    public async Task GetAdminAsync_Returns_First_By_Id()
     {
         await using var ctx = BuildContext();
         var svc = NewUserService(ctx);
-        await svc.CreateAsync(new CreateUserReq { Username = "first", Password = "pw", Role = UserRole.Admin, BasePath = "/", Permission = 0x71FF });
-        await svc.CreateAsync(new CreateUserReq { Username = "second", Password = "pw", Role = UserRole.Admin });
+        await svc.CreateInitialAdminAsync("first", "pw");
         var r = await svc.GetAdminAsync();
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!.Username).IsEqualTo("first");
-        await Assert.That(r.Data.Role).IsEqualTo(UserRole.Admin);
     }
 
     [Test]
-    public async Task UpdateAsync_Invalidates_Tokens_When_BasePath_Changes()
+    public async Task CreateInitialAdminAsync_Rejects_Second_Creation()
     {
-        // BasePath 被签进 token，改小后必须让既有 token 失效（详见 UserTokenCutoffRegistry）。
         await using var ctx = BuildContext();
-        var cutoffs = new UserTokenCutoffRegistry();
-        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
-        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw", BasePath = "/a" });
-        var before = DateTime.UtcNow.AddMinutes(-1);
+        var svc = NewUserService(ctx);
+        var first = await svc.CreateInitialAdminAsync("first", "pw");
+        await Assert.That(first.Code).IsEqualTo(200);
 
-        await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { BasePath = "/b" });
-
-        await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsTrue();
+        var second = await svc.CreateInitialAdminAsync("second", "pw");
+        await Assert.That(second.Code).IsEqualTo(400);
+        await Assert.That(await ctx.Users.CountAsync()).IsEqualTo(1);
     }
 
     [Test]
-    public async Task UpdateAsync_Invalidates_Tokens_When_Permission_Changes()
+    public async Task CreateInitialAdminAsync_Hashes_Password()
     {
         await using var ctx = BuildContext();
-        var cutoffs = new UserTokenCutoffRegistry();
-        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
-        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw", Permission = 7 });
-        var before = DateTime.UtcNow.AddMinutes(-1);
+        var svc = NewUserService(ctx);
+        await svc.CreateInitialAdminAsync("root", "rootpw");
+        var u = await ctx.Users.SingleAsync();
+        await Assert.That(UserService.VerifyPassword("rootpw", u.PasswordHash)).IsTrue();
+    }
 
-        await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Permission = 0 });
+    [Test]
+    public async Task ResetAdminPasswordAsync_Updates_And_Rejects_Empty()
+    {
+        await using var ctx = BuildContext();
+        var svc = NewUserService(ctx);
+        var created = await svc.CreateInitialAdminAsync("root", "oldpw");
 
-        await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsTrue();
+        var empty = await svc.ResetAdminPasswordAsync("  ");
+        await Assert.That(empty.Code).IsEqualTo(400);
+
+        var ok = await svc.ResetAdminPasswordAsync("newpw");
+        await Assert.That(ok.Code).IsEqualTo(200);
+        var u = (await svc.GetAsync(created.Data!.Id)).Data!;
+        await Assert.That(UserService.VerifyPassword("newpw", u.PasswordHash)).IsTrue();
+    }
+
+    [Test]
+    public async Task ResetAdminPasswordAsync_Returns_404_When_No_Account_Exists()
+    {
+        await using var ctx = BuildContext();
+        var svc = NewUserService(ctx);
+        var r = await svc.ResetAdminPasswordAsync("newpw");
+        await Assert.That(r.Code).IsEqualTo(404);
     }
 
     [Test]
     public async Task UpdateAsync_Keeps_Tokens_When_Nothing_Relevant_Changes()
     {
-        // 仅改密码（不涉及 Role/Permission/BasePath）不应登记失效。
+        // 仅改密码（不涉及 Disabled）不应登记失效。
         await using var ctx = BuildContext();
         var cutoffs = new UserTokenCutoffRegistry();
-        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
-        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw", BasePath = "/a" });
+        var svc = new UserService(ctx, null, cutoffs);
+        var created = await svc.CreateInitialAdminAsync("zoe", "pw");
         var before = DateTime.UtcNow.AddMinutes(-1);
 
         await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Password = "newpw" });
@@ -184,8 +137,8 @@ public class UserServiceTests
         // 禁用必须让既有 token 失效，否则被禁账号还能凭旧 token 操作到过期。
         await using var ctx = BuildContext();
         var cutoffs = new UserTokenCutoffRegistry();
-        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
-        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw" });
+        var svc = new UserService(ctx, null, cutoffs);
+        var created = await svc.CreateInitialAdminAsync("zoe", "pw");
         var before = DateTime.UtcNow.AddMinutes(-1);
 
         await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Disabled = true });
@@ -205,7 +158,5 @@ public class UserServiceTests
         return ctx;
     }
 
-    private static AppConfiguration DefaultConfig() => new();
-
-    private static UserService NewUserService(OpenListDbContext ctx) => new(ctx, DefaultConfig());
+    private static UserService NewUserService(OpenListDbContext ctx) => new(ctx, null, null);
 }

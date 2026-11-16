@@ -167,11 +167,10 @@ public sealed class OpenListFtpMembershipProvider : IMembershipProvider
         if (!UserService.VerifyPassword(password, resp.Data.PasswordHash))
             return new MemberValidationResult(MemberValidationStatus.InvalidLogin);
 
-        // 为每个 FTP 会话构造 OpenList 用户身份（含角色声明）。
+        // 为每个 FTP 会话构造 OpenList 用户身份。
         var identity = new ClaimsIdentity("Ftp");
         identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, resp.Data.Id.ToString()));
         identity.AddClaim(new Claim(ClaimTypes.Name, resp.Data.Username));
-        identity.AddClaim(new Claim(ClaimTypes.Role, resp.Data.Role.ToString("D")));
         var principal = new ClaimsPrincipal(identity);
 
         return new MemberValidationResult(MemberValidationStatus.Anonymous, principal);
@@ -215,8 +214,6 @@ public sealed class MountFtpFileSystemFactory : IFileSystemClassFactory
         {
             Id = 0,
             Username = accountInformation.FtpUser?.Identity?.Name ?? "ftp",
-            Role = UserRole.Guest,
-            Permission = 0,
             Disabled = true,
         };
 
@@ -283,9 +280,9 @@ public sealed class MountUnixFileSystem : IUnixFileSystem
     public MountUnixFileSystem(MountService mount, User? user = null, IServiceScopeFactory? scopes = null)
     {
         _mount = mount;
-        _user = user ?? new User { Id = 0, Username = "", Role = UserRole.Guest, Permission = 0 };
+        _user = user ?? new User { Id = 0, Username = "" };
         _scopes = scopes;
-        _rootPath = new UPath(MetaAccess.Normalize(string.IsNullOrEmpty(_user.BasePath) ? "/" : _user.BasePath));
+        _rootPath = new UPath("/");
         _root = new MountUnixDirectoryEntry(_mount, _user, _rootPath, "/", _rootPath);
     }
 
@@ -417,8 +414,8 @@ public sealed class MountUnixFileSystem : IUnixFileSystem
         CancellationToken cancellationToken)
     {
         var mountEntry = (IMountUnixEntry)entry;
-        // 权限位 7（可删除）+ 父目录 meta 写入白名单。
-        if (!_user.CanRemove() && !_user.IsAdmin())
+        // 删除只要求已登录（端点层已鉴权，这里兜底服务层调用方）。
+        if (!_user.IsAdmin())
             throw new UnauthorizedAccessException("permission denied");
         await EnsureAsync(mountEntry.Path, FileOperation.MetaWrite, cancellationToken);
 
@@ -440,8 +437,8 @@ public sealed class MountUnixFileSystem : IUnixFileSystem
         var mountTarget = (MountUnixDirectoryEntry)target;
         var newPath = mountTarget.Path / fileName;
 
-        // MOVE 同时承担「移动」与「重命名」：任一权限位满足即可，但两端都要过 meta 写门禁。
-        if (!_user.CanMove() && !_user.CanRename() && !_user.IsAdmin())
+        // MOVE 同时承担「移动」与「重命名」，只需已登录。
+        if (!_user.IsAdmin())
             throw new UnauthorizedAccessException("permission denied");
         await EnsureAsync(mountSource.Path, FileOperation.MetaWrite, cancellationToken);
         await EnsureAsync(newPath, FileOperation.MetaWrite, cancellationToken);
@@ -526,8 +523,7 @@ public sealed class MountUnixFileEntry : IUnixFileEntry, IMountUnixEntry
     /// </summary>
     internal static IUnixPermissions UnixPermissionsFor(User user)
     {
-        var canWrite = user.CanWriteContent() || user.IsAdmin();
-        var canModify = canWrite || user.CanRename() || user.CanMove() || user.CanRemove();
+        var canModify = user.IsAdmin();
         return new GenericUnixPermissions(
             new GenericAccessMode(true, canModify, true),
             new GenericAccessMode(true, false, true),

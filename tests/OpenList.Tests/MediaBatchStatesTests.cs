@@ -18,7 +18,7 @@ namespace OpenList.Tests;
 /// </summary>
 public class MediaBatchStatesTests
 {
-    private static readonly User AdminUser = new() { Id = 1, Username = "admin", Role = UserRole.Admin };
+    private static readonly User AdminUser = new() { Id = 1, Username = "admin" };
 
     [Test]
     public async Task Returns_Only_Visible_Items_In_Request_Order()

@@ -181,7 +181,7 @@ public sealed class McpServerService : IMcpServerService
     /// <returns>MCP 工具调用结果对象。</returns>
     public async Task<JsonObject> CallToolAsync(string name, JsonElement arguments, long userId, CancellationToken ct = default)
     {
-        var user = new User { Id = userId, Role = UserRole.Admin };
+        var user = new User { Id = userId };
         var texts = new List<string>();
         try
         {

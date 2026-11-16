@@ -29,7 +29,6 @@
     "traffic": "Traffic"
   },
   "title": "OpenList Management",
-  "not_admin": "You are not an admin user, please login with an admin account.",
   "logout_success": "Logout successful",
   "add_storage-tips": "You may need to fill in some information in the newly opened tab.",
   "load_default_setting": "Load default settings",

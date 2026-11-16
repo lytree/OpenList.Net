@@ -47,15 +47,13 @@ const storage = (patch: Partial<StorageWithDriver> = {}): StorageWithDriver =>
 const meta = (patch: Partial<Meta> = {}): Meta => ({
   id: 1,
   path: "/local/secret",
+  password: "pw",
   p_sub: false,
-  read_users: [1, 2],
-  read_users_sub: false,
-  write_users: [],
-  write_users_sub: false,
-  write: false,
-  w_sub: false,
+  hide: "",
   h_sub: false,
+  readme: "",
   r_sub: false,
+  header: "",
   header_sub: false,
   ...patch,
 })
@@ -172,7 +170,7 @@ describe("sealBackup / openBackup", () => {
     if (!opened.ok) return
     expect(opened.payload.settings).toHaveLength(2)
     expect(opened.payload.storages[0]!.mount_path).toBe("/local")
-    expect(opened.payload.metas[0]!.read_users).toEqual([1, 2])
+    expect(opened.payload.metas[0]!.password).toBe("pw")
   })
 
   it("加密往返：数组内容全部还原，且文件里看不到明文", () => {

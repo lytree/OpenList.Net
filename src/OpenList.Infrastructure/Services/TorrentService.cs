@@ -62,7 +62,7 @@ public sealed class TorrentService : ITorrentService
             return Resp<TorrentRapidUploadResp>.Fail("torrent_data is required", RespCodes.BadRequest);
         if (string.IsNullOrEmpty(path))
             return Resp<TorrentRapidUploadResp>.Fail("path is required", RespCodes.BadRequest);
-        if (!user.IsAdmin() && !user.CanWriteContent())
+        if (!user.IsAdmin())
             return Resp<TorrentRapidUploadResp>.Fail("permission denied", RespCodes.Forbidden);
 
         byte[] raw;

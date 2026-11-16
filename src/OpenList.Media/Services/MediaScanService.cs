@@ -42,7 +42,7 @@ public sealed class MediaScanService : IMediaScanService
     /// <inheritdoc />
     public async Task<Resp> StartAsync(long libraryId, User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Resp.Fail("permission denied", 403);
+        if (!user.IsAdmin()) return Resp.Fail("permission denied", 403);
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
@@ -63,7 +63,7 @@ public sealed class MediaScanService : IMediaScanService
     /// <inheritdoc />
     public Task<Resp> StopAsync(long libraryId, User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Task.FromResult(Resp.Fail("permission denied", 403));
+        if (!user.IsAdmin()) return Task.FromResult(Resp.Fail("permission denied", 403));
         if (_running.TryGetValue(libraryId, out var cts))
         {
             cts.Cancel();
@@ -95,7 +95,7 @@ public sealed class MediaScanService : IMediaScanService
     /// <inheritdoc />
     public async Task<Resp<List<MediaScanLog>>> ListLogsAsync(long libraryId, int limit, User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Resp<List<MediaScanLog>>.Fail("permission denied", 403);
+        if (!user.IsAdmin()) return Resp<List<MediaScanLog>>.Fail("permission denied", 403);
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
         var logs = await db.MediaScanLogs.AsNoTracking()
@@ -109,7 +109,7 @@ public sealed class MediaScanService : IMediaScanService
     /// <inheritdoc />
     public async Task<Resp<List<MediaScanTask>>> ListTasksAsync(User user, CancellationToken ct = default)
     {
-        if (!user.CanManageMediaLibrary()) return Resp<List<MediaScanTask>>.Fail("permission denied", 403);
+        if (!user.IsAdmin()) return Resp<List<MediaScanTask>>.Fail("permission denied", 403);
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();

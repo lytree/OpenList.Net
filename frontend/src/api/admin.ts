@@ -1,6 +1,5 @@
 import { http } from "./client"
 import type {
-  AdminUser,
   CreateStorageReq,
   DriverInfo,
   DriverMap,
@@ -62,14 +61,6 @@ export const disableStorage = (id: number): PResp<Record<string, never>> =>
 /** `POST /admin/storage/load_all` → Resp<{}>（重新加载全部非禁用挂载）。 */
 export const loadAllStorages = (): PResp<Record<string, never>> =>
   http.post<Record<string, never>>("/admin/storage/load_all")
-
-// ---------------------------------------------------------------------------
-// 用户（单用户产品：仅保留只读列表，供元数据白名单等场景选择用户）
-// ---------------------------------------------------------------------------
-
-/** `GET /admin/user/list` → Resp<{ content, total }>。 */
-export const listUsers = (): PResp<PageResp<AdminUser>> =>
-  http.get<PageResp<AdminUser>>("/admin/user/list")
 
 // ---------------------------------------------------------------------------
 // 路径元数据

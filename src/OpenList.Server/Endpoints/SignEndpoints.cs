@@ -24,7 +24,7 @@ namespace OpenList.Server.Endpoints;
 public static class SignEndpoints
 {
     /// <summary>签名 URL 端点使用的访客用户（无 JWT，仅凭签名访问）。</summary>
-    private static readonly User GuestUser = new() { Id = 0, Username = "", Role = UserRole.Guest };
+    private static readonly User GuestUser = new() { Id = 0, Username = "" };
 
     /// <summary>归档内条目的 MIME 推断（按扩展名，缺省 octet-stream）。</summary>
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();

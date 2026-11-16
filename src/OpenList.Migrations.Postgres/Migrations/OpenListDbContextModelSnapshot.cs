@@ -35,9 +35,6 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<int>("CreatorRole")
-                        .HasColumnType("integer");
-
                     b.Property<DateTimeOffset?>("EndTime")
                         .HasColumnType("timestamp with time zone");
 
@@ -113,21 +110,9 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .HasColumnType("boolean")
                         .HasJsonPropertyName("r_sub");
 
-                    b.Property<string>("ReadUsersJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<bool>("ReadUsersSub")
-                        .HasColumnType("boolean")
-                        .HasJsonPropertyName("read_users_sub");
-
                     b.Property<string>("Readme")
                         .HasColumnType("text")
                         .HasJsonPropertyName("readme");
-
-                    b.Property<bool>("WSub")
-                        .HasColumnType("boolean")
-                        .HasJsonPropertyName("w_sub");
 
                     b.Property<int>("WebdavManagement")
                         .HasColumnType("integer");
@@ -140,18 +125,6 @@ namespace OpenList.Migrations.Postgres.Migrations
 
                     b.Property<int>("WebdavWrite")
                         .HasColumnType("integer");
-
-                    b.Property<bool>("Write")
-                        .HasColumnType("boolean")
-                        .HasJsonPropertyName("write");
-
-                    b.Property<string>("WriteUsersJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<bool>("WriteUsersSub")
-                        .HasColumnType("boolean")
-                        .HasJsonPropertyName("write_users_sub");
 
                     b.HasKey("Id");
 
@@ -354,19 +327,11 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .HasColumnType("boolean")
                         .HasJsonPropertyName("allow_ldap");
 
-                    b.Property<string>("BasePath")
-                        .HasColumnType("text")
-                        .HasJsonPropertyName("base_path");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("Disabled")
                         .HasColumnType("boolean");
-
-                    b.Property<bool>("IsBuiltIn")
-                        .HasColumnType("boolean")
-                        .HasJsonPropertyName("is_built_in");
 
                     b.Property<string>("Password")
                         .IsRequired()
@@ -375,12 +340,6 @@ namespace OpenList.Migrations.Postgres.Migrations
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("text");
-
-                    b.Property<int>("Permission")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Role")
-                        .HasColumnType("integer");
 
                     b.Property<string>("SsoID")
                         .HasColumnType("text")

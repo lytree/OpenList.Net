@@ -24,7 +24,6 @@ public sealed class MetaService : IMetaService
     public async Task<Resp<List<Meta>>> ListAsync(CancellationToken ct = default)
     {
         var list = await _db.Metas.AsNoTracking().OrderBy(m => m.Path).ToListAsync(ct);
-        foreach (var m in list) m.Hydrate();
         return Resp<List<Meta>>.Ok(list);
     }
 
@@ -35,7 +34,6 @@ public sealed class MetaService : IMetaService
     {
         var meta = await _db.Metas.AsNoTracking().FirstOrDefaultAsync(m => m.Path == path, ct);
         if (meta is null) return Resp<Meta>.Fail("meta not found", RespCodes.NotFound);
-        meta.Hydrate();
         return Resp<Meta>.Ok(meta);
     }
 
@@ -46,7 +44,6 @@ public sealed class MetaService : IMetaService
     {
         var meta = await _db.Metas.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
         if (meta is null) return Resp<Meta>.Fail("meta not found", RespCodes.NotFound);
-        meta.Hydrate();
         return Resp<Meta>.Ok(meta);
     }
 
@@ -64,7 +61,6 @@ public sealed class MetaService : IMetaService
         // 旧库的 x_metas.Hide 是 INTEGER NOT NULL（Go 时期遗留），写入 null 会直接
         // 撞约束。C# 侧语义是「每行一个正则」，空串等价于无隐藏规则，故统一兜底为空串。
         meta.Hide ??= string.Empty;
-        meta.SyncJson();
         _db.Metas.Add(meta);
         await _db.SaveChangesAsync(ct);
         return Resp<Meta>.Ok(meta);
@@ -81,19 +77,12 @@ public sealed class MetaService : IMetaService
         existing.Path = meta.Path;
         existing.Password = meta.Password;
         existing.PSub = meta.PSub;
-        existing.ReadUsers = meta.ReadUsers;
-        existing.ReadUsersSub = meta.ReadUsersSub;
-        existing.WriteUsers = meta.WriteUsers;
-        existing.WriteUsersSub = meta.WriteUsersSub;
-        existing.Write = meta.Write;
-        existing.WSub = meta.WSub;
         existing.Header = meta.Header;
         existing.HeaderSub = meta.HeaderSub;
         existing.Readme = meta.Readme;
         existing.RSub = meta.RSub;
         existing.Hide = meta.Hide ?? string.Empty;
         existing.HideSub = meta.HideSub;
-        existing.SyncJson();
 
         await _db.SaveChangesAsync(ct);
         return Resp.Ok();

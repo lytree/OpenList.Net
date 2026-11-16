@@ -232,7 +232,6 @@ public sealed class SearchService : ISearchService
 
         // 一次加载全部 Meta 到内存，供逐条做最近 Meta + 权限校验（避免逐节点 N+1 查询）。
         var metas = await db.Metas.AsNoTracking().ToListAsync(ct);
-        foreach (var m in metas) m.Hydrate();
         var metasByPath = metas.ToDictionary(m => NormalizeParent(m.Path), StringComparer.Ordinal);
 
         // 过滤后重新计算总数与分页（对齐 Go 的 SearchFiltered 分页语义）。
@@ -247,14 +246,11 @@ public sealed class SearchService : ISearchService
 
     /// <summary>
     /// 判断搜索结果节点对当前用户是否可访问。镜像 Go <c>server/handles/search.go</c>
-    /// <c>isSearchNodeAccessible</c>：先校验 <paramref name="node"/> 位于用户 BasePath 之下，
-    /// 再用最近 Meta 做隐藏/读用户/密码校验；目录节点以自身路径解析 Meta，
+    /// <c>isSearchNodeAccessible</c>：用最近 Meta 做隐藏/密码校验；目录节点以自身路径解析 Meta，
     /// 否则挂在目录本身的隐藏/密码 Meta 会被遗漏。
     /// </summary>
     private static bool CanAccessNode(SearchNode node, SearchReq req, User user, Dictionary<string, Meta> metasByPath)
     {
-        if (!IsSubPath(user.BasePath, node.Parent))
-            return false;
         var nodePath = JoinPath(node.Parent, node.Name);
         var meta = GetNearestMeta(node.IsDir ? nodePath : node.Parent, metasByPath);
         return CanAccess(user, meta, nodePath, req.Password);
@@ -266,10 +262,6 @@ public sealed class SearchService : ISearchService
     /// </summary>
     private static bool CanAccess(User user, Meta? meta, string reqPath, string? password)
         => MetaAccess.CanAccess(user, meta, reqPath, password);
-
-    /// <summary>读用户限制校验，镜像 Go <c>server/common/check.go</c> CanRead。</summary>
-    private static bool CanRead(User user, Meta? meta, string path)
-        => MetaAccess.CanRead(user, meta, path);
 
     /// <summary>
     /// 从路径向上找到最近的 Meta（含自身），找不到返回 null。镜像 Go <c>internal/op/meta.go</c> GetNearestMeta。
@@ -284,14 +276,6 @@ public sealed class SearchService : ISearchService
             if (current == "/") return null;
             current = ParentPath(current);
         }
-    }
-
-    /// <summary>判断 <paramref name="subPath"/> 是否位于 <paramref name="path"/> 之下（含相等），镜像 Go utils.IsSubPath。</summary>
-    private static bool IsSubPath(string? path, string subPath)
-    {
-        var p = FixAndCleanPath(path ?? "/");
-        var s = FixAndCleanPath(subPath);
-        return p == s || s.StartsWith(AddTrailingSlash(p), StringComparison.Ordinal);
     }
 
     /// <summary>把路径规整为以 / 开头、无 ./.. 与重复斜杠的标准形式（空视为根目录），镜像 Go utils.FixAndCleanPath。</summary>
@@ -512,7 +496,7 @@ public sealed class SearchService : ISearchService
     {
         try
         {
-            var admin = new User { Id = 0, Username = "indexer", Role = UserRole.Admin };
+            var admin = User.System("indexer");
 
             using var scope = _scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();

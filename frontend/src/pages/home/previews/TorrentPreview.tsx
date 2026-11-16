@@ -37,8 +37,6 @@ export default defineComponent({
     /** 展开的目录路径集合（文件不参与）。 */
     const expanded = ref<Set<string>>(new Set())
 
-    const canOfflineDownload = computed(() => user.can("offline_download"))
-
     const tree = computed<ArchiveNode[]>(() => {
       const parsed = torrent.value
       if (!parsed) return []
@@ -243,7 +241,7 @@ export default defineComponent({
               </ElIcon>
               {t("home.preview.torrent_copy_magnet")}
             </ElButton>
-            {canOfflineDownload.value && (
+            {user.isLogin && (
               <ElButton size="small" type="primary" onClick={startOfflineDownload}>
                 <ElIcon style={{ marginRight: "4px" }}>
                   <Lightning />

@@ -62,15 +62,10 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// 直接在数据库里种一个用户。
-    /// 单用户产品已移除 <c>/api/admin/user/create</c>，多用户访问控制用例改由这里造数据。
+    /// 直接在数据库里种一个账号。单用户产品已移除 <c>/api/admin/user/create</c>，
+    /// 需要额外账号的用例改由这里造数据。
     /// </summary>
-    public async Task SeedUserAsync(
-        string username,
-        string password,
-        int permission,
-        string basePath = "/",
-        UserRole role = UserRole.General)
+    public async Task SeedUserAsync(string username, string password)
     {
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
@@ -81,9 +76,6 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
         {
             Username = username,
             PasswordHash = UserService.HashPassword(password),
-            Role = role,
-            Permission = permission,
-            BasePath = basePath,
             Disabled = false,
             CreatedAt = now,
             UpdatedAt = now,
@@ -143,11 +135,10 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// 直接写入一条路径元数据（密码目录 / 隐藏 / 读用户白名单），并让签名策略缓存立即失效。
+    /// 直接写入一条路径元数据（密码目录 / 隐藏），并让签名策略缓存立即失效。
     /// </summary>
     public async Task SeedMetaAsync(Meta meta)
     {
-        meta.SyncJson();
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
         db.Metas.Add(meta);

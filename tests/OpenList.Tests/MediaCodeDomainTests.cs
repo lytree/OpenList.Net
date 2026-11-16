@@ -422,7 +422,7 @@ public class MediaCodeDomainTests
         await Assert.That(missingSeries.Code).IsEqualTo(404);
     }
 
-    private static readonly User AdminUser = new() { Id = 1, Username = "admin", Role = UserRole.Admin };
+    private static readonly User AdminUser = new() { Id = 1, Username = "admin" };
 
     private static OpenListDbContext BuildContext()
     {

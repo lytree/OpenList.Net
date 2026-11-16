@@ -133,11 +133,6 @@ public static class DbInitializer
         var additions = new (string Table, string Column, string SqliteDecl, string PgDecl)[]
         {
             ("x_users", "AllowLdap", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
-            // Built-in admin marker. Backfill: the earliest admin row of a pre-existing
-            // database is the one SeedAdminAsync has been maintaining, so treat it as
-            // built-in to keep it protected after the upgrade.
-            ("x_users", "IsBuiltIn", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
-            ("x_users", "BasePath", "TEXT NULL", "TEXT NULL"),
             ("x_storages", "Status", "TEXT NOT NULL DEFAULT 'work'", "TEXT NOT NULL DEFAULT 'work'"),
             // Storage: extended fields mirroring Go model.Storage / frontend Storage type.
             ("x_storages", "OrderBy", "TEXT NULL", "TEXT NULL"),
@@ -150,11 +145,6 @@ public static class DbInitializer
             // SshKey: last-used timestamp for the frontend's last_used_time column.
             ("x_sshkeys", "LastUsedTime", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'", "TIMESTAMPTZ NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'"),
             // Meta: extended fields mirroring the frontend Meta type.
-            ("x_metas", "ReadUsersJson", "TEXT NOT NULL DEFAULT '[]'", "TEXT NOT NULL DEFAULT '[]'"),
-            ("x_metas", "ReadUsersSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_metas", "WriteUsersJson", "TEXT NOT NULL DEFAULT '[]'", "TEXT NOT NULL DEFAULT '[]'"),
-            ("x_metas", "WriteUsersSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_metas", "WSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
             ("x_metas", "HideSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
             ("x_metas", "RSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
             ("x_metas", "HeaderSub", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
@@ -183,11 +173,41 @@ public static class DbInitializer
             }
         }
 
-        // IsBuiltIn was just added as all-zero; without a backfill every pre-existing
-        // admin would lose its delete protection after upgrade. Mark the earliest admin
-        // row (the one the old SeedAdminAsync maintained) as built-in. Runs on both
-        // providers and is idempotent.
-        await BackfillBuiltInAdminAsync(db, ct);
+        // 已删除功能的列（2026-11-16 移除多用户语义）。全新库由迁移 RemoveMultiUserColumns 删列，
+        // 但两类旧库不会走那条迁移：① `EnsureCreated` 直建的库；② 被 `LegacySchemaAdopter`
+        // 一次性盖上「全部迁移已应用」的库。它们仍留着这些列，而 `x_users.Role` / `Permission`
+        // 是 **NOT NULL 且无默认值** —— 模型不再映射它们，INSERT 就会撞
+        // "NOT NULL constraint failed: x_users.Role"。这里幂等地补删一遍。
+        var obsoleteColumns = new (string Table, string Column)[]
+        {
+            ("x_users", "Role"),
+            ("x_users", "Permission"),
+            ("x_users", "BasePath"),
+            ("x_users", "IsBuiltIn"),
+            ("x_tasks", "CreatorRole"),
+            ("x_metas", "ReadUsersJson"),
+            ("x_metas", "ReadUsersSub"),
+            ("x_metas", "WriteUsersJson"),
+            ("x_metas", "WriteUsersSub"),
+            ("x_metas", "Write"),
+            ("x_metas", "WSub"),
+        };
+
+        foreach (var (table, column) in obsoleteColumns)
+        {
+            if (!await ColumnExistsAsync(db, table, column, isPostgres, ct))
+                continue;
+            try
+            {
+                // 标识符加引号：Postgres 侧 EF 建列时就是带引号的 "Role"，不加引号会折成小写找不到列。
+                await db.Database.ExecuteSqlRawAsync(
+                    $"ALTER TABLE \"{table}\" DROP COLUMN \"{column}\";", ct);
+            }
+            catch
+            {
+                // SQLite < 3.35 或被索引/视图引用时删不掉 —— 留着也不影响：模型不映射它即可。
+            }
+        }
 
         // 媒体域的表由「迁移 + 旧库接管」负责（AddMediaSchema / … / AddMediaWatchSessions，
         // 以及 LegacySchemaAdopter 按模型补建）。**新表不要再往这里加 DDL**：
@@ -266,42 +286,6 @@ public static class DbInitializer
                 CREATE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId ON x_authn_credentials (UserId);
                 CREATE UNIQUE INDEX IF NOT EXISTS ix_x_authn_credentials_UserId_CredentialId ON x_authn_credentials (UserId, CredentialId);
                 """, ct);
-        }
-    }
-
-    /// <summary>
-    /// 回填 <c>IsBuiltIn</c> 标记：为已存在但没有该标记的旧库，把<em>最早创建的管理员</em>
-    /// 标记为内置账号。旧版 <c>SeedAdminAsync</c> 每次启动都按配置校对同一条管理员记录，
-    /// 因此"最早的管理员"就是它在维护的那条，升级后禁删保护得以延续。
-    ///已有标记的库不受影响（<c>AnyAsync(IsBuiltIn)</c> 短路）。
-    /// </summary>
-    /// <remarks>
-    /// 同时被 <see cref="MigrateSchemaAsync"/> 与集成测试调用，故为 internal 而非 private。
-    /// </remarks>
-    internal static async Task BackfillBuiltInAdminAsync(OpenListDbContext db, CancellationToken ct)
-    {
-        try
-        {
-            if (await db.Users.AnyAsync(u => u.IsBuiltIn, ct))
-                return;
-
-            var admin = await db.Users
-                .Where(u => u.Role == UserRole.Admin)
-                .OrderBy(u => u.Id)
-                .FirstOrDefaultAsync(ct);
-            if (admin is null)
-                return; // 全新库，交给 SeedAdminAsync 创建。
-
-            admin.IsBuiltIn = true;
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbException)
-        {
-            // 全新库上 `MigrateSchemaAsync` 会在建表 (EnsureTableAsync) **之前**调用本方法，
-            // 此时 `x_users` 还不存在，查询直接抛 `no such table: x_users`
-            // （22 个 BuiltInAdminTests 就是被这条打断的）。
-            // 那个时间点也不可能有「历史管理员」需要回填 —— 跳过即可。
-            // 旧库在调用本方法时表一定已存在，真正的回填不受影响。
         }
     }
 
@@ -407,17 +391,11 @@ public static class DbInitializer
     /// <c>initAdmin</c>（本项目为单用户产品，不再创建 guest 账号）。
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <b>管理员：仅在「没有管理员」且「能拿到初始密码」时才创建。</b>拿不到密码就不建 ——
+    /// <b>管理员：仅在「没有账号」且「能拿到初始密码」时才创建。</b>拿不到密码就不建 ——
     /// 对齐 Go 的 <c>initAdmin</c>：它在既无 <c>--dev</c> 又无 <c>OPENLIST_ADMIN_PASSWORD</c>
     /// 时直接 <c>return</c>，把建号交给 Web 安装向导
     /// <c>POST /api/public/init/setup</c>。这样部署后不会留下人人可猜的默认凭据。
-    /// 用户装完向导后本方法即变成 no-op（管理员已存在），后续凭据改动只以数据库为准。
-    /// </para>
-    /// <para>
-    /// <b>游客：只要没有就建</b>，与管理员判据相互独立。这点很关键 ——
-    /// 若沿用旧的「用户表为空」判据，游客建好之后表永远不为空，管理员就再也建不出来。
-    /// </para>
+    /// 用户装完向导后本方法即变成 no-op（账号已存在），后续凭据改动只以数据库为准。
     /// </remarks>
     /// <param name="db">EF Core 数据库上下文。</param>
     /// <param name="config">应用配置，<see cref="AppConfiguration.AdminPassword"/> 为空时不建管理员。</param>
@@ -428,9 +406,7 @@ public static class DbInitializer
     private static async Task SeedAdminAsync(
         OpenListDbContext db, AppConfiguration config, bool devMode, CancellationToken ct, ILogger? logger = null)
     {
-        // 管理员：不存在才考虑创建。注意用 Role 判据而非"表为空"—— 游客会在同一次
-        // 初始化里被创建，用表判据会让管理员永远建不出来。
-        if (!await db.Users.AnyAsync(u => u.Role == UserRole.Admin, ct))
+        if (!await db.Users.AnyAsync(ct))
         {
             // 与 Go 一致：无初始密码 ⇒ 不自动建号，等 Web 安装向导。
             // devMode 优先，其次是配置里显式提供的密码（appsettings.json 或
@@ -454,14 +430,7 @@ public static class DbInitializer
                 {
                     Username = username,
                     PasswordHash = UserService.HashPassword(password),
-                    Role = UserRole.Admin,
-                    // 权限位对齐 Go:0x71FF（可见隐藏文件 ~ 可分享，含 WebDAV 读写与归档读取位）。
-                    // 必须与 PublicEndpoints 的 /init/setup 建号路径保持一致，否则走安装向导
-                    // 建的管理员权限会低于自动初始化的那个。
-                    Permission = 0x71FF,
-                    BasePath = "/",
                     Disabled = false,
-                    IsBuiltIn = true,
                     CreatedAt = now,
                     UpdatedAt = now,
                 });

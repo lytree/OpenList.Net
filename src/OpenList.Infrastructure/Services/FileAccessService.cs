@@ -1,6 +1,7 @@
 using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Core.Security;
+using OpenList.Vfs;
 
 namespace OpenList.Infrastructure.Services;
 
@@ -12,9 +13,9 @@ public enum FileOperation
 {
     /// <summary>读取（列目录、取元信息、下载、归档内条目预览）。</summary>
     Read,
-    /// <summary>写入内容（上传、建目录、解压落盘、离线下载目标）。需要权限位 3 或 meta 显式开放写入。</summary>
+    /// <summary>写入内容（上传、建目录、解压落盘、离线下载目标）。仅需已登录。</summary>
     ContentWrite,
-    /// <summary>仅 meta 写白名单（重命名/移动/复制/删除的父目录校验），权限位由调用方单独检查。</summary>
+    /// <summary>仅元数据写入（重命名/移动/复制/删除）。仅需已登录。</summary>
     MetaWrite,
 }
 
@@ -41,9 +42,9 @@ public readonly record struct AccessDecision(bool Allowed, int Code, string Mess
 /// 具体判定仍复用 <see cref="MetaAccess"/> 的纯函数，避免出现第二份语义。
 /// </para>
 /// <para>
-/// 使用时注意两点：<b>路径只能拼接一次</b>（对已拼接过的完整路径再调用
-/// <see cref="User.TryJoinPath"/> 会产生双重 BasePath）；<see cref="FileSystemService"/> 是单例，
-/// 访问 meta 必须经由本服务（scoped）而不是把 <see cref="IMetaService"/> 注入单例。
+/// 单用户产品：读取只受隐藏规则与目录密码约束（匿名访客受限）；写入只要已登录即可。
+/// <see cref="FileSystemService"/> 是单例，访问 meta 必须经由本服务（scoped）而不是把
+/// <see cref="IMetaService"/> 注入单例。
 /// </para>
 /// </summary>
 public sealed class FileAccessService
@@ -55,11 +56,13 @@ public sealed class FileAccessService
     public FileAccessService(IMetaService meta) => _meta = meta;
 
     /// <summary>
-    /// 把请求路径解析为完整虚拟路径（套用用户 BasePath）。失败表示路径越界
-    /// （含 <c>..</c>），调用方应按各自协议返回 403 / AccessDenied。
+    /// 把请求路径规整为完整的虚拟路径（补前导斜杠、解析 <c>.</c>/<c>..</c>）。
     /// </summary>
     public static bool TryResolvePath(User user, string? requestedPath, out string fullPath)
-        => user.TryJoinPath(requestedPath, out fullPath);
+    {
+        fullPath = UPath.FixAndCleanPath(requestedPath);
+        return true;
+    }
 
     /// <summary>解析路径的最近 meta（镜像 Go <c>op.GetNearestMeta</c>）；失败返回 null。</summary>
     public async Task<Meta?> NearestMetaAsync(string path, CancellationToken ct = default)
@@ -81,8 +84,8 @@ public sealed class FileAccessService
     /// <summary>
     /// 对已解析的完整路径做授权判定。
     /// <para>
-    /// 读取：<see cref="MetaAccess.CanAccess"/>（隐藏条目 → 读用户白名单 → 免密权限 → 目录密码）。
-    /// 写入：<c>CanWriteContent</c>（或 meta 显式开放写入）+ <c>WriteUsers</c> 白名单。
+    /// 读取：<see cref="MetaAccess.CanAccess"/>（隐藏条目 → 免密 → 目录密码）。
+    /// 写入：只要已登录（<see cref="User.IsAdmin"/>）即放行。
     /// </para>
     /// </summary>
     /// <param name="user">当前用户（不可为 null；匿名访客用 Id=0 的 Guest）。</param>
@@ -115,40 +118,32 @@ public sealed class FileAccessService
         if (user.Disabled)
             return AccessDecision.Deny(RespCodes.Unauthorized, "user disabled");
 
-        var meta = MetaAccess.FindNearest(metas, fullPath);
-
         if (operation == FileOperation.Read)
         {
+            var meta = MetaAccess.FindNearest(metas, fullPath);
             return MetaAccess.CanAccess(user, meta, fullPath, password)
                 ? AccessDecision.Allow
                 : AccessDecision.Deny(RespCodes.Forbidden, "password is incorrect or you have no permission");
         }
 
-        // 写入侧：先看「能否写内容」，再看 meta 的 WriteUsers 白名单。
-        if (operation == FileOperation.ContentWrite)
-        {
-            if (!user.CanWriteContent() && !MetaAccess.CanWriteContentBypass(meta, fullPath))
-                return AccessDecision.Deny(RespCodes.Forbidden, "permission denied");
-        }
-
-        return MetaAccess.CanWrite(user, meta, fullPath)
+        // 写操作只由「是否已登录」决定。
+        return user.IsAdmin()
             ? AccessDecision.Allow
             : AccessDecision.Deny(RespCodes.Forbidden, "permission denied");
     }
 
     /// <summary>
-    /// 解析 + 授权一步完成。路径越界时返回 403（与 Go <c>using relative path is not allowed</c> 一致）。
+    /// 解析 + 授权一步完成。
     /// </summary>
     public async Task<(string FullPath, AccessDecision Decision)> ResolveAndAuthorizeAsync(
         User user, string? requestedPath, FileOperation operation, string? password, CancellationToken ct = default)
     {
-        if (!TryResolvePath(user, requestedPath, out var fullPath))
-            return (string.Empty, AccessDecision.Deny(RespCodes.Forbidden, "using relative path is not allowed"));
+        TryResolvePath(user, requestedPath, out var fullPath);
         return (fullPath, await AuthorizeAsync(user, fullPath, operation, password, ct));
     }
 
     /// <summary>
-    /// 目录列举时的单条目可见性：隐藏规则、读用户白名单、目录密码三项。
+    /// 目录列举时的单条目可见性：隐藏规则与目录密码两项。
     /// 与 <see cref="AuthorizeAsync"/> 的读取分支完全相同，便于 PROPFIND / LIST 逐项过滤 ——
     /// 只检查父目录会让受保护子目录「列得出来、打不开」，仍然泄露名字。
     /// </summary>

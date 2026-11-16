@@ -161,15 +161,11 @@ public sealed class TaskInfo
     public string Creator { get; set; } = string.Empty;
 
     /// <summary>
-    /// 创建者用户 id。服务端用它判定任务归属（普通用户只能看/管自己的任务），
+    /// 创建者用户 id。服务端用它判定任务归属（只能看/管自己的任务），
     /// 不序列化给前端 —— 前端只展示 <see cref="Creator"/>。
     /// </summary>
     [JsonIgnore]
     public long OwnerId { get; set; }
-
-    /// <summary>创建者的角色。</summary>
-    [JsonPropertyName("creator_role")]
-    public int CreatorRole { get; set; }
 
     /// <summary>内部创建时间戳，不序列化（前端使用 <see cref="StartTime"/>）。</summary>
     [JsonIgnore]

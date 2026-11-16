@@ -20,8 +20,8 @@ namespace OpenList.Tests;
 /// </summary>
 public class MediaFavoriteSortTests
 {
-    private static readonly User AdminUser = new() { Id = 1, Username = "admin", Role = UserRole.Admin };
-    private static readonly User OtherUser = new() { Id = 2, Username = "other", Role = UserRole.Admin };
+    private static readonly User AdminUser = new() { Id = 1, Username = "admin" };
+    private static readonly User OtherUser = new() { Id = 2, Username = "other" };
 
     /// <summary>已收藏的按收藏时间倒序在前；未收藏（B，有状态行但未收藏）与没有状态行（D）都在尾部，尾部按入库时间倒序。</summary>
     [Test]

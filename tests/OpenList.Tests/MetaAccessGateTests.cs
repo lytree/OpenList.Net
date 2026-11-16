@@ -155,7 +155,7 @@ public class MetaAccessGateTests
             await factory.SeedMetaAsync(new Meta { Path = "/test/locked", Password = "pw", PSub = true });
 
             await LoginAdminAsync(client);
-            // 管理员权限位含「免密访问」（0x71FF 的 bit1），无需 password 即可列出。
+            // 已登录身份免密访问受保护目录。
             await Assert.That(await ListCodeAsync(client, "/test/locked")).IsEqualTo(200);
             await Assert.That(await GetCodeAsync(client, "/test/locked/a.txt")).IsEqualTo(200);
         }
@@ -176,24 +176,9 @@ public class MetaAccessGateTests
             await Assert.That(await GetCodeAsync(client, "/test/h/secret.txt")).IsEqualTo(403);
             await Assert.That(await GetCodeAsync(client, "/test/h/public.txt")).IsEqualTo(200);
 
-            // 管理员带「可见隐藏」权限位（0x71FF 的 bit0）。
+            // 管理员带「可见隐藏」身份。
             await LoginAdminAsync(client);
             await Assert.That(await GetCodeAsync(client, "/test/h/secret.txt")).IsEqualTo(200);
-        }
-    }
-
-    [Test]
-    public async Task Read_Users_Whitelist_Blocks_Guest_List()
-    {
-        var (factory, client) = await SetupAsync();
-        await using (factory)
-        {
-            await factory.WriteFileAsync("ro/a.txt", "ro"u8.ToArray());
-            // 白名单只含一个不存在的用户 id：游客（Id=0）不在其中，读受限。
-            await factory.SeedMetaAsync(new Meta { Path = "/test/ro", ReadUsers = [9999], ReadUsersSub = true });
-
-            await Assert.That(await ListCodeAsync(client, "/test/ro")).IsEqualTo(403);
-            await Assert.That(await GetCodeAsync(client, "/test/ro/a.txt")).IsEqualTo(403);
         }
     }
 }

@@ -29,7 +29,6 @@
     "traffic": "流量"
   },
   "title": "OpenList 管理台",
-  "not_admin": "你不是管理员，请用管理员账号登录。",
   "logout_success": "已退出登录",
   "add_storage-tips": "新开的标签页里可能还需要填写一些信息。",
   "load_default_setting": "载入默认设置",

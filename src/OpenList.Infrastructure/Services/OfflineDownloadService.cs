@@ -78,9 +78,8 @@ public sealed class OfflineDownloadService : IOfflineDownloadService
         if (string.IsNullOrWhiteSpace(req.Path))
             return Resp<OfflineDownloadResp>.Fail("path is required", RespCodes.BadRequest);
 
-        // 权限位 2：可添加离线下载。端点层已查一次，这里再查一次是因为调用方不止 HTTP 一条
-        // （驱动/插件可能直接调服务），而「能提交任务」等于「能让服务器往目标目录写文件」。
-        if (!user.CanAddOfflineDownload())
+        // 写操作只由「是否已登录」决定（端点层已鉴权，这里兜底服务层调用方）。
+        if (!user.IsAdmin())
             return Resp<OfflineDownloadResp>.Fail("permission denied", RespCodes.Forbidden);
 
         var toolName = (req.Tool ?? "").Trim();

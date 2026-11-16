@@ -65,7 +65,7 @@ public class MultipartUploadServiceTests
             Path = "/big.bin",
             Size = 50L * 1024 * 1024,
             ChunkSize = 100L * 1024 * 1024,
-        }, new User { Id = 1, Username = "u", Role = UserRole.Admin }, 10L * 1024 * 1024);
+        }, new User { Id = 1, Username = "u" }, 10L * 1024 * 1024);
 
         await Assert.That(r.Code).IsEqualTo(200);
         await Assert.That(r.Data!.ChunkSize).IsEqualTo(10L * 1024 * 1024);
@@ -87,7 +87,7 @@ public class MultipartUploadServiceTests
         var svc = new MultipartUploadService(fs, time);
 
         var init = await svc.InitAsync(new MultipartInitRequest { Path = "/f.bin", Size = 1024 * 1024, ChunkSize = 1024 * 1024 },
-            new User { Id = 1, Username = "u", Role = UserRole.Admin });
+            new User { Id = 1, Username = "u" });
         await svc.UploadChunkAsync(init.Data!.UploadId, 0, new MemoryStream(new byte[16]));
 
         // 会话临时目录已创建。
@@ -115,7 +115,7 @@ public class MultipartUploadServiceTests
         var svc = new MultipartUploadService(fs, time);
 
         var init = await svc.InitAsync(new MultipartInitRequest { Path = "/f.bin", Size = 1024 * 1024, ChunkSize = 1024 * 1024 },
-            new User { Id = 1, Username = "u", Role = UserRole.Admin });
+            new User { Id = 1, Username = "u" });
 
         // 未超过 TTL（例如仅过 10 分钟）→ 会话保留。
         time.Advance(TimeSpan.FromMinutes(10));
@@ -155,7 +155,7 @@ public class MultipartUploadServiceTests
         var svc = new MultipartUploadService(fs, time);
 
         var init = await svc.InitAsync(new MultipartInitRequest { Path = "/f.bin", Size = 1024 * 1024, ChunkSize = 1024 * 1024 },
-            new User { Id = 1, Username = "u", Role = UserRole.Admin });
+            new User { Id = 1, Username = "u" });
 
         // 每 20 分钟活动一次：第二次活动（40 分钟处）刷新 LastActive，越过首次 TTL 而不被回收。
         time.Advance(TimeSpan.FromMinutes(20));

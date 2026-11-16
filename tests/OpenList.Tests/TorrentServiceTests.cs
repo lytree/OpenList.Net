@@ -71,7 +71,7 @@ public class TorrentServiceTests
     {
         var (svc, _) = Setup();
         var bytes = BuildMultiFileTorrentBase64WithCas();
-        var r = await svc.RapidUploadAsync(bytes, "/dest", new User { Id = 1, Role = UserRole.Admin });
+        var r = await svc.RapidUploadAsync(bytes, "/dest", new User { Id = 1 });
         await Assert.That(r.Code).IsEqualTo(501);
         await Assert.That(r.Message).Contains("天翼云PC驱动");
     }
@@ -81,17 +81,17 @@ public class TorrentServiceTests
     {
         var (svc, _) = Setup();
         var bytes = BuildTorrentBase64("hello.txt", 11);
-        var r = await svc.RapidUploadAsync(bytes, "/dest", new User { Id = 1, Role = UserRole.Admin });
+        var r = await svc.RapidUploadAsync(bytes, "/dest", new User { Id = 1 });
         await Assert.That(r.Code).IsEqualTo(400);
         await Assert.That(r.Message).Contains("CAS");
     }
 
     [Test]
-    public async Task RapidUploadAsync_Rejects_NonAdmin_NonWriter()
+    public async Task RapidUploadAsync_Rejects_Anonymous_Guest()
     {
         var (svc, _) = Setup();
         var bytes = BuildMultiFileTorrentBase64WithCas();
-        var user = new User { Id = 2, Role = UserRole.General, Permission = 0 };
+        var user = new User { Id = 0, Username = "guest" };
         var r = await svc.RapidUploadAsync(bytes, "/dest", user);
         await Assert.That(r.Code).IsEqualTo(403);
     }

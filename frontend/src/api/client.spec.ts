@@ -1,7 +1,6 @@
 import { AxiosError, type AxiosAdapter, type AxiosResponse } from "axios"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ApiError, type Envelope, instance, setToken, unwrap } from "./client"
-import { UserMethods, PermissionBits } from "./types"
 
 /**
  * HTTP 信封的冒烟用例。
@@ -108,23 +107,5 @@ describe("响应归一", () => {
     }
     await call("/ping")
     expect(seen).toBe("token-abc")
-  })
-})
-
-describe("权限位", () => {
-  it("按位判断，不依赖数组下标", () => {
-    // 后端 admin 的默认权限掩码
-    const admin = { role: 2, permission: 0x71ff } as never
-    expect(UserMethods.can(admin, "rename")).toBe(true)
-    expect(UserMethods.can(admin, "delete")).toBe(true)
-    // 0x71FF 的 bit14 为 1 → 媒体库管理
-    expect(UserMethods.can(admin, "manage_media")).toBe(true)
-    expect(PermissionBits.manage_media).toBe(14)
-  })
-
-  it("普通用户的越权判断为 false", () => {
-    const general = { role: 0, permission: 0b0000_0000 } as never
-    expect(UserMethods.can(general, "write_content")).toBe(false)
-    expect(UserMethods.can(null, "write_content")).toBe(false)
   })
 })

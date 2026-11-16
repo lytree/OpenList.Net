@@ -12,13 +12,13 @@ namespace OpenList.Tests;
 /// <item><c>refresh=true</c> 非管理员返回 403；</item>
 /// <item><c>list</c> 返回 <c>provider</c> 与 <c>write</c>（驱动 ReadOnly 联动）；</item>
 /// <item><c>get</c> 对视频文件附带同目录同名（去扩展名）前缀的兄弟；非视频文件不附带。</item>
-/// <item>meta 的 <c>r_sub</c>/<c>header_sub</c>/<c>w_sub</c> 决定对应规则是否传导到子目录。</item>
+/// <item>meta 的 <c>r_sub</c>/<c>header_sub</c> 决定对应规则是否传导到子目录。</item>
 /// </list>
 /// </summary>
 public class FileSystemListGetFieldsTests
 {
-    private static readonly User AdminUser = new() { Id = 1, Username = "admin", Role = UserRole.Admin, Permission = 0x7F };
-    private static readonly User GuestUser = new() { Id = 2, Username = "guest", Role = UserRole.Guest };
+    private static readonly User AdminUser = new() { Id = 1, Username = "admin" };
+    private static readonly User GuestUser = new() { Id = 0, Username = "guest" };
 
     private static (FileSystemService svc, MemoryFileSystem mem) Setup()
     {
@@ -83,36 +83,6 @@ public class FileSystemListGetFieldsTests
 
         await Assert.That(self.Data!.Header).IsEqualTo("<b>hi</b>");
         await Assert.That(child.Data!.Header).IsNull();
-    }
-
-    [Test]
-    public async Task ListAsync_WriteFlag_RespectsWSub()
-    {
-        // MemoryFileSystem 解析不到驱动（driverWritable=false），write 完全由 meta 决定。
-        var (svc, mem) = SetupWithMeta(new Meta { Path = "/test/movies", Write = true, WSub = false });
-        mem.CreateDirectory("/movies");
-        mem.CreateDirectory("/movies/sub");
-
-        var self = await svc.ListAsync(new FsListReq { Path = "/test/movies" }, GuestUser);
-        var child = await svc.ListAsync(new FsListReq { Path = "/test/movies/sub" }, GuestUser);
-
-        // w_sub=false：meta 位于自身时开放写入，子目录则不继承
-        await Assert.That(self.Data!.Write).IsTrue();
-        await Assert.That(child.Data!.Write).IsFalse();
-        await Assert.That(child.Data!.WriteContentBypass).IsFalse();
-    }
-
-    [Test]
-    public async Task ListAsync_WriteFlag_WSubOn_InheritedByChildren()
-    {
-        var (svc, mem) = SetupWithMeta(new Meta { Path = "/test/movies", Write = true, WSub = true });
-        mem.CreateDirectory("/movies");
-        mem.CreateDirectory("/movies/sub");
-
-        var child = await svc.ListAsync(new FsListReq { Path = "/test/movies/sub" }, GuestUser);
-
-        await Assert.That(child.Data!.Write).IsTrue();
-        await Assert.That(child.Data!.WriteContentBypass).IsTrue();
     }
 
     [Test]

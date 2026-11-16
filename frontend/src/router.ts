@@ -58,8 +58,8 @@ const routes: RouteRecordRaw[] = [
       // - 媒体（`/media`）：默认**对游客开放**（`media_guest_access=true`），是站点的公开门面，
       //   落地页就是它；媒体域只读端点匿名开放（见 MediaEndpoints）。
       // - 首页（`/files`）：默认**需要登录**（`home_guest_access=false`）—— 文件树属于
-      //   「找文件 / 管理」场景。管理员放开这个开关后，游客也能只读浏览（写操作照旧按
-      //   权限位隐藏：`/fs/list` 返回的 `write` 为 false）。
+      //   「找文件 / 管理」场景。管理员放开这个开关后，游客也能只读浏览（写操作照旧
+      //   对游客隐藏：`/fs/list` 返回的 `write` 为 false）。
       //
       // 媒体域内部再分两层界面：`/media` 是**媒体首页**（继续观看 / 最近入库 /
       // 最近收藏的聚合推荐），`/media/library` 是**媒体库**（按库、题材、年份、评分筛选浏览）。
@@ -293,12 +293,10 @@ router.beforeEach(async (to) => {
     return { path: "/@login", query: { redirect: to.fullPath } }
   }
 
-  if (to.meta.admin && !user.isAdmin) {
-    // 未登录去登录页（带上回跳），已登录但非管理员回首页 —— 直接踹回首页会
-    // 让人以为链接坏了，带 redirect 至少能在登录后回到原处。
-    return user.isLogin
-      ? { path: "/" }
-      : { path: "/@login", query: { redirect: to.fullPath } }
+  // 管理台：单用户产品下「登录即内置管理员」，因此只按登录态收口 ——
+  // 未登录先去登录页（带上回跳）。
+  if (to.meta.admin && !user.isLogin) {
+    return { path: "/@login", query: { redirect: to.fullPath } }
   }
 
   return true

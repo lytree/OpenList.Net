@@ -44,7 +44,7 @@
     "max_980px": "最大 980px"
   },
   "home_guest_access": "允许游客浏览首页（文件）",
-  "home_guest_access-tips": "默认关闭，即首页需要登录。开启后未登录用户可只读浏览文件列表；上传、删除等写操作仍按权限隐藏。公开分享链接不受此开关影响。",
+  "home_guest_access-tips": "默认关闭，即首页需要登录。开启后未登录用户可只读浏览文件列表；上传、删除等写操作仍对游客隐藏。",
   "home_icon": "首页图标",
   "iframe_previews": "Iframe 预览",
   "ignore_direct_link_params": "忽略直链参数",

@@ -7,7 +7,7 @@ import { chromium } from "playwright"
  * 前置：隔离后端（临时库 + AdminPassword=e2e12345 + DistDir=frontend/dist），
  *       装置 `G:\Share\ol-v2-media\E2E Movie Night\E2E.Movie.Night.2026.mp4`（ffmpeg 生成）。
  * 脚本自建 /e2e 挂载（幂等）并全程走 UI：建库 → 扫描 → 进度 → 历史 → 编辑 → 删除。
- * 依赖 admin 内置权限位 0x71FF 含 manage_media（位 14）。
+ * 依赖「已登录即可管理媒体库」（单用户产品，无权限位）。
  */
 
 const BASE = process.env.BASE || "http://127.0.0.1:5001"

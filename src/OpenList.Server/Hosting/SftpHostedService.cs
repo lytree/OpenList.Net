@@ -384,7 +384,6 @@ public sealed class SftpHostedService : IHostedService
             var identity = new ClaimsIdentity("Sftp");
             identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, resp.Data.Id.ToString()));
             identity.AddClaim(new Claim(ClaimTypes.Name, resp.Data.Username));
-            identity.AddClaim(new Claim(ClaimTypes.Role, resp.Data.Role.ToString("D")));
             return new ClaimsPrincipal(identity);
         }
         catch (Exception ex)

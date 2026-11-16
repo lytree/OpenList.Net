@@ -34,7 +34,7 @@ page.on("console", (msg) => {
 })
 page.on("pageerror", (e) => errors.push(String(e)))
 
-// 登录：离线下载按钮按 `offline_download` 权限显隐，游客看不到
+// 登录：离线下载按钮按「是否已登录」显隐，游客看不到
 const token = await page
   .request.post(`${BASE}/api/auth/login`, {
     data: { username: process.env.ADMIN_USER || "admin", password: process.env.ADMIN_PASS || "e2e12345" },

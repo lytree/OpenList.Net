@@ -207,8 +207,8 @@ public sealed class JwtService : IAuthService
             var idClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (!long.TryParse(idClaim, out var id)) return Task.FromResult<long?>(null);
 
-            // BasePath / 权限位变更后，早于截止点签发的 token 视为失效（详见 UserTokenCutoffRegistry）：
-            // 走这条入口的调用方（如 S3 网关）同样必须看到最新权限，否则改了 BasePath 也拦不住它。
+            // 账号被禁用后，早于截止点签发的 token 视为失效（详见 UserTokenCutoffRegistry）：
+            // 走这条入口的调用方（如 S3 网关）同样必须看到最新状态。
             if (_cutoffs is not null && _cutoffs.IsStale(id, validated!.ValidFrom))
                 return Task.FromResult<long?>(null);
 
@@ -233,15 +233,9 @@ public sealed class JwtService : IAuthService
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Name, user.Username),
-            new Claim(ClaimTypes.Role, ((int)user.Role).ToString()),
             // jti：同一秒内为同一用户重复签发时，其它 claim 完全相同、JWT 字符串也会一模一样，
             // 于是「登出后立刻重新登录」拿回的还是被吊销的那串 token；带一个随机 id 才能保证每次签发唯一。
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
-            // BasePath 与 Permission 是每个文件系统请求都要用的权限输入（目录隔离 + 权限位），
-            // 而 .NET 侧刻意保持无状态 JWT（不每请求查库），因此必须随身份一起签进 token。
-            // BasePath 先规范化：Go 的 JoinBasePath 对 null/空是按 "/" 处理的，这里统一成同一形式。
-            new Claim(OpenListClaims.BasePath, Vfs.UPath.FixAndCleanPath(user.BasePath)),
-            new Claim(OpenListClaims.Permission, user.Permission.ToString()),
         };
         var creds = new SigningCredentials(BuildSymmetricKey(_config.JwtSecret), SecurityAlgorithms.HmacSha256);
         var token = new JwtSecurityToken(

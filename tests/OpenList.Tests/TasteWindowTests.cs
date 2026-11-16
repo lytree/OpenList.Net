@@ -18,7 +18,7 @@ namespace OpenList.Tests;
 /// </summary>
 public class TasteWindowTests
 {
-    private static readonly User AdminUser = new() { Id = 1, Username = "admin", Role = UserRole.Admin };
+    private static readonly User AdminUser = new() { Id = 1, Username = "admin" };
 
     // ------------------------------------------------------------------
     // 口径

@@ -44,7 +44,7 @@
     "max_980px": "Max 980px"
   },
   "home_guest_access": "Allow guests to browse files (home)",
-  "home_guest_access-tips": "Off by default, so the file browser requires a login. Turning it on lets signed-out visitors browse read-only; uploads, deletes and other writes stay hidden by permission. Public share links are not affected.",
+  "home_guest_access-tips": "Off by default, so the file browser requires a login. Turning it on lets signed-out visitors browse read-only; uploads, deletes and other writes stay hidden from guests.",
   "home_icon": "Home icon",
   "iframe_previews": "Iframe previews",
   "ignore_direct_link_params": "Ignore direct link params",

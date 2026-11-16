@@ -338,12 +338,8 @@ export default defineComponent({
       const currentMetas = (await listMetas()).data?.content ?? []
       const byPathMap = new Map(currentMetas.map((row) => [row.path, row]))
 
-      // 单用户产品没有用户白名单：备份文件里的 read/write users 一律清空，
-      // 否则跨实例恢复会留下指向不存在用户的 id。
-      const stripIds = (row: Meta): Meta => ({ ...row, read_users: [], write_users: [] })
-
       for (const row of plan.creates) {
-        const resp = await saveMeta({ ...stripIds(row), id: 0 })
+        const resp = await saveMeta({ ...row, id: 0 })
         if (resp.code === 200) result.created += 1
         else {
           result.failed += 1
@@ -356,7 +352,7 @@ export default defineComponent({
           result.failed += 1
           continue
         }
-        const resp = await saveMeta({ ...stripIds(row), id: target.id })
+        const resp = await saveMeta({ ...row, id: target.id })
         if (resp.code === 200) result.updated += 1
         else {
           result.failed += 1

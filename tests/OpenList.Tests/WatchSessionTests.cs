@@ -18,7 +18,7 @@ namespace OpenList.Tests;
 /// </summary>
 public class WatchSessionTests
 {
-    private static readonly User Admin = new() { Id = 1, Username = "admin", Role = UserRole.Admin };
+    private static readonly User Admin = new() { Id = 1, Username = "admin" };
     private static readonly DateTimeOffset Now = new(2026, 10, 29, 12, 0, 0, TimeSpan.Zero);
 
     [Test]

@@ -12,7 +12,7 @@ import {
   setToken,
   webauthnAssert,
 } from "~/api"
-import { UserMethods, type Me, type Permission } from "~/api/types"
+import { type Me } from "~/api/types"
 
 /**
  * 登录失败时带状态码的错误。
@@ -42,13 +42,12 @@ export const useUserStore = defineStore("user", () => {
   const token = ref<string>(getToken())
   const loading = ref(false)
 
+  /**
+   * 单用户产品：登录即内置管理员，因此「登录态」就是唯一的权限判据。
+   * 匿名访客没有 token，`isLogin` 为 false。
+   */
   const isLogin = computed(() => Boolean(token.value))
-  const isAdmin = computed(() => UserMethods.isAdmin(me.value))
-  const isGuest = computed(() => UserMethods.isGuest(me.value))
   const username = computed(() => me.value?.username ?? "")
-
-  /** 纯权限位判断，语义与后端 `User.Can*` 一致。 */
-  const can = (permission: Permission) => UserMethods.can(me.value, permission)
 
   function applyToken(next: string) {
     token.value = next
@@ -128,10 +127,7 @@ export const useUserStore = defineStore("user", () => {
     token,
     loading,
     isLogin,
-    isAdmin,
-    isGuest,
     username,
-    can,
     loadMe,
     login,
     loginPlain,

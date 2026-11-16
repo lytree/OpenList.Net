@@ -91,7 +91,7 @@ public sealed class MediaAutoScanHostedService : BackgroundService
             .ToListAsync(ct);
 
         // 用管理员身份触发（扫描本身不涉及个人数据）。
-        var systemUser = new User { Id = 0, Username = "media-scheduler", Role = UserRole.Admin };
+        var systemUser = User.System("media-scheduler");
         foreach (var id in due)
         {
             var resp = await _scans.StartAsync(id, systemUser, ct);

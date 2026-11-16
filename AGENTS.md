@@ -61,14 +61,23 @@
 
 ## Built-in Accounts（单用户产品）
 
-本项目已定位为**个人资源管理**：只保留一个内置管理员，不再有用户管理页、用户 CRUD、guest 账号、分享系统与站内信。
-匿名浏览由设置项控制（见下），与数据库账号无关。
+本项目已定位为**个人资源管理**：只保留一个内置管理员，不再有用户管理页、用户 CRUD、guest 账号、分享系统、站内信，
+也**不再有角色 / 权限位 / BasePath 目录隔离**（2026-11-16 移除）。身份只有三种，全部由 `User.Id` 一个字段区分：
+
+| 身份 | `Id` | 判定 | 能力 |
+|---|---|---|---|
+| 匿名访客 | `0` | 无 token / token 无效 | 只读浏览（受访客开关 + meta 隐藏/密码约束） |
+| 内置管理员 | `> 0` | 持有有效 JWT | 全部（读、写、管理） |
+| 系统内部身份 | `User.SystemUserId`（-1） | `User.System("indexer")` 等工厂 | 全部（扫描 / 刮削 / 索引用，不是真实账号） |
+
+`User.IsAdmin()`、`CanSeeHides()`、`CanAccessWithoutPassword()` 现在都只是 `Id != 0` ——
+**写操作只由「是否登录」决定**，隐藏与目录密码只约束匿名访客。
 
 `DbInitializer.InitializeAsync` 只按 Go 的 `initAdmin` 建一个内置管理员。
 
-| 账号 | 创建条件 | 角色 | 密码 | 权限 | 默认状态 | `IsBuiltIn` |
-|---|---|---|---|---|---|---|
-| `admin`（或配置的 `AdminUsername`） | **没有管理员** **且** 拿得到初始密码 | `Admin` | `AdminPassword` 配置值；devMode 下为 `admin` | `0x71FF` | 启用 | ✅ |
+| 账号 | 创建条件 | 密码 | 默认状态 |
+|---|---|---|---|
+| `admin`（或配置的 `AdminUsername`） | **库里没有任何账号** **且** 拿得到初始密码 | `AdminPassword` 配置值；devMode 下为 `admin` | 启用 |
 
 **拿不到密码就不建管理员**，改由 Web 安装向导 `POST /api/public/init/setup` 在用户首次访问时创建 ——
 对齐 Go 的 `initAdmin`：它在既无 `--dev` 又无 `OPENLIST_ADMIN_PASSWORD` 时直接 `return`。
@@ -78,12 +87,13 @@
 
 其余要点：
 
-- **`IsBuiltIn` 标记是保护的唯一依据**（列由 `AddUserIsBuiltIn` 迁移添加，并在其中回填旧库中最早的管理员）。`UserService.IsSuperAdmin` 读它，**不再**比较 `config.AdminUsername` —— 否则用户在管理界面改过用户名后保护就失效了。**按标记查账号时必须同时限定 `Role == Admin`**。
-- 内置 admin **不可改名 / 降权 / 禁用 / 改权限位**，且已无删除接口，但**可以改密码**：网页端走用户菜单的「修改密码」（`POST /api/me/update`），桌面端 / 客户端走 `POST /api/admin/user/reset_admin_password`。
-- 安装向导走 `IUserService.CreateInitialAdminAsync`（**不是** `CreateAsync`）：它会打上 `IsBuiltIn`。该标记刻意没做进 `CreateUserReq`，否则已登录的管理员能凭空造出受保护账号；`CreateAsync` 恒定 `IsBuiltIn = false`。
+- 账号**没有删除接口、没有用户列表接口**（`GET /api/admin/user/list` 与 `IUserService.ListAsync` / `CreateAsync` 已删除），
+  用户名/密码/禁用状态仍可改：网页端走用户菜单（`POST /api/me/update`），桌面端 / 客户端走 `POST /api/admin/user/reset_admin_password`。
+- 安装向导走 `IUserService.CreateInitialAdminAsync`：库里已有账号时直接 400，避免向导被重复调用追加账号。
+  `GET /api/public/init_status` 与 `ResetAdminPasswordAsync` 都用「按 Id 升序取第一条」定位那个唯一账号。
 - 已存在的管理员永不被配置覆盖 —— 凭据以数据库为准（管理界面 / 桌面端 / CLI 改的密码不会被下次启动打回）。
 - 忘记密码的三条恢复路径：`POST /api/admin/user/reset_admin_password`、桌面端设置页、`cli/openlist admin random`（直连数据库，Web 层起不来时唯一可用的）。
-- 注意：本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（`Id=0`，见 `SignEndpoints`）；新库不再预置 guest 记录（老库残留的 `guest` 行不参与鉴权，仅在改密判据里需按 `Role == Admin` 排除）。
+- 注意：本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（`Id=0`，见 `SignEndpoints`）；新库不预置 guest 记录，老库残留的 `guest` 行不参与鉴权。
 - **两个门面的游客准入由设置控制**（group 13「访问控制」）：`media_guest_access`（默认 `true`）、`home_guest_access`（默认 `false`）。
   后端在 `MediaEndpoints` / `FsEndpoints` 的**路由组上各挂一个 endpoint filter** 拦匿名请求（不是逐端点改 `AllowAnonymous`，
   那是启动期常量）；判定值来自单例 `IGuestAccessService`（3 秒 TTL，管理端保存设置后 `InvalidateCache()` 立即生效）。
@@ -133,7 +143,7 @@ openlist cancel2fa <username>
 - **Swagger**: at `/swagger` + Scalar at `/scalar` (both Development only; Scalar points at `/swagger/v1/swagger.json`).
 - **FTP/SFTP servers**: hosted services, disabled by default (`FTP.Enable`/`SFTP.Enable` in config).
   SFTP is real (not a stub): `Microsoft.DevTunnels.Ssh` handles the SSH transport + password auth,
-  `JustSFTP.Server` speaks SFTP v3, and every session maps onto the VFS rooted at the user's `BasePath`
+  `JustSFTP.Server` speaks SFTP v3, and every session maps onto the VFS root (单用户产品没有 BasePath)
   (same `FileAccessService` gates as `/api/fs`). The host key is persisted to `sftp_host_key` next to the
   database file (PKCS#8 PEM, mode 600 on Unix), so the client-trusted fingerprint survives restarts —
   delete that file to rotate, and the startup log prints the OpenSSH-style `SHA256:` fingerprint.
@@ -196,7 +206,7 @@ openlist cancel2fa <username>
 
 **初始化向导**（Go v4.2.6 `feat!(init)` #3041，`server/handles/setup.go`）：
 - ~~`GET|POST /api/public/init_status` — 系统是否已初始化（是否已存在管理员）~~ **Implemented** (`PublicEndpoints`) → `Resp<{initialized: bool}>`；判定复用了新增的 `IUserService.GetAdminAsync`（无管理员时 404，镜像 Go `op.GetAdmin` / `gorm.ErrRecordNotFound`）。
-- ~~`POST /api/public/init/setup` — 创建首个管理员 + 设置站点名~~ **Implemented**：body `{username, password, site_title}`；先校验必填，再拒绝"已初始化"（400 `system has already been initialized`），密码 `< 4` 返回 400，随后以 `Role=Admin / BasePath=/ / Permission=0x71FF` 建号并写入 `site_title` 设置项。前端安装向导据此实现。
+- ~~`POST /api/public/init/setup` — 创建首个管理员 + 设置站点名~~ **Implemented**：body `{username, password, site_title}`；先校验必填，再拒绝"已初始化"（400 `system has already been initialized`），密码 `< 4` 返回 400，随后建号（单用户产品下不再设 Role/BasePath/Permission）并写入 `site_title` 设置项。前端安装向导据此实现。
 
 ### Driver extension interfaces (defined in `IFileSystemDriverExtensions.cs`)
 
@@ -231,36 +241,32 @@ Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3, AliyundriveOpen),
 上游 `ea10624f` 的安全修复只在 .NET 侧命中 3 处真实缺口（其余改动涉及未移植驱动，见下）：
 
 - **1. 批量 move/copy/remove 的 `names` 未做纯名称校验（目录穿越）**：`.NET` 的 `UPath.Normalize` 会把 `\` 归一化为 `/` **并解析 `..`**，而 `MoveBatchAsync` / `CopyBatchAsync` 以及 `/api/fs/remove` 都是直接用 `UPath.Combine(srcDir, name)` / `JoinPaths(dir, names)` 拼接后下传，于是 `names: ["..\\..\\secret.txt"]` 可越出 `src_dir`/`dir` 读写任意路径。修复镜像 Go `server/handles/fsmanage.go` 的 `checkRelativePath`：新增 `UPath.IsValidName(name)`（非空、非 `.`、非 `..`、不含 `/` 与 `\`），`FileSystemService` 两处批量循环与 `FsEndpoints` 的 `/remove` 均在拼接前校验，命中即返回 403 `using relative path is not allowed`（Go `errs.RelativePath`）。
-  - ⚠️ **当时的残留缺口（已由下节「BasePath 用户目录隔离落地」闭合）**：Go 的 `FsRemove` 用 `user.JoinPath(req.Dir)` 把路径钉在用户 BasePath 之内；.NET 的 `RemoveAsync` 当时**完全忽略 `user`/BasePath**。本次修复严格对齐 Go 提交范围、未顺手引入 BasePath 强制，以免回归 —— 端点层现已由 `JoinGuard` 兜住（服务层 `RemoveAsync` 仍不改）。
-- **2. 搜索结果目录节点用父目录解析 Meta（本目录自身的隐藏/密码 Meta 被漏判）**：`SearchService.CanAccessNode` 原先无论文件还是目录都用 `node.Parent` 查最近 Meta，导致挂在目录节点自身的 `hide`/`password`/`read_users` 设置不生效。修复镜像 Go `isSearchNodeAccessible`：目录节点以**自身路径** `node.Parent/node.Name` 解析 Meta，文件节点仍用 `node.Parent`。
+  - 当时的「残留缺口」注释（BasePath 未强制）已随 BasePath 整体移除而失效 —— 见下节。
+- **2. 搜索结果目录节点用父目录解析 Meta（本目录自身的隐藏/密码 Meta 被漏判）**：`SearchService.CanAccessNode` 原先无论文件还是目录都用 `node.Parent` 查最近 Meta，导致挂在目录节点自身的 `hide`/`password`/`read_users` 设置不生效。修复镜像 Go `isSearchNodeAccessible`：目录节点以**自身路径** `node.Parent/node.Name` 解析 Meta，文件节点仍用 `node.Parent`。（`read_users` 白名单已随多用户语义移除，见下节。）
 - **3. SSO 回调 postMessage 用 `"*"` 作为 targetOrigin（令牌可被任意页面窃取）**：`RenderSsoCallbackHtml` 原先硬编码 `window.opener.postMessage(payload, "*")`，任何页面只要开弹窗并指向 SSO 回调地址即可收走 `token`。修复镜像 Go `ssologin.go` 的 `ssoTargetOrigin`：新增 `sso_postmessage_origin` 设置项（Group 7，Public，默认 `""`），按「配置的合法源 → API 自身源 → `"/"`」三级回退；配置值须为纯 scheme+host 的 http/https 源，含 `UserInfo`/路径/查询串/片段或非 http(s) 协议一律视为非法并回退（`AuthEndpoints.SsoTargetOrigin`）。`/sso_callback`、`/get_sso_id`、`/sso_get_token` 三个入口都改用解析结果。
 
 **无需合并的上游改动**：`139`/`189pc`/`lanzou`/`onedrive` 驱动修复对应未移植驱动；S3 直传（`IFileSystemDirectUploader` 未实现）；gzip 手工解压 bug（.NET 用 `HttpClient.AutomaticDecompression`）；代理请求头上游黑名单（.NET 无客户端请求头透传管道）；S3 `CommonPrefixes` 尾斜杠（.NET 已自带）。
 
-## BasePath 用户目录隔离落地（2026-10-17）
+## BasePath / 权限位已整体移除（2026-11-16）
 
-承接上节遗留的「BasePath 约束全项目普遍未落地」缺口，本次按 Go 语义把 `internal/model/user.go` 的 `User.JoinPath`（= `utils.JoinBasePath`）铺到 HTTP 层：
+早期按 Go 语义铺开的「用户 BasePath 目录隔离 + 权限位门禁」在单用户产品下已无意义，随之删除：
 
-- **路径原语**（`OpenList.Vfs.UPath`）：新增 `FixAndCleanPath`（镜像 Go `utils.FixAndCleanPath`：转斜杠 + 补前导 `/` + 等价 `stdpath.Clean`）与 `TryJoinBasePath(basePath, reqPath, out result)`（镜像 Go `utils.JoinBasePath`）。**关键差异是相对路径守卫**：若 `reqPath` 原本含 `..`、清洗后已不含 `..`，说明那些 `..` 被规范化解析掉了、拼接会越出 `basePath`，因此返回 `false`（调用方回 403 `using relative path is not allowed`）。
-- **用户级入口**（`OpenList.Core.Models.User.TryJoinPath`）：`BasePath` 为 null/空时等价 `/`（内置 admin / guest 情形，无约束）。
-- **端点接线**（`OpenList.Server.Endpoints.FsEndpoints`）：新增 `JoinGuard(user, reqPath, out joined)`（返回非 null 即 403 结果）、`WriteGateAsync`（见下）与 `ParentPath`/`FindNearestMeta`/`CanWriteContent*`/`CanWrite`/`CanRead`/`MetaCoversPath`/`IsSubPath` 等 helper。读端点（`list`/`get`/`dirs`/`search`）、管理端点（`mkdir`/`rename`/`rename_batch`/`batch_rename`/`regex_rename`/`move`/`copy`/`remove`/`remove_empty_directory`）以及 `put`/`form`/`archive/*`/`scan`/`add_offline_download`/`other` 的路径参数**全部**先经 `JoinGuard` 套到用户 BasePath 之下。`/search` 的越界相对路径按 Go 回 **400**（其余回 403）。
-- **写入门控**（`/fs/put`、`/fs/form`，镜像 Go `server/middlewares/fsup.go`）：先 `JoinGuard`，再 `WriteGateAsync` 三重校验 —— ① `user.CanWriteContent()`（权限位 3），除非 `CanWriteContentBypass`（meta `write` 且路径被 `PathEqual`/`IsSubPath` 且 `w_sub` 覆盖）；② `CanWrite(user, nearestMeta, parent)`（`meta.WriteUsers` 非空、不含 `user.Id` 且 meta 覆盖父路径 → 拒绝）。命中即 403。meta 解析失败不阻断写入（fail-open）。
-- **管理端点权限门禁**（镜像 Go `fsmanage.go` / `fsbatch.go` 各端点内联检查）：`mkdir` 用 `CanWriteContent()`（权限位 3）；`rename`/`rename_batch`/`batch_rename`/`regex_rename` 用 `CanRename()`（位 4）；`move`/`recursive_move` 用 `CanMove()`（位 5）；`copy` 用 `CanCopy()`（位 6）；`remove`/`remove_empty_directory` 用 `CanRemove()`（位 7）。helper：`PermissionGuard(bool)`（权限位 → 403 `permission denied`）+ `MetaWriteGateAsync`（`common.CanWrite`）+ `ContentWriteGateAsync`（权限位 3 + bypass + `CanWrite` 组合，`WriteGateAsync` 委托之并作用于 `ParentPath(path)`）。校验顺序镜像 Go：`PermissionGuard` → `JoinGuard` → meta 门禁。**`admin` 不豁免**（`CanWrite`/`CanWriteContentBypass` 均不豁免，与 Go 一致）；内置 admin 权限位 `0x71FF` 全开，故不受影响。
-- **刻意保留的 Go 例外**：`/fs/link` **不 join**（Go 注释：请求路径本就是完整路径）；`/fs/dirs` 的 `force_root` 分支**不 join** 且仅管理员可用（非管理员 403）。
-
-**身份来源决策（「两者结合」）**：BasePath/Permission 随 JWT 一并签发（无状态快速路径），并在凭据变更时即时失效既有 token：
-
-- `IAuthService.OpenListClaims` 新增 `BasePath`（`base_path`）/ `Permission`（`permission`）两个 claim 名；`JwtService.IssueToken` 把它们签进 token（`BasePath` 先经 `FixAndCleanPath` 规范化，null→`/`）；`UserService.UpdateAsync` 在 Role/Permission/BasePath 任一变化后登记失效。
-- `UserTokenCutoffRegistry`（`OpenList.Infrastructure.Services`，**进程级 singleton**）：记「某用户在 T 之前签发的 token 全部失效」。截止点取整秒 **+1s**（JWT `nbf` 只有秒级精度；fail-closed —— 代价至多是变更瞬间登录的用户被要求重登，而不是旧权限 token 被放行）。`JwtBearerEvents.OnTokenValidated`（`Program.cs`）在标准校验通过后比对 `SecurityToken.ValidFrom`；`JwtService.ValidateTokenAsync`（S3 网关走这条入口）同样比对。**局限**：登记表在进程内存，重启清空、多实例各自独立（要强一致需分布式缓存）——与既有 `_revoked` 集合同性质。
-
-**决策与已知缺口**：
-
-- **admin 不豁免 BasePath**（严格对齐 Go；admin 通常 `BasePath="/"` → no-op）。旧 token 无 `base_path` claim 时 fail-open（等价 `/`）；失效登记表 fail-closed。
-- ~~档 B 的权限位校验只覆盖 `/fs/put` + `/fs/form`；`mkdir`/`rename`/`remove` 等管理端点的权限位未校验~~ **已闭合**（2026-10-17 追加）：`mkdir`/`rename`/`rename_batch`/`batch_rename`/`regex_rename`/`move`/`copy`/`remove`/`remove_empty_directory`/`recursive_move` 均已补权限位 + `common.CanWrite` meta 白名单校验（见上「管理端点权限门禁」）。
-- **直传门禁**（`/fs/get_direct_upload_info`，镜像 Go `server/handles/direct_upload.go`）：已补 `checkRelativePath(file_name)`（`UPath.IsValidName`，非纯名称 → 403）与目标**父目录**的 `CanWriteContent`（或 meta bypass）+ `CanWrite` 白名单门禁（复用 `ContentWriteGateAsync`，`parentPath = Dir(join(path, file_name))`，纯名称下恒等于 `path`）。**顺带修复**：`DirectUploadInfoReq` 原先缺 `[JsonPropertyName("file_name"/"file_size")]`，前端发送的 snake_case 从未绑定成功（`FileName` 恒为 null），已补属性。
-- **`/copy` 读门禁**（镜像 Go `FsCopy`）：已补源目录的 `common.CanRead`（新增 `MetaReadGateAsync` + `CanRead` helper，按 `meta.ReadUsers`/`ReadUsersSub` 白名单判定）。`/copy` 现为 `CanCopy()` → 源目录 `CanRead` → 目标目录 `CanWrite` 三段校验，与 Go 一致。
-- **未搬的残留**：Go `FsGetDirectUploadInfo` 另有「父目录与目标挂载点须一致」守卫（`op.GetStorageVirtualMountPath`），.NET 无该挂载点原语，暂缺。
-- ~~既有缺陷：`FileSystemService.RemoveAsync` 仍忽略 `user`（路径约束现由端点层 `JoinGuard` 兜住）~~ **已闭合（2026-11-14）**：`RemoveAsync` / `RemoveEmptyDirectoryAsync` 在服务层补了兜底校验 —— `CanRemove()`（管理员豁免）与「目标须落在 `user.BasePath` 之内」（用 `MetaAccess.IsSubPath` 校验，**只判包含性、不再 join**：调用方传进来的已是套过 BasePath 的完整路径，二次 join 会变成 `/home/bob/home/bob/x`）。端点层原有的权限位 / `JoinGuard` / meta 白名单门禁保持不变，服务层只是防止新增协议入口漏校验。`Disabled` 仍未签进 token（禁用靠 `UserTokenCutoffRegistry` 即时失效兜住）。
+- `User.BasePath` / `User.Permission` / `User.Role` / `User.IsBuiltIn` 四个列与 `UserRole` 枚举消失
+  （迁移 `RemoveMultiUserColumns`，sqlite + postgres 各一份）。
+- `UPath.TryJoinBasePath` / `User.TryJoinPath` / `FsEndpoints.JoinGuard` 全部删除；路径只做
+  `UPath.FixAndCleanPath` 规整。**`UPath.IsValidName` 的纯名称校验必须保留** —— 它防的是目录穿越
+  （`names: ["..\\..\\secret.txt"]`），与 BasePath 无关。
+- 权限位 helper（`CanWriteContent`/`CanRename`/`CanMove`/`CanCopy`/`CanRemove`/`CanAddOfflineDownload`/
+  `CanManageMediaLibrary`）与 meta 白名单（`ReadUsers`/`WriteUsers`/`*_sub`/`Write`/`WSub`）全部删除。
+  写操作只由「路由已认证」保证；meta 只剩隐藏、目录密码、readme、header 四类。
+- `FsEndpoints` 的 `PermissionGuard` / `WriteGateAsync` / `MetaWriteGateAsync` / `MetaReadGateAsync` /
+  `ContentWriteGateAsync` 删除；WebDAV / S3 / FTP / SFTP / 分片上传的同类门禁同步删除，只剩
+  `AuthorizationMetaAsync`（读）与「已登录」判定。
+- JWT 不再携带 `base_path` / `permission` claim，`OpenListClaims` 删除；`"admin"` 授权策略改为
+  **`RequireAuthenticatedUser()`**（保留策略名，避免改 40+ 处 `RequireAdmin`）。`UserTokenCutoffRegistry`
+  保留，唯一用途变成「账号被禁用后即时失效既有 token」。
+- 文件访问判定的主线收敛在 `FileAccessService`（scoped）：`FileOperation.Read` 走
+  `MetaAccess.CanAccess`（隐藏 + 密码），`ContentWrite` / `MetaWrite` 只要求 `user.IsAdmin()`。
 - **登出吊销 / 禁用与删除的 token 失效（2026-11-12 修复）**：`JwtService._revoked` 原先是实例字段，而 `JwtService` 注册为 Scoped —— 登出请求一结束集合就随作用域丢弃，HTTP 侧登出**从未真正生效**。现改为进程级 singleton [`RevokedTokenRegistry`](src/OpenList.Infrastructure/Services/RevokedTokenRegistry.cs)：条目带 token 自身过期时刻并顺带清理过期项，`Program.cs` 的 `OnTokenValidated` 用 `OnMessageReceived` 存进 `HttpContext.Items` 的原始 token 查表；签发 token 时加 `jti`，否则同一秒内重复签发会得到完全相同的字符串（登出后立刻重登会拿回已吊销的那串）。`UserService.UpdateAsync` 的失效条件补上 `Disabled` 变化，`DeleteAsync` 也登记失效 —— 否则被禁用/删除的账号能凭旧 token 操作到过期。局限同 `UserTokenCutoffRegistry`：进程内存，重启清空、多实例各自独立。
 
 ## S3 网关增强（2026-09-21，对照 Go v4.2.6）

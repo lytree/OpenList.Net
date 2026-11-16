@@ -10,21 +10,19 @@ import {
   ElInput,
   ElMessage,
   ElMessageBox,
-  ElOption,
-  ElSelect,
   ElSwitch,
   ElTag,
 } from "element-plus"
 import { VexTable, VexColumn } from "~/components/table"
 import { Delete, Edit, Plus, Refresh } from "@element-plus/icons-vue"
-import { deleteMeta, listMetas, listUsers, saveMeta } from "~/api/admin"
-import type { AdminUser, Meta } from "~/api/types"
+import { deleteMeta, listMetas, saveMeta } from "~/api/admin"
+import type { Meta } from "~/api/types"
 import { t } from "~/i18n"
 
 /**
  * 路径元数据（M2）。
  *
- * 一个 Meta = 一条路径上的四类规则：密码、读写白名单、隐藏、readme/header，
+ * 一个 Meta = 一条路径上的三类规则：密码、隐藏、readme/header，
  * 每类各带一个 `*_sub`（是否对子目录生效）。
  *
  * 后端 `POST /admin/meta/save` 按 `Id` 分派 create/update，且 update 是整体覆盖，
@@ -36,12 +34,6 @@ interface MetaForm {
   path: string
   password: string
   pSub: boolean
-  readUsers: number[]
-  readUsersSub: boolean
-  writeUsers: number[]
-  writeUsersSub: boolean
-  write: boolean
-  wSub: boolean
   hide: string
   hSub: boolean
   readme: string
@@ -56,12 +48,6 @@ function emptyForm(): MetaForm {
     path: "/",
     password: "",
     pSub: false,
-    readUsers: [],
-    readUsersSub: false,
-    writeUsers: [],
-    writeUsersSub: false,
-    write: false,
-    wSub: false,
     hide: "",
     hSub: false,
     readme: "",
@@ -77,12 +63,6 @@ function toForm(meta: Meta): MetaForm {
     path: meta.path,
     password: meta.password ?? "",
     pSub: meta.p_sub,
-    readUsers: meta.read_users ?? [],
-    readUsersSub: meta.read_users_sub,
-    writeUsers: meta.write_users ?? [],
-    writeUsersSub: meta.write_users_sub,
-    write: meta.write,
-    wSub: meta.w_sub,
     hide: meta.hide ?? "",
     hSub: meta.h_sub,
     readme: meta.readme ?? "",
@@ -96,7 +76,6 @@ export default defineComponent({
   name: "MetasPage",
   setup() {
     const rows = ref<Meta[]>([])
-    const users = ref<AdminUser[]>([])
     const loading = ref(false)
     const error = ref("")
 
@@ -116,14 +95,8 @@ export default defineComponent({
       rows.value = resp.data.content
     }
 
-    async function loadUsers() {
-      const resp = await listUsers()
-      if (resp.code === 200) users.value = resp.data.content
-    }
-
     onMounted(() => {
       void load()
-      void loadUsers()
     })
 
     function openCreate() {
@@ -146,12 +119,6 @@ export default defineComponent({
         path: form.path,
         password: form.password || null,
         p_sub: form.pSub,
-        read_users: form.readUsers,
-        read_users_sub: form.readUsersSub,
-        write_users: form.writeUsers,
-        write_users_sub: form.writeUsersSub,
-        write: form.write,
-        w_sub: form.wSub,
         // hide 必须给字符串：旧库该列是 INTEGER NOT NULL，null 会被后端拒绝（500）
         hide: form.hide,
         h_sub: form.hSub,
@@ -264,46 +231,6 @@ export default defineComponent({
                 },
               }}
             </VexColumn>
-            <VexColumn label={t("metas.write")} width={110}>
-              {{
-                default: ({ row }) => {
-                  const r = row as unknown as Meta
-                  return r.write ? (
-                    <ElTag size="small" type="danger">
-                      {r.w_sub ? t("metas.sub_mark") : "ON"}
-                    </ElTag>
-                  ) : (
-                    <span class="ol-muted">-</span>
-                  )
-                },
-              }}
-            </VexColumn>
-            <VexColumn label={t("metas.write_users")} width={120}>
-              {{
-                default: ({ row }) => {
-                  const r = row as unknown as Meta
-                  const n = (r.write_users ?? []).length
-                  return n ? (
-                    <span>{n}</span>
-                  ) : (
-                    <span class="ol-muted">{t("metas.all_permitted_users")}</span>
-                  )
-                },
-              }}
-            </VexColumn>
-            <VexColumn label={t("metas.read_users")} width={120}>
-              {{
-                default: ({ row }) => {
-                  const r = row as unknown as Meta
-                  const n = (r.read_users ?? []).length
-                  return n ? (
-                    <span>{n}</span>
-                  ) : (
-                    <span class="ol-muted">{t("metas.all_permitted_users")}</span>
-                  )
-                },
-              }}
-            </VexColumn>
             <VexColumn label={t("metas.hide")} minWidth={140} showOverflowTooltip={true}>
               {{
                 default: ({ row }) => {
@@ -406,80 +333,6 @@ export default defineComponent({
                         <SubSwitch
                           modelValue={form.pSub}
                           onUpdate={(v) => (form.pSub = v)}
-                          label={t("metas.apply_sub")}
-                        />
-                      </div>
-                    ),
-                  }}
-                </ElFormItem>
-
-                <h4 class="ol-manage-section">{t("metas.section_permission")}</h4>
-                <ElFormItem label={t("metas.write")}>
-                  {{
-                    default: () => (
-                      <div class="ol-field-col">
-                        <ElSwitch
-                          modelValue={form.write}
-                          onUpdate:modelValue={(v: string | number | boolean) =>
-                            (form.write = Boolean(v))
-                          }
-                        />
-                        <span class="ol-field-help">{t("metas.write_help")}</span>
-                        <SubSwitch
-                          modelValue={form.wSub}
-                          onUpdate={(v) => (form.wSub = v)}
-                          label={t("metas.apply_sub")}
-                        />
-                      </div>
-                    ),
-                  }}
-                </ElFormItem>
-                <ElFormItem label={t("metas.read_users")}>
-                  {{
-                    default: () => (
-                      <div class="ol-field-col">
-                        <ElSelect
-                          multiple={true}
-                          modelValue={form.readUsers}
-                          placeholder={t("metas.all_permitted_users")}
-                          onUpdate:modelValue={(v: unknown) =>
-                            (form.readUsers = (v as number[]) ?? [])
-                          }
-                        >
-                          {users.value.map((u) => (
-                            <ElOption key={u.id} label={u.username} value={u.id} />
-                          ))}
-                        </ElSelect>
-                        <span class="ol-field-help">{t("metas.read_users_help")}</span>
-                        <SubSwitch
-                          modelValue={form.readUsersSub}
-                          onUpdate={(v) => (form.readUsersSub = v)}
-                          label={t("metas.apply_sub")}
-                        />
-                      </div>
-                    ),
-                  }}
-                </ElFormItem>
-                <ElFormItem label={t("metas.write_users")}>
-                  {{
-                    default: () => (
-                      <div class="ol-field-col">
-                        <ElSelect
-                          multiple={true}
-                          modelValue={form.writeUsers}
-                          placeholder={t("metas.all_permitted_users")}
-                          onUpdate:modelValue={(v: unknown) =>
-                            (form.writeUsers = (v as number[]) ?? [])
-                          }
-                        >
-                          {users.value.map((u) => (
-                            <ElOption key={u.id} label={u.username} value={u.id} />
-                          ))}
-                        </ElSelect>
-                        <span class="ol-field-help">{t("metas.write_users_help")}</span>
-                        <SubSwitch
-                          modelValue={form.writeUsersSub}
-                          onUpdate={(v) => (form.writeUsersSub = v)}
                           label={t("metas.apply_sub")}
                         />
                       </div>

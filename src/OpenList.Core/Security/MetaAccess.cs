@@ -5,12 +5,15 @@ using OpenList.Vfs;
 namespace OpenList.Core.Security;
 
 /// <summary>
-/// 路径元数据（meta）的访问判定，镜像 Go <c>server/common/check.go</c>：
-/// <c>CanAccess</c> / <c>CanRead</c> / <c>CanWrite</c> / <c>CanWriteContentBypassUserPerms</c>
-/// / <c>MetaCoversPath</c>，以及 <c>internal/op/meta.go</c> 的最近 meta 查找。
+/// 路径元数据（meta）的访问判定，镜像 Go <c>server/common/check.go</c> 的
+/// <c>CanAccess</c> / <c>MetaCoversPath</c>，以及 <c>internal/op/meta.go</c> 的最近 meta 查找。
 /// <para>
 /// 这套判定此前在端点层与搜索服务里各写了一份，导致「密码目录只挡搜索、不挡列目录/直链」。
 /// 收敛到这里，生成侧（签名策略）与校验侧（fs/list、fs/get、/d/）才有同一把尺子。
+/// </para>
+/// <para>
+/// 单用户产品下不再有按用户的白名单：隐藏规则与目录密码只约束<em>匿名访客</em>，
+/// 已登录的管理员与系统内部身份一律放行。
 /// </para>
 /// </summary>
 public static class MetaAccess
@@ -80,38 +83,8 @@ public static class MetaAccess
         return best;
     }
 
-    /// <summary>镜像 Go <c>common.CanRead</c>：<c>ReadUsers</c> 白名单命中，或 meta 未覆盖该路径时放行。</summary>
-    public static bool CanRead(User? user, Meta? meta, string path)
-    {
-        // 内部/系统调用（user 为 null）不做按用户限制，与 Go 的 nil user 语义一致。
-        if (user is null) return true;
-        if (meta is not null && meta.ReadUsers.Count > 0 && !meta.ReadUsers.Contains(user.Id)
-            && MetaCoversPath(meta.Path, path, meta.ReadUsersSub))
-            return false;
-        return true;
-    }
-
-    /// <summary>镜像 Go <c>common.CanWrite</c>：<c>WriteUsers</c> 白名单命中，或 meta 未覆盖该路径时放行。</summary>
-    public static bool CanWrite(User? user, Meta? meta, string path)
-    {
-        if (user is null) return true;
-        if (meta is not null && meta.WriteUsers.Count > 0 && !meta.WriteUsers.Contains(user.Id)
-            && MetaCoversPath(meta.Path, path, meta.WriteUsersSub))
-            return false;
-        return true;
-    }
-
-    /// <summary>镜像 Go <c>common.CanWriteContentBypassUserPerms</c>：meta 显式开放写入时绕过用户权限位。</summary>
-    public static bool CanWriteContentBypass(Meta? meta, string? path)
-    {
-        if (meta is null || !meta.Write) return false;
-        if (string.Equals(Normalize(meta.Path), Normalize(path), StringComparison.OrdinalIgnoreCase)) return true;
-        return IsSubPath(meta.Path, path) && meta.WSub;
-    }
-
     /// <summary>
-    /// 综合访问判定，镜像 Go <c>common.CanAccess</c>：隐藏条目 → 读用户白名单 → 免密用户 →
-    /// 密码（受 <c>PSub</c> 控制是否作用于子目录）。
+    /// 综合访问判定：隐藏条目 → 免密用户 → 密码（受 <c>PSub</c> 控制是否作用于子目录）。
     /// </summary>
     /// <param name="user">当前用户；null 表示内部/系统上下文，直接放行。</param>
     /// <param name="meta">请求路径最近的 meta，可为 null。</param>
@@ -141,9 +114,7 @@ public static class MetaAccess
             }
         }
 
-        if (!CanRead(user, meta, path)) return false;
-
-        // 可免密访问的用户（权限位 1）直接放行。
+        // 已认证身份（管理员 / 系统内部）免密访问受保护目录。
         if (user.CanAccessWithoutPassword()) return true;
 
         if (meta is null || string.IsNullOrEmpty(meta.Password)) return true;

@@ -121,7 +121,7 @@ Admin CRUD for storages + driver instantiation.
 
 - [x] `IStorageService` impl + `StorageService`
 - [x] `MountService.LoadAllAsync` — instantiate drivers, call `InitAsync`, register in `MountFileSystem`
-- [x] `AdminEndpoints.cs` — `/api/admin/*` (admin role `2`):
+- [x] `AdminEndpoints.cs` — `/api/admin/*`（已登录即可，单用户产品没有角色）：
   - [x] `GET  /api/admin/storage/list`
   - [x] `GET  /api/admin/storage/get?id=`
   - [x] `POST /api/admin/storage/create`
@@ -132,7 +132,7 @@ Admin CRUD for storages + driver instantiation.
   - [x] `GET  /api/admin/driver/names`
   - [x] `GET  /api/admin/driver/info?driver=`
   - [x] `POST /api/admin/storage/load_all` — reload all storages
-  - [x] `GET  /api/admin/user/list|get` + `POST /api/admin/user/create|update|delete|cancel_2fa`
+  - [x] ~~`GET /api/admin/user/list|create|delete`~~ — 随多用户语义移除（2026-11-16）；保留 `user/get`、`user/update`、`reset_admin_password`、`cancel_2fa`
   - [x] `GET  /api/admin/setting/list` (placeholder — Phase 14)
 - [x] `LocalDriver` full impl (PhysicalFileSystem + SubFileSystem, config schema)
 - [x] Tests: `StorageServiceTests` (9), `LocalDriverTests` (4) — 13/13 passing
@@ -169,9 +169,9 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 
 ## Phase 5 — Sharing（已移除）
 
-> 2026-11-16 起项目定位为个人资源管理：用户管理、分享系统、站内信、guest 账号一并移除。
-> `/api/share/*`、`/sd/*`、`/sad/*`、`/api/me/message/*`、`/api/admin/message/*` 不再注册，
-> 相关服务/实体删除，表由迁移 `RemoveSharingAndMessage` 清理。
+> 2026-11-16 起项目定位为个人资源管理：用户管理、分享系统、站内信、guest 账号、角色/权限位/BasePath 一并移除。
+> `/api/share/*`、`/sd/*`、`/sad/*`、`/api/me/message/*`、`/api/admin/message/*`、`/api/admin/user/list` 不再注册，
+> 相关服务/实体删除，表由迁移 `RemoveSharingAndMessage` / `RemoveMultiUserColumns` 清理。
 
 - [x] `PublicEndpoints.cs` — `/api/public/*`:
   - [x] `GET/POST /api/public/settings`
@@ -197,16 +197,15 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
   - [x] `POST /api/fs/torrent/cancel` — 501
 - [x] Tests: `TaskServiceTests` — 12 tests covering create/cancel/retry/delete/clear/done/undone
 
-## Phase 7 — Admin: Users, Settings, Messages, Meta ✅
+## Phase 7 — Admin: Account, Settings, Meta ✅
 
 - [x] `AdminEndpoints.cs` (continued):
-  - [x] `GET  /api/admin/user/list`
+  - [x] ~~`GET /api/admin/user/list`~~ / ~~`POST /api/admin/user/create`~~ / ~~`POST /api/admin/user/delete`~~ — 随多用户语义移除（2026-11-16）
   - [x] `GET  /api/admin/user/get?id=`
-  - [x] `POST /api/admin/user/create`
   - [x] `POST /api/admin/user/update`
-  - [x] `POST /api/admin/user/delete`
   - [x] `POST /api/admin/user/cancel_2fa`
   - [x] `POST /api/admin/user/set_password`
+  - [x] `POST /api/admin/user/reset_admin_password`
   - [x] `GET  /api/admin/setting/list`
   - [x] `POST /api/admin/setting/save`
   - [x] `GET  /api/admin/setting/get?keys=`
@@ -278,7 +277,7 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 - [x] `POST /admin/index/{build,update,stop,clear}` + `GET /admin/index/progress`
 - [x] 启动时恢复索引状态（镜像 Go `bootstrap.InitIndex`）— `SearchService.InitIndexAsync` 载入持久化进度、把崩溃遗留的 `running` 状态复位为 `idle`，使增量更新在重启后保持启用。不做全量自动重建（与 Go 一致）
 - [x] 文件操作时增量索引 — `auto_update_index` 设置 + `IObjsUpdateHooks`（发布/订阅）解耦 `FileSystemService` 写操作与 `SearchService` 增量更新（增/删/改路径局部重建）
-- [x] 搜索结果访问控制（镜像 Go `search.go` SearchFiltered）— `SearchAsync(req, user)` 按用户 `BasePath`（`IsSubPath`）与最近 `Meta`（隐藏正则 / 读用户 / 密码，`User` 权限位 `CanSeeHides`/`CanAccessWithoutPassword`）过滤结果
+- [x] 搜索结果访问控制（镜像 Go `search.go` SearchFiltered）— `SearchAsync(req, user)` 按最近 `Meta`（隐藏正则 / 目录密码）过滤结果，匿名访客受限、已登录放行（BasePath 与读用户白名单已随多用户语义移除）
 - [x] 增量更新按父目录串行化（镜像 Go `internal/search/update_lock.go`）— 静态 `Dictionary<parent, UpdateLock>`（信号量+引用计数）排队同一父目录的差集更新，不同父目录可并行，避免并发写表冲突
 
 ## Phase 14 — Archive Support ✅

@@ -41,7 +41,7 @@ public readonly record struct ScanChanges(int Added, int Updated, int Removed);
 public sealed class MediaLibraryScanner
 {
     /// <summary>扫描时使用的内部管理员身份（绕过 BasePath 限制，读全库目录）。</summary>
-    private static readonly User ScannerUser = new() { Id = 0, Username = "media-scanner", Role = UserRole.Admin };
+    private static readonly User ScannerUser = User.System("media-scanner");
 
     /// <summary>单个 sidecar 的读取上限：NFO 是文本、图片是几千字节级，16MB 绰绰有余且防误读大文件。</summary>
     private const long MaxSidecarBytes = 16 * 1024 * 1024;

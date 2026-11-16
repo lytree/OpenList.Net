@@ -14,7 +14,7 @@ namespace OpenList.Media.Services;
 /// </summary>
 public sealed class SubtitleService : ISubtitleService
 {
-    private static readonly User WriterUser = new() { Id = 0, Username = "media-subtitle", Role = UserRole.Admin };
+    private static readonly User WriterUser = User.System("media-subtitle");
 
     private readonly OpenListDbContext _db;
     private readonly IMediaLibraryService _libraries;
@@ -56,7 +56,7 @@ public sealed class SubtitleService : ISubtitleService
         var item = await _db.MediaItems.AsNoTracking().FirstOrDefaultAsync(i => i.Id == itemId, ct);
         if (item is null) return Resp<string>.Fail("item not found", RespCodes.NotFound);
         if (!_libraries.CanSeeItem(user, item)) return Resp<string>.Fail("permission denied", 403);
-        if (!user.CanWriteContent() && !user.CanManageMediaLibrary())
+        if (!user.IsAdmin())
             return Resp<string>.Fail("permission denied", 403);
 
         var file = await _db.MediaFiles.AsNoTracking().Where(f => f.ItemId == itemId).OrderBy(f => f.Path).FirstOrDefaultAsync(ct);

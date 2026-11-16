@@ -121,7 +121,7 @@ public sealed class ScanService : IScanService
     private async Task ScanDirectoryAsync(string path, CancellationToken ct)
     {
         var resp = await _fs.ListAsync(new FsListReq { Path = path, PerPage = 1000 },
-            new User { Id = 0, Username = "scanner", Role = UserRole.Admin }, ct);
+            User.System("scanner"), ct);
         if (resp.Code != 200 || resp.Data is null) return;
 
         lock (_lock)

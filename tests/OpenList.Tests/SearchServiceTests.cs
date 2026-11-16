@@ -247,7 +247,7 @@ public class SearchServiceTests
         mount.Root.Mount("/test", mem);
         var fs = new FileSystemService(mount, null, null, hooks);
 
-        var r = await fs.MkdirAsync("/test/newdir", new User { Id = 1, Username = "t", Role = UserRole.Admin });
+        var r = await fs.MkdirAsync("/test/newdir", new User { Id = 1, Username = "t" });
         await Assert.That(r.Code).IsEqualTo(200);
 
         // PublishDir 是 fire-and-forget，轮询等待订阅者收到父目录 /test 的更新。
@@ -285,7 +285,7 @@ public class SearchServiceTests
             await s.WriteAsync(Encoding.UTF8.GetBytes("x"));
         var fs = new FileSystemService(mount, null, null, hooks);
 
-        var r = await fs.ListAsync(new FsListReq { Path = "/test" }, new User { Id = 1, Username = "t", Role = UserRole.Admin });
+        var r = await fs.ListAsync(new FsListReq { Path = "/test" }, new User { Id = 1, Username = "t" });
         await Assert.That(r.Code).IsEqualTo(200);
 
         var deadline = DateTime.UtcNow.AddSeconds(2);
@@ -307,23 +307,7 @@ public class SearchServiceTests
     // ---------------- 搜索访问控制过滤（镜像 Go SearchFiltered） ----------------
 
     [Test]
-    public async Task SearchDatabaseAsync_Filters_By_User_BasePath()
-    {
-        await using var fixture = new Fixture();
-        fixture.SetDatabaseBackend();
-        await fixture.AddIndexEntry("/docs", "a.txt");
-        await fixture.AddIndexEntry("/docs2", "b.txt");
-
-        var user = new User { Id = 1, Username = "u", Role = UserRole.General, BasePath = "/docs" };
-        var r = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, user);
-
-        await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(r.Data!.Total).IsEqualTo(1);
-        await Assert.That(r.Data.Content[0].Path).IsEqualTo("/docs/a.txt");
-    }
-
-    [Test]
-    public async Task SearchDatabaseAsync_Hides_Meta_Hidden_Files_From_Non_Privileged_User()
+    public async Task SearchDatabaseAsync_Hides_Meta_Hidden_Files_From_Anonymous_Guest()
     {
         await using var fixture = new Fixture();
         fixture.SetDatabaseBackend();
@@ -331,55 +315,38 @@ public class SearchServiceTests
         await fixture.AddIndexEntry("/docs", "secret.txt");
         await fixture.AddMeta("/docs", hide: "secret\\.txt", hideSub: true);
 
-        // 无隐藏权限的普通用户看不到 secret.txt。
-        var plain = new User { Id = 1, Username = "u", Role = UserRole.General };
-        var r1 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, plain);
+        // 匿名访客（Id=0）看不到被隐藏的 secret.txt。
+        var guest = new User { Id = 0, Username = "guest" };
+        var r1 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, guest);
         await Assert.That(r1.Data!.Total).IsEqualTo(1);
         await Assert.That(r1.Data.Content[0].Name).IsEqualTo("visible.txt");
 
-        // 可查看隐藏的用户（权限位 0）能看到全部。
-        var privileged = new User { Id = 2, Username = "p", Role = UserRole.General, Permission = 1 };
-        var r2 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, privileged);
+        // 已登录身份（Id>0）可查看隐藏文件，能看到全部。
+        var admin = new User { Id = 2, Username = "p" };
+        var r2 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, admin);
         await Assert.That(r2.Data!.Total).IsEqualTo(2);
     }
 
     [Test]
-    public async Task SearchDatabaseAsync_Respects_Read_Users_Meta()
-    {
-        await using var fixture = new Fixture();
-        fixture.SetDatabaseBackend();
-        await fixture.AddIndexEntry("/docs", "a.txt");
-        await fixture.AddMeta("/docs", readUsers: [42], readUsersSub: true);
-
-        var outsider = new User { Id = 1, Username = "u", Role = UserRole.General };
-        var r1 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, outsider);
-        await Assert.That(r1.Data!.Total).IsEqualTo(0);
-
-        var insider = new User { Id = 42, Username = "v", Role = UserRole.General };
-        var r2 = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, insider);
-        await Assert.That(r2.Data!.Total).IsEqualTo(1);
-    }
-
-    [Test]
-    public async Task SearchDatabaseAsync_Enforces_Meta_Password()
+    public async Task SearchDatabaseAsync_Enforces_Meta_Password_For_Anonymous_Guest()
     {
         await using var fixture = new Fixture();
         fixture.SetDatabaseBackend();
         await fixture.AddIndexEntry("/docs", "a.txt");
         await fixture.AddMeta("/docs", password: "s3cret", pSub: true);
 
-        var user = new User { Id = 1, Username = "u", Role = UserRole.General };
+        var guest = new User { Id = 0, Username = "guest" };
         // 无密码或密码错误 → 排除。
-        var denied = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, user);
+        var denied = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, guest);
         await Assert.That(denied.Data!.Total).IsEqualTo(0);
 
         var allowed = await fixture.Search.SearchAsync(
-            new SearchReq { Keywords = "txt", Recursive = true, Password = "s3cret" }, user);
+            new SearchReq { Keywords = "txt", Recursive = true, Password = "s3cret" }, guest);
         await Assert.That(allowed.Data!.Total).IsEqualTo(1);
 
-        // 免密用户（权限位 1）无需密码。
-        var bypass = new User { Id = 2, Username = "p", Role = UserRole.General, Permission = 2 };
-        var free = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, bypass);
+        // 已登录身份无需密码。
+        var admin = new User { Id = 2, Username = "p" };
+        var free = await fixture.Search.SearchAsync(new SearchReq { Keywords = "txt", Recursive = true }, admin);
         await Assert.That(free.Data!.Total).IsEqualTo(1);
     }
 
@@ -387,20 +354,20 @@ public class SearchServiceTests
     public async Task SearchDatabaseAsync_Applies_Directory_Own_Meta_To_Dir_Nodes()
     {
         // 镜像 Go isSearchNodeAccessible：目录节点以自身路径解析最近 Meta，
-        // 否则挂在目录本身上的密码/读用户 Meta 会被遗漏而泄漏目录节点。
+        // 否则挂在目录本身上的密码/隐藏 Meta 会被遗漏而泄漏目录节点。
         await using var fixture = new Fixture();
         fixture.SetDatabaseBackend();
         await fixture.AddIndexEntry("/docs", "secretdir", isDir: true);
         await fixture.AddMeta("/docs/secretdir", password: "s3cret", pSub: true);
 
-        var user = new User { Id = 1, Username = "u", Role = UserRole.General };
+        var guest = new User { Id = 0, Username = "guest" };
 
         var denied = await fixture.Search.SearchAsync(
-            new SearchReq { Keywords = "secretdir", Recursive = true }, user);
+            new SearchReq { Keywords = "secretdir", Recursive = true }, guest);
         await Assert.That(denied.Data!.Total).IsEqualTo(0);
 
         var allowed = await fixture.Search.SearchAsync(
-            new SearchReq { Keywords = "secretdir", Recursive = true, Password = "s3cret" }, user);
+            new SearchReq { Keywords = "secretdir", Recursive = true, Password = "s3cret" }, guest);
         await Assert.That(allowed.Data!.Total).IsEqualTo(1);
     }
 
@@ -540,9 +507,9 @@ public class SearchServiceTests
             return db.SaveChangesAsync();
         }
 
-        /// <summary>直接插入一条路径元数据（可选隐藏/读用户/密码，供访问控制过滤测试用）。</summary>
+        /// <summary>直接插入一条路径元数据（可选隐藏/密码，供访问控制过滤测试用）。</summary>
         public Task AddMeta(string path, string? password = null, bool pSub = false,
-            string? hide = null, bool hideSub = false, List<long>? readUsers = null, bool readUsersSub = false)
+            string? hide = null, bool hideSub = false)
         {
             var db = Db();
             var meta = new Meta
@@ -552,10 +519,7 @@ public class SearchServiceTests
                 PSub = pSub,
                 Hide = hide,
                 HideSub = hideSub,
-                ReadUsers = readUsers ?? [],
-                ReadUsersSub = readUsersSub,
             };
-            meta.SyncJson();
             db.Metas.Add(meta);
             return db.SaveChangesAsync();
         }

@@ -1,8 +1,8 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using OpenList.Core.Configuration;
-using OpenList.Core.Interfaces;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
 using OpenList.Infrastructure.Services;
@@ -20,7 +20,7 @@ public class JwtServiceTests
     public async Task IssueToken_ValidateToken_RoundTrip()
     {
         var (svc, _) = await BuildAsync();
-        var user = new User { Id = 42, Username = "alice", Role = UserRole.Admin };
+        var user = new User { Id = 42, Username = "alice" };
         var token = svc.IssueToken(user);
         await Assert.That(token).IsNotNull();
         var id = await svc.ValidateTokenAsync(token);
@@ -58,7 +58,7 @@ public class JwtServiceTests
     public async Task LogoutAsync_Revokes_Token()
     {
         var (svc, _) = await BuildAsync();
-        var token = svc.IssueToken(new User { Id = 1, Username = "alice", Role = UserRole.General });
+        var token = svc.IssueToken(new User { Id = 1, Username = "alice" });
         await svc.LogoutAsync(token);
         var id = await svc.ValidateTokenAsync(token);
         await Assert.That(id).IsNull();
@@ -72,11 +72,11 @@ public class JwtServiceTests
         var (_, db) = await BuildAsync();
         var registry = new RevokedTokenRegistry();
         var config = new AppConfiguration { JwtSecret = Secret, TokenExpiresIn = 1 };
-        var users = new UserService(db, new AppConfiguration());
+        var users = new UserService(db);
         var logoutScope = new JwtService(users, config, revokedTokens: registry);
         var laterRequest = new JwtService(users, config, revokedTokens: registry);
 
-        var token = logoutScope.IssueToken(new User { Id = 3, Username = "alice", Role = UserRole.General });
+        var token = logoutScope.IssueToken(new User { Id = 3, Username = "alice" });
         await Assert.That(await laterRequest.ValidateTokenAsync(token)).IsEqualTo(3L);
 
         await logoutScope.LogoutAsync(token);
@@ -93,33 +93,21 @@ public class JwtServiceTests
     }
 
     [Test]
-    public async Task IssueToken_Includes_BasePath_And_Permission_Claims()
+    public async Task IssueToken_Includes_Identity_Claims()
     {
-        // BasePath 与 Permission 是每请求的权限输入，必须随身份签进 token
-        //（.NET 侧刻意保持无状态 JWT，不每请求查库）。
+        // 单用户产品下 token 只携带身份（NameIdentifier/Name），不再有 base_path / permission。
         var (svc, _) = await BuildAsync();
-        var user = new User { Id = 7, Username = "bob", Role = UserRole.General, BasePath = "/home/bob", Permission = 0x71FF };
+        var user = new User { Id = 7, Username = "bob" };
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(svc.IssueToken(user));
 
-        await Assert.That(jwt.Claims.First(c => c.Type == OpenListClaims.BasePath).Value).IsEqualTo("/home/bob");
-        await Assert.That(jwt.Claims.First(c => c.Type == OpenListClaims.Permission).Value).IsEqualTo(0x71FF.ToString());
-    }
-
-    [Test]
-    public async Task IssueToken_Normalizes_Null_BasePath_To_Root()
-    {
-        // Go 的 JoinBasePath 对 null/空 BasePath 按 "/" 处理；签进 token 的值统一成同一形式。
-        var (svc, _) = await BuildAsync();
-        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(
-            svc.IssueToken(new User { Id = 8, Username = "root", Role = UserRole.Admin }));
-
-        await Assert.That(jwt.Claims.First(c => c.Type == OpenListClaims.BasePath).Value).IsEqualTo("/");
+        await Assert.That(jwt.Claims.First(c => c.Type == ClaimTypes.NameIdentifier).Value).IsEqualTo("7");
+        await Assert.That(jwt.Claims.First(c => c.Type == ClaimTypes.Name).Value).IsEqualTo("bob");
     }
 
     [Test]
     public async Task ValidateTokenAsync_Returns_Null_After_CutoffInvalidation()
     {
-        // BasePath/权限变更后，早于截止点签发的 token 必须失效（详见 UserTokenCutoffRegistry）。
+        // 凭据变更后，早于截止点签发的 token 必须失效（详见 UserTokenCutoffRegistry）。
         var (svc, db, cutoffs) = await BuildWithCutoffsAsync();
         var u = db.Users.First();
         var token = svc.IssueToken(u);
@@ -139,8 +127,8 @@ public class JwtServiceTests
         var db = new OpenListDbContext(opts, new DatabaseConfig());
         await db.Database.EnsureCreatedAsync();
         var cutoffs = new UserTokenCutoffRegistry();
-        var users = new UserService(db, new AppConfiguration(), null, cutoffs);
-        await users.CreateAsync(new CreateUserReq { Username = "alice", Password = "pw" });
+        var users = new UserService(db, null, cutoffs);
+        await users.CreateInitialAdminAsync("alice", "pw");
         var config = new AppConfiguration { JwtSecret = Secret, TokenExpiresIn = 1 };
         var svc = new JwtService(users, config, null, null, cutoffs);
         return (svc, db, cutoffs);
@@ -155,8 +143,8 @@ public class JwtServiceTests
             .Options;
         var db = new OpenListDbContext(opts, new DatabaseConfig());
         await db.Database.EnsureCreatedAsync();
-        var users = new UserService(db, new AppConfiguration());
-        await users.CreateAsync(new CreateUserReq { Username = "alice", Password = "pw" });
+        var users = new UserService(db);
+        await users.CreateInitialAdminAsync("alice", "pw");
         var config = new AppConfiguration { JwtSecret = Secret, TokenExpiresIn = 1 };
         var svc = new JwtService(users, config);
         return (svc, db);

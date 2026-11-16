@@ -102,7 +102,6 @@ export default defineComponent({
     const watchSession = createWatchTracker(mediaReportWatch)
 
     const itemId = computed(() => Number(route.params.id))
-    const canManage = computed(() => user.can("manage_media"))
     const genres = computed<string[]>(() => {
       try {
         const raw = item.value?.genres
@@ -431,41 +430,34 @@ export default defineComponent({
                 <p class="ol-media-detail-overview">
                   {current.overview || t("media.no_overview")}
                 </p>
-                {/* 游客既不能收藏也不能记进度，整条动作区可能只剩「刮削」—— 为空就别占一行 */}
-                {(user.isLogin || canManage.value) && (
+                {/* 游客既不能收藏、记进度，也不能触发刮削 —— 整条动作区只对登录用户显示 */}
+                {user.isLogin && (
                   <div class="ol-media-detail-actions">
-                    {/* 个人状态四件套（收藏/看过/稍后/片单）都需要登录 —— 游客看不到也点不了 */}
-                    {user.isLogin && (
-                      <>
-                        <ElButton size="small" type={state.value?.favorite ? "warning" : "default"} onClick={toggleFavorite}>
-                          <ElIcon style={{ marginRight: "4px" }}>
-                            {state.value?.favorite ? <StarFilled /> : <Star />}
-                          </ElIcon>
-                          {state.value?.favorite ? t("media.unfavorite") : t("media.favorite")}
-                        </ElButton>
-                        <ElButton size="small" type={state.value?.watched ? "success" : "default"} onClick={toggleWatched}>
-                          <ElIcon style={{ marginRight: "4px" }}><View /></ElIcon>
-                          {state.value?.watched ? t("media.mark_unwatched") : t("media.mark_watched")}
-                        </ElButton>
-                        <ElButton size="small" type={state.value?.watch_later ? "primary" : "default"} onClick={toggleLater}>
-                          {t("media.watch_later")}
-                        </ElButton>
-                        <ElButton size="small" onClick={openPlaylistDialog}>
-                          <ElIcon style={{ marginRight: "4px" }}><Plus /></ElIcon>
-                          {t("media.add_to_playlist")}
-                        </ElButton>
-                        {/* 字幕搜索要登录（会写回媒体目录） */}
-                        <ElButton size="small" onClick={openSubtitleDialog}>
-                          {t("media.subtitles")}
-                        </ElButton>
-                      </>
-                    )}
-                    {canManage.value && (
-                      <ElButton size="small" loading={scraping.value} onClick={scrape}>
-                        <ElIcon style={{ marginRight: "4px" }}><Refresh /></ElIcon>
-                        {t("media.scrape")}
-                      </ElButton>
-                    )}
+                    <ElButton size="small" type={state.value?.favorite ? "warning" : "default"} onClick={toggleFavorite}>
+                      <ElIcon style={{ marginRight: "4px" }}>
+                        {state.value?.favorite ? <StarFilled /> : <Star />}
+                      </ElIcon>
+                      {state.value?.favorite ? t("media.unfavorite") : t("media.favorite")}
+                    </ElButton>
+                    <ElButton size="small" type={state.value?.watched ? "success" : "default"} onClick={toggleWatched}>
+                      <ElIcon style={{ marginRight: "4px" }}><View /></ElIcon>
+                      {state.value?.watched ? t("media.mark_unwatched") : t("media.mark_watched")}
+                    </ElButton>
+                    <ElButton size="small" type={state.value?.watch_later ? "primary" : "default"} onClick={toggleLater}>
+                      {t("media.watch_later")}
+                    </ElButton>
+                    <ElButton size="small" onClick={openPlaylistDialog}>
+                      <ElIcon style={{ marginRight: "4px" }}><Plus /></ElIcon>
+                      {t("media.add_to_playlist")}
+                    </ElButton>
+                    {/* 字幕搜索要登录（会写回媒体目录） */}
+                    <ElButton size="small" onClick={openSubtitleDialog}>
+                      {t("media.subtitles")}
+                    </ElButton>
+                    <ElButton size="small" loading={scraping.value} onClick={scrape}>
+                      <ElIcon style={{ marginRight: "4px" }}><Refresh /></ElIcon>
+                      {t("media.scrape")}
+                    </ElButton>
                   </div>
                 )}
                 {state.value && state.value.progress_seconds > 0 && (

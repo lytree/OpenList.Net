@@ -35,7 +35,7 @@ internal sealed class SftpSessionFileSystem : ISFTPHandler
         _mount = mount;
         _user = user;
         _scopes = scopes;
-        _root = new UPath(MetaAccess.Normalize(string.IsNullOrEmpty(user.BasePath) ? "/" : user.BasePath));
+        _root = new UPath("/");
     }
 
     /// <summary>初始化并回显客户端扩展。</summary>
@@ -269,7 +269,7 @@ internal sealed class SftpSessionFileSystem : ISFTPHandler
 
     private SFTPAttributes BuildAttributes(UPath path, bool isDirectory)
     {
-        var canWrite = _user.CanWriteContent() || _user.IsAdmin();
+        var canWrite = _user.IsAdmin();
         var permissions = Permissions.UserRead | Permissions.GroupRead | Permissions.OtherRead;
         permissions |= isDirectory ? Permissions.Directory | Permissions.UserExecute : Permissions.RegularFile;
         if (canWrite)
@@ -354,7 +354,7 @@ internal sealed class SftpSessionFileSystem : ISFTPHandler
         => Run(async () =>
         {
             var vfsPath = Resolve(path);
-            if (!_user.CanRemove() && !_user.IsAdmin())
+            if (!_user.IsAdmin())
                 throw new HandlerException(Status.PermissionDenied, "permission denied");
             await AuthorizeMetaAsync(vfsPath, ct);
 
@@ -369,7 +369,7 @@ internal sealed class SftpSessionFileSystem : ISFTPHandler
         => Run(async () =>
         {
             var vfsPath = Resolve(path);
-            if (!_user.CanWriteContent() && !_user.IsAdmin())
+            if (!_user.IsAdmin())
                 throw new HandlerException(Status.PermissionDenied, "permission denied");
             await AuthorizeWriteAsync(vfsPath, ct);
             _mount.Root.CreateDirectory(vfsPath);
@@ -380,7 +380,7 @@ internal sealed class SftpSessionFileSystem : ISFTPHandler
         => Run(async () =>
         {
             var vfsPath = Resolve(path);
-            if (!_user.CanRemove() && !_user.IsAdmin())
+            if (!_user.IsAdmin())
                 throw new HandlerException(Status.PermissionDenied, "permission denied");
             await AuthorizeMetaAsync(vfsPath, ct);
             _mount.Root.DeleteDirectory(vfsPath, false);
@@ -392,7 +392,7 @@ internal sealed class SftpSessionFileSystem : ISFTPHandler
         {
             var source = Resolve(oldPath);
             var destination = Resolve(newPath);
-            if (!_user.CanMove() && !_user.CanRename() && !_user.IsAdmin())
+            if (!_user.IsAdmin())
                 throw new HandlerException(Status.PermissionDenied, "permission denied");
             await AuthorizeMetaAsync(source, ct);
             await AuthorizeMetaAsync(destination, ct);

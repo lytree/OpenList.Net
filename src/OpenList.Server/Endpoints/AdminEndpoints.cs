@@ -64,14 +64,6 @@ public static class AdminEndpoints
         g.MapGet("/driver/info", async (string driver, IStorageService svc) =>
             Results.Ok(await svc.GetDriverInfoAsync(driver)));
 
-        /** `GET /admin/user/list` → `{ content, total }`。 */
-        g.MapGet("/user/list", async (IUserService users) =>
-        {
-            var r = await users.ListAsync();
-            if (r.Code != 200 || r.Data is null) return Results.Ok(r);
-            return Results.Ok(Resp<object>.Ok(new { content = r.Data, total = r.Data.Count }));
-        });
-
         // POST /admin/user/reset_admin_password — 重置内置管理员的密码。
         // 单用户产品里这是「忘记密码后由已登录客户端 / 桌面端恢复」的通道（网页端改密走 /api/me/update）。
         g.MapPost("/user/reset_admin_password", async (ResetAdminPasswordReq req, IUserService users, HttpContext ctx) =>

@@ -165,14 +165,10 @@ public sealed class FileSystemService : IFileSystemService
             catch { /* meta 解析失败不影响 list 本体 */ }
         }
 
-        // 写入条件：驱动非只读 AND（用户可写 OR meta 显式开放写入）。
-        // meta 那一路必须走 CanWriteContentBypass —— 它内部带 WSub 判断，写入许可才会按
-        // 「是否作用于子目录」传导；此前只看 meta.Write，导致子目录里 w_sub=false 也回
-        // write=true，直到真正上传才被 ContentWriteGateAsync 判 403（前后不一致）。
+        // 写入条件：驱动非只读 AND 已登录（单用户产品下写权限只由「是否登录」决定）。
         var driverWritable = driver?.ReadOnly == false;
         var pathText = path.ToString();
-        var metaForcesWrite = MetaAccess.CanWriteContentBypass(nearest, pathText);
-        var write = (driverWritable && (user.IsAdmin() || user.CanWriteContent())) || metaForcesWrite;
+        var write = driverWritable && user.IsAdmin();
 
         // readme/header 是「目录标签」：RSub/HeaderSub 决定祖先 meta 的文案是否下传到子目录，
         // 关闭时只有 meta.Path 自身这一层能拿到。此前兜底分支用的是前缀判断，而 nearest 本身
@@ -192,7 +188,7 @@ public sealed class FileSystemService : IFileSystemService
             Provider = driver?.DriverName,
             DirectUploadTools = driver is IFileSystemDirectUploader ? new List<string> { "direct" } : null,
             Write = write,
-            WriteContentBypass = metaForcesWrite && !user.CanWriteContent(),
+            WriteContentBypass = false,
             Readme = readme,
             Header = header,
         });
@@ -461,7 +457,7 @@ public sealed class FileSystemService : IFileSystemService
     /// </summary>
     public async Task<Resp<FsManageResp>> MoveBatchAsync(MoveCopyReq req, User user, CancellationToken ct = default)
     {
-        if (!user.CanMove() && !user.IsAdmin())
+        if (!user.IsAdmin())
             return Resp<FsManageResp>.Fail("permission denied", RespCodes.Forbidden);
         if (req.Names.Count == 0)
             return Resp<FsManageResp>.Fail("empty file names", RespCodes.BadRequest);
@@ -524,7 +520,7 @@ public sealed class FileSystemService : IFileSystemService
     /// </summary>
     public async Task<Resp<FsManageResp>> CopyBatchAsync(MoveCopyReq req, User user, CancellationToken ct = default)
     {
-        if (!user.CanCopy() && !user.IsAdmin())
+        if (!user.IsAdmin())
             return Resp<FsManageResp>.Fail("permission denied", RespCodes.Forbidden);
         if (req.Names.Count == 0)
             return Resp<FsManageResp>.Fail("empty file names", RespCodes.BadRequest);
@@ -709,20 +705,14 @@ public sealed class FileSystemService : IFileSystemService
     {
         try
         {
-            // 服务层兜底校验。端点层已有完整门禁（权限位 + JoinGuard + meta 白名单），
-            // 但 WebDAV / S3 等协议入口各自实现了一遍，新增入口很容易漏 —— 服务层至少要拦住：
-            // ① 没有删除权限位的账号；② 删除目标越出用户 BasePath。
-            // 调用方传进来的应是「已套过 BasePath」的完整路径，因此这里只做包含性校验、
-            // 绝不再 join：二次 join 会把 /home/bob/x 变成 /home/bob/home/bob/x。
-            if (!user.CanRemove() && !user.IsAdmin())
+            // 服务层兜底校验。端点层已有认证门禁，但 WebDAV / S3 等协议入口各自实现了一遍，
+            // 服务层至少要拦住未登录身份。
+            if (!user.IsAdmin())
                 return Task.FromResult(Resp.Fail("permission denied", RespCodes.Forbidden));
 
-            var basePath = UPath.FixAndCleanPath(user.BasePath);
             foreach (var p in paths)
             {
                 var upath = Normalize(p);
-                if (!MetaAccess.IsSubPath(basePath, upath.FullName))
-                    return Task.FromResult(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
                 if (_mount.Root.FileExists(upath)) _mount.Root.DeleteFile(upath);
                 else if (_mount.Root.DirectoryExists(upath)) _mount.Root.DeleteDirectory(upath, true);
             }
@@ -734,13 +724,11 @@ public sealed class FileSystemService : IFileSystemService
     /// <summary>删除空目录；目录非空或不存在时返回错误。</summary>
     public Task<Resp> RemoveEmptyDirectoryAsync(string path, User user, CancellationToken ct = default)
     {
-        // 与 RemoveAsync 同一套服务层兜底：权限位 + BasePath 包含性（端点层已各自校验）。
-        if (!user.CanRemove() && !user.IsAdmin())
+        // 与 RemoveAsync 同一套服务层兜底：未登录身份直接拒绝（端点层已各有门禁）。
+        if (!user.IsAdmin())
             return Task.FromResult(Resp.Fail("permission denied", RespCodes.Forbidden));
 
         var upath = Normalize(path);
-        if (!MetaAccess.IsSubPath(UPath.FixAndCleanPath(user.BasePath), upath.FullName))
-            return Task.FromResult(Resp.Fail("using relative path is not allowed", RespCodes.Forbidden));
         if (!_mount.Root.DirectoryExists(upath))
             return Task.FromResult(Resp.Fail("not found", RespCodes.NotFound));
 

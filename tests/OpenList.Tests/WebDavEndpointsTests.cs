@@ -292,8 +292,7 @@ public class WebDavEndpointsTests
 
     // --- 写路径的守卫（2026-11-01）---
     //
-    // 背景：这 5 个写方法原本只校验「已登录、未禁用」，既没有 /api/fs/* 上的权限位校验，
-    // 也没有 BasePath 越界检查；DELETE 对不存在的路径还会静默返回 204。下面按行为钉住。
+    // 背景：DELETE 对不存在的路径曾经静默返回 204。下面按行为钉住。
 
     [Test]
     public async Task Delete_MissingFile_ReturnsNotFound(CancellationToken ct)
@@ -304,37 +303,6 @@ public class WebDavEndpointsTests
             // RFC 4918 §9.6：删不存在的资源是 404，不是「删成功了」。
             var resp = await client.DeleteAsync("/dav/test/never-existed.txt");
             await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
-        }
-    }
-
-    [Test]
-    public async Task Delete_WithoutRemovePermission_IsForbidden(CancellationToken ct)
-    {
-        var (factory, _) = await SetupAsync();
-        await using (factory)
-        {
-            await factory.WriteFileAsync("guarded.txt", "x"u8.ToArray());
-
-            // permission=0：没有任何写/删权限的普通用户
-            using (var scope = factory.Services.CreateScope())
-            {
-                var users = scope.ServiceProvider.GetRequiredService<IUserService>();
-                var created = await users.CreateAsync(new CreateUserReq
-                {
-                    Username = "reader",
-                    Password = "reader123",
-                    Permission = 0,
-                });
-                await Assert.That(created.Code).IsEqualTo(200);
-            }
-
-            var client = factory.CreateClient();
-            client.DefaultRequestHeaders.Authorization = new("Basic", Convert.ToBase64String("reader:reader123"u8.ToArray()));
-            var resp = await client.DeleteAsync("/dav/test/guarded.txt");
-            await Assert.That(resp.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
-
-            // 文件必须还在（拒绝要发生在动作之前，而不是删到一半才报错）
-            await Assert.That(File.Exists(factory.ResolvePath("guarded.txt"))).IsTrue();
         }
     }
 

@@ -38,15 +38,18 @@ public class TaskServiceTests
     public async Task UndoneAsync_Returns_Pending_And_Running_Tasks()
     {
         var svc = new TaskService();
+        // 任务体刻意跑得比断言间隔（50ms）长两个数量级：整套测试并行跑满时，
+        // `Task.Delay(50)` 的续体可能被拖到几百毫秒后才执行，500ms 的任务会先结束、
+        // 计数变成 1（2026-11-16 全量跑就撞到过）。取消会立刻打断这个等待。
         var t1 = await svc.CreateAsync(TaskType.Copy, async (progress, ct) =>
         {
             progress.Report(new TaskProgress { Current = 1, Total = 100 });
-            await Task.Delay(500, ct);
+            await Task.Delay(5000, ct);
         });
         var t2 = await svc.CreateAsync(TaskType.Copy, async (progress, ct) =>
         {
             progress.Report(new TaskProgress { Current = 1, Total = 100 });
-            await Task.Delay(500, ct);
+            await Task.Delay(5000, ct);
         });
 
         await Task.Delay(50);

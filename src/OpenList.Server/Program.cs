@@ -317,10 +317,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             },
             OnTokenValidated = ctx =>
             {
-                // A token carries a snapshot of BasePath/Permission (see JwtService.IssueToken).
-                // When an admin later changes those fields, the old token must stop working;
-                // the cutoff registry records the moment of change and this hook rejects
-                // anything issued before it, forcing a re-login to pick up the new values.
+                // 账号被禁用（或权限相关字段变更）后，旧 token 必须停止工作；截止点登记表
+                // 记录变更时刻，这里拒绝早于它签发的 token，强制重新登录。
                 var cutoffs = ctx.HttpContext.RequestServices.GetRequiredService<UserTokenCutoffRegistry>();
                 var idClaim = ctx.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (long.TryParse(idClaim, out var userId) && cutoffs.IsStale(userId, ctx.SecurityToken.ValidFrom))
@@ -334,8 +332,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             },
         };
     });
+// 单用户产品：库里只有一个管理员账号，因此「admin」策略 = 「已登录」。
+// 保留策略名是为了让 40+ 处 RequireAuthorization("admin") / MapGroup 不必逐一改名。
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy("admin", p => p.RequireRole(((int)UserRole.Admin).ToString()));
+    .AddPolicy("admin", p => p.RequireAuthenticatedUser());
 
 // CORS
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p

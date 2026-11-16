@@ -177,7 +177,7 @@ public static class WebDavEndpoints
             var sb = new StringBuilder();
             sb.AppendLine("<html><head><title>Index of /" + path + "</title></head><body>");
             sb.AppendLine($"<h1>Index of /{path}</h1><hr><ul>");
-            if (upath != NormalizePath(MetaAccess.Normalize(string.IsNullOrEmpty(user.BasePath) ? "/" : user.BasePath)))
+            if (upath != UPath.Root)
             {
                 sb.AppendLine("<li><a href=\"../\">../</a></li>");
             }
@@ -228,14 +228,9 @@ public static class WebDavEndpoints
         return Results.NotFound();
     }
 
-    // --- 写方法的权限 / 路径门禁 ---
+    // --- 写方法的路径门禁 ---
     //
-    // 这一层以前是缺的：`/dav` 的 PUT / MKCOL / DELETE / MOVE / COPY 只校验「已登录、未禁用」，
-    // 于是**任何**已认证用户都能通过 WebDAV 删改文件 —— 没有 CanRemove 的账号、被 BasePath
-    // 限制在某个子目录的账号，全都绕过了 `/api/fs/*` 上那套守卫。
-    // Go 版没有这个洞，是因为它的 webdav 处理器直接调用 FsRemove / FsMove 等公共操作，
-    // 权限检查在被调方内部；本仓库把这些操作搬到了端点层，WebDAV 就成了漏网的那条路。
-    //
+    // 写操作只要求「已登录、未禁用」（由 ResolveUserAsync 保证）。
     // 失败一律给**真实 HTTP 状态码**：Finder / Windows 资源管理器 / rclone 只认状态码，
     // 回 200 + `{"code":403}` 会被它们当成成功。
 
@@ -254,15 +249,12 @@ public static class WebDavEndpoints
     private static IResult DavDeny(string message) => DavFail(RespCodes.Forbidden, message);
 
     /// <summary>
-    /// BasePath 越界检查：受限用户的 `/dav` 绝对路径也必须落在自己的根目录内。
-    /// 与 <c>/api/fs/*</c> 用同一个判定（<see cref="User.TryJoinPath"/>），失败给 403。
+    /// 把 WebDAV 的绝对路径规整为完整虚拟路径（补前导斜杠、解析 <c>.</c>/<c>..</c>）。
     /// </summary>
     private static IResult? DavPathGuard(User user, string rawPath, out string fullPath)
     {
-        var joined = "/" + rawPath.TrimStart('/');
-        if (user.TryJoinPath(joined, out var path)) { fullPath = path; return null; }
-        fullPath = string.Empty;
-        return DavDeny("using relative path is not allowed");
+        fullPath = UPath.FixAndCleanPath("/" + rawPath.TrimStart('/'));
+        return null;
     }
 
     /// <summary>目标是否已存在（文件或目录）。</summary>
@@ -281,9 +273,6 @@ public static class WebDavEndpoints
         if (user.Disabled) return Results.Forbid();
 
         if (DavPathGuard(user, path, out var fullPath) is { } pathDenied) return pathDenied;
-        // 镜像 Go 的 fsup 中间件：CanWriteContent（或 meta 显式开放写入）+ 父目录 meta WriteUsers。
-        if (await FsEndpoints.ContentWriteGateAsync(metaSvc, user, fullPath, ctx.RequestAborted) is not null)
-            return DavDeny("permission denied");
 
         await using var stream = ctx.Request.Body;
         var resp = await fs.PutStreamAsync(fullPath, stream, user, ctx.RequestAborted);
@@ -300,8 +289,6 @@ public static class WebDavEndpoints
         if (user.Disabled) return Results.Forbid();
 
         if (DavPathGuard(user, path, out var fullPath) is { } pathDenied) return pathDenied;
-        if (await FsEndpoints.ContentWriteGateAsync(metaSvc, user, fullPath, ctx.RequestAborted) is not null)
-            return DavDeny("permission denied");
 
         var resp = await fs.MkdirAsync(fullPath, user, ctx.RequestAborted);
         if (resp.Code != 200) return DavFail(resp.Code, resp.Message);
@@ -317,10 +304,6 @@ public static class WebDavEndpoints
         if (user.Disabled) return Results.Forbid();
 
         if (DavPathGuard(user, path, out var fullPath) is { } pathDenied) return pathDenied;
-        // 镜像 Go FsRemove：CanRemove + 父目录 meta 写入校验。
-        if (!user.CanRemove()) return DavDeny("permission denied");
-        if (await FsEndpoints.MetaWriteGateAsync(metaSvc, user, MetaAccess.Parent(fullPath), ctx.RequestAborted) is not null)
-            return DavDeny("permission denied");
 
         // RFC 4918 §9.6：删除不存在的资源是 404。RemoveAsync 对不存在的路径是静默成功，
         // 这里显式判一次，否则 rclone / 资源管理器会把「删了个寂寞」当成删掉了。
@@ -346,14 +329,9 @@ public static class WebDavEndpoints
         var rawDest = ExtractPathFromUrl(destUrl, ctx);
         if (rawDest is null) return DavFail(RespCodes.BadRequest, "invalid Destination");
 
-        // MOVE 既覆盖「移动」（跨目录，要 CanMove）也覆盖「重命名」（同目录，要 CanRename）。
-        if (!user.CanMove() && !user.CanRename()) return DavDeny("permission denied");
+        // MOVE 既覆盖「移动」（跨目录）也覆盖「重命名」（同目录），两者都只要求已登录。
         if (DavPathGuard(user, path, out var srcPath) is { } srcDenied) return srcDenied;
         if (DavPathGuard(user, rawDest, out var destPath) is { } destDenied) return destDenied;
-        if (await FsEndpoints.MetaWriteGateAsync(metaSvc, user, MetaAccess.Parent(srcPath), ctx.RequestAborted) is not null)
-            return DavDeny("permission denied");
-        if (await FsEndpoints.MetaWriteGateAsync(metaSvc, user, MetaAccess.Parent(destPath), ctx.RequestAborted) is not null)
-            return DavDeny("permission denied");
         if (!DavExists(mount, srcPath)) return DavFail(RespCodes.NotFound, "object not found");
 
         var resp = await fs.RenameAsync(srcPath, destPath, user, ctx.RequestAborted);
@@ -375,14 +353,8 @@ public static class WebDavEndpoints
         var rawDest = ExtractPathFromUrl(destUrl, ctx);
         if (rawDest is null) return DavFail(RespCodes.BadRequest, "invalid Destination");
 
-        // 镜像 Go FsCopy：CanCopy + 源的 meta 读校验 + 目标目录的 meta 写校验。
-        if (!user.CanCopy()) return DavDeny("permission denied");
         if (DavPathGuard(user, path, out var srcPath) is { } srcDenied) return srcDenied;
         if (DavPathGuard(user, rawDest, out var destPath) is { } destDenied) return destDenied;
-        if (await FsEndpoints.MetaReadGateAsync(metaSvc, user, MetaAccess.Parent(srcPath), ctx.RequestAborted) is not null)
-            return DavDeny("permission denied");
-        if (await FsEndpoints.MetaWriteGateAsync(metaSvc, user, MetaAccess.Parent(destPath), ctx.RequestAborted) is not null)
-            return DavDeny("permission denied");
 
         // RFC 4918 §10.6：`Overwrite: F` 且目标已存在 → 412（默认允许覆盖）。
         var overwrite = !string.Equals(ctx.Request.Headers["Overwrite"].ToString(), "F", StringComparison.OrdinalIgnoreCase);
@@ -556,16 +528,10 @@ public static class WebDavEndpoints
         };
     }
 
-    /// <summary>
-    /// 生成客户端可见的 href。受限用户（BasePath）看到的是**以自己根目录为根**的路径 ——
-    /// 直接回绝对路径会暴露 `/dav/other-user/...`，并且让客户端在错误的前缀下拼 URL。
-    /// </summary>
+    /// <summary>生成客户端可见的 href。</summary>
     private static string DavHref(User user, UPath path)
     {
         var full = path.FullName;
-        var basePath = MetaAccess.Normalize(string.IsNullOrEmpty(user.BasePath) ? "/" : user.BasePath);
-        if (basePath != "/" && full.StartsWith(basePath, StringComparison.Ordinal))
-            full = full[basePath.Length..];
         if (string.IsNullOrEmpty(full)) full = "/";
         if (!full.StartsWith('/')) full = "/" + full;
         return full == "/" ? "/dav/" : "/dav" + full;
