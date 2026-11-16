@@ -98,6 +98,11 @@ frontend/src/
 
 （「✅」= `frontend/` 已实现并真机验证；「—」= 未做；「⌛」= 后端无接口/依赖未接）
 
+> **2026-11-16 补注（本表是 2026-10-26 的快照，以下已不成立）**：
+> 前端路由已从 hash 改为 history（`#/media` → `/media`，本文其它地方出现的 `#/...`
+> 只是在描述 OLF 自身的地址形态）；分享页与多用户能力已整体移除，
+> 「分享 ✅」「管理台 users / shares」「guest 入口按权限位」等行不再适用。
+
 | 域 | 子项 | Vue 版 |
 |---|---|---|
 | **认证** | 明文/哈希登录、guest 入口、remember 仅记用户名、401→登录页、权限位守卫 | ✅ |
@@ -115,10 +120,10 @@ frontend/src/
 | | archive / torrent / doc / xls / ppt / plist / ipa / asciinema / url / flash / aliyun_video / video360 / video_box / markdown+wrap / text-editor(Monaco) | — 18 项 |
 | **管理台** | storages（动态表单）/ users / metas / indexes / tasks / settings / shares | ✅ 7 模块 |
 | | plugins / messenger / backup-restore / dashboard / about | ⌛ 后端无接口 |
-| **分享** | 公开分享页 `#/s/:code` + 分享码鉴权 | ✅ |
+| **分享** | 公开分享页 `#/s/:code` + 分享码鉴权 | — 已随多用户下线 |
 | **媒体域** | 库/编目/墙/详情/播放列表 | — （M4） |
 
-Vue 版现状：**84 个 ts/tsx、11,591 行**，`dist` 分包 `home` 229 KB（gzip 79 KB）。
+Vue 版现状（2026-11-16 重测）：**172 个 ts/tsx、27,125 行**，`dist` 分包 `home` 242.5 KB（gzip 81.2 KB）。
 
 ## 5. Peach 值得借鉴的五个结构性决策（不抄代码）
 

@@ -400,7 +400,9 @@ public partial class DashboardViewModel : ViewModelBase
     private void OpenInitPage()
     {
         if (!IsRunning) return;
-        UpdateChecker.OpenUrl($"{_core.BaseUrl}/#/@init");
+        // 前端已是 history 路由（URL 就是真实路径），别再加 `#` ——
+        // 带 hash 的地址会命中前端的旧地址兼容逻辑，多绕一次改写。
+        UpdateChecker.OpenUrl($"{_core.BaseUrl}/@init");
     }
 
     /// <summary>

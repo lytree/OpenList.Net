@@ -444,7 +444,7 @@ x_source_secrets
 - 硬套会导致刮削失败时把上游条目当成 TMDB 结果。
 
 **C. 独立"资源"页（推荐同时做）**
-- 前端新增 `#/sources`（用户侧）与 `#/@manage/sources`（管理侧）；
+- 前端新增 `/sources`（用户侧）与 `/@manage/sources`（管理侧）；
 - 用户侧只展示已启用源，支持列表/搜索/播放；
 - 管理侧负责清单编辑、密钥、探针、缓存清理。
 
@@ -490,7 +490,7 @@ x_source_secrets
 ### P1（媒体能力）
 - [ ] 封面代理 + 磁盘缓存 + MIME 嗅探
 - [ ] m3u8 全量 URI 重写 + key/分片代理 + 签名 URL
-- [ ] 媒体首页"外部源"section + 用户侧 `#/sources` 页
+- [ ] 媒体首页"外部源"section + 用户侧 `/sources` 页
 - [ ] e2e：`frontend/scripts/verify-sources.mjs`（假上游 + AES 封面 + m3u8 + 签名代理）
 
 ### P2（规模化）
