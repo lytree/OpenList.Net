@@ -54,7 +54,7 @@ await page.addInitScript((value) => localStorage.setItem("token", value), token)
 
 /** 打开文件并切到「Text Editor」预览器。 */
 async function openInEditor(name) {
-  await page.goto(`${BASE}/#/?path=${encodeURIComponent(`/e2e/${name}`)}`, { waitUntil: "networkidle" })
+  await page.goto(`${BASE}/files?path=${encodeURIComponent(`/e2e/${name}`)}`, { waitUntil: "networkidle" })
   await page.waitForTimeout(1500)
   const select = page.locator(".ol-preview-actions .el-select").first()
   await select.click()

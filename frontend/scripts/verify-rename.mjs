@@ -52,7 +52,7 @@ const token = await page
   .then((body) => body.data.token)
 await page.addInitScript((value) => localStorage.setItem("token", value), token)
 
-await page.goto(`${BASE}/#/?path=/e2e`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/files?path=/e2e`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 
 const listNames = async () =>

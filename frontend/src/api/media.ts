@@ -350,6 +350,17 @@ export const mediaListFavorites = (page = 1, perPage = 30): Promise<Resp<Page<Me
     Resp<Page<MediaItem>>
   >
 
+/**
+ * 想看清单（个人 `watch_later` 标记的条目）。
+ *
+ * 与「媒体库 + `state=later`」的差别只在形状：这个端点直接给 `Page<MediaItem>`，
+ * 不带筛选组合，适合独立页面整页翻。仅登录用户可读（游客没有「想看」这个概念）。
+ */
+export const mediaListWatchLater = (page = 1, perPage = 30): Promise<Resp<Page<MediaItem>>> =>
+  http.get<Page<MediaItem>>("/media/watch-later", {
+    params: { page, per_page: perPage },
+  }) as Promise<Resp<Page<MediaItem>>>
+
 // ---- 聚合 ----------------------------------------------------------------
 
 export const mediaHome = (limit = 12): Promise<Resp<MediaHome>> =>

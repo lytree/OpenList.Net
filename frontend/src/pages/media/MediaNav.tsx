@@ -1,59 +1,60 @@
 import { computed, defineComponent } from "vue"
-import { useRoute, useRouter } from "vue-router"
-import { ElButton } from "element-plus"
+import { RouterLink, useRoute } from "vue-router"
 import { t } from "~/i18n"
 import { useUserStore } from "~/stores/user"
 
 /**
- * 媒体域的页面导航条：首页 / 媒体库 / 人物 / 片商 / 系列 /（播放列表 / 口味）。
+ * 媒体门面的主导航：首页 / 媒体库 / 演员 / 片商 / 系列 +（登录后）想看 / 历史。
  *
- * 媒体首页（`/media`，聚合推荐）与媒体库（`/media/library`，库内浏览）是**两个界面**，
- * 各自只是这套导航里的一个入口 —— 之前它们挤在同一页（库浏览页上方还挂着继续观看横滑条），看着像一件事，
- * 其实一个是「看什么」、一个是「找什么」。见 docs/unified-media-product-plan.md 第 48 节。
+ * 位置从页面挪到了**布局**（`layouts/MediaLayout`）。原先这条入口条只在媒体首页与
+ * 媒体库两页渲染，人物/片商/系列/播放列表页面上根本没有导航 —— 进到深处只能靠浏览器
+ * 后退。导航属于外壳，不属于某一页。
  *
- * 播放列表与口味画像都是按用户的数据（个人片单、观看口味），游客不显示入口 ——
- * 它们本身也 requiresAuth，给游客留个假按钮只会在点进去时被弹到登录页。
+ * 入口分级参照 Peach：**浏览类**（首页 / 媒体库 / 演员 / 片商 / 系列）恒在，
+ * **按用户的收藏类**（想看 / 历史 / 片单 / 口味）只在登录后出现。给游客留一个
+ * 点进去就被弹到登录页的假入口，比没有入口更让人困惑。
  */
 export default defineComponent({
   name: "MediaNav",
   setup() {
     const route = useRoute()
-    const router = useRouter()
     const user = useUserStore()
 
+    /**
+     * 每项带一个 `prefix` 而不是依赖 RouterLink 的 activeClass：
+     * 演员详情（`/media/persons/12`）与演员列表（`/media/persons`）是不同的路由记录，
+     * 靠 RouterLink 的匹配规则，详情页上「演员」不会高亮。前缀判断把「列表 + 详情」
+     * 当成同一个栏目，符合导航的语义。
+     */
     const entries = computed(() => [
-      { name: "media", label: t("media.tab_home") },
-      { name: "media-library", label: t("media.tab_libraries") },
-      { name: "media-persons", label: t("media.persons") },
-      { name: "media-studios", label: t("media.studios") },
-      { name: "media-series", label: t("media.series") },
+      { prefix: "/media", label: t("media.tab_home"), exact: true },
+      { prefix: "/media/library", label: t("media.tab_libraries") },
+      { prefix: "/media/persons", label: t("media.persons") },
+      { prefix: "/media/studios", label: t("media.studios") },
+      { prefix: "/media/series", label: t("media.series") },
       ...(user.isLogin
         ? [
-            { name: "media-playlists", label: t("media.tab_playlists") },
-            { name: "media-taste", label: t("media.tab_taste") },
+            { prefix: "/media/watch-later", label: t("media.tab_later") },
+            { prefix: "/media/history", label: t("media.tab_history") },
           ]
         : []),
     ])
 
+    const active = (prefix: string, exact?: boolean) =>
+      exact ? route.path === prefix : route.path === prefix || route.path.startsWith(`${prefix}/`)
+
     return () => (
-      <div class="ol-media-nav">
-        {entries.value.map((entry) => {
-          const active = route.name === entry.name
-          return (
-            <ElButton
-              key={entry.name}
-              size="small"
-              type={active ? "primary" : "default"}
-              plain={!active}
-              onClick={() => {
-                if (!active) void router.push({ name: entry.name })
-              }}
-            >
-              {entry.label}
-            </ElButton>
-          )
-        })}
-      </div>
+      <nav class="olm-nav">
+        {entries.value.map((entry) => (
+          <RouterLink
+            key={entry.prefix}
+            to={entry.prefix}
+            class={["olm-nav-link", active(entry.prefix, entry.exact) && "is-active"]}
+          >
+            {entry.label}
+          </RouterLink>
+        ))}
+      </nav>
     )
   },
 })

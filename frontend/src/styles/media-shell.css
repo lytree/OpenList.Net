@@ -1,0 +1,468 @@
+/* ==========================================================================
+ * 媒体门面外壳（layouts/MediaLayout）
+ *
+ * 与文件门面（`.ol-view*`，见 layout.css）是两套独立的视觉语言：
+ * - 文件门面是「管理工具」：980px 居中列 + 面包屑 + 悬浮操作条，信息密度优先；
+ * - 媒体门面是「内容站」：1360px 宽幅 + 常驻顶部栏目导航，海报/封面优先。
+ *
+ * 两边共用 tokens.css 的变量，所以切换主题（浅/深）时观感一致，但类名互不重叠 ——
+ * 这样改媒体外壳时不会顺手把文件浏览器的顶栏样式带偏。
+ * ========================================================================== */
+
+.olm-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------- 顶栏 */
+
+.olm-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--ol-bg-surface) 88%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+.olm-header-inner {
+  width: min(98%, var(--ol-content-width-wide));
+  margin: 0 auto;
+  height: 60px;
+  padding: 0 calc(1.5% + 8px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-6);
+}
+
+.olm-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.olm-logo {
+  height: 28px;
+  max-width: 140px;
+  object-fit: contain;
+}
+
+.olm-logo-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ol-radius-md);
+  background: var(--el-color-primary);
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.olm-site {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ol-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------- 栏目导航 */
+
+.olm-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  /* 窄屏时不换行、不撑破顶栏：导航自己横向滚动 */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.olm-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.olm-nav-link {
+  position: relative;
+  flex: none;
+  padding: 6px 10px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ol-text-secondary);
+  text-decoration: none;
+  border-radius: var(--ol-radius-md);
+  transition:
+    color var(--ol-dur) var(--ol-ease),
+    background var(--ol-dur) var(--ol-ease);
+}
+
+.olm-nav-link:hover {
+  color: var(--ol-text);
+  background: var(--ol-bg-hover);
+}
+
+/* 高亮用「文字变主色 + 底部 2px 短横线」：栏目多的时候，只有色块会让整条导航很吵。 */
+.olm-nav-link.is-active {
+  color: var(--el-color-primary);
+  font-weight: 600;
+}
+
+.olm-nav-link.is-active::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -2px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--el-color-primary);
+}
+
+/* ---------------------------------------------------------------- 右侧操作 */
+
+.olm-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  flex: none;
+}
+
+.olm-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 3px;
+  border-radius: var(--ol-radius-pill);
+  cursor: pointer;
+  color: var(--ol-text);
+  transition: background var(--ol-dur) var(--ol-ease);
+}
+
+.olm-user:hover {
+  background: var(--ol-bg-hover);
+}
+
+.olm-user-name {
+  font-size: 13px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- 内容区 */
+
+.olm-body {
+  flex: 1;
+  width: min(98%, var(--ol-content-width-wide));
+  margin: 0 auto;
+  padding: var(--ol-space-5) calc(1.5% + 8px) var(--ol-space-8);
+  box-sizing: border-box;
+}
+
+.olm-footer {
+  width: min(98%, var(--ol-content-width-wide));
+  margin: 0 auto;
+  padding: 18px calc(1.5% + 8px) 28px;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.olm-footer a {
+  color: var(--ol-text-muted);
+  text-decoration: none;
+}
+
+.olm-footer a:hover {
+  color: var(--el-color-primary);
+}
+
+.olm-footer-sep {
+  opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------- 卡片上的「移出清单」 */
+
+.ol-media-remove {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 1px 8px;
+  border-radius: var(--ol-radius-pill);
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  /* 常显但不抢眼：清单页的主要动作就是「移出」，藏在 hover 后面的按钮在触屏上等于不存在；
+     透明度给 0.9（而不是 0.55）—— 再低下去白字会糊在浅色海报上。 */
+  opacity: 0.9;
+  transition: opacity var(--ol-dur) var(--ol-ease);
+}
+
+.ol-media-card:hover .ol-media-remove {
+  opacity: 1;
+}
+
+.ol-media-remove:hover {
+  background: var(--el-color-danger);
+}
+
+/* ---------------------------------------------------------------- 观看历史 */
+
+.olm-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-6);
+}
+
+.olm-history-day-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ol-text-secondary);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  margin-bottom: var(--ol-space-2);
+}
+
+.olm-history-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-4);
+  padding: 8px;
+  border-radius: var(--ol-radius-lg);
+  cursor: pointer;
+  transition: background var(--ol-dur) var(--ol-ease);
+}
+
+.olm-history-row:hover {
+  background: var(--ol-bg-hover);
+}
+
+.olm-history-thumb {
+  width: 104px;
+  height: 59px;
+  flex: none;
+  border-radius: var(--ol-radius-md);
+  overflow: hidden;
+  background: var(--ol-bg-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.olm-history-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.olm-history-thumb-fallback {
+  color: var(--ol-text-muted);
+  font-size: 22px;
+}
+
+.olm-history-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.olm-history-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.olm-history-year {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  font-weight: 400;
+}
+
+.olm-history-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  /* 每一项各自不折行（「10 min」被拆成两行最难读），换行只发生在项之间 */
+  white-space: nowrap;
+  /* 每一项各自不折行（「10 min」被拆成两行最难读），换行只发生在项之间 */
+  white-space: nowrap;
+  color: var(--ol-text-muted);
+}
+
+.olm-history-play {
+  flex: none;
+}
+
+/* ---------------------------------------------------------------- 任务中心 */
+
+.olm-task-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--ol-radius-lg);
+  overflow: hidden;
+}
+
+.olm-task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-4);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: var(--ol-bg-surface);
+}
+
+.olm-task-row:last-child {
+  border-bottom: none;
+}
+
+.olm-task-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.olm-task-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ol-text);
+}
+
+.olm-task-sub {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.olm-task-times {
+  flex: none;
+  text-align: right;
+  font-size: 12px;
+  color: var(--ol-text-secondary);
+  line-height: 18px;
+}
+
+.olm-task-muted {
+  color: var(--ol-text-muted);
+}
+
+.olm-task-error {
+  flex: none;
+  font-size: 12px;
+  color: var(--el-color-danger);
+  cursor: help;
+}
+
+/* ---------------------------------------------------------------- 窄屏 */
+
+@media (max-width: 900px) {
+  .olm-header-inner {
+    gap: var(--ol-space-3);
+  }
+
+  /* 顶栏只留品牌 + 导航 + 头像：语言切换收进用户菜单，主题按钮保留（它只有 32px）。 */
+  .olm-lang {
+    display: none;
+  }
+
+  .olm-site {
+    max-width: 96px;
+  }
+}
+
+@media (max-width: 600px) {
+  /*
+   * 窄屏换成两行：第一行品牌 + 账户，第二行整行导航。
+   * 单行时导航只剩「第一个栏目」的宽度，其余全靠横向滑动 —— 用户看到的是一条被截断的
+   * 导航，不知道右边还有东西；整行给导航之后，滑动区域本身就是提示。
+   */
+  .olm-header-inner {
+    height: auto;
+    padding: 8px 10px 0;
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .olm-brand {
+    order: 1;
+    flex: 1;
+  }
+
+  .olm-actions {
+    order: 2;
+  }
+
+  .olm-nav {
+    order: 3;
+    flex: 1 0 100%;
+    padding-bottom: 6px;
+  }
+
+  .olm-body {
+    padding: 12px 10px 32px;
+  }
+
+  .olm-footer {
+    padding: 14px 10px 24px;
+  }
+
+  /* 品牌退化成首字母方块（与文件门面同样的取舍）：≤600px 时站点名会挤掉导航。 */
+  .olm-site {
+    display: none;
+  }
+
+  .olm-history-thumb {
+    width: 80px;
+    height: 45px;
+  }
+
+  /* 提高一格选择器：Element Plus 的 `.el-button` 也是 0,1,0，靠后加载会盖掉
+     `.olm-history-play` 的 display:none（按钮类样式是按需注入的，顺序不由我们控制）。 */
+  .olm-history-row .olm-history-play {
+    display: none;
+  }
+
+  .olm-history-title {
+    font-size: 13px;
+  }
+
+  .olm-task-row {
+    padding: 10px 12px;
+  }
+
+  .olm-task-times {
+    display: none;
+  }
+}

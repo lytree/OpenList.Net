@@ -248,14 +248,15 @@ check(
 )
 
 // ---------- 4. 媒体库：facets 筛选 + 维度入口 ----------
-await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/library`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-facets", { timeout: 10000 })
 
 const facetChips = await page.locator(".ol-media-facets .ol-media-chip-tag").count()
 check("媒体库页渲染 facets 筛选条", facetChips > 3, `${facetChips} chips`)
 
-const navCount = await page.locator(".ol-media-nav .el-button").count()
-check("媒体域导航 7 个入口（首页 + 媒体库 + 5 个维度）", navCount === 7, `${navCount} buttons`)
+// 登录态下导航是 7 项：首页 / 媒体库 / 演员 / 片商 / 系列 + 想看 / 历史（游客只有前 5 项）
+const navCount = await page.locator(".olm-nav .olm-nav-link").count()
+check("媒体外壳导航 7 项（5 浏览 + 想看/历史）", navCount === 7, `${navCount} links`)
 
 const cardsBefore = await page.locator(".ol-media-grid .ol-media-card").count()
 await page.locator(".ol-media-facets .ol-media-chip-tag", { hasText: "Blade Runner" }).count()
@@ -269,7 +270,7 @@ await yearChip.click()
 await page.waitForTimeout(500)
 
 // ---------- 5. 人物列表 / 详情 ----------
-await page.locator(".ol-media-nav .el-button", { hasText: "People" }).click()
+await page.locator(".olm-nav .olm-nav-link", { hasText: "People" }).click()
 await page.waitForSelector(".ol-media-person-card", { timeout: 10000 })
 const personCards = await page.locator(".ol-media-person-card").count()
 check("人物列表 5 张卡片", personCards === 5, `${personCards}`)
@@ -288,7 +289,7 @@ const goslingInitial = (await goslingCard.locator(".ol-media-avatar").innerText(
 check("无头像人物回退姓名首字且不发图片请求", goslingImgs === 0 && goslingInitial === "R", `imgs=${goslingImgs} text=${goslingInitial}`)
 
 // 人物详情的大号头像
-await page.goto(`${BASE}/#/media/persons/${ford?.id}`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/persons/${ford?.id}`, { waitUntil: "networkidle" })
 await page
   .waitForFunction(
     () => (document.querySelector(".ol-media-detail-title-plain")?.textContent ?? "").includes("Harrison"),
@@ -304,7 +305,7 @@ const detailAvatar = await page
 check("人物详情大号头像渲染", detailAvatar === true, "")
 
 // 回到列表继续原来的流程（上面为了验大号头像离开了列表页）
-await page.goto(`${BASE}/#/media/persons`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/persons`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-person-card", { timeout: 10000 })
 
 await page.locator(".ol-media-person-card", { hasText: "Denis Villeneuve" }).first().click()
@@ -325,8 +326,8 @@ const roleTags = await page.locator(".ol-media-person-head .el-tag").allInnerTex
 check("人物详情含 Director 角色标签", roleTags.some((tag) => tag.includes("Director")), roleTags.join("|"))
 
 // ---------- 6. 片商 / 系列 ----------
-await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
-await page.locator(".ol-media-nav .el-button", { hasText: "Studios" }).click()
+await page.goto(`${BASE}/media/library`, { waitUntil: "networkidle" })
+await page.locator(".olm-nav .olm-nav-link", { hasText: "Studios" }).click()
 await page.waitForSelector(".ol-media-taxonomy-chip", { timeout: 10000 })
 const studioChips = await page.locator(".ol-media-taxonomy-chip").allInnerTexts()
 check(
@@ -340,7 +341,7 @@ const studioItems = await page.locator(".ol-media-grid .ol-media-card").count()
 check("片商详情显示 Warner 名下 2 部", studioItems === 2, `${studioItems}`)
 
 // 深链（**不带** ?name=）：标题必须来自详情接口。旧实现直接输地址会显示「Studio #2」。
-await page.goto(`${BASE}/#/media/studios/${warner?.id}`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/studios/${warner?.id}`, { waitUntil: "networkidle" })
 await page
   .waitForFunction(
     () => (document.querySelector(".ol-media-page-title")?.textContent ?? "").includes("Warner"),
@@ -351,12 +352,12 @@ await page
 const deepStudioTitle = ((await page.locator(".ol-media-page-title").textContent()) ?? "").trim()
 check("片商深链标题 = 真实名称（不再退化 Studio #id）", deepStudioTitle === "Warner Bros.", deepStudioTitle)
 
-await page.goto(`${BASE}/#/media/series`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/series`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-taxonomy-chip", { timeout: 10000 })
 const seriesChips = await page.locator(".ol-media-taxonomy-chip").allInnerTexts()
 check("系列页含 Blade Runner", seriesChips.some((t) => t.includes("Blade Runner")), seriesChips.join("|"))
 
-await page.goto(`${BASE}/#/media/series/${bladeRunner?.id}`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/series/${bladeRunner?.id}`, { waitUntil: "networkidle" })
 await page
   .waitForFunction(
     () => (document.querySelector(".ol-media-page-title")?.textContent ?? "").includes("Blade Runner"),
@@ -368,7 +369,7 @@ const deepSeriesTitle = ((await page.locator(".ol-media-page-title").textContent
 check("系列深链标题 = 真实名称", deepSeriesTitle === "Blade Runner", deepSeriesTitle)
 
 // 不存在的 id：显示 Not found，而不是编一个「Studio #999」出来
-await page.goto(`${BASE}/#/media/studios/999`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/studios/999`, { waitUntil: "networkidle" })
 await page
   .waitForFunction(
     () => (document.querySelector(".ol-media-page-title")?.textContent ?? "").includes("Not found"),
@@ -401,7 +402,7 @@ check(
   JSON.stringify(tasteBogus.data?.windowDays),
 )
 
-await page.goto(`${BASE}/#/media/taste`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/taste`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-stat-card", { timeout: 10000 })
 const statValues = await page.locator(".ol-media-stat-value").allInnerTexts()
 check("口味页统计卡有 6 张", statValues.length === 6, `${statValues.length}`)
@@ -429,7 +430,7 @@ const summary = ((await page.locator(".ol-media-taste-summary").innerText().catc
 check("窗口内偏好面板仍在（Favorites: 1）", summary.includes("Favorites: 1"), summary)
 
 // ---------- 8. 播放列表：建 → 加 → 重排 → 移除 ----------
-await page.goto(`${BASE}/#/media/playlists`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/playlists`, { waitUntil: "networkidle" })
 await page.locator(".el-button", { hasText: "New playlist" }).first().click()
 await page.waitForSelector(".el-dialog", { timeout: 5000 })
 await page.locator(".el-dialog input").first().fill(PLAYLIST_NAME)
@@ -439,7 +440,7 @@ const playlistCards = await page.locator(".ol-media-playlist-card").count()
 check("播放列表创建后出现 1 张卡片", playlistCards === 1, `${playlistCards}`)
 
 // 从条目详情加入：第一部（Blade Runner 1982）
-await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/library`, { waitUntil: "networkidle" })
 await page.locator(".ol-media-grid .ol-media-card", { hasText: "Blade Runner" }).first().click()
 await page.waitForSelector(".ol-media-detail-actions", { timeout: 10000 })
 check(
@@ -455,7 +456,7 @@ await page.locator(".el-dialog__footer .el-button--primary").click()
 await page.waitForTimeout(800)
 
 // 第二部（Blade Runner 2049）
-await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/library`, { waitUntil: "networkidle" })
 await page.locator(".ol-media-grid .ol-media-card", { hasText: "Blade Runner 2049" }).first().click()
 await page.waitForSelector(".ol-media-detail-actions", { timeout: 10000 })
 await page.locator(".ol-media-detail-actions .el-button", { hasText: "Add to playlist" }).click()
@@ -476,7 +477,7 @@ check(
   JSON.stringify(queue?.preview_items),
 )
 
-await page.goto(`${BASE}/#/media/playlists`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/playlists`, { waitUntil: "networkidle" })
 await page.locator(".ol-media-playlist-card", { hasText: PLAYLIST_NAME }).locator(".el-button", { hasText: "Open" }).click()
 await page.waitForSelector(".ol-media-queue-row", { timeout: 10000 })
 const queueRows = await page.locator(".ol-media-queue-row").count()
@@ -500,7 +501,7 @@ const rowsAfterRemove = await page.locator(".ol-media-queue-row").count()
 check("移除后剩 1 行", rowsAfterRemove === 1, `${rowsAfterRemove}`)
 
 // ---------- 9. 字幕对话框 ----------
-await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/library`, { waitUntil: "networkidle" })
 await page.locator(".ol-media-grid .ol-media-card", { hasText: "Arrival" }).first().click()
 await page.waitForSelector(".ol-media-detail-actions", { timeout: 10000 })
 await page.locator(".ol-media-detail-actions .el-button", { hasText: "Subtitles" }).click()

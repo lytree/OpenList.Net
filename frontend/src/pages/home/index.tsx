@@ -753,7 +753,7 @@ export default defineComponent({
             />
           )}
 
-          {isEmpty.value && <ElEmpty description="此目录为空" />}
+          {isEmpty.value && <ElEmpty description={t("home.empty_dir")} />}
 
           {noMatch.value && (
             <ElEmpty description={`没有匹配「${files.keyword.value}」的条目`} />

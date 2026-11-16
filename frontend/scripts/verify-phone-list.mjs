@@ -118,7 +118,7 @@ try {
   )
 
   // 文件浏览是独立门面 /files，当前目录用 ?path= 指定（深链）
-  await page.goto(`${BASE}/#/files?path=${encodeURIComponent(MOUNT)}`, { waitUntil: "networkidle" })
+  await page.goto(`${BASE}/files?path=${encodeURIComponent(MOUNT)}`, { waitUntil: "networkidle" })
   // 固定为浅色再量（主题只在初始化时读一次，改完要 reload 才生效）
   await page.evaluate(() => localStorage.setItem("theme-mode", "light"))
   await page.reload({ waitUntil: "networkidle" })

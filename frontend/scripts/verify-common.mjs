@@ -33,8 +33,9 @@ page.on("console", (msg) => {
 })
 page.on("pageerror", (e) => errors.push(String(e)))
 
-const goto = async (hash) => {
-  await page.goto(`${BASE}/${hash}`, { waitUntil: "networkidle" })
+/** 导航到站内路径（history 路由：传 `/media` 这样的真实路径，不是 `#/media`）。 */
+const goto = async (path) => {
+  await page.goto(`${BASE}${path}`, { waitUntil: "networkidle" })
   await page.waitForTimeout(800)
 }
 
@@ -43,11 +44,16 @@ const goto = async (hash) => {
 // 不登录也能看库/详情/海报；文件浏览（/files）与个人页（播放列表、口味）需要账户。
 // 这里同时守住「游客停在媒体页不被弹走」：页面挂载时不能去调按用户的接口（收藏/续播），
 // 否则 401 → 全局处理 → 登录页，而登录页的「以访客身份浏览」又回 `/`，来回死循环。
-await goto("#/")
+await goto("/")
 check(
-  "游客打开首页落在媒体首页",
-  /#\/media/.test(page.url()) && (await page.locator(".ol-auth").count()) === 0,
+  "游客打开 / 落在媒体首页（history 路由，没有 #）",
+  /\/media$/.test(page.url()) && (await page.locator(".ol-auth").count()) === 0,
   page.url(),
+)
+check(
+  "媒体门面用独立外壳（olm-shell），不是文件门面的 ol-view",
+  (await page.locator(".olm-shell").count()) === 1 && (await page.locator(".ol-view").count()) === 0,
+  `olm-site=${await page.locator(".olm-site").innerText().catch(() => "")}`,
 )
 check(
   "游客能渲染媒体页面",
@@ -62,24 +68,29 @@ const anonFs = await page.request.post(`${BASE}/api/fs/list`, { data: { path: "/
 check("首页默认要求登录（匿名 /api/fs/list 401）", anonFs.status() === 401, `${anonFs.status()}`)
 
 check(
-  "游客顶栏只有媒体入口（没有首页）",
-  (await page.locator('.ol-view-links a[href*="#/files"]').count()) === 0,
-  `filesLinks=${await page.locator('.ol-view-links a[href*="#/files"]').count()}`,
+  "游客在媒体门面看不到文件入口",
+  (await page.locator('a[href*="/files"]').count()) === 0,
+  `filesLinks=${await page.locator('a[href*="/files"]').count()}`,
 )
 
-await goto("#/files")
-check("游客进文件浏览被要求登录", /#\/@login/.test(page.url()), page.url())
+await goto("/files")
+check("游客进文件浏览被要求登录", /\/@login/.test(page.url()), page.url())
 
-await goto("#/@manage/storages")
-check("游客访问管理台被弹回首页", !/#\/@manage/.test(page.url()), page.url())
+await goto("/@manage/storages")
+// 只看 pathname：登录页会带上 `?redirect=/@manage/...`，用整串 URL 判断会把回跳参数误当成「还在管理台」。
+check(
+  "游客访问管理台被弹到登录页",
+  new URL(page.url()).pathname === "/@login",
+  page.url(),
+)
 check(
   "游客身份下不显示用户名",
-  (await page.locator(".ol-user").count()) === 0,
-  `ol-user=${await page.locator(".ol-user").count()}`,
+  (await page.locator(".ol-user, .olm-user").count()) === 0,
+  `user=${await page.locator(".ol-user, .olm-user").count()}`,
 )
 
 // ---------- A. 错误口令不放行 ----------
-await goto("#/@login")
+await goto("/@login")
 check("直接访问登录页可渲染", (await page.locator(".ol-auth").count()) === 1, page.url())
 await page.locator(".ol-auth input").first().fill("admin")
 await page.locator(".ol-auth input").nth(1).fill("wrong-password")
@@ -96,7 +107,7 @@ await page.locator(".ol-auth input").nth(1).fill(PASS)
 await page.locator(".ol-auth-card button.el-button--primary").first().click()
 await page.waitForTimeout(2500)
 const token = await page.evaluate(() => localStorage.getItem("token"))
-check("登录成功并落 token", Boolean(token) && !/#\/@login/.test(page.url()), page.url())
+check("登录成功并落 token", Boolean(token) && !/\/@login/.test(page.url()), page.url())
 
 // 刷新后仍登录（token 恢复 + 守卫放行）
 await page.reload({ waitUntil: "networkidle" })
@@ -106,15 +117,15 @@ check("刷新后保持登录", (await page.locator(".ol-auth").count()) === 0, p
 // ---------- E. 管理台 9 个模块都能打开 ----------
 // （单用户产品已移除 users / shares / messenger 三页；about 是最后一个，见 §38）
 const ADMIN_PAGES = [
-  ["#/@manage/dashboard", "Dashboard"],
-  ["#/@manage/storages", "Storages"],
-  ["#/@manage/metas", "Metas"],
-  ["#/@manage/indexes", "Indexes"],
-  ["#/@manage/tasks", "Tasks"],
-  ["#/@manage/media", "Media"],
-  ["#/@manage/backup-restore", "Backup"],
-  ["#/@manage/settings", "Settings"],
-  ["#/@manage/about", "About"],
+  ["/@manage/dashboard", "Dashboard"],
+  ["/@manage/storages", "Storages"],
+  ["/@manage/metas", "Metas"],
+  ["/@manage/indexes", "Indexes"],
+  ["/@manage/tasks", "Tasks"],
+  ["/@manage/media", "Media"],
+  ["/@manage/backup-restore", "Backup"],
+  ["/@manage/settings", "Settings"],
+  ["/@manage/about", "About"],
 ]
 for (const [hash, label] of ADMIN_PAGES) {
   const before = errors.length
@@ -132,7 +143,7 @@ for (const [hash, label] of ADMIN_PAGES) {
 // ---------- F. 关于页：每个数字都要和接口对得上 ----------
 // 这一页不放任何写死的期望值（版本号随构建变、路径随部署变，写死必然假失败），
 // 断言的是「界面 == GET /api/admin/system/info」。
-await goto("#/@manage/about")
+await goto("/@manage/about")
 await page.waitForSelector(".ol-about-hero", { timeout: 15000 })
 const info = await page.request
   .get(`${BASE}/api/admin/system/info`, { headers: { Authorization: token } })
@@ -231,8 +242,8 @@ await page.waitForTimeout(1200)
 check("点刷新重新请求 system/info", infoCalls >= 1, `calls=${infoCalls}`)
 
 // ---------- G. 外观：暗色主题 + 语言控件 ----------
-await goto("#/")
-const themeBtn = page.locator(".el-header button.el-button.is-circle").last()
+await goto("/media")
+const themeBtn = page.locator(".olm-header button.el-button.is-circle").last()
 const darkBefore = await page.evaluate(() => document.documentElement.classList.contains("dark"))
 await themeBtn.click()
 await page.waitForTimeout(600)
@@ -249,10 +260,10 @@ const darkKept = await page.evaluate(() => document.documentElement.classList.co
 check("刷新后主题保持", darkKept === darkAfter, `dark=${darkKept}`)
 
 // 切回浅色，避免影响后续截图/轮次
-await page.locator(".el-header button.el-button.is-circle").last().click()
+await page.locator(".olm-header button.el-button.is-circle").last().click()
 await page.waitForTimeout(400)
 
-const langTrigger = page.locator(".el-header .el-dropdown").first()
+const langTrigger = page.locator(".olm-header .el-dropdown").first()
 check("语言控件存在", (await langTrigger.count()) > 0)
 // 字典目前只有 en（见 i18n/index.ts 的 availableLanguages），因此只验证控件可用，
 // 不假装验证「多语言切换」—— 那需要先有第二份字典。
@@ -260,7 +271,7 @@ const langText = (await langTrigger.innerText().catch(() => "")) || ""
 check("语言控件显示当前语言", langText.trim().length > 0, langText.replace(/\s+/g, " "))
 
 // ---------- A. 退出登录 ----------
-const userMenu = page.locator(".ol-user").first()
+const userMenu = page.locator(".olm-user").first()
 if ((await userMenu.count()) > 0) {
   await userMenu.click()
   await page.waitForTimeout(500)
@@ -275,8 +286,8 @@ const afterLogout = await page.evaluate(() => localStorage.getItem("token"))
 // 真正要断言的是凭据被清掉、且 UI 不再呈现已登录身份。
 check(
   "退出登录后清 token 并回到游客态",
-  !afterLogout && (await page.locator(".ol-user").count()) === 0,
-  `${page.url()} token=${afterLogout} user=${await page.locator(".ol-user").count()}`,
+  !afterLogout && (await page.locator(".olm-user").count()) === 0,
+  `${page.url()} token=${afterLogout} user=${await page.locator(".olm-user").count()}`,
 )
 
 check("全程无控制台错误", errors.length === 0, errors.slice(0, 3).join(" | "))

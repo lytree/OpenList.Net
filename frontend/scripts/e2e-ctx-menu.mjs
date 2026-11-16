@@ -96,14 +96,14 @@ async function main() {
     page.on("pageerror", (e) => consoleErrors.push(String(e)))
 
     // 登录
-    await page.goto(`${DEV}/#/@login`, { waitUntil: "networkidle" })
+    await page.goto(`${DEV}/@login`, { waitUntil: "networkidle" })
     await page.locator('input[placeholder]:not([readonly])').first().fill("admin")
     await page.locator("input[type=password]").fill("admin")
     await page.getByRole("button").last().click()
     await page.waitForURL((u) => !u.href.includes("@login"), { timeout: 15000 })
 
     // 进入隔离目录
-    await page.goto(`${DEV}/#/?path=${encodeURIComponent(TEST_DIR)}`, { waitUntil: "networkidle" })
+    await page.goto(`${DEV}/?path=${encodeURIComponent(TEST_DIR)}`, { waitUntil: "networkidle" })
     await page.waitForTimeout(1200)
     ok(await page.locator(".ol-file-name", { hasText: TEST_FILE }).first().isVisible(), "seed file listed")
 

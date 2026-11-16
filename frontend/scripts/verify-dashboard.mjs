@@ -108,7 +108,7 @@ check("库已匹配 1 条", libStatus?.matched === 1, `matched=${libStatus?.matc
 check("库待刮削 1 条", libStatus?.pending === 1, `pending=${libStatus?.pending}`)
 
 // ---------- 3. 页面 ----------
-await page.goto(`${BASE}/#/@manage/dashboard`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/@manage/dashboard`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1000)
 
 const heading = (await page.locator(".ol-manage-toolbar .ol-manage-h2").innerText().catch(() => "")).trim()

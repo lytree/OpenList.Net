@@ -11,7 +11,7 @@ import { useSettingsStore } from "~/stores/settings"
  * 应用根：只做三件事
  * 1. Element Plus 的语言包跟随 i18n 的 locale（EP 组件内部文案，如分页/日期）；
  * 2. 把站点品牌色注入成 --el-color-primary 系列变量；
- * 3. 渲染 RouterView（布局由路由表里的 BasicLayout 承担，登录页为 blank 布局）。
+ * 3. 渲染 RouterView（布局由路由表承担：媒体 MediaLayout、文件 FilesLayout、登录页 blank）。
  */
 export default defineComponent({
   name: "App",

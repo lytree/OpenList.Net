@@ -20,17 +20,19 @@ import { useUserStore } from "~/stores/user"
 import { useTheme } from "~/composables/useTheme"
 
 /**
- * 浏览侧外壳（复刻 OpenList-Frontend 的 `pages/home` 布局）。
+ * 文件门面的外壳（原来的 `BasicLayout`）。
  *
- * 旧前端没有左侧导航：顶部是一条约 44px 高的 logo 栏，下面是**居中定宽**的内容列
- * （`min(99%, 980px)`），最后是仅含「管理 / 登录」入口的页脚。导航（面包屑）、
- * 操作按钮和批量选择条都是浮在内容之上的小挂件，不占版面。
+ * 复刻 OpenList-Frontend 的 `pages/home` 布局：顶部一条 ~44px 的 logo 栏，下面是
+ * **居中定宽**的内容列（`min(99%, 980px)`），最后是仅含「管理 / 登录」入口的页脚。
+ * 导航（面包屑）、操作按钮和批量选择条都是浮在内容之上的小挂件，不占版面 ——
+ * 文件浏览器的主视觉必须是列表本身。
  *
- * 这里的职责只有「顶栏 + 内容列 + 页脚」三件；面包屑与操作条在 `pages/home` 内部，
- * 因为它们依赖文件列表状态。
+ * **与媒体门面（`MediaLayout`）完全隔离**：这里不再有「媒体 / 首页」并排的双入口。
+ * 文件树是需要登录的私人门面，媒体是对外的公开门面，两者的导航语义不同；
+ * 返回媒体的入口收在顶栏左侧一个「媒体」链接里，游客则根本看不到本布局。
  */
 export default defineComponent({
-  name: "BasicLayout",
+  name: "FilesLayout",
   setup() {
     const route = useRoute()
     const router = useRouter()
@@ -38,24 +40,20 @@ export default defineComponent({
     const user = useUserStore()
     const { isDark, toggle } = useTheme()
 
-    const isHome = computed(() => route.name === "home")
     const wide = computed(() => route.meta.wide === true)
 
     /** 手机端汉堡抽屉：导航与账户操作收进这里，避免顶栏在窄屏挤崩。 */
     const navOpen = ref(false)
     watch(() => route.fullPath, () => (navOpen.value = false))
 
-    const isMedia = computed(() => route.path.startsWith("/media"))
-
-    /** 顶栏「媒体」入口：登录用户恒可见；游客看 `media_guest_access`。 */
+    /** 顶栏「媒体」入口：媒体是公开门面，登录用户与可访问媒体的游客都看得到。 */
     const showMediaLink = computed(() => user.isLogin || settings.mediaGuestAccess)
-    /** 顶栏「首页」入口：登录用户恒可见；游客只在管理员放开 `home_guest_access` 时可见。 */
-    const showHomeLink = computed(() => user.isLogin || settings.homeGuestAccess)
 
     async function onLogout() {
       navOpen.value = false
       await user.logout()
-      await router.push("/")
+      // 退出后文件树立刻不可见，落到公开的媒体首页。
+      await router.push("/media")
     }
 
     function onUserCommand(command: string) {
@@ -115,7 +113,7 @@ export default defineComponent({
               </ElIcon>
             </ElButton>
 
-            <RouterLink to="/" class="ol-view-brand" title={settings.siteTitle}>
+            <RouterLink to="/files" class="ol-view-brand" title={settings.siteTitle}>
               {settings.logo ? (
                 <img class="ol-view-logo" src={settings.logo} alt={settings.siteTitle} />
               ) : (
@@ -129,22 +127,10 @@ export default defineComponent({
             </RouterLink>
 
             <nav class="ol-view-links">
-              {/* 两个门面各自按访客开关决定要不要露入口（设置 → 访问控制）：
-                  - 媒体（`/media`）默认对游客开放，所以游客也看得到；
-                  - 首页（`/files`）默认要登录，未登录且没开 `home_guest_access` 时**不渲染** ——
-                    挂在外面只会让人点进去被守卫弹回登录页，等于给游客一个假入口。
-                  开关与路由守卫读的是同一组公开设置，不会出现「入口在、点进去 401」。 */}
+              {/* 只留一个「媒体」出口：文件门面里不需要再确认「你在文件门面」。 */}
               {showMediaLink.value && (
-                <RouterLink
-                  to="/media"
-                  class={["ol-view-link", route.path.startsWith("/media") && "is-active"]}
-                >
+                <RouterLink to="/media" class="ol-view-link">
                   {t("global.nav_media")}
-                </RouterLink>
-              )}
-              {showHomeLink.value && (
-                <RouterLink to="/files" class={["ol-view-link", isHome.value && "is-active"]}>
-                  {t("global.nav_home")}
                 </RouterLink>
               )}
             </nav>
@@ -155,7 +141,7 @@ export default defineComponent({
                 onCommand={(code: string) => setLocale(code)}
                 v-slots={{
                   default: () => (
-                    <ElButton text={true} size="small">
+                    <ElButton text={true} size="small" class="ol-view-lang">
                       {availableLanguages.find((l) => l.code === locale.value)?.name ?? locale.value}
                     </ElButton>
                   ),
@@ -195,9 +181,7 @@ export default defineComponent({
                     ),
                     dropdown: () => (
                       <ElDropdownMenu>
-                        {user.isLogin && (
-                          <ElDropdownItem command="manage">{t("global.nav_manage")}</ElDropdownItem>
-                        )}
+                        <ElDropdownItem command="manage">{t("global.nav_manage")}</ElDropdownItem>
                         <ElDropdownItem command="password">
                           {t("global.change_password")}
                         </ElDropdownItem>
@@ -212,7 +196,11 @@ export default defineComponent({
                   }}
                 />
               ) : (
-                <ElButton type="primary" size="small" onClick={() => router.push("/@login")}>
+                <ElButton
+                  type="primary"
+                  size="small"
+                  onClick={() => router.push({ name: "login", query: { redirect: encodeURIComponent(route.fullPath) } })}
+                >
                   {t("login.login")}
                 </ElButton>
               )}
@@ -241,19 +229,10 @@ export default defineComponent({
           {showMediaLink.value && (
             <RouterLink
               to="/media"
-              class={["ol-view-drawer-link", isMedia.value && "is-active"]}
+              class="ol-view-drawer-link"
               onClick={() => (navOpen.value = false)}
             >
               {t("global.nav_media")}
-            </RouterLink>
-          )}
-          {showHomeLink.value && (
-            <RouterLink
-              to="/files"
-              class={["ol-view-drawer-link", isHome.value && "is-active"]}
-              onClick={() => (navOpen.value = false)}
-            >
-              {t("global.nav_home")}
             </RouterLink>
           )}
 
@@ -324,7 +303,7 @@ export default defineComponent({
               type="primary"
               onClick={() => {
                 navOpen.value = false
-                void router.push("/@login")
+                void router.push({ name: "login", query: { redirect: encodeURIComponent(route.fullPath) } })
               }}
             >
               {t("login.login")}

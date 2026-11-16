@@ -40,7 +40,7 @@ await page.addInitScript((value) => localStorage.setItem("token", value), token)
 
 /** 打开某个文件的预览页并等它稳定下来（异步分包 + 取数都要时间）。 */
 async function openFile(name, wait = 2500) {
-  await page.goto(`${BASE}/#/?path=${encodeURIComponent(`${TARGET}/${name}`)}`, {
+  await page.goto(`${BASE}/files?path=${encodeURIComponent(`${TARGET}/${name}`)}`, {
     waitUntil: "networkidle",
   })
   await page.waitForTimeout(wait)

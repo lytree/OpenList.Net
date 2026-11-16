@@ -68,17 +68,17 @@ async function main() {
     })
     page.on("pageerror", (e) => consoleErrors.push(String(e)))
 
-    // 登录（注意：路由是 /#/@login；页面上还有只读 combobox，必须按 placeholder 定位）
-    await page.goto(`${DEV}/#/@login`, { waitUntil: "networkidle" })
+    // 登录（注意：路由是 /@login；页面上还有只读 combobox，必须按 placeholder 定位）
+    await page.goto(`${DEV}/@login`, { waitUntil: "networkidle" })
     await page.locator('input[placeholder]:not([readonly])').first().fill("admin")
     await page.locator("input[type=password]").fill("admin")
     await page.getByRole("button").last().click()
-    // 登录成功 = 离开 /@login（正则不能写成 /#\/…/，那会匹配登录页自身）
+    // 登录成功 = 离开 /@login（正则不能写成 /\/…/，那会匹配登录页自身）
     await page.waitForURL((u) => !u.href.includes("@login"), { timeout: 15000 })
     console.log("logged in, url:", page.url())
 
     // 进入 /Shared（本地存储挂载目录）
-    await page.goto(`${DEV}/#/?path=/Shared`, { waitUntil: "networkidle" })
+    await page.goto(`${DEV}/?path=/Shared`, { waitUntil: "networkidle" })
     await page.waitForTimeout(1000)
 
     // 点上传按钮

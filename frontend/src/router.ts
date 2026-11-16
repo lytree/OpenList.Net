@@ -1,6 +1,6 @@
 import {
   createRouter,
-  createWebHashHistory,
+  createWebHistory,
   type RouteRecordRaw,
   type RouterHistory,
 } from "vue-router"
@@ -16,25 +16,45 @@ import { GuestSwitch, guestBlocked } from "~/utils/access"
 /**
  * 路由。
  *
- * 用 hash 模式：桌面端（Avalonia）与反代场景下 dist 可能挂在任意前缀/自定义协议上，
- * history 模式需要服务端 rewrite 配合，hash 模式零配置。
+ * **history 模式**：URL 就是真实路径（`/media/library`、`/files?path=/a`），没有 `#`。
+ * 服务端已把未命中的路径回落到 `index.html`（Program.cs 的 `MapFallback("{*path}")`），
+ * 所以刷新 / 直接粘贴深链都成立；桌面端（Avalonia）同样是核心起在本机端口上再被
+ * WebView 加载，走的是同一条回落，不需要自定义协议的特判。
  *
- * 但外部链接（旧前端书签、文档、第三方面板）写的是**路径式**深链
- * （`http://host/@login?redirect=/`）。hash 模式下这种地址的 pathname 会被忽略，
- * 打开后落在 `#/`（首页）—— 看起来「登录页/安装页根本进不去」。所以在建 router 之前
- * 先把它归一化成 `/#/@login?...`，两种写法就都能用了。
+ * 站点的两个门面是**两棵互相独立的树**，各自一个布局组件、各自一套守卫：
+ *
+ * - `/media/**` → `MediaLayout`（公开门面，默认落地页）。游客默认可进
+ *   （`media_guest_access=true`）；关掉之后连海报都要登录。
+ * - `/files/**` → `FilesLayout`（私人门面：文件树属于「找文件 / 管理」）。
+ *   默认要求登录（`home_guest_access=false`）；管理员显式放开后游客可只读浏览。
+ *
+ * 拆成两棵树而不是「一棵树 + 条件渲染」，是因为两者需要的外壳根本不同：媒体要的是
+ * 海报墙的宽幅容器与内容导航，文件要的是面包屑与操作条。挤在同一个布局里，
+ * 每一处都要写 `route.path.startsWith("/media")` 的分支，游客还会在公开页面上
+ * 看到自己进不去的「文件」入口。
  */
-function normalizePathStyleDeepLink() {
+
+/**
+ * 老地址兼容（两代）。
+ *
+ * 1. **hash 模式**（`/#/media/item/1`、`/#/@login?redirect=/`）：旧前端书签、文档、
+ *    第三方面板里到处是这种写法。直接换成 history 后这些地址的 pathname 是 `/`，
+ *    打开只会落回首页 —— 看起来「收藏的详情页全丢了」。这里就地改写 URL
+ *    （`replaceState`，不产生一条多余的历史记录），后续 router 按正常路径解析。
+ * 2. **更老的文件深链**（`/?path=/a/b`）不需要在这里管：根路由的 `redirect`
+ *    会把它转给 `/files`。
+ */
+function migrateLegacyHashLink() {
   if (typeof window === "undefined") return
-  if (window.location.hash) return // 已经是 hash 路由，别动
+  const { hash } = window.location
+  if (!hash.startsWith("#/")) return
+
+  const target = hash.slice(1) // "#/media?x=1" -> "/media?x=1"
   const prefix = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath
-  const { pathname, search } = window.location
-  const rel = prefix && pathname.startsWith(prefix) ? pathname.slice(prefix.length) : pathname
-  if (!rel.startsWith("/@")) return
-  window.history.replaceState(null, "", `${prefix}/#${rel}${search}`)
+  window.history.replaceState(null, "", `${prefix}${target}`)
 }
 
-normalizePathStyleDeepLink()
+migrateLegacyHashLink()
 
 const routes: RouteRecordRaw[] = [
   {
@@ -50,122 +70,157 @@ const routes: RouteRecordRaw[] = [
     component: () => import("~/pages/login"),
     meta: { layout: "blank", title: "login.login" },
   },
+
+  // ---------------------------------------------------------------- 媒体门面
   {
-    path: "/",
-    component: () => import("~/layouts/BasicLayout"),
+    path: "/media",
+    component: () => import("~/layouts/MediaLayout"),
+    meta: { guestSwitch: GuestSwitch.media },
     children: [
-      // 站点有两个**独立门面**，各有自己的访客策略（设置 → 访问控制）：
-      // - 媒体（`/media`）：默认**对游客开放**（`media_guest_access=true`），是站点的公开门面，
-      //   落地页就是它；媒体域只读端点匿名开放（见 MediaEndpoints）。
-      // - 首页（`/files`）：默认**需要登录**（`home_guest_access=false`）—— 文件树属于
-      //   「找文件 / 管理」场景。管理员放开这个开关后，游客也能只读浏览（写操作照旧
-      //   对游客隐藏：`/fs/list` 返回的 `write` 为 false）。
-      //
-      // 媒体域内部再分两层界面：`/media` 是**媒体首页**（继续观看 / 最近入库 /
-      // 最近收藏的聚合推荐），`/media/library` 是**媒体库**（按库、题材、年份、评分筛选浏览）。
-      // 两者曾经挤在同一页，见 docs/unified-media-product-plan.md 第 48 节。
-      //
-      // 旧书签/文档里的文件深链是 `/?path=/a/b`（没有 /files 前缀），这类地址照旧
-      // 转给首页：游客会被访客策略拦到登录页，登录用户则正常浏览。
       {
+        // 媒体首页：继续观看 / 想看 / 最近入库 / 最近收藏。
+        // 它是站点的**默认落地页**（`/` 就落在这里），也是对游客开放的那一面。
         path: "",
-        redirect: (to) => (to.query.path ? { name: "home", query: to.query } : { name: "media" }),
-      },
-      {
-        path: "files",
-        name: "home",
-        component: () => import("~/pages/home"),
-        meta: { title: "global.nav_home", requiresAuth: true, guestSwitch: GuestSwitch.home },
-      },
-      // 媒体域的两个界面：`/media` 是**媒体首页**（聚合推荐，点「媒体」先看到它），
-      // `/media/library` 是**媒体库**（按库/题材/年份/评分筛选浏览）。
-      // 两者共用 `MediaNav` 的入口条，见 docs/unified-media-product-plan.md 第 48 节。
-      {
-        path: "media",
         name: "media",
         component: () => import("~/pages/media/Home"),
-        meta: { title: "media.tab_home", wide: true, guestSwitch: GuestSwitch.media },
+        meta: { title: "media.tab_home", wide: true },
       },
       {
-        path: "media/library",
+        // 媒体库：按库 / 题材 / 年份 / 评分筛选浏览。与首页是**两个界面**：
+        // 这一页回答「找什么」，首页回答「看什么」（见方案文档第 48 节）。
+        path: "library",
         name: "media-library",
         component: () => import("~/pages/media"),
-        meta: { title: "media.tab_libraries", wide: true, guestSwitch: GuestSwitch.media },
+        meta: { title: "media.tab_libraries", wide: true },
       },
       {
         // 兼容：媒体首页刚拆出来时短期用过 `/media/home`
-        path: "media/home",
+        path: "home",
         redirect: { name: "media" },
       },
       {
-        path: "media/item/:id",
+        path: "item/:id(\\d+)",
         name: "media-item",
         component: () => import("~/pages/media/ItemDetail"),
-        meta: { title: "media.title", wide: true, guestSwitch: GuestSwitch.media },
+        meta: { title: "media.title", wide: true },
       },
-      // ---- 媒体域维度页（M4 第三片）----
+      // ---- 维度页 ----
       // 片商/系列共用一个列表组件与一个详情组件，靠 meta.kind 区分维度
       {
-        path: "media/persons",
+        path: "persons",
         name: "media-persons",
         component: () => import("~/pages/media/PersonList"),
-        meta: { title: "media.persons", wide: true, guestSwitch: GuestSwitch.media },
+        meta: { title: "media.persons", wide: true },
       },
       {
-        path: "media/persons/:id(\\d+)",
+        path: "persons/:id(\\d+)",
         name: "media-person",
         component: () => import("~/pages/media/PersonDetail"),
-        meta: { title: "media.persons", wide: true, guestSwitch: GuestSwitch.media },
+        meta: { title: "media.persons", wide: true },
       },
       {
-        path: "media/studios",
+        path: "studios",
         name: "media-studios",
         component: () => import("~/pages/media/TaxonomyList"),
-        meta: { title: "media.studios", kind: "studios", wide: true, guestSwitch: GuestSwitch.media },
+        meta: { title: "media.studios", kind: "studios", wide: true },
       },
       {
-        path: "media/studios/:id(\\d+)",
+        path: "studios/:id(\\d+)",
         name: "media-studio",
         component: () => import("~/pages/media/TaxonomyDetail"),
-        meta: { title: "media.studios", kind: "studios", wide: true, guestSwitch: GuestSwitch.media },
+        meta: { title: "media.studios", kind: "studios", wide: true },
       },
       {
-        path: "media/series",
+        path: "series",
         name: "media-series",
         component: () => import("~/pages/media/TaxonomyList"),
-        meta: { title: "media.series", kind: "series", wide: true, guestSwitch: GuestSwitch.media },
+        meta: { title: "media.series", kind: "series", wide: true },
       },
       {
-        path: "media/series/:id(\\d+)",
+        path: "series/:id(\\d+)",
         name: "media-series-detail",
         component: () => import("~/pages/media/TaxonomyDetail"),
-        meta: { title: "media.series", kind: "series", wide: true, guestSwitch: GuestSwitch.media },
+        meta: { title: "media.series", kind: "series", wide: true },
       },
-      // 播放列表与口味画像都是**按用户**的数据（个人片单、观看口味），游客没有，
-      // 因此这两个入口保持 requiresAuth：游客点进去先去登录，而不是看空页面。
+      // ---- 按用户的界面 ----
+      // 想看 / 历史 / 播放列表 / 口味都是「按用户」的数据，游客没有，所以这些入口
+      // 保持 requiresAuth：游客点进去先去登录，而不是看一个空页面。
       {
-        path: "media/playlists",
+        path: "watch-later",
+        name: "media-watch-later",
+        component: () => import("~/pages/media/WatchLater"),
+        meta: { title: "media.tab_later", wide: true, requiresAuth: true },
+      },
+      {
+        path: "history",
+        name: "media-history",
+        component: () => import("~/pages/media/History"),
+        meta: { title: "media.tab_history", wide: true, requiresAuth: true },
+      },
+      {
+        path: "playlists",
         name: "media-playlists",
         component: () => import("~/pages/media/Playlists"),
         meta: { title: "media.tab_playlists", wide: true, requiresAuth: true },
       },
       {
-        path: "media/playlists/:id(\\d+)",
+        path: "playlists/:id(\\d+)",
         name: "media-playlist",
         component: () => import("~/pages/media/PlaylistDetail"),
         meta: { title: "media.tab_playlists", wide: true, requiresAuth: true },
       },
       {
-        path: "media/taste",
+        path: "taste",
         name: "media-taste",
         component: () => import("~/pages/media/Taste"),
         meta: { title: "media.tab_taste", wide: true, requiresAuth: true },
       },
+      // ---- 任务中心 ----
+      // 扫描 / 刮削的进度原来只在管理台可见；媒体侧也需要「我刚点的扫描跑到哪了」，
+      // 这一页复用同一批端点，只读。
+      {
+        path: "tasks",
+        name: "media-tasks",
+        component: () => import("~/pages/media/Tasks"),
+        meta: { title: "media.tab_tasks", wide: true, requiresAuth: true },
+      },
     ],
   },
+
+  // ---------------------------------------------------------------- 文件门面
   {
-    // 管理台是**独立整页布局**（顶部标题栏 + 图标侧栏 + 内容区），不再套在浏览外壳里。
-    // 对应旧前端 pages/manage/index.tsx —— 它同样是一套自成一体的 chrome。
+    path: "/files",
+    component: () => import("~/layouts/FilesLayout"),
+    // 文件树默认要登录；管理员在「访问控制」里放开 `home_guest_access` 后游客可只读浏览
+    // （写操作照旧对游客隐藏：`/fs/list` 返回的 `write` 为 false）。
+    // 这里**不写** `requiresAuth`：那样会把「开关放开」这条出口焊死。默认要登录是靠
+    // `home_guest_access` 的默认值 false 得到的，与后端 `IGuestAccessService` 同源。
+    meta: { guestSwitch: GuestSwitch.home },
+    children: [
+      {
+        // 路径仍然走 query（`/files?path=/a/b`）：目录名里什么字符都可能有
+        // （`#`、`?`、中文、空格），塞进 path 段会让编码规则与后端 VFS 的匹配
+        // 口径产生第二套真相。query 由 `useFileList` 单一驱动，前进/后退天然正确。
+        path: "",
+        name: "files",
+        component: () => import("~/pages/home"),
+        meta: { title: "global.nav_home" },
+      },
+    ],
+  },
+
+  // ---------------------------------------------------------------- 落地页
+  {
+    // `/` 落媒体首页（公开门面）。老的文件深链 `/??path=/a/b` 转给文件树 ——
+    // 游客会被访客策略拦到登录页，登录用户则正常浏览。
+    path: "/",
+    redirect: (to) =>
+      to.query.path ? { name: "files", query: { path: to.query.path } } : { name: "media" },
+  },
+
+  // ---------------------------------------------------------------- 管理台
+  {
+    // 管理台是**独立整页布局**（顶部标题栏 + 图标侧栏 + 内容区），不套在浏览外壳里。
     path: "/@manage",
     component: () => import("~/layouts/ManageLayout"),
     meta: { title: "manage.title", admin: true },
@@ -233,35 +288,57 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
-  { path: "/:pathMatch(.*)*", redirect: "/" },
+
+  // 其余一律回媒体首页（history 模式下用户可能手改出一个不存在的路径）。
+  { path: "/:pathMatch(.*)*", redirect: { name: "media" } },
 ]
 
-const history: RouterHistory = createWebHashHistory()
+const history: RouterHistory = createWebHistory(basePath || "/")
 
-const router = createRouter({ history, routes })
+const router = createRouter({
+  history,
+  routes,
+  // 媒体页都是长列表：从详情返回列表时恢复原滚动位置，新页面从顶部开始。
+  scrollBehavior: (_to, _from, savedPosition) => savedPosition ?? { top: 0 },
+})
 
 declare module "vue-router" {
   interface RouteMeta {
     title?: string
     /** 仅管理员可进。 */
     admin?: boolean
-    /** 需要登录（默认允许游客浏览，写操作由按钮级权限控制）。 */
+    /** 需要登录（与访客开关无关）。 */
     requiresAuth?: boolean
     /**
-     * 访客放行开关（公开设置里的键名）。
-     *
-     * 语义：**未登录能不能进这一页，由这个设置项决定**。
-     * - `media_guest_access`（默认 true）：媒体关闭后游客进不去，只能去登录；
-     * - `home_guest_access`（默认 false）：首页默认要登录，管理员放开后游客可只读浏览。
+     * 访客放行开关（公开设置里的键名），**登录与否由它决定**：
+     * - `media_guest_access`（默认 true）：关掉后游客连媒体首页都进不去；
+     * - `home_guest_access`（默认 false）：文件树默认要登录，管理员放开后游客可只读浏览。
      *
      * 与 `requiresAuth` 的分工：只写 `requiresAuth` 表示「与开关无关，必须登录」
-     * （播放列表、口味画像、管理台）；两者都写表示「默认要登录，但开关可放开」（首页）。
+     * （想看 / 历史 / 播放列表 / 口味 / 任务中心 / 管理台）；两者都写表示
+     * 「默认要登录，但开关可放开」（文件树）。
      */
     guestSwitch?: string
     layout?: string
     /** 内容区放宽到 1280px（媒体库这类多列页面），默认按 OpenList 的 980px 居中列。 */
     wide?: boolean
   }
+}
+
+/**
+ * 登录回跳参数。
+ *
+ * 必须**自己再编码一次**（router 序列化时还会编一遍，所以地址栏里看到的是 `%252F`）：
+ * vue-router 序列化 query 时会把 `%3F` / `%3D` / `%26` 还原成 `?` `=` `&`（为了让 URL
+ * 可读），于是 `redirect=/files?path=/a` 会被浏览器解析成 `redirect=/files` + `path=/a`
+ * 两个参数 —— 登录后就丢了目录。
+ *
+ * 现在的链路是「自己编一次 → router 编一次 → 浏览器解析 → router 解一次 → 登录页
+ * `safeDecode` 解一次」，最终回到完整的 `/files?path=/a`。代价是 URL 不好看，
+ * 换来的是带查询串的深链（文件目录、媒体筛选）登录后不会被吞掉。
+ */
+function loginRedirect(fullPath: string): string {
+  return encodeURIComponent(fullPath)
 }
 
 router.beforeEach(async (to) => {
@@ -290,13 +367,13 @@ router.beforeEach(async (to) => {
   // 里（纯函数，有单测），口径与后端 `IGuestAccessService` 一致 —— 否则会出现
   // 「页面能进、接口 401」或者反过来「接口能进、页面被弹走」。
   if (!user.isLogin && guestBlocked(to.meta, settings.getBool)) {
-    return { path: "/@login", query: { redirect: to.fullPath } }
+    return { name: "login", query: { redirect: loginRedirect(to.fullPath) } }
   }
 
   // 管理台：单用户产品下「登录即内置管理员」，因此只按登录态收口 ——
   // 未登录先去登录页（带上回跳）。
   if (to.meta.admin && !user.isLogin) {
-    return { path: "/@login", query: { redirect: to.fullPath } }
+    return { name: "login", query: { redirect: loginRedirect(to.fullPath) } }
   }
 
   return true
@@ -318,7 +395,7 @@ onUnauthorized(() => {
   user.clear()
   const current = router.currentRoute.value.fullPath
   if (current.startsWith("/@login")) return
-  void router.replace({ path: "/@login", query: { redirect: current } })
+  void router.replace({ name: "login", query: { redirect: loginRedirect(current) } })
 })
 
 export default router

@@ -78,7 +78,7 @@ const mkMount = await api("post", "/admin/storage/create", {
 check("装置：建探针挂载", mkMount.code === 200, mkMount.message)
 
 // ---------- 2. 页面与导航 ----------
-await page.goto(`${BASE}/#/@manage/backup-restore`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/@manage/backup-restore`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-br-card", { timeout: 10000 })
 const cardCount = await page.locator(".ol-br-card").count()
 check("页面渲染三张卡（备份 / 恢复 / 日志）", cardCount === 3, `${cardCount}`)

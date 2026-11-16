@@ -6,12 +6,14 @@ import { setLocale } from "~/i18n"
 import MediaHomePage from "~/pages/media/Home"
 
 /**
- * 媒体首页三个 section 的「查看全部 →」入口。
+ * 媒体首页各 section 的「查看全部 →」入口。
  *
- * 三段都能下钻到媒体库页且**筛选已预置**（收藏 → `state=favorite`、
- * 在追 → `state=in-progress`、最近入库 → `sort=created`）。这条契约一旦错，
- * 用户点「查看全部」看到的是未筛选的全量列表，等于入口失效。
+ * 去向分两类：**按用户的两段**（继续观看 → 观看历史页）与**发现型的两段**
+ * （收藏 → `state=favorite`、最近入库 → `sort=created`，都下钻到媒体库页并预置筛选）。
+ * 这条契约一旦错，用户点「查看全部」看到的是未筛选的全量列表，等于入口失效。
  * 空 section 本来就不渲染，因此也不该留下一个点了没用的链接。
+ *
+ * 「想看」只对登录用户渲染，这里的 pinia 是干净实例（未登录），所以只有三段。
  */
 
 /** 首页聚合的假数据（每个测试按需替换）。 */
@@ -101,7 +103,7 @@ describe("媒体首页 查看全部入口", () => {
     expect(heads[0]!.text()).toContain("Recently added")
   })
 
-  it("各段带正确的预置筛选：在追 / 最近入库 / 收藏", async () => {
+  it("各段带正确的去向：继续观看 → 历史、最近入库 / 收藏 → 预置筛选的媒体库", async () => {
     state.home = {
       continue_watching: [item(1, "Movie A")],
       recently_added: [item(2, "Movie B")],
@@ -114,10 +116,7 @@ describe("媒体首页 查看全部入口", () => {
     await buttons[1]!.trigger("click")
     await buttons[2]!.trigger("click")
 
-    expect(push).toHaveBeenNthCalledWith(1, {
-      name: "media-library",
-      query: { state: "in-progress" },
-    })
+    expect(push).toHaveBeenNthCalledWith(1, { name: "media-history" })
     expect(push).toHaveBeenNthCalledWith(2, {
       name: "media-library",
       query: { sort: "created" },

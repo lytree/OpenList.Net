@@ -43,7 +43,7 @@ await page.addInitScript((value) => localStorage.setItem("token", value), token)
 
 const modeBtn = (label) => page.locator(`.el-button-group .el-button:has-text('${label}')`).first()
 
-await page.goto(`${BASE}/#/?path=${encodeURIComponent(TARGET)}`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/files?path=${encodeURIComponent(TARGET)}`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 
 // --- 目录树 ---

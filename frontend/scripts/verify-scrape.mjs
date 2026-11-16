@@ -140,7 +140,7 @@ check("启动失败没留下运行态", fullAfter?.running === false, `running=$
 check("pending 保持不变", fullAfter?.pending === 3, `pending=${fullAfter?.pending}`)
 
 // ---------- 5. UI：列与按钮三态 ----------
-await page.goto(`${BASE}/#/@manage/media`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/@manage/media`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 
 const rowFull = page.locator(".vxe-body--row", { hasText: LIB_FULL })

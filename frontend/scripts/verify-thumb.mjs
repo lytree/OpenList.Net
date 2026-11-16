@@ -308,7 +308,7 @@ await page.addInitScript((t) => {
 
 async function openFiles(mode, viewport) {
   if (viewport) await page.setViewportSize(viewport)
-  await page.goto(`${BASE}/#/files?path=%2Fe2e`, { waitUntil: "networkidle" })
+  await page.goto(`${BASE}/files?path=%2Fe2e`, { waitUntil: "networkidle" })
   await page.evaluate((m) => localStorage.setItem("ol-view-mode", m), mode)
   await page.reload({ waitUntil: "networkidle" })
   await page.waitForTimeout(1200)

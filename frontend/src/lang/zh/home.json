@@ -355,5 +355,6 @@
     "overwrite_existing": "覆盖已有文件",
     "skip_existing": "跳过已有文件",
     "merge": "仅复制新增的文件与子目录"
-  }
+  },
+  "empty_dir": "此目录为空"
 }

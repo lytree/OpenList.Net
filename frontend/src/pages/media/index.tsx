@@ -15,7 +15,6 @@ import {
 } from "~/api/media"
 import MediaGrid from "~/components/MediaGrid"
 import FilePager from "~/pages/home/Pager"
-import MediaNav from "~/pages/media/MediaNav"
 import { useUserStore } from "~/stores/user"
 import { t } from "~/i18n"
 
@@ -25,11 +24,12 @@ import { t } from "~/i18n"
  * 数据面很薄：库列表 + 条目分页查询（筛选/排序/搜索）。
  * 库的管理（建/删/扫描）在管理台，这里只做**看**。
  *
- * **媒体首页（推荐聚合）是另一个界面**（`pages/media/Home.tsx`，`#/media`）：
+ * **媒体首页（推荐聚合）是另一个界面**（`pages/media/Home.tsx`，`/media`）：
  * 继续观看 / 最近入库 / 最近收藏都在那边，这一页只负责「按库、题材、年份、评分找条目」。
- * 本页在 `#/media/library`，两者共用 `MediaNav` 的入口条，见 docs/unified-media-product-plan.md 第 48 节。
+ * 本页在 `/media/library`；栏目导航在外壳（`layouts/MediaLayout`）里，见
+ * docs/unified-media-product-plan.md 第 48 节。
  *
- * **游客也能进这一页**（只读端点匿名开放，`/` 默认落这里）。凡是「按用户」的东西
+ * **游客也能进这一页**（只读端点匿名开放）。凡是「按用户」的东西
  * （收藏星标、「播放列表/口味」入口）只在登录时渲染 —— 否则游客会连发几个 401，
  * 被全局 401 处理踢回登录页。
  *
@@ -251,8 +251,6 @@ export default defineComponent({
 
     return () => (
       <div class="ol-media">
-        <MediaNav />
-
         <div class="ol-media-toolbar">
           <div class="ol-media-libs">
             <ElButton

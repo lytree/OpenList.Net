@@ -355,5 +355,6 @@
     "overwrite_existing": "Overwrite existing files",
     "skip_existing": "Skip existing files",
     "merge": "Only Copy new files and subdirectories"
-  }
+  },
+  "empty_dir": "This folder is empty"
 }

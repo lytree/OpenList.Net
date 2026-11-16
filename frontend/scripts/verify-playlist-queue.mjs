@@ -204,7 +204,7 @@ check(
 )
 
 // ---------- 3. UI：播放全部 → 队列位置 ----------
-await page.goto(`${BASE}/#/media/playlists/${playlistId}`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/playlists/${playlistId}`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-queue-row", { timeout: 10000 })
 
 const playAll = page.locator(".ol-media-title-row .el-button", { hasText: "Play all" })
@@ -332,11 +332,11 @@ check("逐日统计回显 window_days", watchStats.data?.window_days === 7, `${w
 check("逐日统计 7 个点", (watchStats.data?.days ?? []).length === 7, `${(watchStats.data?.days ?? []).length}`)
 
 // 口味页的「最近观看」面板吃的是同一份数据：走一遍 UI，确认不是只有接口通
-await page.goto(`${BASE}/#/media/taste`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/taste`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-stat-card", { timeout: 10000 })
 const watchRows = await page.locator(".ol-media-watch-row").count()
 check("口味页「最近观看」列出 2 条", watchRows === 2, `${watchRows} rows`)
-await page.goto(`${BASE}/#/media/playlists/${playlistId}`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/playlists/${playlistId}`, { waitUntil: "networkidle" })
 await page.waitForSelector(".ol-media-queue-row", { timeout: 10000 })
 
 // ---------- 6. 中文界面下的同一套控件 ----------

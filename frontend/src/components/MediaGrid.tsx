@@ -29,10 +29,16 @@ export default defineComponent({
      * 卡片本身只有一份实现，只有容器与卡片宽度不同。
      */
     layout: { type: String as PropType<"grid" | "strip">, default: "grid" },
+    /**
+     * 卡片左上角的「移出清单」按钮文案。给 `null`（默认）就不渲染 ——
+     * 只有「想看」这类**自己攒的清单**需要它：从清单里移除而不是打开条目。
+     */
+    removeLabel: { type: String, default: "" },
   },
   emits: {
     open: (_item: MediaItem) => true,
     favorite: (_item: MediaItem) => true,
+    remove: (_item: MediaItem) => true,
   },
   setup(props, { emit }) {
     /** 海报加载失败的条目：换成占位块而不是裂图（无 sidecar 的条目很常见）。 */
@@ -82,6 +88,18 @@ export default defineComponent({
                       <span>{t("media.no_poster")}</span>
                     </div>
                   )}
+                  {props.removeLabel ? (
+                    <span
+                      class="ol-media-remove"
+                      title={props.removeLabel}
+                      onClick={(event: MouseEvent) => {
+                        event.stopPropagation()
+                        emit("remove", item)
+                      }}
+                    >
+                      {props.removeLabel}
+                    </span>
+                  ) : null}
                   {item.rating ? <span class="ol-media-rating">★ {item.rating.toFixed(1)}</span> : null}
                   {props.showFavorite ? (
                     <span

@@ -47,9 +47,20 @@ export default defineComponent({
     const logoBroken = ref(false)
     const logo = computed(() => settings.logo)
 
+    /** 解码一次，坏值原样返回（`decodeURIComponent("100%")` 会抛 URIError）。 */
+    function safeDecode(value: string): string {
+      try {
+        return decodeURIComponent(value)
+      } catch {
+        return value
+      }
+    }
+
     function targetAfterLogin(): string {
       const redirect = route.query.redirect
-      const raw = typeof redirect === "string" ? decodeURIComponent(redirect) : "/"
+      // 守卫传过来的是编码过一次的值（见 router.ts 的 loginRedirect）；老书签里也可能
+      // 是裸路径（`%` 未转义），解码失败就按原样用，别让登录页因为一个坏参数白屏。
+      const raw = typeof redirect === "string" ? safeDecode(redirect) : "/"
       // 只接受站内绝对路径，避免 ?redirect=https://evil 造成开放重定向。
       return raw.startsWith("/") && !raw.startsWith("//") ? raw : "/"
     }
@@ -131,12 +142,25 @@ export default defineComponent({
       return ""
     })
 
+    /**
+     * 游客进不去的媒体路径（与 `router.ts` 里 `requiresAuth: true` 的五个页面一一对应）。
+     * 「以游客身份浏览」按钮据此决定落点，避免把游客送进一个会被守卫原样弹回登录页的地址。
+     */
+    const PRIVATE_MEDIA_PREFIXES = [
+      "/media/watch-later",
+      "/media/history",
+      "/media/playlists",
+      "/media/taste",
+      "/media/tasks",
+    ]
+
     function guestCanOpen(path: string): boolean {
       if (path.startsWith("/@manage")) return false
       if (path.startsWith("/files")) return settings.homeGuestAccess
       if (path.startsWith("/media")) {
-        // 播放列表 / 口味是「按用户」的数据，只有「媒体 + 首页」的开关管不到它们
-        if (path.startsWith("/media/playlists") || path.startsWith("/media/taste")) return false
+        // 想看 / 历史 / 播放列表 / 口味 / 任务中心是「按用户」的数据，
+        // 「允许游客浏览媒体」这个开关管不到它们（与路由 meta.requiresAuth 同一份名单）。
+        if (PRIVATE_MEDIA_PREFIXES.some((prefix) => path.startsWith(prefix))) return false
         return settings.mediaGuestAccess
       }
       return Boolean(guestEntry.value)

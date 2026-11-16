@@ -42,7 +42,7 @@ const apiGet = async (path) =>
     .then((r) => r.json())
 
 // ---------- 1. 媒体库浏览页 ----------
-await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/library`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1800)
 
 const libTabs = await page.locator(".ol-media-libs .el-button").allTextContents()
@@ -137,16 +137,20 @@ await page.screenshot({ path: `${SHOT}/media-playing.png` })
 
 // ---------- 6. 媒体首页 vs 媒体库：两个界面 ----------
 // 媒体库页只负责「找」：不该再混入首页聚合（继续观看横滑条）
-await page.goto(`${BASE}/#/media/library`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media/library`, { waitUntil: "networkidle" })
 await page.waitForTimeout(800)
 const stripOnLibrary = await page.locator(".ol-media-strip").count()
 check("媒体库页不含首页聚合条", stripOnLibrary === 0, `strip=${stripOnLibrary}`)
 
-// 媒体首页（#/media）才是聚合推荐：继续观看 / 最近入库
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+// 媒体首页（/media）才是聚合推荐：继续观看 / 最近入库
+await page.goto(`${BASE}/media`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
-const navLabels = (await page.locator(".ol-media-nav .el-button").allTextContents()).map((s) => s.trim())
-check("媒体域导航含首页与媒体库入口", navLabels.includes("Media home") && navLabels.includes("Libraries"), JSON.stringify(navLabels))
+const navLabels = (await page.locator(".olm-nav .olm-nav-link").allTextContents()).map((s) => s.trim())
+check(
+  "媒体外壳导航含首页与媒体库入口",
+  navLabels.includes("Media home") && navLabels.includes("Libraries"),
+  JSON.stringify(navLabels),
+)
 
 const sectionTitles = (await page.locator(".ol-media-section-title").allTextContents()).map((s) => s.trim())
 check(
@@ -173,9 +177,9 @@ const openViewAll = async (title) => {
   await page.waitForTimeout(1400)
 }
 
-// 继续观看 → #/media/library?state=in-progress
+// 继续观看 → /media/library?state=in-progress
 await openViewAll("Continue watching")
-check("「继续观看」下钻落到媒体库页", /#\/media\/library/.test(page.url()), page.url())
+check("「继续观看」下钻落到媒体库页", /\/media\/library/.test(page.url()), page.url())
 check("「继续观看」下钻 URL 带 state=in-progress", /state=in-progress/.test(page.url()), page.url())
 const inProgressCards = await page.locator(".ol-media-grid .ol-media-card").count()
 check("「继续观看」筛选后仍列出条目", inProgressCards === 1, `cards=${inProgressCards}`)
@@ -194,16 +198,16 @@ check("回「全部」后列出全部条目", allCards === 2, `cards=${allCards}
 const activeAllChips = (await stateRow.locator(".ol-media-chip-tag.is-on").allTextContents()).map((s) => s.trim())
 check("「状态」行高亮回到「全部」", activeAllChips.length === 1 && activeAllChips[0] === "All", JSON.stringify(activeAllChips))
 
-// 最近收藏 → #/media/library?state=favorite
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+// 最近收藏 → /media/library?state=favorite
+await page.goto(`${BASE}/media`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 await openViewAll("Recently favorited")
 check("「最近收藏」下钻 URL 带 state=favorite", /state=favorite/.test(page.url()), page.url())
 const favoriteCards = await page.locator(".ol-media-grid .ol-media-card").count()
 check("「最近收藏」筛选后只列出收藏条目", favoriteCards === 1, `cards=${favoriteCards}`)
 
-// 最近入库 → #/media/library?sort=created
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+// 最近入库 → /media/library?sort=created
+await page.goto(`${BASE}/media`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 await openViewAll("Recently added")
 check("「最近入库」下钻 URL 带 sort=created", /sort=created/.test(page.url()), page.url())
@@ -211,7 +215,7 @@ const recentCards = await page.locator(".ol-media-grid .ol-media-card").count()
 check("「最近入库」下钻列出全部条目", recentCards === 2, `cards=${recentCards}`)
 
 // ---------- 7. 标记看完 ----------
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 await page.locator(".ol-media-strip .ol-media-card", { hasText: "The Grand Budapest Hotel" }).first().click()
 await page.waitForTimeout(1200)
@@ -225,7 +229,7 @@ await page.screenshot({ path: `${SHOT}/media-detail.png` })
 // ---------- 8. 空 section 不渲染「查看全部」 ----------
 // 看完即 progress=0，继续观看段空掉：整段不渲染（连标题都没有），自然也不该有下钻链接，
 // 剩下两个有数据的段仍是 2 条链接。
-await page.goto(`${BASE}/#/media`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/media`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 const titlesAfterWatched = (await page.locator(".ol-media-section-title").allTextContents()).map((s) => s.trim())
 check("看完后「继续观看」段消失", !titlesAfterWatched.includes("Continue watching"), JSON.stringify(titlesAfterWatched))

@@ -3887,3 +3887,132 @@ SMB **服务端**被否决 —— OpenList 的密码是 `SHA256(password + 固�
   当前只有密码一种登录方式，接上这个开关等于把 SFTP 关死，等公钥认证落地后再补。
 
 
+
+## 60. 路由换成 history 模式 + 媒体/文件门面隔离（2026-11-16）
+
+### 60.1 为什么换掉 hash
+
+hash 模式当初是为了「零配置」：桌面端（Avalonia）与反代场景下 dist 可能挂在任意前缀上，
+history 模式需要服务端 rewrite 配合。但代价在 M5 之后越来越明显：
+
+- 对外分享的链接是 `http://host/#/media/item/12`，粘到聊天软件里 `#` 之后常被截断；
+- 老前端（SolidJS）与文档里写的是**路径式**深链（`/@login?redirect=/`），两种写法并存，
+  `normalizePathStyleDeepLink()` 就是为这个打的补丁；
+- 面包屑、`window.location.pathname` 永远是 `/`，第三方统计与反代规则都拿不到真实页面。
+
+服务端其实早就具备了条件：`Program.cs` 里 `MapFallback("{*path}")` 会把未命中的路径
+回落到 `index.html`（静态资源中间件在路由之前，`/assets/*` 不受影响）。桌面端也不是
+`file://` 直开，而是核心起在本机端口上再被 WebView 加载 —— 同一条回落。于是直接换成
+`createWebHistory(basePath || "/")`，旧注释里「history 需要服务端 rewrite」的前提已经不存在了。
+
+兼容两代老地址（`router.ts` 模块初始化时执行一次）：
+
+| 老地址 | 处理 |
+|---|---|
+| `/#/media/item/1` | `replaceState` 就地改写成 `/media/item/1`（不产生多余历史记录） |
+| `/?path=/a/b` | 根路由 `redirect` 转给 `/files?path=/a/b` |
+| `/@login?redirect=/` | 本来就是路径式，直接可用 |
+
+### 60.2 两棵树，而不是一棵树加条件渲染
+
+| 路径 | 布局 | 访客策略 |
+|---|---|---|
+| `/media/**` | `layouts/MediaLayout.tsx` | 默认公开（`media_guest_access=true`），是**默认落地页** |
+| `/files/**` | `layouts/FilesLayout.tsx` | 默认要登录（`home_guest_access=false`），放开后游客只读 |
+| `/@login` `/@init` | blank | 公开 |
+| `/@manage/**` | `ManageLayout` | 登录（单用户产品里即管理员） |
+
+原来的 `BasicLayout` 一套外壳同时服务两个门面，靠 `route.path.startsWith("/media")` 分支
+决定顶栏露哪个入口。问题不在代码难看，而在**语义混在一起**：
+
+- 游客在公开的媒体页上会看到一个自己进不去的「文件」入口（得靠 `showHomeLink` 再判一次开关）；
+- 媒体页要 `wide` 宽幅 + 栏目导航，文件页要 980px 居中 + 面包屑 + 悬浮操作条，两者在同一个
+  布局里只能各让一步；
+- 导航条（`MediaNav`）之前挂在**页面**上，只有媒体首页和媒体库两页有 —— 人物、片商、系列、
+  播放列表页进到深处只能靠浏览器后退。
+
+拆开之后：`MediaLayout` 拥有常驻顶栏（品牌 + 栏目导航 + 账户），`FilesLayout` 保留原来的
+「logo 栏 + 居中内容列 + 页脚」，两边只共用一个「媒体」出口（文件门面顶栏左侧一个链接）。
+样式也是两套命名空间（`.olm-*` 新增于 `styles/media-shell.css`，`.ol-view-*` 留给文件门面），
+改媒体外壳不会顺手把文件浏览器顶栏带偏。
+
+### 60.3 守卫语义的一处真 bug：父子 meta 合并
+
+拆分时发现 `guestBlocked()` 的判定顺序是错的：
+
+```ts
+// 旧：开关优先
+if (meta.guestSwitch) return !getBool(meta.guestSwitch)
+return Boolean(meta.requiresAuth)
+```
+
+旧路由表是**扁平**的，每个页面各写一份 meta ——「播放列表 / 口味」只写 `requiresAuth`，
+不带开关，所以侥幸没出事。换成父子结构后，`/media` 根上的 `guestSwitch: media` 会
+**合并进每一个子路由**，如果开关先判，`media_guest_access=true` 就把「想看 / 历史 /
+播放列表 / 口味 / 任务中心」一起对游客放开了 —— 页面能进，接口 401，全局处理器再把游客
+弹到登录页，表现是「点进去闪一下就回登录页」。
+
+现在 `requiresAuth` 永远优先：
+
+```ts
+if (meta.requiresAuth) return true          // 与开关无关，必须登录
+if (meta.guestSwitch) return !getBool(...)  // 开关说了算（两棵树的根）
+return false                                // 公开页
+```
+
+`/files` 根因此**只写** `guestSwitch: home`，不写 `requiresAuth` —— 默认要登录是
+`home_guest_access` 的默认值 false 给的，与后端 `IGuestAccessService` 同源；写死
+`requiresAuth` 会把「管理员放开只读浏览」这条出口焊死。`utils/access.spec.ts` 补了一条
+专门的用例钉住「继承下来的开关不能把 requiresAuth 放开」。
+
+### 60.4 媒体 IA 参照 Peach
+
+[peach](https://github.com/peach-mitao/peach) 的信息架构是「常驻栏目导航 + 按用户的重看队列」，
+落地到现有接口（不新增后端表）：
+
+- **导航**（`pages/media/MediaNav.tsx`，渲染在布局里）：首页 / 媒体库 / 演员 / 片商 / 系列，
+  登录后追加 想看 / 历史。按用户的入口对游客**不渲染** —— 假入口点进去只会被弹回登录页。
+- **媒体首页**（`/media`）：继续观看（横滑条）→ 想看 → 最近入库 → 最近收藏。
+  「接着看」永远在最上面，它是唯一带「未完成」语义的列表；「查看全部」的去向按语义分：
+  继续观看 → `/media/history`，收藏 / 入库 → 带 `state=favorite` / `sort=created` 的媒体库。
+- **想看**（`/media/watch-later`，新增）：`GET /media/watch-later` 的整页清单。卡片左上角
+  常显「移除」（`MediaGrid` 新增 `removeLabel` / `onRemove`，默认不渲染），点一下打
+  `watch_later=false` 并就地删行；当前页被删空会自动退一页。
+- **历史**（`/media/history`，新增）：`GET /media/watch/history` 按**天**分组，今天/昨天/
+  `YYYY-MM-DD` 三种段头，行内是缩略图 + 播放时刻 + 时长 + 看完/未看完 + 「继续播放」，
+  顶部给 7 / 30 / 90 天 / 全部的时间窗。历史与「播放进度」是两件事：进度只有一条，历史是流水。
+- **任务中心**（`/media/tasks`，新增）：`GET /media/tasks` + `GET /media/scrape/tasks`，
+  2.5s 轮询、页面不可见时不轮询。**只读** —— 启动/取消仍在管理台：这一页回答「我刚点的扫描
+  跑完没有」，不是运维面板。
+- 播放列表 / 口味画像仍在右侧账户菜单里（按用户、低频），不占栏目导航的位置。
+
+### 60.5 回跳参数的编码坑
+
+`/@login?redirect=` 的值里可能带查询串（`/files?path=/a`）。vue-router 序列化 query 时会把
+`%3F` / `%3D` / `%26` 还原成可读字符，于是 `redirect=/files?path=/a` 会被浏览器解析成
+`redirect=/files` + `path=/a` 两个参数 —— 登录后目录丢失。现在守卫自己先 `encodeURIComponent`
+一次（地址栏会看到 `%252F`，不好看但正确），登录页用 `safeDecode()` 解一层
+（`decodeURIComponent("100%")` 会抛 URIError，老书签里的裸 `%` 不能把登录页打白）。
+
+### 60.6 验收
+
+- `pnpm typecheck` / `pnpm test`（256 条）/ `pnpm build` 全绿。
+- 真机冒烟（隔离后端 + 临时库，`dotnet OpenList.Server.dll` 托管新 dist）：
+  - `/`、`/media`、`/media/history`、`/files`、`/@login` 全部 200 且返回外壳 HTML（深链刷新可用）；
+  - `/#/media/item/1` → `/media/item/1`；`/?path=/` → 登录后落回 `/files?path=/`；
+  - 游客：`/media` 只渲染「最近入库」，导航 5 项；`/media/watch-later`、`/files` → 登录页；
+  - 登录：导航 7 项，「移除」按钮可用（3 → 2 条），历史按天分组，任务中心两个 section 有数据；
+  - 390px：顶栏换两行（品牌 + 账户 / 整行可横滑的导航），四个页面 `scrollWidth - innerWidth == 0`。
+- `verify-common.mjs` 改成真实路径后 **52/52**（其中三条断言重写：`/` 落 `/media`、
+  媒体门面用 `.olm-shell` 而不是 `.ol-view`、管理台拦截只看 pathname —— 登录页的
+  `?redirect=/@manage/...` 会让整串 URL 的正则误判）。
+- 其余 18 个 `verify-*.mjs` / `e2e-*.mjs` 的 URL 全部从 `#/...` 改成真实路径；
+  导航选择器从 `.ol-media-nav .el-button` 改成 `.olm-nav .olm-nav-link`（导航已从页面搬进布局）。
+
+### 60.7 与 Peach 的差距（本轮未做）
+
+- **关注演员更新流**：需要新表（user↔person）与「更新了什么」的聚合查询；
+- **云下载**（番号/磁力搜索 → 下载 → 入库）：需要下载器与驱动侧配合；
+- **任务中心的写操作**（暂停/取消/重试）：现在只读，操作留在管理台。
+
+以上三项都不影响本轮的路由与门面边界，属于媒体域下一阶段的能力。

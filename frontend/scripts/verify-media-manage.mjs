@@ -71,7 +71,7 @@ for (let i = existing; i < FILLERS; i++) {
 log("fillers ready:", FILLERS)
 
 // ---------- 1. 管理台入口 ----------
-await page.goto(`${BASE}/#/@manage/media`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/@manage/media`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1500)
 
 const h2 = await page.locator(".ol-manage-h2").textContent().catch(() => "")

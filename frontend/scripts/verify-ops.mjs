@@ -115,7 +115,7 @@ async function closeDialog() {
 }
 
 // ---------- 登录 ----------
-await page.goto(`${BASE}/#/@login`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/@login`, { waitUntil: "networkidle" })
 await page.locator("input").first().fill(USER)
 await page.locator("input[type=password]").first().fill(PASS)
 await page.locator("button:has-text('Login')").first().click()
@@ -127,7 +127,7 @@ check("登录成功", (await page.locator(".ol-user-name").count()) > 0)
 const token = await page.evaluate(() => localStorage.getItem("token"))
 
 // ---------- 进入挂载点 ----------
-await page.goto(`${BASE}/#/?path=/e2e`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/files?path=/e2e`, { waitUntil: "networkidle" })
 await waitList()
 const totalTag = await page.locator(".ol-files-bar .el-tag").last().textContent().catch(() => "")
 check("挂载点列出 44 项", /共 44 项/.test(totalTag || ""), `tag="${totalTag}"`)
@@ -210,7 +210,7 @@ const apiPost = (apiPath, body) =>
   })
 await apiPost("/fs/mkdir", { path: "/e2e/moved-into" })
 await apiPost("/fs/mkdir", { path: "/e2e/子目录C" })
-await page.goto(`${BASE}/#/?path=/e2e`, { waitUntil: "networkidle" })
+await page.goto(`${BASE}/files?path=/e2e`, { waitUntil: "networkidle" })
 // 目录是走 API 建的，SPA 自己的列表还停在旧快照；整页重载拿到最新结果，
 // 同时绕开后端目录缓存（fs/list 默认带缓存）。
 await page.reload({ waitUntil: "networkidle" })

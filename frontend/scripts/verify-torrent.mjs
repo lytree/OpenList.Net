@@ -44,7 +44,7 @@ const token = await page
 await page.addInitScript((value) => localStorage.setItem("token", value), token)
 
 async function openFile(name, wait = 2500) {
-  await page.goto(`${BASE}/#/?path=${encodeURIComponent(`${TARGET}/${name}`)}`, {
+  await page.goto(`${BASE}/files?path=${encodeURIComponent(`${TARGET}/${name}`)}`, {
     waitUntil: "networkidle",
   })
   await page.waitForTimeout(wait)

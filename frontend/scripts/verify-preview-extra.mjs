@@ -133,7 +133,7 @@ const mount = await api("post", "/admin/storage/create", {
 log("mount:", mount.code, mount.code === 200 ? "" : mount.message)
 
 const openFile = async (name, wait = 3000) => {
-  await page.goto(`${BASE}/#/?path=${encodeURIComponent(`${TARGET}/${name}`)}`, {
+  await page.goto(`${BASE}/files?path=${encodeURIComponent(`${TARGET}/${name}`)}`, {
     waitUntil: "networkidle",
   })
   await page.waitForTimeout(wait)
