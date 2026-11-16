@@ -8,7 +8,8 @@ using OpenList.Infrastructure.Data;
 namespace OpenList.Infrastructure.Services;
 
 /// <summary>
-/// 用户增删改查 + 双因子缓存管理。密码使用 SHA256 加盐哈希（带固定后缀）。
+/// 账号查询、资料更新、初始管理员创建与密码重置。密码使用 SHA256 加盐哈希（带固定后缀）。
+/// 单用户产品：不提供用户删除/多账号管理接口，<see cref="CreateAsync"/> 仅作为服务层原语保留。
 /// 对应 Go 参考实现 <c>internal/op/user.go</c>。
 /// </summary>
 public sealed class UserService : IUserService
@@ -275,26 +276,6 @@ public sealed class UserService : IUserService
     }
 
     /// <summary>
-    /// 删除用户。仅内置管理员（<see cref="User.IsBuiltIn"/>）受保护不可删除 ——
-    /// 它是系统唯一保证存在的管理入口；其余账号（含后来手工创建的管理员）均可删除。
-    /// 删掉最后一个管理员仍允许（与 Go 版一致，Go 只保护内置账号不建模），但内置账号
-    /// 本身保证系统不会彻底失去管理入口。
-    /// </summary>
-    public async Task<Resp> DeleteAsync(long id, CancellationToken ct = default)
-    {
-        var u = await _db.Users.FindAsync([id], ct);
-        if (u is null) return Resp.Fail("user not found", RespCodes.NotFound);
-        if (IsSuperAdmin(u))
-            return Resp.Fail("cannot delete built-in admin", RespCodes.Forbidden);
-        _db.Users.Remove(u);
-        await _db.SaveChangesAsync(ct);
-        // 已删账号的既有 token 必须立即失效：JWT 是无状态的，不做这一步的话
-        // 被删用户还能凭旧 token 操作到过期（详见 UserTokenCutoffRegistry）。
-        _cutoffs?.InvalidateUser(id, _time.GetUtcNow());
-        return Resp.Ok();
-    }
-
-    /// <summary>
     /// 重置内置管理员的密码，供桌面端与恢复场景使用。
     /// 与 <see cref="UpdateAsync"/> 的区别是：无需调用者具备该账号身份，也无需旧密码 ——
     /// 因为内置管理员被刻意设计成不可删除、不可改名、不可降权，若同时要求旧密码，
@@ -308,8 +289,8 @@ public sealed class UserService : IUserService
         if (string.IsNullOrWhiteSpace(newPassword))
             return Resp.Fail("password required", RespCodes.BadRequest);
 
-        // 判据必须带上 Role == Admin：guest 同样带 IsBuiltIn 标记，只按标记查会命中游客
-        // 并改掉它的密码。尚未回填的旧库退回到"最早的管理员"。
+        // 判据必须带上 Role == Admin：旧版本数据库里预置的 guest 同样带 IsBuiltIn 标记，
+        // 只按标记查会命中游客并改掉它的密码。尚未回填的旧库退回到"最早的管理员"。
         var admin = await _db.Users.FirstOrDefaultAsync(u => u.IsBuiltIn && u.Role == UserRole.Admin, ct)
                     ?? await _db.Users.Where(u => u.Role == UserRole.Admin)
                                       .OrderBy(u => u.Id)
@@ -326,20 +307,6 @@ public sealed class UserService : IUserService
     }
 
     /// <summary>
-    /// 关闭指定用户的双因子并清空其双因子密钥。
-    /// </summary>
-    public async Task<Resp> Cancel2FaAsync(long id, CancellationToken ct = default)
-    {
-        var u = await _db.Users.FindAsync([id], ct);
-        if (u is null) return Resp.Fail("user not found", RespCodes.NotFound);
-        u.TwoFactorEnabled = false;
-        u.TwoFactorSecret = null;
-        u.UpdatedAt = _time.GetUtcNow();
-        await _db.SaveChangesAsync(ct);
-        return Resp.Ok();
-    }
-
-    /// <summary>
     /// 持久化指定用户的双因子密钥。
     /// </summary>
     public async Task<Resp> SetTwoFactorSecretAsync(long id, string secret, CancellationToken ct = default)
@@ -348,39 +315,6 @@ public sealed class UserService : IUserService
         if (u is null) return Resp.Fail("user not found", RespCodes.NotFound);
         u.TwoFactorSecret = secret;
         u.UpdatedAt = _time.GetUtcNow();
-        await _db.SaveChangesAsync(ct);
-        return Resp.Ok();
-    }
-
-    /// <summary>
-    /// 清理指定用户缓存。当前尚无缓存层（Phase 16），为未来缓存失效预留的占位实现。
-    /// </summary>
-    public Task<Resp> DelCacheAsync(long id, CancellationToken ct = default)
-    {
-        // 尚未实现缓存层（Phase 16），此处为用户缓存失效预留占位。
-        return Task.FromResult(Resp.Ok());
-    }
-
-    /// <summary>
-    /// 列出指定用户的 SSH 公钥，按 Id 倒序。
-    /// </summary>
-    public async Task<Resp<List<SshKey>>> ListSshKeysAsync(long userId, CancellationToken ct = default)
-    {
-        var list = await _db.SshKeys.AsNoTracking()
-            .Where(k => k.UserId == userId)
-            .OrderByDescending(k => k.Id)
-            .ToListAsync(ct);
-        return Resp<List<SshKey>>.Ok(list);
-    }
-
-    /// <summary>
-    /// 删除指定 SSH 公钥。
-    /// </summary>
-    public async Task<Resp> DeleteSshKeyAsync(long keyId, CancellationToken ct = default)
-    {
-        var k = await _db.SshKeys.FindAsync([keyId], ct);
-        if (k is null) return Resp.Fail("ssh key not found", RespCodes.NotFound);
-        _db.SshKeys.Remove(k);
         await _db.SaveChangesAsync(ct);
         return Resp.Ok();
     }

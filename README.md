@@ -85,7 +85,7 @@ Phased rollout. Each phase builds on the previous. Items are checked off `[x]` a
 ## Phase 1 — Skeleton ✅
 
 - [x] Solution structure (`OpenList.slnx` + 5 projects)
-- [x] `OpenList.Core`: `Resp<T>`, models (`User`, `Storage`, `Meta`, `Sharing`, `SettingItem`, `SshKey`), `DriverBase`, service interfaces
+- [x] `OpenList.Core`: `Resp<T>`, models (`User`, `Storage`, `Meta`, `SettingItem`, `SshKey`), `DriverBase`, service interfaces
 - [x] `OpenList.Infrastructure`: `OpenListDbContext`, `MountService` skeleton, `OpenListDbContextFactory`
 - [x] `OpenList.Drivers`: `LocalDriver` skeleton
 - [x] `OpenList.Server`: `Program.cs` (DI, JSON, CORS, Kestrel, SPA fallback), `HealthEndpoints` (`GET /ping`)
@@ -215,19 +215,11 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
   - [x] `POST /api/admin/meta/get`
   - [x] `POST /api/admin/meta/save`
   - [x] `POST /api/admin/meta/delete`
-- [x] `IMessageService` impl + `MessageService`:
-  - [x] `GET  /api/admin/message/list`
-  - [x] `GET  /api/admin/message/get?id=`
-  - [x] `POST /api/admin/message/create`
-  - [x] `POST /api/admin/message/update`
-  - [x] `POST /api/admin/message/delete`
-  - [x] `GET  /api/me/message/unread`
-  - [x] `GET  /api/me/message/list`
-  - [x] `POST /api/me/message/read`
+- [x] ~~`IMessageService` impl + `MessageService`~~ — 随站内信系统一并移除（2026-11-16，单用户定位）
 - [x] `IScanService` impl + `ScanService`:
   - [x] `POST /api/admin/scan/:path`
   - [x] `POST /api/fs/scan`
-- [x] Tests: `UserServiceTests`, `SettingServiceTests`, `MetaServiceTests`, `MessageServiceTests` — 76/76 passing
+- [x] Tests: `UserServiceTests`, `SettingServiceTests`, `MetaServiceTests`
 
 ## Phase 8 — Drivers: S3, WebDAV, FTP/SFTP/SMB
 

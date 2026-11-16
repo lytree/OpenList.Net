@@ -9,7 +9,8 @@ using OpenList.Infrastructure.Services;
 namespace OpenList.Tests;
 
 /// <summary>
-/// UserService tests against in-memory SQLite. Verifies CRUD, password hashing, 2FA cancel.
+/// UserService tests against in-memory SQLite. Verifies account queries, updates,
+/// password hashing and initial-admin protection.
 /// </summary>
 public class UserServiceTests
 {
@@ -78,24 +79,7 @@ public class UserServiceTests
     }
 
     [Test]
-    public async Task DeleteAsync_Allows_Non_BuiltIn_Admin()
-    {
-        await using var ctx = BuildContext();
-        var svc = NewUserService(ctx);
-        var created = await svc.CreateAsync(new CreateUserReq
-        {
-            Username = "admin2",
-            Password = "pw",
-            Role = UserRole.Admin,
-        });
-        // 保护范围收窄为「内置admin」：只保护系统唯一的管理入口，
-        // 后来手工创建的管理员照常可删（见 BuiltInAdminTests 覆盖标记位语义）。
-        var r = await svc.DeleteAsync(created.Data!.Id);
-        await Assert.That(r.Code).IsEqualTo(200);
-    }
-
-    [Test]
-    public async Task BuiltInAdmin_Cannot_Be_Demoted_Deleted_Or_Renamed()
+    public async Task BuiltInAdmin_Cannot_Be_Demoted_Or_Renamed()
     {
         await using var ctx = BuildContext();
         var config = new AppConfiguration { AdminUsername = "root", AdminPassword = "rootpw" };
@@ -123,26 +107,6 @@ public class UserServiceTests
         // Disable is forbidden.
         var disable = await svc.UpdateAsync(created.Data.Id, new UpdateUserReq { Disabled = true });
         await Assert.That(disable.Code).IsEqualTo(403);
-
-        // Deletion is forbidden.
-        var del = await svc.DeleteAsync(created.Data.Id);
-        await Assert.That(del.Code).IsEqualTo(403);
-    }
-
-    [Test]
-    public async Task Cancel2FaAsync_Clears_State()
-    {
-        await using var ctx = BuildContext();
-        var svc = NewUserService(ctx);
-        var created = await svc.CreateAsync(new CreateUserReq { Username = "eve", Password = "pw" });
-        await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq
-        {
-            TwoFactorEnabled = true,
-        });
-        var r = await svc.Cancel2FaAsync(created.Data.Id);
-        await Assert.That(r.Code).IsEqualTo(200);
-        var u = (await svc.GetAsync(created.Data.Id)).Data!;
-        await Assert.That(u.TwoFactorEnabled).IsFalse();
     }
 
     [Test]
@@ -225,21 +189,6 @@ public class UserServiceTests
         var before = DateTime.UtcNow.AddMinutes(-1);
 
         await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Disabled = true });
-
-        await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsTrue();
-    }
-
-    [Test]
-    public async Task DeleteAsync_Invalidates_Tokens()
-    {
-        // 删除后旧 token 必须立即失效：JWT 无状态，服务端不会每请求查库确认用户存在。
-        await using var ctx = BuildContext();
-        var cutoffs = new UserTokenCutoffRegistry();
-        var svc = new UserService(ctx, DefaultConfig(), null, cutoffs);
-        var created = await svc.CreateAsync(new CreateUserReq { Username = "zoe", Password = "pw" });
-        var before = DateTime.UtcNow.AddMinutes(-1);
-
-        await svc.DeleteAsync(created.Data!.Id);
 
         await Assert.That(cutoffs.IsStale(created.Data.Id, before)).IsTrue();
     }

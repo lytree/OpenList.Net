@@ -4,7 +4,8 @@ using OpenList.Core.Models;
 namespace OpenList.Core.Interfaces;
 
 /// <summary>
-/// 用户管理服务接口，用于用户查询、创建、更新、删除及 SSH 密钥管理等。
+/// 账号服务接口：查询、资料更新、初始管理员创建与密码重置。
+/// 单用户产品不提供用户删除 / 多账号管理能力；SSH 公钥由 <c>ISshKeyService</c> 负责。
 /// </summary>
 public interface IUserService
 {
@@ -25,25 +26,23 @@ public interface IUserService
     Task<Resp> UpdateCurrentAsync(long userId, UpdateUserReq req, CancellationToken ct = default);
     /// <summary>获取用户列表。</summary>
     Task<Resp<List<UserPublic>>> ListAsync(CancellationToken ct = default);
-    /// <summary>创建新用户。</summary>
+    /// <summary>
+    /// 创建新用户。仅作为服务层原语保留（无 HTTP 入口）；单用户产品不在运行时开通账号。
+    /// </summary>
     Task<Resp<UserPublic>> CreateAsync(CreateUserReq req, CancellationToken ct = default);
     /// <summary>
     /// 创建系统的<em>初始</em>管理员，仅供 Web 安装向导
     /// <c>POST /api/public/init/setup</c> 在系统未初始化时调用。
     /// </summary>
     /// <remarks>
-    /// 与 <see cref="CreateAsync"/> 的区别是本方法会把账号标记为
-    /// <see cref="User.IsBuiltIn"/>，使其此后不可被删除 / 改名 / 降权 —— 它是系统保证存在的
-    /// 唯一管理入口。刻意不把该标记做进 <see cref="CreateUserReq"/>：那样已登录的管理员就能
-    /// 把任意账号标成"内置"，而这个标记本应全局只有一份。
-    /// 已存在管理员时返回 400，对齐 Go <c>handles.InitSetup</c>。判据是"有 admin"而非
-    /// "用户表非空" —— 初始化会自动创建 guest，用表判据会让向导在全新库上永远被拒。
+    /// 本方法会把账号标记为 <see cref="User.IsBuiltIn"/>，使其此后不可被改名 / 降权 ——
+    /// 它是系统保证存在的唯一管理入口。刻意不把该标记做进 <see cref="CreateUserReq"/>：
+    /// 否则调用方就能把任意账号标成"内置"，而这个标记本应全局只有一份。
+    /// 已存在管理员时返回 400，对齐 Go <c>handles.InitSetup</c>。
     /// </remarks>
     Task<Resp<UserPublic>> CreateInitialAdminAsync(string username, string password, CancellationToken ct = default);
     /// <summary>更新指定用户。</summary>
     Task<Resp> UpdateAsync(long id, UpdateUserReq req, CancellationToken ct = default);
-    /// <summary>删除指定用户。</summary>
-    Task<Resp> DeleteAsync(long id, CancellationToken ct = default);
     /// <summary>
     /// 重置内置管理员的密码。此操作<em>不需要</em>当前登录用户是自己，也不需要旧密码 ——
     /// 它是运维/桌面端的恢复入口：内置管理员本身不可删除、不可改名，一旦忘记密码
@@ -51,16 +50,8 @@ public interface IUserService
     /// 用户表为空（系统尚未初始化）时返回 <see cref="RespCodes.NotFound"/>。
     /// </summary>
     Task<Resp> ResetAdminPasswordAsync(string newPassword, CancellationToken ct = default);
-    /// <summary>取消指定用户的两步验证。</summary>
-    Task<Resp> Cancel2FaAsync(long id, CancellationToken ct = default);
     /// <summary>为指定用户设置两步验证密钥。</summary>
     Task<Resp> SetTwoFactorSecretAsync(long id, string secret, CancellationToken ct = default);
-    /// <summary>清除指定用户的缓存（当前为占位实现）。</summary>
-    Task<Resp> DelCacheAsync(long id, CancellationToken ct = default);
-    /// <summary>列出某用户的 SSH 公钥。</summary>
-    Task<Resp<List<SshKey>>> ListSshKeysAsync(long userId, CancellationToken ct = default);
-    /// <summary>删除指定的 SSH 公钥。</summary>
-    Task<Resp> DeleteSshKeyAsync(long keyId, CancellationToken ct = default);
 }
 
 /// <summary>

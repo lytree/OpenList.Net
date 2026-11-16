@@ -11,8 +11,8 @@ namespace OpenList.Tests;
 
 /// <summary>
 /// 内置账号（<c>User.IsBuiltIn</c>）的生命周期测试。对应 Go 版
-/// <c>internal/bootstrap/data/user.go</c> 的 <c>initUser()</c>：
-/// 游客固定创建；管理员<em>仅在拿得到初始密码时</em>创建，否则交给 Web 安装向导
+/// <c>internal/bootstrap/data/user.go</c> 的 <c>initAdmin()</c>：
+/// 管理员<em>仅在拿得到初始密码时</em>创建，否则交给 Web 安装向导
 /// <c>POST /api/public/init/setup</c>。已存在的管理员永不被配置覆盖。
 /// </summary>
 public class BuiltInAdminTests
@@ -225,39 +225,6 @@ public class BuiltInAdminTests
             Role = UserRole.Admin,
         });
         await Assert.That(r.Data!.IsBuiltIn).IsFalse();
-    }
-
-    // ---------------- 删除保护 ----------------
-
-    [Test]
-    public async Task DeleteAsync_Blocks_BuiltIn_Admin()
-    {
-        await using var ctx = BuildContext();
-        var svc = new UserService(ctx, new AppConfiguration());
-        await InitWithAdminAsync(ctx);
-
-        var admin = await AdminAsync(ctx);
-        var r = await svc.DeleteAsync(admin.Id);
-        await Assert.That(r.Code).IsEqualTo(403);
-        await Assert.That(await ctx.Users.AnyAsync(u => u.Id == admin.Id)).IsTrue();
-    }
-
-    [Test]
-    public async Task DeleteAsync_Allows_Non_BuiltIn_Admin()
-    {
-        await using var ctx = BuildContext();
-        var svc = new UserService(ctx, new AppConfiguration());
-        var created = await svc.CreateAsync(new CreateUserReq
-        {
-            Username = "second-admin",
-            Password = "pw",
-            Role = UserRole.Admin,
-        });
-
-        // 非内置的管理员可以删除（只保护唯一入口那一个）。
-        var r = await svc.DeleteAsync(created.Data!.Id);
-        await Assert.That(r.Code).IsEqualTo(200);
-        await Assert.That(await ctx.Users.AnyAsync(u => u.Id == created.Data.Id)).IsFalse();
     }
 
     // ---------------- 改名 / 降权保护 ----------------
@@ -473,8 +440,8 @@ public class BuiltInAdminTests
         => DbInitializer.InitializeAsync(ctx, new AppConfiguration { AdminPassword = password });
 
     /// <summary>
-    /// 取管理员。库里可能同时存在 guest（对齐 Go 的 initUser），因此按角色查而不用
-    /// <c>SingleAsync()</c> 的无参重载。
+    /// 取管理员。按角色查而不用 <c>SingleAsync()</c> 的无参重载 —— 老库里可能还残留
+    /// 早期版本预置的 guest 记录。
     /// </summary>
     private static Task<User> AdminAsync(OpenListDbContext ctx)
         => ctx.Users.SingleAsync(u => u.Role == UserRole.Admin);

@@ -21,7 +21,6 @@ public sealed class JwtService : IAuthService
     private readonly TimeProvider _time;
     private readonly ILdapAuthenticator? _ldap;
     private readonly UserTokenCutoffRegistry? _cutoffs;
-    private readonly ISettingService? _settings;
     // 必须是进程级单例（DI 注入），否则登出只影响当前请求的作用域 —— 详见 RevokedTokenRegistry。
     private readonly RevokedTokenRegistry _revoked;
 
@@ -33,18 +32,16 @@ public sealed class JwtService : IAuthService
     /// <param name="time">时间源（可选，默认系统时区）。</param>
     /// <param name="ldap">LDAP 认证器（可选，未配置时 LDAP 登录不可用）。</param>
     /// <param name="cutoffs">token 失效登记表（可选；用于 BasePath/权限位变更后即时失效既有 token）。</param>
-    /// <param name="settings">设置服务（可选；用于读取 LDAP 自动开通用户的默认目录与权限位）。</param>
     /// <param name="revokedTokens">已吊销 token 登记表（可选；生产环境注入进程级单例）。</param>
     public JwtService(IUserService users, AppConfiguration config, TimeProvider? time = null,
         ILdapAuthenticator? ldap = null, UserTokenCutoffRegistry? cutoffs = null,
-        ISettingService? settings = null, RevokedTokenRegistry? revokedTokens = null)
+        RevokedTokenRegistry? revokedTokens = null)
     {
         _users = users;
         _config = config;
         _time = time ?? TimeProvider.System;
         _ldap = ldap;
         _cutoffs = cutoffs;
-        _settings = settings;
         _revoked = revokedTokens ?? new RevokedTokenRegistry();
     }
 
@@ -122,10 +119,9 @@ public sealed class JwtService : IAuthService
     }
 
     /// <summary>
-    /// 通过 LDAP 登录。流程：先用认证器对目录服务校验凭据，再按用户名查找本地用户——
-    /// 存在且启用 AllowLdap 则签发 Token；不存在则自动创建一个“密码口令随机化”的本地账号
-    /// （随机哈希密码 + General 角色），使其可无管理员预注册而登录；已存在但未启用 AllowLdap
-    /// 的用户被拒绝，以保证管理员对账号的控制权。
+    /// 通过 LDAP 登录：先由认证器向目录服务校验凭据，成功后匹配<em>已存在</em>的本地账号。
+    /// 单用户产品不做自动开通 —— 目录用户必须已经在本机存在（由安装向导或初始密码创建的
+    /// 唯一账号），否则返回 401。LDAP 因此只是一种认证方式，不会产生新账号。
     /// </summary>
     /// <param name="username">用户名。</param>
     /// <param name="password">密码。</param>
@@ -133,13 +129,6 @@ public sealed class JwtService : IAuthService
     /// <returns>成功返回 JWT Token；LDAP 未配置时返回 501。</returns>
     public async Task<Resp<string>> LoginLdapAsync(string username, string password, CancellationToken ct = default)
     {
-        // LDAP 登录流程：
-        //   1. 认证器向目录服务校验 (username, password)。
-        //   2. 按用户名查找本地用户：
-        //      - 存在且启用 AllowLdap → 签发 Token；
-        //      - 不存在 → 自动创建一个禁用密码（随机哈希）的本地账号（General 角色），
-        //        使 LDAP 用户无需管理员预注册即可登录，符合 Go 参考实现行为。
-        //   3. 存在但未启用 AllowLdap 的用户被拒绝，管理员保留控制权。
         if (_ldap is null || !await _ldap.IsEnabledAsync(ct))
             return Resp<string>.Fail("ldap not configured", RespCodes.NotImplemented);
 
@@ -147,58 +136,13 @@ public sealed class JwtService : IAuthService
         if (!ok) return Resp<string>.Fail("wrong username or password", RespCodes.Unauthorized);
 
         var r = await _users.GetByNameAsync(username, ct);
-        User u;
-        if (r.IsSuccess())
-        {
-            u = r.Data!;
-            if (u.Disabled) return Resp<string>.Fail("user disabled", RespCodes.Forbidden);
-            if (!u.AllowLdap)
-                return Resp<string>.Fail("ldap login not allowed for this user", RespCodes.Forbidden);
-        }
-        else
-        {
-            // 自动开通：随机 32 字节哈希使密码登录路径不可用，因此该本地账号只能通过 LDAP 登录。
-            // 默认目录/权限位来自 LDAP 设置组，管理员改设置后对新开通的用户即时生效。
-            var (defaultDir, defaultPermission) = await LoadLdapUserDefaultsAsync(ct);
-            var create = await _users.CreateAsync(new CreateUserReq
-            {
-                Username = username,
-                Password = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)),
-                Role = UserRole.General,
-                Permission = defaultPermission,
-                BasePath = defaultDir,
-                AllowLdap = true,
-            }, ct);
-            if (!create.IsSuccess()) return Resp<string>.Fail(create.Message, create.Code);
-            var fetched = await _users.GetByNameAsync(username, ct);
-            if (!fetched.IsSuccess()) return Resp<string>.Fail("ldap user provisioning failed", RespCodes.InternalError);
-            u = fetched.Data!;
-        }
-        return Resp<string>.Ok(IssueToken(u));
-    }
+        // 不再自动开通：目录里的任意用户都能凭空生成本地账号，等于退回多用户模型。
+        if (!r.IsSuccess())
+            return Resp<string>.Fail("user not registered", RespCodes.Unauthorized);
 
-    /// <summary>
-    /// 读取 LDAP 自动开通用户的默认目录与权限位（设置项 <c>ldap_default_dir</c> /
-    /// <c>ldap_default_permission</c>）。设置服务缺失或读取失败时回退 <c>/</c> + <c>0</c>，
-    /// 与种子默认值一致 —— 开通流程不能因为一个设置项读不到就失败。
-    /// </summary>
-    private async Task<(string? Dir, int Permission)> LoadLdapUserDefaultsAsync(CancellationToken ct)
-    {
-        if (_settings is null) return ("/", 0);
-        try
-        {
-            var dirResp = await _settings.GetAsync("ldap_default_dir", ct);
-            var dir = dirResp.IsSuccess() && !string.IsNullOrWhiteSpace(dirResp.Data?.Value)
-                ? dirResp.Data!.Value!.Trim()
-                : "/";
-            var permResp = await _settings.GetAsync("ldap_default_permission", ct);
-            var perm = permResp.IsSuccess() && int.TryParse(permResp.Data?.Value, out var p) ? p : 0;
-            return (dir, perm);
-        }
-        catch
-        {
-            return ("/", 0);
-        }
+        var u = r.Data!;
+        if (u.Disabled) return Resp<string>.Fail("user disabled", RespCodes.Forbidden);
+        return Resp<string>.Ok(IssueToken(u));
     }
 
     /// <summary>

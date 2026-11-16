@@ -14,7 +14,8 @@ using OpenList.Server.Models;
 namespace OpenList.Server.Endpoints;
 
 /// <summary>
-/// 管理端点：存储 CRUD、驱动列表、用户管理、设置、元数据、站内信、扫描、搜索索引。
+/// 管理端点：存储 CRUD、驱动列表、设置、元数据、扫描、搜索索引。
+/// 用户方面只保留只读列表（元数据白名单用）与内置管理员密码重置。
 /// 对应 OpenList Go <c>server/handles/admin</c>。所有端点均要求 admin 角色。
 /// 路由位于 <c>/api/admin</c> 下，整体 <c>RequireAuthorization("admin")</c>。
 /// </summary>

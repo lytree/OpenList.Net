@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -143,49 +142,12 @@ public sealed class SsoService : ISsoService
         if (method == "get_sso_id")
             return Resp<SsoCallbackResult>.Ok(new SsoCallbackResult { SsoId = userId });
 
-        // sso_get_token：查找本地用户，允许时自动注册，然后签发 JWT。
+        // sso_get_token：按 SSO 编号查找已绑定的本地账号后签发 JWT。
+        // 单用户产品不做自动注册 —— 未绑定时直接拒绝，绑定通过 /api/me/update 的 sso_id 完成。
         var lookup = await _users.GetBySsoIdAsync(userId, ct);
-        User u;
-        if (lookup.IsSuccess())
-        {
-            u = lookup.Data!;
-        }
-        else
-        {
-            if (!s.AutoRegister)
-                return Resp<SsoCallbackResult>.Fail("sso user not registered", RespCodes.NotFound);
-            var username = string.IsNullOrEmpty(profile.Data.Username) ? userId : profile.Data.Username;
-            var create = await _users.CreateAsync(new CreateUserReq
-            {
-                Username = username,
-                Password = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)),
-                Role = UserRole.General,
-                Permission = s.DefaultPermission,
-                BasePath = s.DefaultDir,
-            }, ct);
-            if (!create.IsSuccess())
-            {
-                // 用户名冲突 —— 追加 SSO id 后缀以消歧（与 Go 行为一致）。
-                create = await _users.CreateAsync(new CreateUserReq
-                {
-                    Username = username + "_" + userId,
-                    Password = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)),
-                    Role = UserRole.General,
-                    Permission = s.DefaultPermission,
-                    BasePath = s.DefaultDir,
-                }, ct);
-                if (!create.IsSuccess()) return Resp<SsoCallbackResult>.Fail(create.Message, create.Code);
-            }
-            var fetched = await _users.GetByNameAsync(username, ct);
-            if (!fetched.IsSuccess())
-            {
-                fetched = await _users.GetByNameAsync(username + "_" + userId, ct);
-                if (!fetched.IsSuccess()) return Resp<SsoCallbackResult>.Fail("sso user provisioning failed", RespCodes.InternalError);
-            }
-            u = fetched.Data!;
-            // 给新创建的账号打上 SSO 编号。
-            await _users.UpdateAsync(u.Id, new UpdateUserReq { Id = u.Id, SsoID = userId }, ct);
-        }
+        if (!lookup.IsSuccess())
+            return Resp<SsoCallbackResult>.Fail("sso user not registered", RespCodes.NotFound);
+        var u = lookup.Data!;
 
         if (u.Disabled) return Resp<SsoCallbackResult>.Fail("user disabled", RespCodes.Forbidden);
         var token = _auth.IssueToken(u);
@@ -438,9 +400,6 @@ public sealed class SsoService : ISsoService
             Enabled = GetBool("sso_login_enabled"),
             Platform = Get("sso_login_platform"),
             CompatibilityMode = GetBool("sso_compatibility_mode"),
-            AutoRegister = GetBool("sso_auto_register"),
-            DefaultDir = Get("sso_default_dir") is { Length: > 0 } d ? d : "/",
-            DefaultPermission = int.TryParse(Get("sso_default_permission"), out var p) ? p : 0,
             ClientId = Get("sso_client_id"),
             ClientSecret = Get("sso_client_secret"),
             Endpoint = Get("sso_endpoint_name"),
@@ -462,9 +421,6 @@ public sealed class SsoService : ISsoService
         public bool Enabled { get; init; }
         public string Platform { get; init; } = "Casdoor";
         public bool CompatibilityMode { get; init; }
-        public bool AutoRegister { get; init; }
-        public string DefaultDir { get; init; } = "/";
-        public int DefaultPermission { get; init; }
         public string ClientId { get; init; } = "";
         public string ClientSecret { get; init; } = "";
         public string Endpoint { get; init; } = "";

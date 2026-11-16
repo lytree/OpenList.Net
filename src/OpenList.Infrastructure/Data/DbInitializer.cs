@@ -494,6 +494,31 @@ public static class DbInitializer
     }
 
     /// <summary>
+    /// 已废弃的设置键：启动时从老库里删除，避免设置页继续渲染无效开关。
+    /// <list type="bullet">
+    /// <item><c>share_stream_max_concurrency</c>、<c>share_icon</c>、<c>share_summary_content</c>、
+    /// <c>share_preview*</c>、<c>share_archive_preview</c> — 公开分享系统已移除。</item>
+    /// <item><c>sso_auto_register</c>、<c>sso_default_dir</c>、<c>sso_default_permission</c> — SSO 不再自动注册。</item>
+    /// <item><c>ldap_default_dir</c>、<c>ldap_default_permission</c> — LDAP 不再自动开通账号。</item>
+    /// </list>
+    /// </summary>
+    private static readonly string[] RemovedSettingKeys =
+    [
+        "share_stream_max_concurrency",
+        "share_icon",
+        "share_summary_content",
+        "share_preview",
+        "share_archive_preview",
+        "share_preview_archives_by_default",
+        "share_preview_download_by_default",
+        "sso_auto_register",
+        "sso_default_dir",
+        "sso_default_permission",
+        "ldap_default_dir",
+        "ldap_default_permission",
+    ];
+
+    /// <summary>
     /// 按分组组织的默认设置表：既用于首次装填，也用于 <c>POST /admin/setting/default?group=</c>
     /// 恢复某分组为默认值。Group 取值为前端 Group 枚举（int）：
     /// 0=SINGLE, 1=SITE, 2=STYLE, 3=PREVIEW, 4=GLOBAL, 5=ARIA2, 6=INDEX,
@@ -529,8 +554,7 @@ public static class DbInitializer
         ("logo", "", SettingValueType.String, SettingFlag.Public, 2, null),
         ("main_color", "#722ed1", SettingValueType.String, SettingFlag.Public, 2, null),
         ("home_icon", "", SettingValueType.String, SettingFlag.Public, 2, null),
-        ("share_icon", "", SettingValueType.String, SettingFlag.Public, 2, null),
-        ("share_summary_content", "", SettingValueType.Text, SettingFlag.Public, 2, null),
+        // share_icon / share_summary_content 已删：公开分享页移除后没有消费方。
         ("home_container", "10", SettingValueType.Number, SettingFlag.Public, 2, null),
         ("settings_layout", "responsive", SettingValueType.Select, SettingFlag.Public, 2, "responsive,columns"),
         ("customize_head", "", SettingValueType.Text, SettingFlag.Public, 2, null),
@@ -557,12 +581,9 @@ public static class DbInitializer
         // 曾经写成 package_download=false / preview_archives_by_default=false / pagination_type=all，
         // 结果升级后打包入口消失、归档不再自动预览、列表不再分页 —— A–H 回归立刻红了 6 条。
         ("package_download", "true", SettingValueType.Bool, SettingFlag.Public, 3, null),
-        ("share_preview", "true", SettingValueType.Bool, SettingFlag.Public, 3, null),
-        ("share_archive_preview", "false", SettingValueType.Bool, SettingFlag.Public, 3, null),
+        // share_preview* / share_archive_preview 已删：公开分享页移除后无人读取。
         ("preview_archives_by_default", "true", SettingValueType.Bool, SettingFlag.Public, 3, null),
         ("preview_download_by_default", "false", SettingValueType.Bool, SettingFlag.Public, 3, null),
-        ("share_preview_archives_by_default", "true", SettingValueType.Bool, SettingFlag.Public, 3, null),
-        ("share_preview_download_by_default", "false", SettingValueType.Bool, SettingFlag.Public, 3, null),
         ("non_efs_zip_encoding", "", SettingValueType.String, SettingFlag.Public, 3, null),
 
         // --- Group 4: GLOBAL ---
@@ -600,9 +621,8 @@ public static class DbInitializer
         ("sso_login_platform", "Casdoor", SettingValueType.Select, SettingFlag.Public, 7, "Casdoor,Gitlab,Google,Microsoft,Discord,Twitter,Github"),
         ("sso_compatibility_mode", "false", SettingValueType.Bool, SettingFlag.Public, 7, null),
         ("sso_postmessage_origin", "", SettingValueType.String, SettingFlag.Public, 7, null),
-        ("sso_auto_register", "false", SettingValueType.Bool, SettingFlag.Public, 7, null),
-        ("sso_default_dir", "/", SettingValueType.String, SettingFlag.Public, 7, null),
-        ("sso_default_permission", "0", SettingValueType.Number, SettingFlag.Public, 7, null),
+        // sso_auto_register / sso_default_dir / sso_default_permission 已删：单用户产品禁止
+        // SSO 自动注册（未绑定的外部身份一律拒绝），这三个键不再有任何消费方。
         ("sso_client_id", "", SettingValueType.String, SettingFlag.Private, 7, null),
         ("sso_client_secret", "", SettingValueType.String, SettingFlag.Private, 7, null),
         ("sso_endpoint_name", "", SettingValueType.String, SettingFlag.Private, 7, null),
@@ -620,8 +640,7 @@ public static class DbInitializer
         ("ldap_manager_password", "", SettingValueType.String, SettingFlag.Private, 8, null),
         ("ldap_user_search_base", "", SettingValueType.String, SettingFlag.Private, 8, null),
         ("ldap_user_search_filter", "", SettingValueType.String, SettingFlag.Private, 8, null),
-        ("ldap_default_dir", "/", SettingValueType.String, SettingFlag.Public, 8, null),
-        ("ldap_default_permission", "0", SettingValueType.Number, SettingFlag.Public, 8, null),
+        // ldap_default_dir / ldap_default_permission 已删：LDAP 不再自动开通本地账号。
         ("ldap_skip_tls_verify", "false", SettingValueType.Bool, SettingFlag.Private, 8, null),
 
         // Group 9（S3）整组删除（2026-11-01）：S3 网关按「存储挂载→桶」映射 + 用户认证工作，
@@ -645,10 +664,7 @@ public static class DbInitializer
         ("max_client_upload_speed", "-1", SettingValueType.Number, SettingFlag.Public, 11, null),
         ("max_server_download_speed", "-1", SettingValueType.Number, SettingFlag.Private, 11, null),
         ("max_server_upload_speed", "-1", SettingValueType.Number, SettingFlag.Private, 11, null),
-        // 公开分享的并发流预算：同一个分享码同时最多 N 条流，超出返回 429 + Retry-After。
-        // 0 表示不限（默认，保持既有行为）。限速管「总量」，这个键管「单条链接」——
-        // 一条链接被几十个播放器同时拉时，只靠限速挡不住。
-        ("share_stream_max_concurrency", "0", SettingValueType.Number, SettingFlag.Private, 11, null),
+        // share_stream_max_concurrency 已删：公开分享系统移除后无人消费。
         // Multipart 分片上传：multipart_chunk_size 单位为 MB；move_task_threads_num 对齐 Go 的 move_task_threads_num。
         ("multipart_enabled", "true", SettingValueType.Bool, SettingFlag.Public, 11, null),
         ("multipart_chunk_size", "10", SettingValueType.Number, SettingFlag.Public, 11, null),
@@ -728,6 +744,10 @@ public static class DbInitializer
         }
 
         var existingSet = new HashSet<string>(allSettings.Select(s => s.Key), StringComparer.Ordinal);
+
+        // 清理已废弃的键（老库升级路径）；新库由 DefaultSettings 决定，不会出现这些键。
+        var obsolete = allSettings.Where(s => RemovedSettingKeys.Contains(s.Key, StringComparer.Ordinal)).ToList();
+        if (obsolete.Count > 0) db.Settings.RemoveRange(obsolete);
 
         foreach (var (key, value, type, flag, group, options) in DefaultSettings)
         {

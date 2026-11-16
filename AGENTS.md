@@ -79,11 +79,11 @@
 其余要点：
 
 - **`IsBuiltIn` 标记是保护的唯一依据**（列由 `AddUserIsBuiltIn` 迁移添加，并在其中回填旧库中最早的管理员）。`UserService.IsSuperAdmin` 读它，**不再**比较 `config.AdminUsername` —— 否则用户在管理界面改过用户名后保护就失效了。**按标记查账号时必须同时限定 `Role == Admin`**。
-- 内置 admin **不可删除 / 改名 / 降权 / 禁用 / 改权限位**，但**可以改密码**：网页端走用户菜单的「修改密码」（`POST /api/me/update`），桌面端 / 客户端走 `POST /api/admin/user/reset_admin_password`。
+- 内置 admin **不可改名 / 降权 / 禁用 / 改权限位**，且已无删除接口，但**可以改密码**：网页端走用户菜单的「修改密码」（`POST /api/me/update`），桌面端 / 客户端走 `POST /api/admin/user/reset_admin_password`。
 - 安装向导走 `IUserService.CreateInitialAdminAsync`（**不是** `CreateAsync`）：它会打上 `IsBuiltIn`。该标记刻意没做进 `CreateUserReq`，否则已登录的管理员能凭空造出受保护账号；`CreateAsync` 恒定 `IsBuiltIn = false`。
 - 已存在的管理员永不被配置覆盖 —— 凭据以数据库为准（管理界面 / 桌面端 / CLI 改的密码不会被下次启动打回）。
 - 忘记密码的三条恢复路径：`POST /api/admin/user/reset_admin_password`、桌面端设置页、`cli/openlist admin random`（直连数据库，Web 层起不来时唯一可用的）。
-- 注意：本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（`Id=0`，见 `SignEndpoints`），库里没有 guest 记录。
+- 注意：本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（`Id=0`，见 `SignEndpoints`）；新库不再预置 guest 记录（老库残留的 `guest` 行不参与鉴权，仅在改密判据里需按 `Role == Admin` 排除）。
 - **两个门面的游客准入由设置控制**（group 13「访问控制」）：`media_guest_access`（默认 `true`）、`home_guest_access`（默认 `false`）。
   后端在 `MediaEndpoints` / `FsEndpoints` 的**路由组上各挂一个 endpoint filter** 拦匿名请求（不是逐端点改 `AllowAnonymous`，
   那是启动期常量）；判定值来自单例 `IGuestAccessService`（3 秒 TTL，管理端保存设置后 `InvalidateCache()` 立即生效）。
@@ -150,7 +150,7 @@ openlist cancel2fa <username>
 - `IFileSystemDirectUploader` / `IFileSystemWithDetails` — driver extension interfaces still unimplemented by any driver.
 - `/debug/pprof/*` — Go's pprof surface has no .NET equivalent (DebugEndpoints registers `/debug/{gc,hide_privacy,path}` only).
 
-> **SSO / WebAuthn / LDAP are NOT stubs anymore** — implemented: `/api/auth/sso`, `/sso_callback`, `/get_sso_id`, `/sso_get_token` (via `ISsoService`; 403 when disabled), `/api/authn/webauthn_{begin,finish}_{login,registration}` + `/delete_authn` + `/getcredentials` (via `IWebAuthnService`; 403 when disabled), `/api/auth/login/ldap` (via `JwtService.LoginLdapAsync`; 501 when LDAP unconfigured).
+> **SSO / WebAuthn / LDAP are NOT stubs anymore** — implemented: `/api/auth/sso`, `/sso_callback`, `/get_sso_id`, `/sso_get_token` (via `ISsoService`; 403 when disabled), `/api/authn/webauthn_{begin,finish}_{login,registration}` + `/delete_authn` + `/getcredentials` (via `IWebAuthnService`; 403 when disabled), `/api/auth/login/ldap` (via `JwtService.LoginLdapAsync`; 501 when LDAP unconfigured). **单用户产品下 LDAP / SSO 只做认证、不再自动开通账号**：目录/LDAP 用户必须已有同名本地账号，SSO 身份必须已通过 `sso_id` 绑定（未绑定回调返回 404），相关 `ldap_default_*` / `sso_auto_register` / `sso_default_*` 设置项已删除并会在启动时从老库清理。
 
 ### Completely missing (no route registered)
 
@@ -180,7 +180,6 @@ openlist cancel2fa <username>
 - `/api/fs/other` — misc fs operations
 
 **Admin routes**:
-- ~~`/api/admin/user/del_cache` — clear user cache~~ **Implemented** (`POST /admin/user/del_cache?id=`; `UserService.DelCacheAsync` is a no-op placeholder until a cache layer is added).
 - ~~`/api/admin/user/sshkey/{list,delete}` — admin SSH-key management~~ **Implemented** (`AdminEndpoints`): `GET /admin/user/sshkey/list?uid=` and `POST /admin/user/sshkey/delete?uid=&id=`; reuses `SshKeyService` with `isAdmin: true` so admins can manage any user's keys.
 - ~~`/api/admin/setting/delete`, `/setting/default`, `/setting/reset_token`~~ **Implemented** (`AdminEndpoints`): `delete` removes a key; `default?group=` restores `DbInitializer.DefaultSettings` for the group; `reset_token` rotates the JWT secret (updates singleton `AppConfiguration` + persists to `jwt_secret` file + updates bearer `TokenValidationParameters` via `IOptionsMonitor` so existing tokens are invalidated immediately).
 - ~~`/api/admin/setting/set_{aria2,qbit,transmission,115,115_open,123_pan,123_open,pikpak,thunder,thunderx,thunder_browser}` — 11 offline-download-tool config routes~~ **Implemented** — 12 routes incl. `set_guangyapan` (`guangyapan_temp_dir`).
@@ -215,10 +214,9 @@ Implemented extensions: `IFileSystemLinkProvider` (WebDAV, S3, AliyundriveOpen),
 对照 `docs/alignment-plan.md` 落地的 P0+P1+P2 项（不含 Cloud 驱动）：
 
 - **Multipart 分片上传**（新增，前端破坏性缺口）：`/api/fs/multipart/{init,chunk,status,complete,abort}`。`IMultipartUploadService`/`MultipartUploadService`（会话内存 + 临时文件缓冲，窗口 8 分片流控 429、断点续传、failed_retriable）；`MultipartEndpoints`。POST 读 body，chunk 走 PUT。**设置门控**：`multipart_enabled`（默认 true）关闭时 `/init` 返回 403；`multipart_chunk_size`（MB，默认 10）作为客户端分片大小上界（`ResolveChunkSize`，1 MB 下限）；chunk 端点无论结果都**有界排空请求体**（镜像 Go MultipartChunk 的 io.LimitReader+io.Copy(io.Discard)），避免拒绝的分片污染客户端连接池。**会话 GC**（镜像 Go `internal/multipart` StartGC）：滑动 TTL 30 分钟不活动回收会话并清理临时目录，`Program.cs` 启动时清扫上次运行遗留的孤儿临时目录并启动周期回收。
-- **消息 send 体形兼容**：`POST /admin/message/send` 现接受前端实际发送的 `{message:"string"}`（`SendBroadcastReq.Message` 改为 `object`，字符串包装为 `BroadcastMessage{Type="string"}`）。
 - **归档驱动**：`OpenList.Drivers/Archive/SharpCompressArchiveSupport` + `LocalDriver` 实现 `IFileSystemArchiveReader/Decompress`（zip/rar/7z/tar/gz，ZipSlip 防护）→ `/fs/archive/*`、`/ad /ap /ae`、`/sad` 全部可用。
 - **MCP 端点**：`/mcp`（Streamable HTTP + JSON-RPC 2.0，admin-only，`MCP.Enable` 开关，未启用 403）。`IMcpServerService`/`McpServerService`（会话 TTL 30min、128 全局/16 用户）+ `McpEndpoints`。工具：`openlist.fs.list/get/link`。
-- **路由方法兼容（Go Any）**：`/fs/{list,get,dirs,search,other,archive/meta,archive/list}`、`/public/{settings,archive_extensions,offline_download_tools}`、`/share/list`、`/ping` 均接受 GET+POST（POST 读 body / GET 绑 query，`RequestBinder`）。
+- **路由方法兼容（Go Any）**：`/fs/{list,get,dirs,search,other,archive/meta,archive/list}`、`/public/{settings,archive_extensions,offline_download_tools}`、`/ping` 均接受 GET+POST（POST 读 body / GET 绑 query，`RequestBinder`）。
 - **`/api/fs/regex_rename`**：`POST`，body `{src_dir, src_name_regex, new_name_regex}` → `FileSystemService.RegexRenameAsync`。
 - **`/api/fs/link` 收紧为 admin-only**（对齐 Go `AuthAdmin`）。
 - **S3 网关鉴权加固（P2）**：`S3Endpoints.ResolveUserAsync` 原在 JWT 中间件未捕获时把任何 token 原样接受为硬编码 Admin guest（安全洞）。现经 `IAuthService.ValidateTokenAsync` 校验 token → `IUserService.GetAsync` 加载真实用户，无效 token / 禁用用户一律返回 401。支持 SigV4 `Credential=<jwt>` / `AWS` / `Bearer` / 裸 token 四种头形态。

@@ -152,15 +152,6 @@
     padding: var(--ol-space-1) var(--ol-space-2);
   }
 
-  /* ---- 公开分享页：减小外边距 ---- */
-  .ol-share-page {
-    padding: var(--ol-space-3);
-  }
-
-  .ol-share-topbar {
-    margin-bottom: var(--ol-space-3);
-  }
-
   /* ---- 权限位复选框：手机上单列 ---- */
   .ol-perm-grid {
     grid-template-columns: 1fr;
