@@ -186,10 +186,6 @@
   color: var(--el-color-primary);
 }
 
-.ol-view-footer-sep {
-  color: var(--ol-border);
-}
-
 .ol-view-footer-page {
   margin-left: 6px;
   opacity: 0.6;

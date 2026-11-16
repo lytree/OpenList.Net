@@ -16,7 +16,7 @@
 ┌───────────────────────────┐          ┌───────────────────────────┐
 │ OpenList.Infrastructure   │          │      OpenList.Media       │
 │  Data/MediaModelConfiguration         │  服务 / provider / 端点    │
-│  （EF 映射：表名、索引）   │          │  / 后台扫描 / DI 模块      │
+│  （EF 映射：表名、索引）   │          │  / 后台任务 / DI 模块      │
 └───────────┬───────────────┘          └───────────┬───────────────┘
             │                                      │
             └──────────────► OpenList.Core ◄────────┘
@@ -36,8 +36,8 @@
 
 | 项目 | 内容 | 不应出现的东西 |
 |---|---|---|
-| `OpenList.Media.Domain` | `Domain/`：`MediaLibrary` `MediaScanLog` `MediaItem` `MediaFile` `MediaPerson` `MediaItemPerson` `MediaStudio` `MediaSeries` `UserMediaState` `MediaPlaylist` `MediaPlaylistItem` `MediaGenres`；`Abstractions/`：9 个服务/provider 接口与请求、响应 DTO | EF 特性、`HttpContext`、DI 注册 |
-| `OpenList.Media` | `MediaModule.cs`（DI + 路由）、`Services/`（库、扫描编排、扫描执行器、命名规则、聚合、播放列表、个人状态、元数据、字幕、演职员与片商/系列落库）、`Providers/`（TMDB、code 番号、OpenSubtitles）、`Endpoints/`（6 个子域文件）、`Hosting/`（定时扫描） | 直接 `Program.cs` 级的静态初始化 |
+| `OpenList.Media.Domain` | `Domain/`：`MediaLibrary` `MediaScanLog` `MediaItem` `MediaFile` `MediaPerson` `MediaItemPerson` `MediaStudio` `MediaSeries` `UserMediaState` `MediaPlaylist` `MediaPlaylistItem` `MediaGenres` `MediaWatchSession`；`Abstractions/`：10 个服务/provider 接口（分布在 9 个文件）与请求、响应 DTO | EF 特性、`HttpContext`、DI 注册 |
+| `OpenList.Media` | `MediaModule.cs`（DI + 路由）、`Services/`（库、扫描编排、扫描执行器、命名规则、聚合、播放列表、个人状态、观看会话、元数据、字幕、演职员与片商/系列落库）、`Providers/`（TMDB、code 番号、OpenSubtitles）、`Endpoints/`（7 个子域端点文件 + 路由挂载 / 查询串 / 图片三个助手）、`Hosting/`（自动扫描 + 观看会话留存清理） | 直接 `Program.cs` 级的静态初始化 |
 | `OpenList.Infrastructure` | `Data/MediaModelConfiguration.cs`（表名前缀、唯一索引、`Genres` 非映射声明）、`OpenListDbContext.Media*` DbSet | 媒体业务逻辑 |
 
 原有文件去向：
@@ -48,7 +48,7 @@
 | `Core/Interfaces/IMedia*.cs`、`IMetadataProvider.cs`、`ISubtitleService.cs` | `Media.Domain/Abstractions/` |
 | `Infrastructure/Services/Media*.cs`、`Media/*.cs` | `Media/Services/`、`Media/Providers/` |
 | `Infrastructure/Services/MediaGenreJson.cs` | 删除，语义并入 `MediaItem.Genres` / `MediaGenres` |
-| `Server/Endpoints/MediaEndpoints.cs` | `Media/Endpoints/*.cs`（1 个 377 行文件 → 7 个按子域拆分的文件） |
+| `Server/Endpoints/MediaEndpoints.cs` | `Media/Endpoints/*.cs`（1 个 377 行文件 → 7 个按子域拆分的端点文件，另加路由挂载 / 查询串 / 图片助手） |
 | `Server/Hosting/MediaAutoScanHostedService.cs` | `Media/Hosting/`，由 `AddMediaModule()` 注册 |
 | `Server/Endpoints/AuthEndpoints.cs` 内的 `AuthClaimsExtensions` | `Core/Security/ClaimsPrincipalExtensions.cs`（模块项目不能反向引用宿主） |
 
@@ -64,13 +64,14 @@ HTTP → Endpoints/*.cs        MediaQuery 归一查询串（空串→null、非�
 
 1. **管理类**（库 CRUD、扫描、刮削）：`user.CanManageMediaLibrary()`，失败返回 403。
 2. **浏览类**（条目、聚合、状态、列表）：先按库可见性（`BasePath` 覆盖库路径），再按**条目目录**可见性过滤；
-   库可见但条目在别人目录下的情况必须被过滤，聚合接口（facets/stats/persons/home）与列表接口口径相同。
+   库可见但条目在别人目录下的情况必须被过滤，聚合接口（facets/stats/home/persons/studios/series/tasks）与列表接口口径相同。
 
 ## 4. 数据表与迁移
 
-- 媒体表：`{prefix}media_libraries`、`media_scan_logs`、`media_items`、`media_files`、`media_persons`、`media_item_persons`、`media_studios`、`media_series`、`user_media_states`、`media_playlists`、`media_playlist_items`。
-- 建表**只由 EF 迁移负责**：`AddMediaSchema`（9 张表）+ `AddMediaCollections`（个人状态三列 + 两张列表表）
-  + `AddMediaMetadataSource`（元数据来源列）+ `AddMediaCodeDomain`（番号域：items 三列 + studios/series 两表）。
+- 媒体表：`{prefix}media_libraries`、`media_scan_logs`、`media_items`、`media_files`、`media_persons`、`media_item_persons`、`media_studios`、`media_series`、`user_media_states`、`media_watch_sessions`、`media_playlists`、`media_playlist_items`。
+- 建表**只由 EF 迁移负责**：`AddMediaSchema`（7 张表）+ `AddMediaCollections`（个人状态三列 + 两张列表表）
+  + `AddMediaMetadataSource`（元数据来源列）+ `AddMediaCodeDomain`（番号域：items 三列 + studios/series 两表）
+  + `AddMediaWatchSessions`（观看会话表）。
 - `DbInitializer` 里原先手写的媒体建表 DDL（约 280 行）与补列逻辑已删除。那条路径是给 Go 时代 `EnsureCreated` 遗留库兜底的，
   手写 DDL 与 EF 模型必然漂移（第一次升级就漏了 `WatchLater`/`Flagged`/`FlagNote`，需要第二遍 ALTER 才补上）。
 - **兼容性口径**：媒体域不承诺兼容"无 `__EFMigrationsHistory` 的旧库"。这类库的其它功能照常工作，媒体接口会因缺表报错，
@@ -88,18 +89,22 @@ MediaScanService（单例）        并发互斥、进度登记、取消、扫�
 但过去埋在 445 行的扫描服务里无法单测。现在 `MediaNaming` 是纯函数，`tests/OpenList.Tests/MediaNamingTests.cs` 覆盖了
 括号年份优先、裸年份回退、库根散文件归属、Mixed 库季检测、标题清洗等用例。
 
-## 6. HTTP 契约（`/api/media`，46 条，全部需登录）
+## 6. HTTP 契约（`/api/media`，55 条）
 
 | 子域 | 路由 |
 |---|---|
 | 库与扫描 | `GET/POST /libraries`、`GET /libraries/{id}`、`POST /libraries/{id}/update|delete|scan|scan/stop`、`GET /libraries/{id}/scan`、`GET /libraries/{id}/scan/logs` |
-| 条目与刮削 | `GET /items`、`GET /items/{id}`、`GET /items/{id}/files|credits`、`POST /items/{id}/scrape?provider=|match`、`POST /libraries/{id}/scrape` |
-| 个人状态 | `GET/POST /items/{id}/state`、`GET /favorites|in-progress|watch-later|flagged|unseen|taste` |
+| 条目与刮削 | `GET /items`（`state=` / `sort=`，含 `sort=favorited`）、`GET /items/{id}`、`GET /items/{id}/files|image|credits`、`POST /items/{id}/scrape?provider=|match`、`POST /libraries/{id}/scrape`、`GET /scrape/tasks` |
+| 个人状态 | `POST /items/states`（批量）、`GET/POST /items/{id}/state`、`GET /favorites|in-progress|watch-later|flagged|unseen|taste` |
+| 观看会话 | `POST /watch/report`、`GET /watch/history`、`GET /watch/stats` |
 | 播放列表 | `GET/POST /playlists`、`GET /playlists/{id}`、`POST /playlists/{id}/update|delete|items|items/remove|items/reorder`、`POST /playlists/add` |
-| 聚合 | `GET /facets|stats|home|tasks|persons|persons/{id}|persons/{id}/items`、`GET /studios|studios/{id}/items|series|series/{id}/items` |
+| 聚合 | `GET /facets|stats|home|tasks|persons|persons/{id}|persons/{id}/image|persons/{id}/items`、`GET /studios|studios/{id}|studios/{id}/items|series|series/{id}|series/{id}/items` |
 | 字幕 | `GET /subtitles/search`、`POST /items/{id}/subtitles` |
 
-路由清单由 `Media/Endpoints/*.cs` 生成，重构前后逐条比对一致。
+路由组整体 `RequireAuthorization()`：库/条目/聚合/演职员/图片等只读浏览端点逐个 `AllowAnonymous()`，
+匿名请求再由组级 endpoint filter 按 `media_guest_access`（默认开）放行，关闭即 401；个人状态、观看会话与
+所有写操作仍需登录。路由清单与 `Media/Endpoints/*.cs` 的 55 处 `Map*` 注册一致
+（库 9 + 条目 9 + 状态 9 + 观看 3 + 播放列表 9 + 聚合 14 + 字幕 2）。
 
 ## 7. 模块化收益与边界
 
@@ -109,10 +114,17 @@ MediaScanService（单例）        并发互斥、进度登记、取消、扫�
 - 契约层（Domain）可被未来任何宿主复用（桌面端、独立服务、测试工程）。
 - 扫描命名规则可单测；`Genres` 只有一套解析口径（`MediaGenres` / `MediaItem.Genres`）。
 
+已落地的会话留存：
+
+- 观看会话按天清理：设置项 `media_watch_retention_days`（Group 12，默认 3650 天、0 = 永久）
+  由 `WatchSessionRetentionHostedService` 执行——启动延迟 5 分钟、每 24 小时一轮，按 `LastAt`
+  批量删除超期会话。默认值正好等于口味页 `?days=` 的上限（`TasteWindow.MaxDays` = 3650），
+  因此默认配置下不会删掉仍可查询的会话。
+
 仍是已知边界（对应方案文档第 7 节待补项）：
 
 - 扫描任务不持久化，进程重启后无法续跑。
-- 归档/下载联动、关注聚合未开始。
+- 归档/下载联动、关注聚合（`FollowEntry`/`FollowPost`）未开始。
 
 ## NFO 双向化（已完成）
 

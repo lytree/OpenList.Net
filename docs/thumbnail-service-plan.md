@@ -44,7 +44,7 @@
 2. **stderr 必须留**：失败时把 stderr 尾部记进 `thumb failed: … detail=`，并把原因归类成可枚举值返回 `X-Thumb-Reason`。
 3. **超时必须 Kill 整棵进程树**，且所有在跑进程登记在案，`Dispose` 时统一清理。
 
-**测试**：`tests/OpenList.Tests/ThumbnailTests.cs`（23 条，缓存键/类型判定/参数拼装/设置映射/URL 条件/ffmpeg 缺失降级）
+**测试**：`tests/OpenList.Tests/ThumbnailTests.cs`（26 条，缓存键/类型判定/参数拼装/设置映射/URL 条件/ffmpeg 缺失降级）
 + `tests/OpenList.Tests/ThumbnailEndpointTests.cs`（11 条，含「不传 type 时行为不变」「非法 w 不 400」「HEAD 不生成」「415/404 原因头」「真 ffmpeg 出图并二次命中缓存」）
 + `tests/OpenList.Tests/ThumbnailFfmpegTests.cs`（6 条，用仓库内 `.e2e/bin/ffmpeg.exe` 现录 3 秒 testsrc，断言产物是 320×320 的 JPEG）。
 
@@ -58,7 +58,7 @@ PDF 首页当时没做，已在下一批补齐（见 §0.3）。
 | 项 | 落点 | 说明 |
 |---|---|---|
 | 列表 40px 缩略图槽位 | `frontend/src/components/ThumbIcon.tsx`（新）+ `pages/home/index.tsx`（表格名称列）+ `pages/home/ListRows.tsx`（手机卡片行） | 统一成一个组件：有 `thumb` 画图，没有/加载失败退图标。**只做一级降级**（缩略图 → 图标），不像网格那样再退原图 —— 40px 的槽位为一张全尺寸图付流量不划算。手机行用 36px，好塞进 52px 的行高 |
-| E2E 轮次 `verify-thumb.mjs` | `frontend/scripts/verify-thumb.mjs` + `run-regression.sh` 的 `round_thumb`（`I/thumb`） | 28 条断言（PDF 首页补齐后为 33 条，见 §0.3），覆盖 §12 的 9 条（并拆细）：默认关闭不下发 → 开启后下发 → 生成/命中/ETag → 改文件失效 → txt 415 → w=9999 夹到 1024 → 带封面 200 / 无封面 404 `no-cover` → PDF 首页 200（第三批补齐，见 §0.3）→ **不带 type 仍是原文件** → 表格/网格/手机三处槽位。fixture 由脚本用 ffmpeg 现造，PDF 用脚本内手拼的最小合法文件 |
+| E2E 轮次 `verify-thumb.mjs` | `frontend/scripts/verify-thumb.mjs` + `run-regression.sh` 的 `round_thumb`（`I/thumb`） | 33 条断言（脚本内共 35 处 `check`，其中 2 处是 ffmpeg / 登录缺失时的前置守卫，成功轮只跑 33 条；SUMMARY 也按实际执行条数打印），覆盖 §12 的 9 条（并拆细）：默认关闭不下发 → 开启后下发 → 生成/命中/ETag → 改文件失效 → txt 415 → w=9999 夹到 1024 → 带封面 200 / 无封面 404 `no-cover` → PDF 首页 200（第三批补齐，见 §0.3）→ **不带 type 仍是原文件** → 表格/网格/手机三处槽位。fixture 由脚本用 ffmpeg 现造，PDF 用脚本内手拼的最小合法文件 |
 | 资源 404 的口径 | 同上 | 列表对「无封面 mp3」必然发一次取不到图的请求（后端无法预知有没有内嵌封面），前端按约定降级为图标。E2E 把这类 404 与**脚本级异常**分开统计，否则这一轮永远红 |
 
 **PDF 首页为什么第二轮没做**（本节只记录当时的判断，已在第三批推翻并补齐，见 §0.3）：不是取舍变化，是环境阻塞 —— 本机 NuGet 源不可达（`dotnet package search PDFtoImage` 直接报「无法加载服务索引」），本地缓存里也没有 PDFtoImage/PDFium；同时机器上没有任何可用的 PDF 渲染器（`pdftoppm`/`mutool`/`gs` 都不存在）。要么联网补包（PDFtoImage 5.4.0，含 PDFium + SkiaSharp native，Docker 运行时还要补 `libfontconfig1`/`libstdc++`），要么改用外部渲染器（`pdftoppm`，与现有「外部 ffmpeg」同构，镜像里补一个 poppler-utils）。两条路都要动 Dockerfile 与发布体积，属于需要拍板的取舍，留到下一批。
@@ -108,7 +108,7 @@ SkiaSharp 大版本和 PDFium 主版本，在没有 Docker 实测的条件下一
 
 - 后端 **618 项全通过 / 0 跳过**（新增 5 条：`PdfRenderer` 直出 PNG 并校验尺寸、坏 PDF 归因、
   全链路出 JPEG、坏 PDF 全链路归因、`Probe` 对 PDF 回 200）。
-- `I/thumb` 轮 **33/33**：PDF 条目下发 thumb、`GET` 200 + 2594B JPEG、二次 `hit`、
+- `I/thumb` 轮 **33/33**（脚本内共 35 处 `check`，其中 2 处为前置守卫，成功轮运行 33 条）：PDF 条目下发 thumb、`GET` 200 + 2594B JPEG、二次 `hit`、
   半截 PDF → 404 `pdf-invalid`。
 - 发布产物核对：`linux-x64` 服务端有 `libSkiaSharp.so` + `libpdfium.so`（无重名冲突）；
   桌面端不链接 `OpenList.Infrastructure`（Server 是子进程），`SkiaSharp` 仍是 3.119.4。
@@ -519,7 +519,7 @@ key = SHA1( $"v1|{path}|{size}|{mtimeUtcTicks}|{w}x{h}|{fmt}|{q}|{atKey}|{genera
 8. 超限：源文件 > `thumb_max_source_mb` → `too-large`，不读内容。
 9. 读取预算：伪造 RangeReader 累计字节 > budget → 中止（断言抛出的异常类型）。
 
-**E2E（`frontend/scripts/verify-thumb.mjs`，新增一轮 `thumb`）—— 已落地，见 §0.2（本轮 28 条，PDF 首页补齐后 33 条（§0.3）；下列 9 条为原始清单）**
+**E2E（`frontend/scripts/verify-thumb.mjs`，新增一轮 `thumb`）—— 已落地，见 §0.2（本轮 28 条，PDF 首页补齐后 33 条，现 33 条／脚本内共 35 处 `check`、2 处前置守卫；下列 9 条为原始清单）**
 
 -fixture 用 `gen_fixtures.py` 现成的图片/音频/PDF；视频用 `ffmpeg` 造 3s 的 `testsrc`（回归脚本已把 ffmpeg 放进 PATH）。
 

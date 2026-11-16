@@ -23,7 +23,7 @@ import { useTheme } from "~/composables/useTheme"
  * 浏览侧外壳（复刻 OpenList-Frontend 的 `pages/home` 布局）。
  *
  * 旧前端没有左侧导航：顶部是一条约 44px 高的 logo 栏，下面是**居中定宽**的内容列
- * （`min(99%, 980px)`），最后是 "Powered by OpenList | Manage" 页脚。导航（面包屑）、
+ * （`min(99%, 980px)`），最后是仅含「管理 / 登录」入口的页脚。导航（面包屑）、
  * 操作按钮和批量选择条都是浮在内容之上的小挂件，不占版面。
  *
  * 这里的职责只有「顶栏 + 内容列 + 页脚」三件；面包屑与操作条在 `pages/home` 内部，
@@ -227,10 +227,6 @@ export default defineComponent({
         </main>
 
         <footer class="ol-view-footer">
-          <a href="https://github.com/OpenListTeam/OpenList" target="_blank" rel="noopener">
-            {t("home.footer.powered_by")}
-          </a>
-          <span class="ol-view-footer-sep">|</span>
           <RouterLink to={user.isLogin ? "/@manage" : "/@login"}>
             {user.isLogin ? t("home.footer.manage") : t("login.login")}
           </RouterLink>
