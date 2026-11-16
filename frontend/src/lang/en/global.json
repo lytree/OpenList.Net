@@ -46,6 +46,12 @@
   "nav_media": "Media",
   "nav_manage": "Management",
   "logout": "Logout",
+  "change_password": "Change Password",
+  "new_password": "New password",
+  "confirm_password": "Confirm new password",
+  "password_too_short": "Password must be at least 4 characters",
+  "password_mismatch": "The two passwords do not match",
+  "password_updated": "Password updated",
   "language": "Language",
   "under_construction": "This section is under construction and will be delivered in a later milestone."
 }

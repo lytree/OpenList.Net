@@ -29,14 +29,10 @@ public sealed class OpenListDbContext : DbContext
     public DbSet<Storage> Storages => Set<Storage>();
     /// <summary>路径元数据表。</summary>
     public DbSet<Meta> Metas => Set<Meta>();
-    /// <summary>分享记录表。</summary>
-    public DbSet<Sharing> Sharings => Set<Sharing>();
     /// <summary>设置键值对表。</summary>
     public DbSet<SettingItem> Settings => Set<SettingItem>();
     /// <summary>SSH 公钥表。</summary>
     public DbSet<SshKey> SshKeys => Set<SshKey>();
-    /// <summary>消息表（站内消息/广播）。</summary>
-    public DbSet<Message> Messages => Set<Message>();
     /// <summary>搜索索引条目表。</summary>
     public DbSet<SearchIndexEntry> SearchIndex => Set<SearchIndexEntry>();
     /// <summary>WebAuthn 凭据表。</summary>
@@ -92,11 +88,6 @@ public sealed class OpenListDbContext : DbContext
             e.HasKey(m => m.Id);
             e.HasIndex(m => m.Path).IsUnique();
         });
-        b.Entity<Sharing>(e =>
-        {
-            e.ToTable(prefix + "sharings");
-            e.HasKey(s => s.Id);
-        });
         b.Entity<SettingItem>(e =>
         {
             e.ToTable(prefix + "settings");
@@ -108,12 +99,6 @@ public sealed class OpenListDbContext : DbContext
             e.ToTable(prefix + "sshkeys");
             e.HasKey(k => k.Id);
             e.HasIndex(k => k.UserId);
-        });
-        b.Entity<Message>(e =>
-        {
-            e.ToTable(prefix + "messages");
-            e.HasKey(m => m.Id);
-            e.HasIndex(m => m.UserId);
         });
         b.Entity<SearchIndexEntry>(e =>
         {

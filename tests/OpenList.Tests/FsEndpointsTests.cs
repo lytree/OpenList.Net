@@ -112,28 +112,6 @@ public class FsEndpointsTests
     }
 
     [Test]
-    public async Task List_Still_Allows_Share_Code_When_Home_Guest_Access_Is_Off()
-    {
-        // 公开分享是既有契约，与「首页对游客开不开」无关：带分享码的匿名请求照旧放行，
-        // 真伪交给 ShareAccess 判定（错误的分享码会拿到它自己的错误码，而不是网关层的 401）。
-        var (factory, client) = await SetupAsync();
-        await using (factory)
-        {
-            await factory.WriteFileAsync("a.txt", "a"u8.ToArray());
-
-            using var req = new HttpRequestMessage(HttpMethod.Post, "/api/fs/list")
-            {
-                Content = JsonContent.Create(new { path = "/" }),
-            };
-            req.Headers.TryAddWithoutValidation("Authorization", "not-a-real-share-code");
-            var resp = await client.SendAsync(req);
-
-            var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsNotEqualTo(401);
-        }
-    }
-
-    [Test]
     public async Task Mkdir_Still_Requires_Auth()
     {
         // Write endpoints (mkdir, rename, move, copy, remove, put, ...) must still require auth.
@@ -216,18 +194,8 @@ public class FsEndpointsTests
             await factory.WriteFileAsync("writable/a.txt", "a"u8.ToArray());
             await factory.WriteFileAsync("other/b.txt", "b"u8.ToArray());
 
-            // 以 admin 建一个 BasePath=/test/writable 的普通用户（权限位全开，避免权限位干扰路径断言）。
-            client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
-            var create = await client.PostAsync("/api/admin/user/create", JsonContent.Create(new
-            {
-                username = "bob",
-                password = "pw",
-                role = 0,
-                base_path = "/test/writable",
-                permission = 0x71FF,
-            }));
-            var createJson = await create.Content.ReadFromJsonAsync<JsonDocument>();
-            await Assert.That(createJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
+            // 以 admin 造一个 BasePath=/test/writable 的普通用户（权限位全开，避免权限位干扰路径断言）。
+            await factory.SeedUserAsync("bob", "pw", 0x71FF, "/test/writable");
 
             client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "bob", "pw"));
 
@@ -258,7 +226,7 @@ public class FsEndpointsTests
             await factory.WriteFileAsync("base/empty/.keep", "k"u8.ToArray());
 
             client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
-            await CreateUserAsync(client, "noperm", "pw", permission: 0);
+            await CreateUserAsync(factory, "noperm", "pw", permission: 0);
             client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "noperm", "pw"));
 
             var calls = new (string Route, object Body)[]
@@ -318,7 +286,7 @@ public class FsEndpointsTests
 
                 var name = $"bit{i++}";
                 client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
-                await CreateUserAsync(client, name, "pw", c.Bit);
+                await CreateUserAsync(factory, name, "pw", c.Bit);
                 client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, name, "pw"));
 
                 var allowed = await PostJsonAsync(client, c.Allowed.Route, c.Allowed.Body);
@@ -359,7 +327,7 @@ public class FsEndpointsTests
             var metaJson = await metaResp.Content.ReadFromJsonAsync<JsonDocument>();
             await Assert.That(metaJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
 
-            await CreateUserAsync(client, "metawriter", "pw", permission: 1 << 3);
+            await CreateUserAsync(factory, "metawriter", "pw", permission: 1 << 3);
             client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "metawriter", "pw"));
 
             var json = await PostJsonAsync(client, "/api/fs/mkdir", new { path = "/test/meta_dir/sub" });
@@ -378,8 +346,8 @@ public class FsEndpointsTests
             await factory.WriteFileAsync("base/.keep", "k"u8.ToArray());
 
             client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "admin", "admin"));
-            await CreateUserAsync(client, "nowrite", "pw", permission: 0);
-            await CreateUserAsync(client, "canwrite", "pw", permission: 1 << 3); // CanWriteContent
+            await CreateUserAsync(factory, "nowrite", "pw", permission: 0);
+            await CreateUserAsync(factory, "canwrite", "pw", permission: 1 << 3); // CanWriteContent
 
             // 无 CanWriteContent 权限位 → 403。
             client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "nowrite", "pw"));
@@ -425,7 +393,7 @@ public class FsEndpointsTests
             var metaJson = await metaResp.Content.ReadFromJsonAsync<JsonDocument>();
             await Assert.That(metaJson!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
 
-            await CreateUserAsync(client, "copier", "pw", permission: 1 << 6); // CanCopy
+            await CreateUserAsync(factory, "copier", "pw", permission: 1 << 6); // CanCopy
             client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsync(client, "copier", "pw"));
 
             // 有 CanCopy 位，但源目录 meta 的 read_users 白名单不含该用户 → 403。
@@ -469,12 +437,14 @@ public class FsEndpointsTests
         return json!.RootElement.GetProperty("data").GetProperty("token").GetString()!;
     }
 
-    private static async Task CreateUserAsync(HttpClient client, string username, string password, int permission)
+    private static async Task CreateUserAsync(
+        TestWebAppFactory factory,
+        string username,
+        string password,
+        int permission,
+        string basePath = "/")
     {
-        var resp = await client.PostAsync("/api/admin/user/create",
-            JsonContent.Create(new { username, password, role = 0, permission }));
-        var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-        await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
+        await factory.SeedUserAsync(username, password, permission, basePath);
     }
 
     private static async Task<JsonDocument> PostJsonAsync(HttpClient client, string route, object body)

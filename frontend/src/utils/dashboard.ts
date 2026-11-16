@@ -8,26 +8,9 @@
  * 计数口径都写在函数注释里，别按直觉改成另一种（例如「挂载按驱动分组」只算启用的，
  * 停用的挂载不产生流量，混进去会让分布图与真实负载不符）。
  */
-import { UserRole, type AdminUser, type ShareInfo, type StorageWithDriver } from "~/api/types"
+import { type StorageWithDriver } from "~/api/types"
 import type { MediaScrapeStatus } from "~/api/media"
 import { percentOf } from "./mediaCatalog"
-
-export interface UserStats {
-  total: number
-  /** 角色为 ADMIN 的账号数（含被停用的：停用的管理员仍是管理员，另行用 disabled 表达）。 */
-  admins: number
-  disabled: number
-}
-
-export function userStats(users: readonly AdminUser[]): UserStats {
-  let admins = 0
-  let disabled = 0
-  for (const user of users) {
-    if (user.role === UserRole.ADMIN) admins += 1
-    if (user.disabled) disabled += 1
-  }
-  return { total: users.length, admins, disabled }
-}
 
 export interface DriverBucket {
   /** 驱动展示名（后端 `driver_name`，拿不到时退回驱动 key）。 */
@@ -62,29 +45,6 @@ export function storageStats(storages: readonly StorageWithDriver[]): StorageSta
     enabled: storages.length - disabled,
     disabled,
     byDriver,
-  }
-}
-
-export interface ShareStats {
-  total: number
-  enabled: number
-  disabled: number
-  /** 累计访问次数（后端 `accessed`，含已失效的分享）。 */
-  accessed: number
-}
-
-export function shareStats(shares: readonly ShareInfo[]): ShareStats {
-  let enabled = 0
-  let accessed = 0
-  for (const share of shares) {
-    if (!share.disabled) enabled += 1
-    accessed += share.accessed ?? 0
-  }
-  return {
-    total: shares.length,
-    enabled,
-    disabled: shares.length - enabled,
-    accessed,
   }
 }
 

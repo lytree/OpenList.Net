@@ -3,18 +3,21 @@ import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import {
   ElAvatar,
   ElButton,
+  ElDialog,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
   ElIcon,
+  ElInput,
+  ElMessage,
   ElTooltip,
 } from "element-plus"
 import { ArrowDown, Menu, Moon, Sunny, SwitchButton } from "@element-plus/icons-vue"
 import { availableLanguages, locale, setLocale, t } from "~/i18n"
+import { updateMe } from "~/api/auth"
 import { useSettingsStore } from "~/stores/settings"
 import { useUserStore } from "~/stores/user"
 import { useTheme } from "~/composables/useTheme"
-import InboxBell from "~/components/InboxBell"
 
 /**
  * 浏览侧外壳（复刻 OpenList-Frontend 的 `pages/home` 布局）。
@@ -58,6 +61,38 @@ export default defineComponent({
     function onUserCommand(command: string) {
       if (command === "logout") void onLogout()
       if (command === "manage") void router.push("/@manage")
+      if (command === "password") {
+        navOpen.value = false
+        password.value = ""
+        confirmPassword.value = ""
+        passwordVisible.value = true
+      }
+    }
+
+    /** 单用户产品只保留「修改自己的密码」，不再有用户管理页。 */
+    const passwordVisible = ref(false)
+    const password = ref("")
+    const confirmPassword = ref("")
+    const passwordSaving = ref(false)
+
+    async function submitPassword() {
+      if (password.value.length < 4) {
+        ElMessage.warning(t("global.password_too_short"))
+        return
+      }
+      if (password.value !== confirmPassword.value) {
+        ElMessage.warning(t("global.password_mismatch"))
+        return
+      }
+      passwordSaving.value = true
+      const resp = await updateMe({ password: password.value })
+      passwordSaving.value = false
+      if (resp.code !== 200) {
+        ElMessage.error(resp.message)
+        return
+      }
+      passwordVisible.value = false
+      ElMessage.success(t("global.password_updated"))
     }
 
     function goManage() {
@@ -115,9 +150,6 @@ export default defineComponent({
             </nav>
 
             <div class="ol-view-header-right">
-              {/* 站内信铃铛：未登录时组件自身返回 null，不占位 */}
-              <InboxBell />
-
               <ElDropdown
                 trigger="click"
                 onCommand={(code: string) => setLocale(code)}
@@ -166,6 +198,9 @@ export default defineComponent({
                         {user.isAdmin && (
                           <ElDropdownItem command="manage">{t("global.nav_manage")}</ElDropdownItem>
                         )}
+                        <ElDropdownItem command="password">
+                          {t("global.change_password")}
+                        </ElDropdownItem>
                         <ElDropdownItem command="logout" divided={true}>
                           <ElIcon>
                             <SwitchButton />
@@ -273,6 +308,17 @@ export default defineComponent({
                   {t("global.nav_manage")}
                 </div>
               )}
+              <div
+                class="ol-view-drawer-link"
+                onClick={() => {
+                  navOpen.value = false
+                  password.value = ""
+                  confirmPassword.value = ""
+                  passwordVisible.value = true
+                }}
+              >
+                {t("global.change_password")}
+              </div>
               <div class="ol-view-drawer-link" onClick={() => void onLogout()}>
                 {t("global.logout")}
               </div>
@@ -289,6 +335,42 @@ export default defineComponent({
             </ElButton>
           )}
         </aside>
+
+        <ElDialog
+          v-model={passwordVisible.value}
+          title={t("global.change_password")}
+          width="360px"
+        >
+          <ElInput
+            v-model={password.value}
+            type="password"
+            showPassword={true}
+            placeholder={t("global.new_password")}
+          />
+          <div style={{ height: "10px" }} />
+          <ElInput
+            v-model={confirmPassword.value}
+            type="password"
+            showPassword={true}
+            placeholder={t("global.confirm_password")}
+          />
+          {{
+            footer: () => (
+              <div>
+                <ElButton onClick={() => (passwordVisible.value = false)}>
+                  {t("global.cancel")}
+                </ElButton>
+                <ElButton
+                  type="primary"
+                  loading={passwordSaving.value}
+                  onClick={() => void submitPassword()}
+                >
+                  {t("global.confirm")}
+                </ElButton>
+              </div>
+            ),
+          }}
+        </ElDialog>
       </div>
     )
   },

@@ -129,7 +129,7 @@ export default defineComponent({
       void files.open(obj)
     }
 
-    /** 行右键菜单：打开/下载/复制直链/分享/打包 + 写操作（按权限与文件类型显隐）。 */
+    /** 行右键菜单：打开/下载/复制直链/打包 + 写操作（按权限与文件类型显隐）。 */
     function rowMenuItems(obj: Obj): ContextMenuItem[] {
       const items: ContextMenuItem[] = [
         { key: "open", label: t("ops.open"), handler: () => openObj(obj) },
@@ -142,7 +142,6 @@ export default defineComponent({
             handler: () => window.open(downloadLink(objPath(obj), obj.sign), "_blank", "noopener"),
           },
           { key: "copy_link", label: t("home.toolbar.copy_link"), handler: () => void copyObjLink(obj) },
-          { key: "share", label: "分享", handler: () => openDialog("share", [obj]) },
         )
         if (packageDownloadEnabled.value) {
           items.push({ key: "package", label: "打包下载", handler: () => openDialog("package-download", [obj]) })
@@ -151,9 +150,6 @@ export default defineComponent({
           items.push({ key: "decompress", label: "解压", handler: () => openDialog("decompress", [obj]) })
         }
       } else {
-        items.push(
-          { key: "share", label: "分享", handler: () => openDialog("share", [obj]) },
-        )
         if (packageDownloadEnabled.value) {
           items.push({ key: "package", label: "打包下载", handler: () => openDialog("package-download", [obj]) })
         }
@@ -660,9 +656,6 @@ export default defineComponent({
                     打包下载
                   </ElButton>
                 )}
-                <ElButton size="small" onClick={() => openDialog("share", ops.selected.value)}>
-                  分享
-                </ElButton>
                 {writable.value && (
                 <>
                 <ElButton

@@ -40,6 +40,13 @@ export const logout = () => http.get("/auth/logout")
 /** 当前登录用户（未登录时后端返回 401 信封）。 */
 export const fetchMe = (): PResp<Me> => http.get<Me>("/me")
 
+/** 更新当前用户资料（单用户产品主要用于修改密码）。 */
+export const updateMe = (payload: {
+  username?: string
+  password?: string
+  sso_id?: string
+}): PResp<Record<string, never>> => http.post<Record<string, never>>("/me/update", payload)
+
 export function persistToken(data: TokenData) {
   setToken(data.token)
   return data.token

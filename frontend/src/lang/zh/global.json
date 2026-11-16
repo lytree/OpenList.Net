@@ -46,6 +46,12 @@
   "nav_media": "媒体",
   "nav_manage": "管理",
   "logout": "退出登录",
+  "change_password": "修改密码",
+  "new_password": "新密码",
+  "confirm_password": "确认新密码",
+  "password_too_short": "密码至少 4 位",
+  "password_mismatch": "两次输入的密码不一致",
+  "password_updated": "密码已更新",
   "language": "语言",
   "under_construction": "这个模块还在建设中，会在后续里程碑交付。"
 }

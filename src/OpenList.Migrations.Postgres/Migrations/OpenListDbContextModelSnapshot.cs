@@ -73,38 +73,6 @@ namespace OpenList.Migrations.Postgres.Migrations
                     b.ToTable("x_tasks", (string)null);
                 });
 
-            modelBuilder.Entity("OpenList.Core.Models.Message", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("Content")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("Read")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<long>("UserId")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("x_messages", (string)null);
-                });
-
             modelBuilder.Entity("OpenList.Core.Models.Meta", b =>
                 {
                     b.Property<long>("Id")
@@ -263,88 +231,6 @@ namespace OpenList.Migrations.Postgres.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("x_settings", (string)null);
-                });
-
-            modelBuilder.Entity("OpenList.Core.Models.Sharing", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("Accessed")
-                        .HasColumnType("integer")
-                        .HasJsonPropertyName("accessed");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("Disabled")
-                        .HasColumnType("boolean")
-                        .HasJsonPropertyName("disabled");
-
-                    b.Property<bool>("Enabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTimeOffset?>("Expiration")
-                        .HasColumnType("timestamp with time zone")
-                        .HasJsonPropertyName("expires");
-
-                    b.Property<string>("ExtractFolder")
-                        .HasColumnType("text")
-                        .HasJsonPropertyName("extract_folder");
-
-                    b.Property<string>("FilesJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Header")
-                        .HasColumnType("text")
-                        .HasJsonPropertyName("header");
-
-                    b.Property<int>("MaxAccessed")
-                        .HasColumnType("integer")
-                        .HasJsonPropertyName("max_accessed");
-
-                    b.Property<string>("OrderBy")
-                        .HasColumnType("text")
-                        .HasJsonPropertyName("order_by");
-
-                    b.Property<string>("OrderDirection")
-                        .HasColumnType("text")
-                        .HasJsonPropertyName("order_direction");
-
-                    b.Property<long>("OwnerId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Password")
-                        .HasColumnType("text")
-                        .HasJsonPropertyName("pwd");
-
-                    b.Property<string>("Path")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Readme")
-                        .HasColumnType("text")
-                        .HasJsonPropertyName("readme");
-
-                    b.Property<string>("Remark")
-                        .HasColumnType("text")
-                        .HasJsonPropertyName("remark");
-
-                    b.Property<string>("ShareCode")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasJsonPropertyName("id");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("x_sharings", (string)null);
                 });
 
             modelBuilder.Entity("OpenList.Core.Models.SshKey", b =>

@@ -8,7 +8,7 @@ using OpenList.Server.Models;
 namespace OpenList.Server.Endpoints;
 
 /// <summary>
-/// 当前用户管理端点：个人资料更新、2FA、会话、SSH 公钥、站内信。
+/// 当前用户管理端点：个人资料更新、2FA、会话、SSH 公钥。
 /// 对应 OpenList Go <c>server/handles/me.go</c>。全部需要登录鉴权。
 /// </summary>
 public static class MeEndpoints
@@ -106,37 +106,9 @@ public static class MeEndpoints
             return Results.Ok(await svc.DeleteAsync(id.Value, keyId, isAdmin: false));
         });
 
-        // --- 站内信 ---
-        // GET /api/me/message/unread — 未读消息数量
-        g.MapGet("/message/unread", async (ClaimsPrincipal user, IMessageService msgs) =>
-        {
-            var id = user.UserId();
-            if (id is null) return Results.Ok(Resp.Fail("unauthorized", RespCodes.Unauthorized));
-            var r = await msgs.GetAsync(id.Value, unreadOnly: true);
-            return Results.Ok(Resp<int>.Ok(r.Data?.Count ?? 0));
-        });
-
-        g.MapGet("/message/list", async (ClaimsPrincipal user, IMessageService msgs) =>
-        {
-            var id = user.UserId();
-            if (id is null) return Results.Ok(Resp.Fail("unauthorized", RespCodes.Unauthorized));
-            return Results.Ok(await msgs.GetAsync(id.Value));
-        });
-
-        g.MapPost("/message/read", async (ReadMessageReq req, ClaimsPrincipal user, IMessageService msgs) =>
-        {
-            var id = user.UserId();
-            if (id is null) return Results.Ok(Resp.Fail("unauthorized", RespCodes.Unauthorized));
-            // 带上当前用户 id：服务端据此拒绝跨用户标记（否则猜到 id 就能清掉别人的未读）
-            return Results.Ok(await msgs.MarkReadAsync(req.Id, id.Value));
-        });
-
         return app;
     }
 }
-
-/// <summary>标记站内信为已读的请求体（<c>POST /api/me/message/read</c>，字段为消息 Id）。</summary>
-public sealed class ReadMessageReq { public long Id { get; set; } }
 
 /// <summary>添加 SSH 公钥的请求体（<c>POST /api/me/sshkey/add</c>）。</summary>
 public sealed class SshKeyAddReq

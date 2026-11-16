@@ -147,18 +147,6 @@ public static class DbInitializer
             ("x_storages", "WebdavPolicy", "TEXT NULL", "TEXT NULL"),
             ("x_storages", "EnableSign", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
             ("x_storages", "Modified", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'", "TIMESTAMPTZ NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'"),
-            // Sharing: extended fields mirroring Go model.Sharing.
-            ("x_sharings", "ShareCode", "TEXT NOT NULL DEFAULT ''", "TEXT NOT NULL DEFAULT ''"),
-            ("x_sharings", "FilesJson", "TEXT NOT NULL DEFAULT '[]'", "TEXT NOT NULL DEFAULT '[]'"),
-            ("x_sharings", "MaxAccessed", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_sharings", "Accessed", "INTEGER NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
-            ("x_sharings", "Disabled", "INTEGER NOT NULL DEFAULT 0", "BOOLEAN NOT NULL DEFAULT FALSE"),
-            ("x_sharings", "Remark", "TEXT NULL", "TEXT NULL"),
-            ("x_sharings", "Readme", "TEXT NULL", "TEXT NULL"),
-            ("x_sharings", "Header", "TEXT NULL", "TEXT NULL"),
-            ("x_sharings", "OrderBy", "TEXT NULL", "TEXT NULL"),
-            ("x_sharings", "OrderDirection", "TEXT NULL", "TEXT NULL"),
-            ("x_sharings", "ExtractFolder", "TEXT NULL", "TEXT NULL"),
             // SshKey: last-used timestamp for the frontend's last_used_time column.
             ("x_sshkeys", "LastUsedTime", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'", "TIMESTAMPTZ NOT NULL DEFAULT '0001-01-01T00:00:00+00:00'"),
             // Meta: extended fields mirroring the frontend Meta type.
@@ -416,7 +404,7 @@ public static class DbInitializer
 
     /// <summary>
     /// 创建内置账号，语义对齐 Go 版 <c>internal/bootstrap/data/user.go</c> 的
-    /// <c>initUser()</c>（= <c>initAdmin</c> + <c>initGuest</c>）。
+    /// <c>initAdmin</c>（本项目为单用户产品，不再创建 guest 账号）。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -483,26 +471,6 @@ public static class DbInitializer
                 WriteCredential(logger, LogLevel.Information,
                     $"Successfully created the built-in admin user \"{username}\" with the initial password: {password}");
             }
-        }
-
-        // 游客账号：Go 的 initGuest 固定创建（禁用、零权限、密码 "guest"），判据独立于管理员。
-        // 本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（Id=0），与此记录无关；
-        // 建它是为了与 Go 版行为一致，并给管理界面一个可管理的游客账号。
-        if (!await db.Users.AnyAsync(u => u.Username == "guest", ct))
-        {
-            var now = DateTimeOffset.UtcNow;
-            db.Users.Add(new User
-            {
-                Username = "guest",
-                PasswordHash = UserService.HashPassword("guest"),
-                Role = UserRole.Guest,
-                Permission = 0,
-                BasePath = "/",
-                Disabled = true,
-                IsBuiltIn = true,
-                CreatedAt = now,
-                UpdatedAt = now,
-            });
         }
 
         await db.SaveChangesAsync(ct);

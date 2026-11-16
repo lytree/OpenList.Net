@@ -28,8 +28,8 @@ public class BuiltInAdminTests
 
         // 不留 admin/admin 这种人人可猜的默认凭据，交由安装向导创建。
         await Assert.That(await ctx.Users.AnyAsync(u => u.Role == UserRole.Admin)).IsFalse();
-        // 但游客照样建（判据独立）。
-        await Assert.That(await ctx.Users.AnyAsync(u => u.Username == "guest")).IsTrue();
+        // 单用户产品不再创建 guest 账号；匿名访问由代码内的虚拟 Guest 承担。
+        await Assert.That(await ctx.Users.AnyAsync(u => u.Username == "guest")).IsFalse();
     }
 
     [Test]
@@ -85,19 +85,14 @@ public class BuiltInAdminTests
     }
 
     [Test]
-    public async Task InitializeAsync_Creates_Disabled_Guest_Account()
+    public async Task InitializeAsync_Does_Not_Create_Guest_Account()
     {
         await using var ctx = BuildContext();
         await DbInitializer.InitializeAsync(ctx, new AppConfiguration());
 
-        // 对齐 Go 的 initGuest：用户名固定 guest、密码 guest、零权限、默认禁用。
-        var guest = await ctx.Users.SingleAsync(u => u.Username == "guest");
-        await Assert.That(guest.Role).IsEqualTo(UserRole.Guest);
-        await Assert.That(guest.Disabled).IsTrue();
-        await Assert.That(guest.Permission).IsEqualTo(0);
-        await Assert.That(guest.BasePath).IsEqualTo("/");
-        await Assert.That(guest.IsBuiltIn).IsTrue();
-        await Assert.That(UserService.VerifyPassword("guest", guest.PasswordHash)).IsTrue();
+        // 单用户产品：不再预置 guest 账号（匿名访问走代码内构造的虚拟 Guest）。
+        await Assert.That(await ctx.Users.AnyAsync(u => u.Role == UserRole.Guest)).IsFalse();
+        await Assert.That(await ctx.Users.AnyAsync(u => u.Username == "guest")).IsFalse();
     }
 
     // ---------------- 关键行为：已有管理员时绝不覆盖 ----------------
@@ -150,8 +145,7 @@ public class BuiltInAdminTests
     public async Task InitializeAsync_Creates_Admin_Even_If_Only_NonAdmin_Users_Exist()
     {
         await using var ctx = BuildContext();
-        // 判据是「没有管理员」而非「用户表为空」：游客会被自动创建，
-        // 若用表判据，管理员在第二次启动后就再也建不出来。
+        // 判据是「没有管理员」而非「用户表为空」。
         ctx.Users.Add(new User
         {
             Username = "alice",
@@ -163,7 +157,7 @@ public class BuiltInAdminTests
         await InitWithAdminAsync(ctx);
 
         await Assert.That(await ctx.Users.AnyAsync(u => u.Role == UserRole.Admin)).IsTrue();
-        await Assert.That(await ctx.Users.CountAsync()).IsEqualTo(3); // alice + guest + admin
+        await Assert.That(await ctx.Users.CountAsync()).IsEqualTo(2); // alice + admin
     }
 
     [Test]
@@ -187,12 +181,12 @@ public class BuiltInAdminTests
     // ---------------- 安装向导（生产环境的建号主路径） ----------------
 
     [Test]
-    public async Task CreateInitialAdminAsync_Works_After_Guest_Seeded()
+    public async Task CreateInitialAdminAsync_Works_After_First_Start_Without_Password()
     {
         await using var ctx = BuildContext();
         var svc = new UserService(ctx, new AppConfiguration());
 
-        // 典型时序：首次启动未配密码 → 只建了 guest，用户随后访问网页走向导。
+        // 典型时序：首次启动未配密码 → 不建任何账号，用户随后访问网页走向导。
         await DbInitializer.InitializeAsync(ctx, new AppConfiguration());
         await Assert.That(await ctx.Users.AnyAsync(u => u.Role == UserRole.Admin)).IsFalse();
 
@@ -309,12 +303,10 @@ public class BuiltInAdminTests
         var svc = new UserService(ctx, new AppConfiguration());
         await InitWithAdminAsync(ctx);
 
-        // 漏映射IsBuiltIn 会让前端放出"删除内置管理员"这个注定被拒的操作。
+        // 漏映射 IsBuiltIn 会让前端放出"删除内置管理员"这个注定被拒的操作。
         var r = await svc.ListAsync();
         var admin = r.Data!.Single(u => u.Role == UserRole.Admin);
-        var guest = r.Data!.Single(u => u.Username == "guest");
         await Assert.That(admin.IsBuiltIn).IsTrue();
-        await Assert.That(guest.IsBuiltIn).IsTrue();
     }
 
     // ---------------- 密码重置通道 ----------------

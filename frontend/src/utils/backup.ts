@@ -19,7 +19,7 @@
  * 且**只用于读写这个历史格式**，不用于任何新协议。
  */
 import CryptoJS from "crypto-js"
-import type { AdminUser, Meta, SettingItem, ShareInfo, StorageWithDriver } from "~/api/types"
+import type { Meta, SettingItem, StorageWithDriver } from "~/api/types"
 
 /** 我们自己写的格式标记（旧文件没有这两个字段，导入时按缺省处理）。 */
 export const BACKUP_FORMAT = "openlist-net-backup"
@@ -27,10 +27,8 @@ export const BACKUP_VERSION = 1
 
 export interface BackupPayload {
   settings: SettingItem[]
-  users: AdminUser[]
   storages: StorageWithDriver[]
   metas: Meta[]
-  shares: ShareInfo[]
 }
 
 export interface BackupFile extends BackupPayload {
@@ -44,11 +42,11 @@ export interface BackupFile extends BackupPayload {
 
 export type BackupSection = keyof BackupPayload
 
-/** 导出顺序 = 恢复顺序：先设置（站点身份），再用户（元数据里要按用户 id 重映射），最后资源。 */
-export const BACKUP_SECTIONS: BackupSection[] = ["settings", "users", "storages", "metas", "shares"]
+/** 导出顺序 = 恢复顺序：先设置（站点身份），再挂载，最后元数据。 */
+export const BACKUP_SECTIONS: BackupSection[] = ["settings", "storages", "metas"]
 
 export function emptyPayload(): BackupPayload {
-  return { settings: [], users: [], storages: [], metas: [], shares: [] }
+  return { settings: [], storages: [], metas: [] }
 }
 
 // ---------------------------------------------------------------------------
@@ -112,25 +110,11 @@ export function verifyPassword(file: Pick<BackupFile, "encrypted">, key: string)
 // 导出
 // ---------------------------------------------------------------------------
 
-/**
- * 用户行去掉凭据字段。
- *
- * 本仓库的 `/admin/user/list` 返回的是 `UserPublic`，**本来就没有密码**；但旧前端的备份文件
- * 里带着 Go 侧的 `password` 哈希。那种文件在本仓库恢复不了密码（Go 的 create 会把哈希当明文再散列
- * 一次，登录必失败），所以导入时一律丢弃该字段并在日志里说明。
- */
-export function stripUserSecrets(users: readonly AdminUser[]): AdminUser[] {
-  return users.map((user) => {
-    const { password: _password, ...rest } = user as AdminUser & { password?: unknown }
-    return rest as AdminUser
-  })
-}
-
 /** 逐字段加密（不改入参）。 */
 function sealPayload(payload: BackupPayload, key: string): BackupPayload {
   const sealed = emptyPayload()
   for (const section of BACKUP_SECTIONS) {
-    // 五个域的实体类型互不兼容，这里只关心「一行是一个字段字典」
+    // 三个域的实体类型互不兼容，这里只关心「一行是一个字段字典」
     const rows = payload[section] as unknown as Record<string, unknown>[]
     sealed[section] = rows.map((row) => {
       const out: Record<string, unknown> = {}
@@ -211,7 +195,7 @@ export function parseBackupText(text: string): ParseResult {
     return { ok: false, reason: "not_a_backup" }
   }
   const file = raw as Partial<BackupFile>
-  // 至少要有五个数组里的一个，才认为这是一份备份（旧文件也没有 format 字段）
+  // 至少要有三个数组里的一个，才认为这是一份备份（旧文件也没有 format 字段）
   const hasSection = BACKUP_SECTIONS.some((section) => Array.isArray(file[section]))
   if (!hasSection) return { ok: false, reason: "no_sections" }
 
@@ -224,10 +208,8 @@ export function parseBackupText(text: string): ParseResult {
       site: typeof file.site === "string" ? file.site : "",
       encrypted: typeof file.encrypted === "string" ? file.encrypted : "",
       settings: (file.settings ?? []) as SettingItem[],
-      users: (file.users ?? []) as AdminUser[],
       storages: (file.storages ?? []) as StorageWithDriver[],
       metas: (file.metas ?? []) as Meta[],
-      shares: (file.shares ?? []) as ShareInfo[],
     },
   }
 }
@@ -270,10 +252,8 @@ export function openBackup(text: string, password = ""): OpenResult {
 function pickPayload(file: BackupFile): BackupPayload {
   return {
     settings: file.settings ?? [],
-    users: file.users ?? [],
     storages: file.storages ?? [],
     metas: file.metas ?? [],
-    shares: file.shares ?? [],
   }
 }
 
@@ -281,10 +261,8 @@ function pickPayload(file: BackupFile): BackupPayload {
 export function countBackup(payload: BackupPayload): Record<BackupSection, number> {
   return {
     settings: payload.settings.length,
-    users: payload.users.length,
     storages: payload.storages.length,
     metas: payload.metas.length,
-    shares: payload.shares.length,
   }
 }
 
@@ -304,7 +282,7 @@ export interface ReconcilePlan<T> {
 /**
  * 按自然键对账。
  *
- * 自然键各域不同（settings.key / users.username / storages.mount_path / metas.path / shares.id），
+ * 自然键各域不同（settings.key / storages.mount_path / metas.path），
  * 这也是「恢复」区别于「整库导入」的地方：**永远不删**，只做新增与更新。
  * 文件内同键重复只保留第一条，其余算 skipped —— 不静默丢掉，也不让后一条覆盖前一条。
  */
@@ -329,80 +307,6 @@ export function reconcile<T>(
     else plan.skipped.push(item)
   }
   return plan
-}
-
-/**
- * 元数据里的 `read_users` / `write_users` 存的是**用户 id**，跨实例恢复时 id 会对不上。
- * 用备份里的 `id → username` 换成本实例的 id；认不出的 id 直接丢掉（宁可少给权限，
- * 也不能把权限开给一个完全不相干的人）。
- */
-export function remapUserIds(
-  ids: readonly number[] | undefined,
-  oldIdToUsername: ReadonlyMap<number, string>,
-  usernameToNewId: ReadonlyMap<string, number>,
-): number[] {
-  const out: number[] = []
-  for (const id of ids ?? []) {
-    const username = oldIdToUsername.get(id)
-    if (!username) continue
-    const mapped = usernameToNewId.get(username)
-    if (mapped === undefined) continue
-    if (!out.includes(mapped)) out.push(mapped)
-  }
-  return out
-}
-
-/** 备份里的 users → { 旧 id: 用户名 }。 */
-export function userIdToUsername(users: readonly AdminUser[]): Map<number, string> {
-  const map = new Map<number, string>()
-  for (const user of users) {
-    if (typeof user.id === "number" && user.username) map.set(user.id, user.username)
-  }
-  return map
-}
-
-export function usernameToId(users: readonly AdminUser[]): Map<string, number> {
-  const map = new Map<string, number>()
-  for (const user of users) {
-    if (typeof user.id === "number" && user.username) map.set(user.username, user.id)
-  }
-  return map
-}
-
-/**
- * 自锁保护：恢复不能把**当前登录的管理员**降权或停用。
- *
- * 上游没有这道检查，但恢复一份「自己是普通用户」的备份之后，下一次请求就会 401，
- * 只能走 CLI 救场。整份恢复在这里直接拒绝，比恢复一半再被踢出去好。
- */
-export function selfLockoutRisk(
-  currentUserId: number,
-  planned: readonly (Pick<AdminUser, "id" | "role" | "disabled"> & { username?: string })[],
-): string | null {
-  const self = planned.find((row) => row.id === currentUserId)
-  if (!self) return null
-  // UserRole.Admin = 2（见 api/types.ts）。这里不 import 枚举，避免纯函数层依赖 api 层
-  if (typeof self.role === "number" && self.role !== 2) return self.username ?? String(currentUserId)
-  if (self.disabled === true) return self.username ?? String(currentUserId)
-  return null
-}
-
-/** 生成恢复新建账号时用的随机口令（16 位，大小写+数字，避开易混淆字符）。 */
-export function randomPassword(random: (max: number) => number = cryptoRandom): string {
-  const alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-  let out = ""
-  for (let i = 0; i < 16; i++) out += alphabet[random(alphabet.length)]
-  return out
-}
-
-function cryptoRandom(max: number): number {
-  const webCrypto = globalThis.crypto
-  if (webCrypto?.getRandomValues) {
-    const buf = new Uint32Array(1)
-    webCrypto.getRandomValues(buf)
-    return buf[0]! % max
-  }
-  return Math.floor(Math.random() * max)
 }
 
 /**

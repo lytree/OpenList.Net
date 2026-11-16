@@ -15,9 +15,9 @@ public enum RateLimitDirection
 /// </summary>
 public sealed class RateLimitMiddleware
 {
-    // Go router.go 中 downloadLimiter 挂载的签名/分享下载路由（GET）。
+    // Go router.go 中 downloadLimiter 挂载的签名下载路由（GET）。
     private static readonly string[] DownloadPrefixes =
-        { "/d/", "/p/", "/ad/", "/ap/", "/ae/", "/sd/", "/sad/" };
+        { "/d/", "/p/", "/ad/", "/ap/", "/ae/" };
 
     // Go router.go 中 uploadLimiter 挂载的 PUT 上传路由。
     private static readonly string[] UploadPaths =
@@ -51,7 +51,7 @@ public sealed class RateLimitMiddleware
         await _next(ctx);
     }
 
-    /// <summary>判断请求是否为下载限流路由（GET /d/、/p/、/ad/、/ap/、/ae/、/sd/、/sad/）。</summary>
+    /// <summary>判断请求是否为下载限流路由（GET /d/、/p/、/ad/、/ap/、/ae/）。</summary>
     public static bool IsDownloadRoute(HttpRequest request)
     {
         // HEAD 无响应体，无需限速（与 Go 只给 GET 挂 downloadLimiter 一致）。

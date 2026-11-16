@@ -27,12 +27,7 @@ public static class FsEndpoints
         var g = app.MapGroup("/api/fs").WithTags("Fs").RequireAuthorization();
 
         // 首页（文件浏览）的访客开关：**默认要求登录**（设置项 home_guest_access，默认 false）。
-        //
-        // 这里只拦「纯粹的匿名请求」，两种匿名请求照旧放行：
-        // 1. 带分享码的 —— `Authorization` 非空且不含 '.'（JWT 是三段式）。公开分享是既有契约，
-        //    与「首页对游客开不开」无关，真伪交给端点内的 ShareAccess 校验；这里只做粗筛，
-        //    放行后密码错/过期照样会被 ShareAccess 拒掉。
-        // 2. 管理员显式打开了 home_guest_access —— 公开只读分享站的部署形态。
+        // 匿名请求只有在管理员显式打开 home_guest_access 时才放行（只读浏览）。
         //
         // 用组级 endpoint filter 而不是去动各端点的 AllowAnonymous：后者是启动期常量。
         // 授权中间件在前，所以写端点（无 AllowAnonymous）根本走不到这里。
@@ -40,9 +35,6 @@ public static class FsEndpoints
         {
             var http = context.HttpContext;
             if (http.User.Identity?.IsAuthenticated == true) return await next(context);
-
-            var raw = http.Request.Headers.Authorization.ToString().Trim();
-            if (raw.Length > 0 && !raw.Contains('.')) return await next(context);
 
             var access = http.RequestServices.GetService<IGuestAccessService>();
             if (access is null || await access.CanBrowseHomeAsync(http.RequestAborted))
@@ -61,15 +53,10 @@ public static class FsEndpoints
         // Go registers these via g.Any(...) — accept GET or POST for third-party
         // clients that follow the Go convention (the frontend itself uses POST).
         // POST binds the JSON body; GET binds the DTO from query params.
-        g.MapMethods("/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ISharingService shares, ClaimsPrincipal user, CancellationToken ct) =>
+        g.MapMethods("/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsListReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
-            // 分享码鉴权：匿名 + Authorization 为分享码时，换成 BasePath=分享路径 的受限访客。
-            var (shareError, shareUser) = await ShareAccess.ResolveAsync(
-                ctx, shares, user.Identity?.IsAuthenticated == true, req.Password, ct);
-            if (shareError is not null) return shareError;
-            if (shareUser is not null) u = shareUser;
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
             req.Path = path;
             // 镜像 Go FsList：CanAccess(user, meta, path, req.Password)。
@@ -77,14 +64,10 @@ public static class FsEndpoints
             return Results.Ok(await svc.ListAsync(req, u));
         }).AllowAnonymous();
 
-        g.MapMethods("/get", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ISharingService shares, ClaimsPrincipal user, CancellationToken ct) =>
+        g.MapMethods("/get", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<FsGetReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
-            var (shareError, shareUser) = await ShareAccess.ResolveAsync(
-                ctx, shares, user.Identity?.IsAuthenticated == true, req.Password, ct);
-            if (shareError is not null) return shareError;
-            if (shareUser is not null) u = shareUser;
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
             req.Path = path;
             // 镜像 Go FsGet：CanAccess(user, meta, path, req.Password)。
@@ -94,14 +77,10 @@ public static class FsEndpoints
             return Results.Ok(await svc.GetAsync(req, u));
         }).AllowAnonymous();
 
-        g.MapMethods("/dirs", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ISharingService shares, ClaimsPrincipal user, CancellationToken ct) =>
+        g.MapMethods("/dirs", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<DirsReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
-            var (shareError, shareUser) = await ShareAccess.ResolveAsync(
-                ctx, shares, user.Identity?.IsAuthenticated == true, req.Password, ct);
-            if (shareError is not null) return shareError;
-            if (shareUser is not null) u = shareUser;
             // Go FsDirs：force_root 仅管理员可用且不做 BasePath 拼接；否则套 BasePath。
             string path;
             if (req.ForceRoot)
@@ -359,17 +338,10 @@ public static class FsEndpoints
         // （否则公开目录里点开压缩包会 401 把人踢去登录页）。
         // 访问控制交给 meta 门禁：目录密码/白名单/隐藏条目与 /list 完全一致。
         // 注意区分两个密码：`password` 是目录密码（走门禁），`archive_pass` 才是压缩包密码。
-        g.MapMethods("/archive/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ISharingService shares, ClaimsPrincipal user, CancellationToken ct) =>
+        g.MapMethods("/archive/list", ["GET", "POST"], async (HttpContext ctx, IFileSystemService svc, IMetaService metaSvc, ClaimsPrincipal user, CancellationToken ct) =>
         {
             var req = await RequestBinder.BodyOrQueryAsync<ArchiveListReq>(ctx, ctx.RequestAborted);
             var u = user.ToUser();
-            // 分享页的归档预览：游客拿不到 JWT，只有分享码。不在这里解析的话，
-            // 匿名请求会退化成 BasePath="/" 的访客，进而去读服务器的 `/x.zip` ——
-            // 表现为「分享页列归档条目 501/404」，而真正的原因是没有换成受限访客。
-            var (shareError, shareUser) = await ShareAccess.ResolveAsync(
-                ctx, shares, user.Identity?.IsAuthenticated == true, req.Password, ct);
-            if (shareError is not null) return shareError;
-            if (shareUser is not null) u = shareUser;
             if (JoinGuard(u, req.Path, out var path) is { } fail) return fail;
             if (await AccessGateAsync(metaSvc, u, path, req.Password, ct) is { } denied) return denied;
             return Results.Ok(await svc.ArchiveListAsync(path, req.ArchivePass, u));

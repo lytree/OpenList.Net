@@ -51,13 +51,6 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: "blank", title: "login.login" },
   },
   {
-    // 公开分享页：不带应用外壳、不带登录态，仅凭分享码访问（见 api/sharePublic.ts）
-    path: "/s/:code",
-    name: "share",
-    component: () => import("~/pages/share"),
-    meta: { layout: "blank", title: "shares.title" },
-  },
-  {
     path: "/",
     component: () => import("~/layouts/BasicLayout"),
     children: [
@@ -197,22 +190,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "manage.sidemenu.storages" },
       },
       {
-        path: "users",
-        name: "users",
-        component: () => import("~/pages/manage/users/Users"),
-        meta: { title: "manage.sidemenu.users" },
-      },
-      {
         path: "metas",
         name: "metas",
         component: () => import("~/pages/manage/metas/Metas"),
         meta: { title: "manage.sidemenu.metas" },
-      },
-      {
-        path: "shares",
-        name: "shares",
-        component: () => import("~/pages/manage/shares/Shares"),
-        meta: { title: "manage.sidemenu.shares" },
       },
       {
         path: "indexes",
@@ -231,12 +212,6 @@ const routes: RouteRecordRaw[] = [
         name: "media-libraries",
         component: () => import("~/pages/manage/media/MediaLibraries"),
         meta: { title: "media.manage.title" },
-      },
-      {
-        path: "messenger",
-        name: "messenger",
-        component: () => import("~/pages/manage/messenger/Messenger"),
-        meta: { title: "manage.sidemenu.messenger" },
       },
       {
         path: "settings",

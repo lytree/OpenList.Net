@@ -13,16 +13,14 @@ import { chromium } from "playwright"
  * （2 个条目 / 1 已匹配 / 1 待刮削 / 匹配率 50% / 题材 Comedy+Drama），
  * 再逐张卡片、逐个单元格去对。
  *
- * **为什么建第 2 个用户和一个分享**：隔离库里只有内置 admin，用户卡永远是 1，
- * 「计数逻辑是否正确」根本区分不出来。多一条数据才能证明卡片读的是真数据。
+ * **单用户产品**：仪表盘不再有用户 / 分享指标卡，因此脚本只造挂载与媒体库数据，
+ * 断言的是 4 张卡（挂载 / 媒体库 / 容量 / 索引对象）与后端接口数字一致。
  */
 
 const BASE = process.env.BASE || "http://127.0.0.1:5055"
 const PASS = process.env.ADMIN_PASS || "e2e12345"
 const ROOT = process.env.FIXTURE || "G:/Share/ol-v2-dash"
 const LIB = "E2E Dash Lib"
-const GUEST = "dash_guest"
-const GUEST_PASS = "dash12345"
 
 const log = (...args) => console.log("[dashboard]", ...args)
 const results = []
@@ -96,33 +94,7 @@ for (let i = 0; i < 600; i++) {
 }
 check("扫描完成", scanState === "completed", scanState)
 
-// ---------- 2. 补齐「非默认」数据：第二个用户 + 一条分享 ----------
-let usersResp = await api("get", "/admin/user/list")
-if (!(usersResp.data?.content ?? []).some((u) => u.username === GUEST)) {
-  const u = await api("post", "/admin/user/create", {
-    username: GUEST,
-    password: GUEST_PASS,
-    role: 0,
-    permission: 0,
-  })
-  check("建普通用户", u.code === 200, u.message)
-  usersResp = await api("get", "/admin/user/list")
-}
-// 期望值不写死：初始化时后端会建 `guest` 内置账号（默认停用），绝对值随时可能变，
-// 断言「UI 数字 == 接口算出来的数字」才是这张卡真正要证的事。
-const allUsers = usersResp.data?.content ?? []
-const expectUsers = String(allUsers.length)
-const expectAdmins = String(allUsers.filter((u) => u.role === 2).length)
-const expectDisabled = String(allUsers.filter((u) => u.disabled).length)
-check("用户数已非默认（≥3：guest + admin + 脚本新建）", allUsers.length >= 3, `${allUsers.length}`)
-
-const sharesResp0 = await api("get", "/share/list")
-if ((sharesResp0.data?.content ?? []).length === 0) {
-  const s = await api("post", "/share/create", { files: ["/e2e"], pwd: "", max_accessed: 0 })
-  check("建分享", s.code === 200, s.message)
-}
-
-// ---------- 3. 接口侧的真实数字（UI 断言的期望值来源） ----------
+// ---------- 2. 接口侧的真实数字（UI 断言的期望值来源） ----------
 const statsResp = await api("get", "/media/stats")
 const stats = statsResp.data ?? {}
 check("接口 item_count = 2", stats.item_count === 2, `item_count=${stats.item_count}`)
@@ -135,17 +107,17 @@ const libStatus = (scrapeResp.data ?? []).find((s) => s.library_id === libraryId
 check("库已匹配 1 条", libStatus?.matched === 1, `matched=${libStatus?.matched}`)
 check("库待刮削 1 条", libStatus?.pending === 1, `pending=${libStatus?.pending}`)
 
-// ---------- 4. 页面 ----------
+// ---------- 3. 页面 ----------
 await page.goto(`${BASE}/#/@manage/dashboard`, { waitUntil: "networkidle" })
 await page.waitForTimeout(1000)
 
 const heading = (await page.locator(".ol-manage-toolbar .ol-manage-h2").innerText().catch(() => "")).trim()
 check("页面标题", heading === "Dashboard", heading)
 
-// 卡片：6 张，顺序即 用户 / 挂载 / 分享 / 媒体库 / 容量 / 索引对象
+// 卡片：4 张，顺序即 挂载 / 媒体库 / 容量 / 索引对象
 const cards = page.locator(".ol-dash-card")
 const cardCount = await cards.count()
-check("6 张指标卡", cardCount === 6, `count=${cardCount}`)
+check("4 张指标卡", cardCount === 4, `count=${cardCount}`)
 const cardValues = []
 for (let i = 0; i < cardCount; i++) {
   cardValues.push((await cards.nth(i).locator(".ol-dash-card-value").innerText()).trim())
@@ -155,19 +127,12 @@ for (let i = 0; i < cardCount; i++) {
   cardLabels.push((await cards.nth(i).locator(".ol-dash-card-label").innerText()).trim())
 }
 log("cards:", cardLabels.map((l, i) => `${l}=${cardValues[i]}`).join(" | "))
-check("用户卡 = 接口用户数", cardValues[0] === expectUsers, `${cardValues[0]} vs ${expectUsers}`)
-check("挂载卡 = 1", cardValues[1] === "1", cardValues[1])
-check("分享卡 = 1", cardValues[2] === "1", cardValues[2])
-check("媒体库卡 = 1", cardValues[3] === "1", cardValues[3])
-check("容量卡是体积（非占位符）", /\d/.test(cardValues[4]) && cardValues[4] !== "-", cardValues[4])
+check("挂载卡 = 1", cardValues[0] === "1", cardValues[0])
+check("媒体库卡 = 1", cardValues[1] === "1", cardValues[1])
+check("容量卡是体积（非占位符）", /\d/.test(cardValues[2]) && cardValues[2] !== "-", cardValues[2])
+check("索引对象卡有数字", /\d/.test(cardValues[3]), cardValues[3])
 
-const userSub = (await cards.nth(0).locator(".ol-dash-card-sub").innerText()).trim()
-check(
-  `用户卡副标题 = ${expectAdmins} 管理员 / ${expectDisabled} 停用`,
-  userSub.includes(expectAdmins) && userSub.includes(expectDisabled),
-  userSub,
-)
-const libSub = (await cards.nth(3).locator(".ol-dash-card-sub").innerText()).trim()
+const libSub = (await cards.nth(1).locator(".ol-dash-card-sub").innerText()).trim()
 check("媒体库卡副标题：2 个条目", libSub.includes("2"), libSub)
 
 // 元数据健康表（第一块面板）

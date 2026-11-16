@@ -319,19 +319,10 @@ round_dimensions() {
 round_backup() {
   say "round: backup (E 管理台备份 / 恢复)"
   local dir; dir="$(round_dir backup)"; mkdir -p "$dir"
-  # 装置自建（探针用户 + 探针挂载），不需要挂载点
+  # 装置自建（探针挂载），不需要挂载点
   begin_round "$dir" || return 1
   run_node "$dir/run.log" "$FE/scripts/verify-backup.mjs"
   finish_round "E/backup" $?
-}
-
-round_messenger() {
-  say "round: messenger (E 管理台站内信 + 用户侧收件箱)"
-  local dir; dir="$(round_dir messenger)"; mkdir -p "$dir"
-  # 装置自建（幂等建 carol、清空两边历史消息），不需要挂载
-  begin_round "$dir" || return 1
-  run_node "$dir/run.log" "$FE/scripts/verify-messenger.mjs"
-  finish_round "E/messenger" $?
 }
 
 round_scrape() {
@@ -415,7 +406,7 @@ round_playlist_queue() {
 # --------------------------------------------------------------------------- 入口
 
 WANT=("$@")
-[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage thumb dimensions scrape dashboard backup messenger webdav phone playlist-queue)
+[ ${#WANT[@]} -eq 0 ] && WANT=(common ops upload preview preview-extra editor rename torrent media media-manage thumb dimensions scrape dashboard backup webdav phone playlist-queue)
 
 for name in "${WANT[@]}"; do
   # 轮次名用连字符（preview-extra），函数名用下划线 —— 这里做一次映射

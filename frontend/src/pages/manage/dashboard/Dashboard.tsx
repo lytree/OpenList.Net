@@ -10,8 +10,7 @@ import {
 } from "element-plus"
 import { VexTable, VexColumn } from "~/components/table"
 import { Refresh } from "@element-plus/icons-vue"
-import { getIndexProgress, getScanProgress, listStorages, listUsers } from "~/api/admin"
-import { listShares } from "~/api/shares"
+import { getIndexProgress, getScanProgress, listStorages } from "~/api/admin"
 import {
   mediaListScrapeTasks,
   mediaStats,
@@ -19,12 +18,10 @@ import {
   type MediaStats,
 } from "~/api/media"
 import type {
-  AdminUser,
   IndexProgress,
   PageResp,
   Resp,
   ScanProgress,
-  ShareInfo,
   StorageWithDriver,
 } from "~/api/types"
 import {
@@ -32,9 +29,7 @@ import {
   libraryMatchRate,
   libraryState,
   libraryStateTagType,
-  shareStats,
   storageStats,
-  userStats,
 } from "~/utils/dashboard"
 import { hoursOf, topBuckets } from "~/utils/mediaCatalog"
 import { formatTime, humanSize } from "~/utils/format"
@@ -44,11 +39,11 @@ import { t } from "~/i18n"
  * 管理台仪表盘 —— `/@manage/dashboard`。
  *
  * 后端**没有**统计端点（承方案 §32.8：上游也没有，仪表盘是各页各取一份）。
- * 所以这里并发拉 7 个既有端点，在本地做计数/分组。几条约定：
+ * 所以这里并发拉 5 个既有端点，在本地做计数/分组。几条约定：
  *
  * 1. **不引图表库**：只有条形分布和计数，用 div 画即可；为一张图引 echarts
  *    （300 KB+）不划算，而且暗色变量还要单独适配一遍。
- * 2. **数据源失败不整体爆掉**：7 个请求里有 1 个失败（例如委派管理员没有
+ * 2. **数据源失败不整体爆掉**：5 个请求里有 1 个失败（例如委派管理员没有
  *    `manage_media`，刮削状态就 403），其余面板照常显示，顶部用一条 warning
  *    列出失败的来源 —— 比「整页白屏 + 一个 toast」可诊断得多。
  * 3. **口径以 `utils/dashboard.ts` 为准**：计数逻辑全在那个纯函数文件里，便于单测；
@@ -58,7 +53,7 @@ import { t } from "~/i18n"
  */
 
 /** 失败来源在界面上显示的名字（也用于拼 warning 文案）。 */
-const SOURCES = ["users", "storages", "shares", "stats", "scrape", "index", "scan"] as const
+const SOURCES = ["storages", "stats", "scrape", "index", "scan"] as const
 type SourceName = (typeof SOURCES)[number]
 
 /** 分布图最多展示的桶数：再多就成噪音。 */
@@ -67,9 +62,7 @@ const TOP_N = 8
 export default defineComponent({
   name: "DashboardPage",
   setup() {
-    const users = ref<AdminUser[]>([])
     const storages = ref<StorageWithDriver[]>([])
-    const shares = ref<ShareInfo[]>([])
     const stats = ref<MediaStats | null>(null)
     const scrape = ref<MediaScrapeStatus[]>([])
     const index = ref<IndexProgress | null>(null)
@@ -98,11 +91,9 @@ export default defineComponent({
         return null
       }
 
-      const [userPage, storagePage, sharePage, statsData, scrapeRows, indexData, scanData] =
+      const [storagePage, statsData, scrapeRows, indexData, scanData] =
         await Promise.all([
-          settle<PageResp<AdminUser>>("users", () => listUsers()),
           settle<PageResp<StorageWithDriver>>("storages", () => listStorages()),
-          settle<PageResp<ShareInfo>>("shares", () => listShares()),
           settle<MediaStats>("stats", () => mediaStats()),
           settle<MediaScrapeStatus[]>("scrape", () => mediaListScrapeTasks()),
           settle<IndexProgress>("index", () => getIndexProgress()),
@@ -110,9 +101,7 @@ export default defineComponent({
         ])
 
       // 列表类端点都返回 `{ content, total }` 信封，仪表盘只需要 content（total 与长度一致）
-      users.value = userPage?.content ?? []
       storages.value = storagePage?.content ?? []
-      shares.value = sharePage?.content ?? []
       stats.value = statsData
       scrape.value = scrapeRows ?? []
       index.value = indexData
@@ -126,9 +115,7 @@ export default defineComponent({
 
     onMounted(() => void load())
 
-    const user = computed(() => userStats(users.value))
     const storage = computed(() => storageStats(storages.value))
-    const share = computed(() => shareStats(shares.value))
     const health = computed(() => libraryHealth(scrape.value))
     const genres = computed(() => topBuckets(stats.value?.by_genre ?? [], TOP_N))
     const maxDriver = computed(() => Math.max(1, ...storage.value.byDriver.map((b) => b.count)))
@@ -162,30 +149,12 @@ export default defineComponent({
       const media = stats.value
       const cards: { key: string; value: string | number; label: string; sub: string }[] = [
         {
-          key: "users",
-          value: user.value.total,
-          label: t("manage.dashboard.card_users"),
-          sub: t("manage.dashboard.sub_users", {
-            admins: user.value.admins,
-            disabled: user.value.disabled,
-          }),
-        },
-        {
           key: "storages",
           value: storage.value.total,
           label: t("manage.dashboard.card_storages"),
           sub: t("manage.dashboard.sub_storages", {
             enabled: storage.value.enabled,
             disabled: storage.value.disabled,
-          }),
-        },
-        {
-          key: "shares",
-          value: share.value.total,
-          label: t("manage.dashboard.card_shares"),
-          sub: t("manage.dashboard.sub_shares", {
-            enabled: share.value.enabled,
-            accessed: share.value.accessed,
           }),
         },
         {

@@ -68,36 +68,6 @@ namespace OpenList.Migrations.Sqlite.Migrations
                     b.ToTable("x_tasks", (string)null);
                 });
 
-            modelBuilder.Entity("OpenList.Core.Models.Message", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Content")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("Read")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<long>("UserId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("x_messages", (string)null);
-                });
-
             modelBuilder.Entity("OpenList.Core.Models.Meta", b =>
                 {
                     b.Property<long>("Id")
@@ -252,86 +222,6 @@ namespace OpenList.Migrations.Sqlite.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("x_settings", (string)null);
-                });
-
-            modelBuilder.Entity("OpenList.Core.Models.Sharing", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Accessed")
-                        .HasColumnType("INTEGER")
-                        .HasJsonPropertyName("accessed");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("Disabled")
-                        .HasColumnType("INTEGER")
-                        .HasJsonPropertyName("disabled");
-
-                    b.Property<bool>("Enabled")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTimeOffset?>("Expiration")
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("expires");
-
-                    b.Property<string>("ExtractFolder")
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("extract_folder");
-
-                    b.Property<string>("FilesJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Header")
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("header");
-
-                    b.Property<int>("MaxAccessed")
-                        .HasColumnType("INTEGER")
-                        .HasJsonPropertyName("max_accessed");
-
-                    b.Property<string>("OrderBy")
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("order_by");
-
-                    b.Property<string>("OrderDirection")
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("order_direction");
-
-                    b.Property<long>("OwnerId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Password")
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("pwd");
-
-                    b.Property<string>("Path")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Readme")
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("readme");
-
-                    b.Property<string>("Remark")
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("remark");
-
-                    b.Property<string>("ShareCode")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasJsonPropertyName("id");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("x_sharings", (string)null);
                 });
 
             modelBuilder.Entity("OpenList.Core.Models.SshKey", b =>

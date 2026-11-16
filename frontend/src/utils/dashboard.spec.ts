@@ -1,30 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { UserRole, type AdminUser, type ShareInfo, type StorageWithDriver } from "~/api/types"
+import { type StorageWithDriver } from "~/api/types"
 import type { MediaScrapeStatus } from "~/api/media"
 import {
   libraryHealth,
   libraryMatchRate,
   libraryState,
   libraryStateTagType,
-  shareStats,
   storageStats,
-  userStats,
 } from "./dashboard"
-
-/** 只填被测字段，其余用最小合法值补齐 —— 断言失败时能一眼看出是哪一项。 */
-const user = (patch: Partial<AdminUser>): AdminUser =>
-  ({
-    id: 0,
-    username: "u",
-    password: "",
-    base_path: "/",
-    role: UserRole.GENERAL,
-    permission: 0,
-    sso_id: "",
-    disabled: false,
-    allow_ldap: false,
-    ...patch,
-  }) as AdminUser
 
 const storage = (patch: Partial<StorageWithDriver>): StorageWithDriver =>
   ({
@@ -42,18 +25,6 @@ const storage = (patch: Partial<StorageWithDriver>): StorageWithDriver =>
     ...patch,
   }) as StorageWithDriver
 
-const share = (patch: Partial<ShareInfo>): ShareInfo =>
-  ({
-    id: "s",
-    files: [],
-    max_accessed: 0,
-    accessed: 0,
-    disabled: false,
-    creator: "admin",
-    creator_role: 2,
-    ...patch,
-  }) as ShareInfo
-
 const scrapeRow = (patch: Partial<MediaScrapeStatus> = {}): MediaScrapeStatus =>
   ({
     library_id: 1,
@@ -68,23 +39,6 @@ const scrapeRow = (patch: Partial<MediaScrapeStatus> = {}): MediaScrapeStatus =>
     error: null,
     ...patch,
   }) as MediaScrapeStatus
-
-describe("userStats", () => {
-  it("分别统计管理员与被停用账号", () => {
-    const stats = userStats([
-      user({ role: UserRole.ADMIN, is_built_in: true }),
-      user({ role: UserRole.ADMIN, disabled: true }),
-      user({ role: UserRole.GENERAL }),
-      user({ role: UserRole.GUEST, disabled: true }),
-    ])
-    // 停用的管理员仍计入 admins —— 停用是「能不能登录」，不是「是不是管理员」
-    expect(stats).toEqual({ total: 4, admins: 2, disabled: 2 })
-  })
-
-  it("空列表全是 0", () => {
-    expect(userStats([])).toEqual({ total: 0, admins: 0, disabled: 0 })
-  })
-})
 
 describe("storageStats", () => {
   it("分布只算启用的挂载，按数量降序、同数量按名字升序", () => {
@@ -113,17 +67,6 @@ describe("storageStats", () => {
   it("全部停用时分布为空（而不是列出 0 项）", () => {
     const stats = storageStats([storage({ disabled: true })])
     expect(stats).toEqual({ total: 1, enabled: 0, disabled: 1, byDriver: [] })
-  })
-})
-
-describe("shareStats", () => {
-  it("启用数只排除 disabled，访问次数含失效分享", () => {
-    const stats = shareStats([
-      share({ accessed: 3 }),
-      share({ accessed: 0 }),
-      share({ accessed: 7, disabled: true }),
-    ])
-    expect(stats).toEqual({ total: 3, enabled: 2, disabled: 1, accessed: 10 })
   })
 })
 

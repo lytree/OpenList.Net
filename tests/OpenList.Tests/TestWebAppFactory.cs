@@ -61,6 +61,36 @@ public sealed class TestWebAppFactory : WebApplicationFactory<Program>
         await mount.LoadAsync(storage);
     }
 
+    /// <summary>
+    /// 直接在数据库里种一个用户。
+    /// 单用户产品已移除 <c>/api/admin/user/create</c>，多用户访问控制用例改由这里造数据。
+    /// </summary>
+    public async Task SeedUserAsync(
+        string username,
+        string password,
+        int permission,
+        string basePath = "/",
+        UserRole role = UserRole.General)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OpenListDbContext>();
+        if (await db.Users.AnyAsync(u => u.Username == username)) return;
+
+        var now = DateTimeOffset.UtcNow;
+        db.Users.Add(new User
+        {
+            Username = username,
+            PasswordHash = UserService.HashPassword(password),
+            Role = role,
+            Permission = permission,
+            BasePath = basePath,
+            Disabled = false,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>把挂载内的相对路径解析成本机路径（断言「文件真的落到磁盘」时用）。</summary>
     public string ResolvePath(string relativePath)
         => Path.Combine(_tempDir, relativePath.Replace('/', Path.DirectorySeparatorChar));

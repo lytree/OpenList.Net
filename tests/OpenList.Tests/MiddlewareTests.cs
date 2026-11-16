@@ -112,9 +112,9 @@ public sealed class RateLimitRouteTests
     }
 
     [Test]
-    public async Task DownloadRoute_MatchesSignedAndSharingGetPaths()
+    public async Task DownloadRoute_MatchesSignedGetPaths()
     {
-        foreach (var p in new[] { "/d/a", "/p/b", "/ad/c", "/ap/x", "/ae/y", "/sd/sid", "/sd/sid/sub", "/sad/sid" })
+        foreach (var p in new[] { "/d/a", "/p/b", "/ad/c", "/ap/x", "/ae/y" })
             await Assert.That(RateLimitMiddleware.IsDownloadRoute(NewRequest("GET", p))).IsTrue();
     }
 

@@ -63,8 +63,7 @@ public static class AdminEndpoints
         g.MapGet("/driver/info", async (string driver, IStorageService svc) =>
             Results.Ok(await svc.GetDriverInfoAsync(driver)));
 
-        // --- 用户管理 ---
-        // GET /admin/user/list -> { content, total } (frontend Users.tsx reads data.content)
+        /** `GET /admin/user/list` → `{ content, total }`。 */
         g.MapGet("/user/list", async (IUserService users) =>
         {
             var r = await users.ListAsync();
@@ -72,48 +71,10 @@ public static class AdminEndpoints
             return Results.Ok(Resp<object>.Ok(new { content = r.Data, total = r.Data.Count }));
         });
 
-        g.MapGet("/user/get", async (long id, IUserService users) =>
-            Results.Ok(await users.GetAsync(id)));
-
-        g.MapPost("/user/create", async (CreateUserReq req, IUserService users) =>
-            Results.Ok(await users.CreateAsync(req)));
-
-        g.MapPost("/user/update", async (UpdateUserReq req, IUserService users) =>
-            Results.Ok(await users.UpdateAsync(req.Id, req)));
-
-        g.MapPost("/user/cancel_2fa", async (long id, IUserService users) =>
-            Results.Ok(await users.Cancel2FaAsync(id)));
-
-        g.MapPost("/user/delete", async (long id, IUserService users) =>
-            Results.Ok(await users.DeleteAsync(id)));
-
-        g.MapPost("/user/set_password", async (SetPasswordReq req, IUserService users) =>
-            Results.Ok(await users.UpdateAsync(req.Id, new UpdateUserReq { Password = req.Password })));
-
-        // POST /admin/user/reset_admin_password — 重置<em>内置</em>管理员的密码。
-        // 与 set_password 的区别：不针对指定 id、不需要旧密码，只要调用者是 admin 即可。
-        // 内置 admin 被刻意设为不可删除 / 不可改名 / 不可降权，若改密还要求旧密码，
-        // 一旦忘记就彻底失去管理入口；此端点是桌面端与网页端的共同恢复通道。
+        // POST /admin/user/reset_admin_password — 重置内置管理员的密码。
+        // 单用户产品里这是「忘记密码后由已登录客户端 / 桌面端恢复」的通道（网页端改密走 /api/me/update）。
         g.MapPost("/user/reset_admin_password", async (ResetAdminPasswordReq req, IUserService users, HttpContext ctx) =>
             Results.Ok(await users.ResetAdminPasswordAsync(req.Password, ctx.RequestAborted)));
-
-        // POST /admin/user/del_cache?id= — clear a user's cached profile (no-op until
-        // a cache layer is added, but the route is registered for frontend compat).
-        g.MapPost("/user/del_cache", async (long id, IUserService users) =>
-            Results.Ok(await users.DelCacheAsync(id)));
-
-        // --- Admin SSH-key management (any user) ---
-        // GET /admin/user/sshkey/list?uid={uid} — paged response { content, total }.
-        g.MapGet("/user/sshkey/list", async (long uid, ISshKeyService svc) =>
-        {
-            var r = await svc.ListAsync(uid);
-            if (r.Code != 200) return Results.Ok(r);
-            return Results.Ok(Resp<object>.Ok(new { content = r.Data!, total = r.Data!.Count }));
-        });
-
-        // POST /admin/user/sshkey/delete?uid={uid}&id={id} — returns remaining keys.
-        g.MapPost("/user/sshkey/delete", async (long uid, long id, ISshKeyService svc) =>
-            Results.Ok(await svc.DeleteAsync(uid, id, isAdmin: true)));
 
         // --- Setting management ---
         // GET /admin/setting/list?group=N  or  ?groups=N1,N2  — filter by group.
@@ -295,48 +256,6 @@ public static class AdminEndpoints
 
         g.MapPost("/meta/delete", async (long id, IMetaService svc) =>
             Results.Ok(await svc.DeleteAsync(id)));
-
-        // --- Message management ---
-        // Persistent admin-to-user messages (CRUD).
-        g.MapGet("/message/list", async (long user_id, IMessageService svc) =>
-            Results.Ok(await svc.GetAsync(user_id)));
-
-        // GET /admin/message/get?id= — fetch a single persistent message by id.
-        g.MapGet("/message/get", async (long id, IMessageService svc) =>
-            Results.Ok(await svc.GetByIdAsync(id)));
-
-        g.MapPost("/message/create", async (CreateMessageReq req, IMessageService svc) =>
-            Results.Ok(await svc.SendAsync(req.UserId, req.Title, req.Content)));
-
-        // Alias: frontend Messenger uses /admin/message/send with { message } body for
-        // admin broadcast (in-memory). The frontend sends a plain string
-        // (r.post("/admin/message/send", { message: toSend() })) so wrap it into a
-        // BroadcastMessage { type: "string", content: <str> } — mirroring Go's
-        // message.SendHandle which accepts Req{Message string}.
-        g.MapPost("/message/send", async (SendBroadcastReq? req, IBroadcastService svc) =>
-        {
-            var msg = req?.Message switch
-            {
-                null => new BroadcastMessage(),
-                string s => new BroadcastMessage { Type = "string", Content = s },
-                JsonElement e when e.ValueKind == JsonValueKind.String => new BroadcastMessage { Type = "string", Content = e.GetString() },
-                BroadcastMessage bm => bm,
-                _ => new BroadcastMessage { Type = "string", Content = req!.Message },
-            };
-            return Results.Ok(await svc.SendAsync(msg));
-        });
-
-        g.MapPost("/message/update", async (long id, IMessageService svc) =>
-            Results.Ok(await svc.MarkReadAsync(id)));
-
-        // POST /admin/message/delete?id= — delete a persistent message.
-        g.MapPost("/message/delete", async (long id, IMessageService svc) =>
-            Results.Ok(await svc.DeleteAsync(id)));
-
-        // POST /admin/message/get (no body) — retrieve the latest admin broadcast.
-        // The frontend Messenger polls this to display site-wide announcements.
-        g.MapPost("/message/get", async (IBroadcastService svc) =>
-            Results.Ok(await svc.GetAsync()));
 
         // --- Scan ---
         // --- Scan management ---
@@ -522,14 +441,8 @@ public static class AdminEndpoints
     }
 }
 
-/// <summary>设置用户密码的请求体（<c>POST /admin/user/set_password</c>）。</summary>
-public sealed class SetPasswordReq { public long Id { get; set; } public string Password { get; set; } = ""; }
 /// <summary>重置内置管理员密码的请求体（<c>POST /admin/user/reset_admin_password</c>）。</summary>
 public sealed class ResetAdminPasswordReq { public string Password { get; set; } = ""; }
-/// <summary>创建站内信的请求体（<c>POST /admin/message/create</c>）。</summary>
-public sealed class CreateMessageReq { public long UserId { get; set; } public string Title { get; set; } = ""; public string Content { get; set; } = ""; }
-/// <summary>广播消息请求体（<c>POST /admin/message/send</c>）；Message 兼容字符串或结构化对象。</summary>
-public sealed class SendBroadcastReq { public object? Message { get; set; } }
 /// <summary>启动扫描的请求体（<c>POST /admin/scan/start</c>）；Limit 为限速（文件/秒，0=不限）。</summary>
 public sealed class ScanStartReq { public string? Path { get; set; } public double Limit { get; set; } }
 /// <summary>构建/更新搜索索引的请求体（<c>POST /admin/index/build</c> 或 <c>/admin/index/update</c>）。</summary>

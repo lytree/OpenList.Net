@@ -228,27 +228,6 @@ export interface AdminUser extends User {
   updatedAt?: string
 }
 
-export interface CreateUserReq {
-  username: string
-  password: string
-  role: UserRole
-  permission: number
-  base_path?: string | null
-  disabled?: boolean
-  allow_ldap?: boolean
-}
-
-export interface UpdateUserReq {
-  id: number
-  username?: string
-  password?: string
-  role?: UserRole
-  permission?: number
-  base_path?: string | null
-  disabled?: boolean
-  allow_ldap?: boolean
-}
-
 /**
  * 路径元数据（`/admin/meta/list` 的行）。
  * 每个 `xxx_sub` 表示对应规则是否对子目录生效。
@@ -379,54 +358,3 @@ export const SettingGroups: { group: number; labelKey: string }[] = [
   // 单独一组而不是塞进「预览」：它管的是「列表用什么图」，与「点开怎么预览」是两件事。
   { group: 14, labelKey: "settings.groups.thumbnails" },
 ]
-
-// ---------------------------------------------------------------------------
-// 分享（M2 · shares）
-// 真源：`OpenList.Core/Interfaces/ISharingService.cs` 的 `ShareInfo` / `ShareReq`。
-// `ShareInfo.Files` 没有 JsonPropertyName，走全局 camelCase → 字段名是 `files`；
-// 其余为显式 snake_case（max_accessed / order_by …）。
-// ---------------------------------------------------------------------------
-
-export interface ShareInfo {
-  id: string
-  files: string[]
-  expires?: string | null
-  pwd?: string | null
-  max_accessed: number
-  accessed: number
-  disabled: boolean
-  remark?: string | null
-  readme?: string | null
-  header?: string | null
-  order_by?: string | null
-  order_direction?: string | null
-  extract_folder?: string | null
-  creator: string
-  creator_role: number
-}
-
-/**
- * 新建 / 更新分享的请求体。
- *
- * **注意 `accessed`**：后端 `UpdateAsync` 会无条件执行 `s.Accessed = req.Accessed`，
- * 编辑时若不回传当前访问次数，会把计数清零。所以编辑必须带上原值。
- */
-export interface ShareReq {
-  /** 新建时可指定分享码；留空由服务端生成。更新时忽略（用 new_id 改名）。 */
-  id?: string | null
-  /** 更新时改名（仅管理员）。 */
-  new_id?: string | null
-  files: string[]
-  expires?: string | null
-  pwd?: string | null
-  max_accessed: number
-  disabled: boolean
-  remark?: string | null
-  readme?: string | null
-  header?: string | null
-  order_by?: string | null
-  order_direction?: string | null
-  extract_folder?: string | null
-  creator?: string | null
-  accessed: number
-}

@@ -34,12 +34,16 @@ public class CrossProtocolAccessTests
         return json!.RootElement.GetProperty("data").GetProperty("token").GetString()!;
     }
 
-    private static async Task CreateUserAsync(HttpClient client, string username, string password, int permission, CancellationToken ct = default)
+    private static async Task CreateUserAsync(
+        TestWebAppFactory factory,
+        string username,
+        string password,
+        int permission,
+        string basePath = "/",
+        CancellationToken ct = default)
     {
-        var resp = await client.PostAsync("/api/admin/user/create",
-            JsonContent.Create(new { username, password, role = 0, permission }), ct);
-        var json = await resp.Content.ReadFromJsonAsync<JsonDocument>();
-        await Assert.That(json!.RootElement.GetProperty("code").GetInt32()).IsEqualTo(200);
+        await factory.SeedUserAsync(username, password, permission, basePath);
+        ct.ThrowIfCancellationRequested();
     }
 
     private static async Task<JsonDocument> PostJsonAsync(HttpClient client, string route, object body, CancellationToken ct = default)
@@ -60,7 +64,7 @@ public class CrossProtocolAccessTests
             await factory.WriteFileAsync("a.txt", "a"u8.ToArray());
             var token = await LoginAsync(client, "admin", "admin");
             client.DefaultRequestHeaders.Authorization = new("Bearer", token);
-            await CreateUserAsync(client, "reader", "pw", permission: 0);
+            await CreateUserAsync(factory, "reader", "pw", permission: 0);
 
             // 切到只读账号（Basic）
             client.DefaultRequestHeaders.Authorization =
@@ -87,7 +91,7 @@ public class CrossProtocolAccessTests
 
             var token = await LoginAsync(client, "admin", "admin");
             client.DefaultRequestHeaders.Authorization = new("Bearer", token);
-            await CreateUserAsync(client, "nosy", "pw", permission: 0);
+            await CreateUserAsync(factory, "nosy", "pw", permission: 0);
             client.DefaultRequestHeaders.Authorization =
                 new("Basic", Convert.ToBase64String("nosy:pw"u8.ToArray()));
 
@@ -113,7 +117,7 @@ public class CrossProtocolAccessTests
 
             var token = await LoginAsync(client, "admin", "admin");
             client.DefaultRequestHeaders.Authorization = new("Bearer", token);
-            await CreateUserAsync(client, "outsider", "pw", permission: 0);
+            await CreateUserAsync(factory, "outsider", "pw", permission: 0);
             client.DefaultRequestHeaders.Authorization =
                 new("Basic", Convert.ToBase64String("outsider:pw"u8.ToArray()));
 
@@ -151,7 +155,7 @@ public class CrossProtocolAccessTests
         {
             var token = await LoginAsync(client, "admin", "admin");
             client.DefaultRequestHeaders.Authorization = new("Bearer", token);
-            await CreateUserAsync(client, "s3reader", "pw", permission: 0);
+            await CreateUserAsync(factory, "s3reader", "pw", permission: 0);
             var userToken = await LoginAsync(client, "s3reader", "pw");
             client.DefaultRequestHeaders.Authorization = new("Bearer", userToken);
 
@@ -171,7 +175,7 @@ public class CrossProtocolAccessTests
             await factory.WriteFileAsync("a.zip", TestWebAppFactory.CreateZipBytes());
             var token = await LoginAsync(client, "admin", "admin");
             client.DefaultRequestHeaders.Authorization = new("Bearer", token);
-            await CreateUserAsync(client, "noperm", "pw", permission: 0);
+            await CreateUserAsync(factory, "noperm", "pw", permission: 0);
 
             var userToken = await LoginAsync(client, "noperm", "pw");
             client.DefaultRequestHeaders.Authorization = new("Bearer", userToken);
@@ -204,7 +208,7 @@ public class CrossProtocolAccessTests
         {
             var adminToken = await LoginAsync(client, "admin", "admin");
             client.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
-            await CreateUserAsync(client, "uploader", "pw", permission: 1 << 3);
+            await CreateUserAsync(factory, "uploader", "pw", permission: 1 << 3);
 
             // admin 建会话
             var init = new HttpRequestMessage(HttpMethod.Post, "/api/fs/multipart/init");
@@ -237,7 +241,7 @@ public class CrossProtocolAccessTests
         {
             var adminToken = await LoginAsync(client, "admin", "admin");
             client.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
-            await CreateUserAsync(client, "readonly", "pw", permission: 0);
+            await CreateUserAsync(factory, "readonly", "pw", permission: 0);
 
             var userToken = await LoginAsync(client, "readonly", "pw");
             client.DefaultRequestHeaders.Authorization = new("Bearer", userToken);

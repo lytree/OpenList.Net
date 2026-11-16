@@ -103,19 +103,15 @@ await page.reload({ waitUntil: "networkidle" })
 await page.waitForTimeout(1200)
 check("刷新后保持登录", (await page.locator(".ol-auth").count()) === 0, page.url())
 
-// ---------- E. 管理台 12 个模块都能打开 ----------
-// （12 个全部就绪：about 是最后一个，见 §38；plugins 已于 §35 从导航移除 ——
-//   .NET 侧没有 .so 插件宿主，留着只会误导）
+// ---------- E. 管理台 9 个模块都能打开 ----------
+// （单用户产品已移除 users / shares / messenger 三页；about 是最后一个，见 §38）
 const ADMIN_PAGES = [
   ["#/@manage/dashboard", "Dashboard"],
   ["#/@manage/storages", "Storages"],
-  ["#/@manage/users", "Users"],
   ["#/@manage/metas", "Metas"],
-  ["#/@manage/shares", "Shares"],
   ["#/@manage/indexes", "Indexes"],
   ["#/@manage/tasks", "Tasks"],
   ["#/@manage/media", "Media"],
-  ["#/@manage/messenger", "Messages"],
   ["#/@manage/backup-restore", "Backup"],
   ["#/@manage/settings", "Settings"],
   ["#/@manage/about", "About"],
@@ -218,10 +214,10 @@ check(
   JSON.stringify(links[0]),
 )
 
-// 导航：12 项、全部可点（about 就绪后不该再有 (soon)）
+// 导航：9 项、全部可点（单用户产品已移除 users / shares / messenger）
 const navTexts = await page.locator(".ol-manage-menu .el-menu-item").allInnerTexts()
 const navDisabled = await page.locator(".ol-manage-menu .el-menu-item.is-disabled").count()
-check("导航 12 项", navTexts.length === 12, navTexts.join("|"))
+check("导航 9 项", navTexts.length === 9, navTexts.join("|"))
 check("没有 (soon) 条目", !navTexts.some((t) => t.includes("(soon)")), navTexts.filter((t) => t.includes("soon")).join("|"))
 check("没有禁用项", navDisabled === 0, `disabled=${navDisabled}`)
 

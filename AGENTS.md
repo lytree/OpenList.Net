@@ -59,16 +59,16 @@
 | `S3Endpoints.cs` | `/s3` | Mixed |
 | `WebDavEndpoints.cs` | `/dav` | Mixed |
 
-## Built-in Accounts (mirrors Go `internal/bootstrap/data/user.go`)
+## Built-in Accounts（单用户产品）
 
-`DbInitializer.InitializeAsync` 按 Go 的 `initUser()`（= `initAdmin` + `initGuest`）建两个内置账号。
-**两者判据相互独立**，这点很关键 —— 早期用「用户表为空」统一判据，结果游客先建好之后表永远不为空，
-管理员再也建不出来。
+本项目已定位为**个人资源管理**：只保留一个内置管理员，不再有用户管理页、用户 CRUD、guest 账号、分享系统与站内信。
+匿名浏览由设置项控制（见下），与数据库账号无关。
+
+`DbInitializer.InitializeAsync` 只按 Go 的 `initAdmin` 建一个内置管理员。
 
 | 账号 | 创建条件 | 角色 | 密码 | 权限 | 默认状态 | `IsBuiltIn` |
 |---|---|---|---|---|---|---|
 | `admin`（或配置的 `AdminUsername`） | **没有管理员** **且** 拿得到初始密码 | `Admin` | `AdminPassword` 配置值；devMode 下为 `admin` | `0x71FF` | 启用 | ✅ |
-| `guest` | 没有 `guest` | `Guest` | `guest` | `0` | **禁用** | ✅ |
 
 **拿不到密码就不建管理员**，改由 Web 安装向导 `POST /api/public/init/setup` 在用户首次访问时创建 ——
 对齐 Go 的 `initAdmin`：它在既无 `--dev` 又无 `OPENLIST_ADMIN_PASSWORD` 时直接 `return`。
@@ -78,16 +78,15 @@
 
 其余要点：
 
-- **`IsBuiltIn` 标记是保护的唯一依据**（列由 `AddUserIsBuiltIn` 迁移添加，并在其中回填旧库中最早的管理员）。`UserService.IsSuperAdmin` 读它，**不再**比较 `config.AdminUsername` —— 否则用户在管理界面改过用户名后保护就失效了。**按标记查账号时必须同时限定 `Role == Admin`**，否则会命中同样带标记的 guest（`ResetAdminPasswordAsync` 与 CLI 都踩过这个坑）。
-- 内置 admin **不可删除 / 改名 / 降权 / 禁用 / 改权限位**，但**可以改密码**（那是被保留的唯一理由）。其余 admin 角色账号可正常删除。
+- **`IsBuiltIn` 标记是保护的唯一依据**（列由 `AddUserIsBuiltIn` 迁移添加，并在其中回填旧库中最早的管理员）。`UserService.IsSuperAdmin` 读它，**不再**比较 `config.AdminUsername` —— 否则用户在管理界面改过用户名后保护就失效了。**按标记查账号时必须同时限定 `Role == Admin`**。
+- 内置 admin **不可删除 / 改名 / 降权 / 禁用 / 改权限位**，但**可以改密码**：网页端走用户菜单的「修改密码」（`POST /api/me/update`），桌面端 / 客户端走 `POST /api/admin/user/reset_admin_password`。
 - 安装向导走 `IUserService.CreateInitialAdminAsync`（**不是** `CreateAsync`）：它会打上 `IsBuiltIn`。该标记刻意没做进 `CreateUserReq`，否则已登录的管理员能凭空造出受保护账号；`CreateAsync` 恒定 `IsBuiltIn = false`。
 - 已存在的管理员永不被配置覆盖 —— 凭据以数据库为准（管理界面 / 桌面端 / CLI 改的密码不会被下次启动打回）。
 - 忘记密码的三条恢复路径：`POST /api/admin/user/reset_admin_password`、桌面端设置页、`cli/openlist admin random`（直连数据库，Web 层起不来时唯一可用的）。
-- 注意：本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（`Id=0`，见 `SignEndpoints` / `ShareDownloadEndpoints`），与库里这条 `guest` 记录无关。
+- 注意：本项目多数"匿名访问"路径用的是代码内构造的虚拟 Guest（`Id=0`，见 `SignEndpoints`），库里没有 guest 记录。
 - **两个门面的游客准入由设置控制**（group 13「访问控制」）：`media_guest_access`（默认 `true`）、`home_guest_access`（默认 `false`）。
   后端在 `MediaEndpoints` / `FsEndpoints` 的**路由组上各挂一个 endpoint filter** 拦匿名请求（不是逐端点改 `AllowAnonymous`，
   那是启动期常量）；判定值来自单例 `IGuestAccessService`（3 秒 TTL，管理端保存设置后 `InvalidateCache()` 立即生效）。
-  `FsEndpoints` 的过滤器**放行带分享码的匿名请求**（`Authorization` 非空且不含 `.`），否则公开分享链接会被误杀。
   前端守卫读**同一组公开设置**（`utils/access.ts` 的 `guestBlocked`，路由 meta 用 `guestSwitch`），三处显隐（顶栏 / 抽屉 /
   登录页「以访客身份浏览」）也要同步 —— 只看后端会导致「入口在、点进去 401」。**改默认值等于改产品的准入语义**，要同步改
   `DbInitializer` 种子、`GuestAccessService.Snapshot.Default`、前端 `stores/settings.ts` 的兜底 三处。
@@ -155,10 +154,10 @@ openlist cancel2fa <username>
 
 ### Completely missing (no route registered)
 
-**Sharing system** (Program.cs registers `MapShareApi` + `MapSharingDownloadApi`):
-- ~~`/api/share/*` — 7 sharing-management routes~~ **Implemented** (`list`, `get`, `create`, `update`, `delete`, `enable`, `disable`). Lookups use the user-visible share **code** (frontend `?id=`), not the db primary key. Service: `SharingService` / `ISharingService`.
-- ~~`/sd/:sid[/*path]` — sharing signed download (GET + HEAD)~~ **Implemented** (`ShareDownloadEndpoints.MapSharingDownloadApi`). Public; verifies share code + optional `?pwd=` + expiration/disable/max-accessed; bumps `Accessed` counter; streams file via `FileDownloadHelper` (Range-supported). Path mapping: `share.Path` + URL relative path (single-file/dir shares; multi-file matching is P2).
-- ~~`/sad/:sid[/*path]` — sharing signed archive extract (GET + HEAD)~~ **Implemented** — delegates to `ArchiveDecompressAsync`; 501 until a driver implements `IFileSystemArchiveDecompress` (LocalDriver now does via SharpCompress).
+**Sharing system + 站内信**：**已整体移除**（单用户个人资源管理定位，2026-11-16）。
+`/api/share/*`、`/sd/*`、`/sad/*`、`/api/me/message/*`、`/api/admin/message/*` 均不再注册；
+`ShareEndpoints` / `ShareDownloadEndpoints` / `SharingService` / `MessageService` / `BroadcastService` 与对应实体已删除，
+数据库表由迁移 `RemoveSharingAndMessage` 删除。`x_sharings` / `x_messages` 不再属于模型。
 
 **Signed archive routes** (Go `/ad/`, `/ap/`, `/ae/`):
 - ~~`/ad/*path` — archive signed download (GET + HEAD)~~ **Implemented** (`SignEndpoints`, P1-5) — reuses `ISignService` + delegates `ArchiveListAsync`/`ArchiveDecompressAsync`; 501 when the driver has no archive support.

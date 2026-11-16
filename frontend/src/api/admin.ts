@@ -2,7 +2,6 @@ import { http } from "./client"
 import type {
   AdminUser,
   CreateStorageReq,
-  CreateUserReq,
   DriverInfo,
   DriverMap,
   IndexBuildReq,
@@ -14,7 +13,6 @@ import type {
   ScanStartReq,
   SettingItem,
   StorageWithDriver,
-  UpdateUserReq,
 } from "./types"
 
 /**
@@ -66,43 +64,12 @@ export const loadAllStorages = (): PResp<Record<string, never>> =>
   http.post<Record<string, never>>("/admin/storage/load_all")
 
 // ---------------------------------------------------------------------------
-// 用户管理
+// 用户（单用户产品：仅保留只读列表，供元数据白名单等场景选择用户）
 // ---------------------------------------------------------------------------
 
 /** `GET /admin/user/list` → Resp<{ content, total }>。 */
 export const listUsers = (): PResp<PageResp<AdminUser>> =>
   http.get<PageResp<AdminUser>>("/admin/user/list")
-
-/** `GET /admin/user/get?id=` → Resp<AdminUser>。 */
-export const getUser = (id: number): PResp<AdminUser> =>
-  http.get<AdminUser>("/admin/user/get", { params: { id } })
-
-/** `POST /admin/user/create` → Resp<User>。 */
-export const createUser = (req: CreateUserReq): PResp<AdminUser> =>
-  http.post<AdminUser>("/admin/user/create", req)
-
-/** `POST /admin/user/update` → Resp<{}>。 */
-export const updateUser = (req: UpdateUserReq): PResp<Record<string, never>> =>
-  http.post<Record<string, never>>("/admin/user/update", req)
-
-/** `POST /admin/user/delete?id=` → Resp<{}>。内置管理员会被后端拒绝。 */
-export const deleteUser = (id: number): PResp<Record<string, never>> =>
-  http.post<Record<string, never>>("/admin/user/delete", undefined, { params: { id } })
-
-/** `POST /admin/user/set_password`（body：`{ id, password }`）。 */
-export const setUserPassword = (
-  id: number,
-  password: string,
-): PResp<Record<string, never>> =>
-  http.post<Record<string, never>>("/admin/user/set_password", { id, password })
-
-/** `POST /admin/user/cancel_2fa?id=`。 */
-export const cancelUser2Fa = (id: number): PResp<Record<string, never>> =>
-  http.post<Record<string, never>>("/admin/user/cancel_2fa", undefined, { params: { id } })
-
-/** `POST /admin/user/reset_admin_password`（body：`{ password }`，仅内置管理员）。 */
-export const resetAdminPassword = (password: string): PResp<Record<string, never>> =>
-  http.post<Record<string, never>>("/admin/user/reset_admin_password", { password })
 
 // ---------------------------------------------------------------------------
 // 路径元数据

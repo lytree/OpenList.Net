@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
 import { describe, expect, it } from "vitest"
-import type { AdminUser, Meta, SettingItem, ShareInfo, StorageWithDriver } from "~/api/types"
+import type { Meta, SettingItem, StorageWithDriver } from "~/api/types"
 import {
   BackupCryptoError,
   backupFileName,
@@ -10,16 +10,10 @@ import {
   encryptValue,
   openBackup,
   parseBackupText,
-  randomPassword,
   reconcile,
-  remapUserIds,
   restorableSettings,
   sealBackup,
-  selfLockoutRisk,
   serializeBackup,
-  stripUserSecrets,
-  userIdToUsername,
-  usernameToId,
   verifyPassword,
 } from "./backup"
 
@@ -33,21 +27,6 @@ const setting = (patch: Partial<SettingItem> = {}): SettingItem => ({
   group: 1,
   ...patch,
 })
-
-const user = (patch: Partial<AdminUser> = {}): AdminUser =>
-  ({
-    id: 1,
-    username: "admin",
-    password: "$2a$10$legacyhash",
-    base_path: "/",
-    role: 2,
-    permission: 0,
-    sso_id: "",
-    disabled: false,
-    allow_ldap: false,
-    is_built_in: true,
-    ...patch,
-  }) as AdminUser
 
 const storage = (patch: Partial<StorageWithDriver> = {}): StorageWithDriver =>
   ({
@@ -81,25 +60,12 @@ const meta = (patch: Partial<Meta> = {}): Meta => ({
   ...patch,
 })
 
-const share = (patch: Partial<ShareInfo> = {}): ShareInfo => ({
-  id: "abc123",
-  files: ["/local"],
-  max_accessed: 0,
-  accessed: 0,
-  disabled: false,
-  creator: "admin",
-  creator_role: 2,
-  ...patch,
-})
-
 /** 一份完整的样本负载。 */
 function samplePayload() {
   return {
     settings: [setting(), setting({ key: "version", value: "v1" })],
-    users: [user(), user({ id: 2, username: "bob", role: 0, is_built_in: false })],
     storages: [storage()],
     metas: [meta()],
-    shares: [share()],
   }
 }
 
@@ -193,22 +159,8 @@ describe("verifyPassword", () => {
   })
 })
 
-describe("stripUserSecrets", () => {
-  it("去掉用户的 password 字段（旧备份里的 Go 哈希）", () => {
-    const out = stripUserSecrets([user()])
-    expect("password" in out[0]!).toBe(false)
-    expect(out[0]!.username).toBe("admin")
-  })
-
-  it("不改原数组", () => {
-    const src = [user()]
-    stripUserSecrets(src)
-    expect(src[0]!.password).toBe("$2a$10$legacyhash")
-  })
-})
-
 describe("sealBackup / openBackup", () => {
-  it("明文往返：五个数组原样回来，并带上格式头", () => {
+  it("明文往返：三个数组原样回来，并带上格式头", () => {
     const payload = samplePayload()
     const file = sealBackup(payload, { site: "My Site", now: new Date("2026-10-27T03:04:05Z") })
     expect(file.format).toBe("openlist-net-backup")
@@ -219,10 +171,8 @@ describe("sealBackup / openBackup", () => {
     expect(opened.ok).toBe(true)
     if (!opened.ok) return
     expect(opened.payload.settings).toHaveLength(2)
-    expect(opened.payload.users[0]!.username).toBe("admin")
     expect(opened.payload.storages[0]!.mount_path).toBe("/local")
     expect(opened.payload.metas[0]!.read_users).toEqual([1, 2])
-    expect(opened.payload.shares[0]!.id).toBe("abc123")
   })
 
   it("加密往返：数组内容全部还原，且文件里看不到明文", () => {
@@ -238,7 +188,7 @@ describe("sealBackup / openBackup", () => {
     expect(opened.encrypted).toBe(true)
     expect(opened.payload.settings[0]!.value).toBe("OpenList")
     expect(opened.payload.storages[0]!.addition).toBe('{"root_folder_path":"D:/x"}')
-    expect(opened.payload.users[1]!.role).toBe(0)
+    expect(opened.payload.metas[0]!.path).toBe("/local/secret")
   })
 
   it("加密文件不给口令 / 给错口令都失败，且原因是 wrong_password", () => {
@@ -263,14 +213,20 @@ describe("parseBackupText", () => {
   })
 
   it("旧前端的文件（没有 format/version）也能认出来，缺失数组补空", () => {
-    const legacy = JSON.stringify({ encrypted: "", users: [{ id: 1, username: "a" }] })
+    const legacy = JSON.stringify({
+      encrypted: "",
+      settings: [],
+      storages: [{ mount_path: "/old" }],
+      users: [{ id: 1, username: "a" }],
+    })
     const parsed = parseBackupText(legacy)
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
     expect(parsed.file.version).toBe(0)
-    expect(parsed.file.users).toHaveLength(1)
-    expect(parsed.file.storages).toEqual([])
-    expect(parsed.file.shares).toEqual([])
+    expect(parsed.file.storages).toHaveLength(1)
+    expect(parsed.file.metas).toEqual([])
+    // 用户数组不再属于备份格式，恢复时被忽略
+    expect("users" in parsed.file).toBe(false)
   })
 })
 
@@ -312,45 +268,6 @@ describe("reconcile", () => {
   })
 })
 
-describe("元数据的用户 id 重映射", () => {
-  const oldIdToName = userIdToUsername([user({ id: 3, username: "bob" }), user({ id: 7, username: "carol" })])
-  const newNameToId = usernameToId([user({ id: 1, username: "admin" }), user({ id: 9, username: "carol" })])
-
-  it("按用户名换成新 id，认不出的丢掉", () => {
-    // 3 在备份里是 bob，但本实例没有 bob；7 是 carol → 9
-    expect(remapUserIds([3, 7], oldIdToName, newNameToId)).toEqual([9])
-  })
-
-  it("去重且保持顺序", () => {
-    const dupNameToId = new Map([
-      ["bob", 20],
-      ["carol", 9],
-    ])
-    expect(remapUserIds([3, 7, 3], oldIdToName, dupNameToId)).toEqual([20, 9])
-  })
-
-  it("空值 / 未知 id 返回空数组", () => {
-    expect(remapUserIds(undefined, oldIdToName, newNameToId)).toEqual([])
-    expect(remapUserIds([99], oldIdToName, newNameToId)).toEqual([])
-  })
-})
-
-describe("selfLockoutRisk", () => {
-  it("把自己降权 → 报风险", () => {
-    expect(selfLockoutRisk(1, [{ id: 1, username: "admin", role: 0, disabled: false }])).toBe("admin")
-  })
-
-  it("把自己停用 → 报风险", () => {
-    expect(selfLockoutRisk(1, [{ id: 1, username: "admin", role: 2, disabled: true }])).toBe("admin")
-  })
-
-  it("管理员身份保持不变（或备份里没有自己）→ 无风险", () => {
-    expect(selfLockoutRisk(1, [{ id: 1, username: "admin", role: 2, disabled: false }])).toBeNull()
-    expect(selfLockoutRisk(1, [{ id: 2, username: "bob", role: 0, disabled: true }])).toBeNull()
-    expect(selfLockoutRisk(1, [])).toBeNull()
-  })
-})
-
 describe("backupFileName", () => {
   const at = new Date(2026, 9, 27, 11, 30, 5) // 本地时间 2026-10-27 11:30:05
 
@@ -375,34 +292,17 @@ describe("restorableSettings", () => {
   })
 })
 
-describe("randomPassword", () => {
-  it("长度 16 且字符集不含易混淆字符", () => {
-    const pw = randomPassword()
-    expect(pw).toHaveLength(16)
-    expect(pw).toMatch(/^[a-km-zA-HJ-NP-Z2-9]+$/)
-  })
-
-  it("注入随机源时可预测（单测不依赖真随机）", () => {
-    expect(randomPassword(() => 0)).toBe("aaaaaaaaaaaaaaaa")
-    expect(randomPassword(() => 1)).toBe("bbbbbbbbbbbbbbbb")
-  })
-})
-
 describe("countBackup", () => {
   it("统计各类条目数", () => {
     expect(countBackup(samplePayload())).toEqual({
       settings: 2,
-      users: 2,
       storages: 1,
       metas: 1,
-      shares: 1,
     })
     expect(countBackup(emptyPayload())).toEqual({
       settings: 0,
-      users: 0,
       storages: 0,
       metas: 0,
-      shares: 0,
     })
   })
 })

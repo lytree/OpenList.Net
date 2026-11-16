@@ -153,9 +153,6 @@ builder.Services.AddScoped<IMetaService, MetaService>();
 // 统一授权服务（scoped）：WebDAV / S3 / FTP 之外的非 /api/fs 入口都经它做读写门禁，
 // 避免各协议自己写一份判定而与 /api/fs 漂移。
 builder.Services.AddScoped<OpenList.Infrastructure.Services.FileAccessService>();
-builder.Services.AddScoped<IMessageService, MessageService>();
-builder.Services.AddSingleton<IBroadcastService, BroadcastService>();
-builder.Services.AddScoped<ISharingService, SharingService>();
 builder.Services.AddScoped<ISshKeyService, SshKeyService>();
 // IHttpContextAccessor lets WebAuthnService read the browser origin (scheme + host)
 // to build the FIDO2 Relying Party config per request.
@@ -231,8 +228,6 @@ builder.Services.AddSingleton<IObjsUpdateHooks, ObjsUpdateHooks>();
 // Rate limiters — singleton manager holding the 4 byte-token-bucket limiters
 // (client/server × download/upload), refreshed from the settings table.
 builder.Services.AddSingleton<RateLimitManager>();
-// 公开分享的并发流预算（同一分享码同时在传的流数上限，设置项 share_stream_max_concurrency）。
-builder.Services.AddSingleton<ShareStreamBudget>();
 // ---------------------------------------------------------------------
 // 媒体域（独立模块 OpenList.Media）：DI 与路由都由模块自身提供，宿主只调用两行。
 // 注册细节、生命周期约定与依赖方向见 src/OpenList.Media/MediaModule.cs。
@@ -450,10 +445,6 @@ app.MapPublicApi();
 app.MapSignApi();
 // Plist (iOS IPA manifest) — public
 app.MapMiscApi();
-// Sharing system (Phase 5)
-app.MapShareApi();
-// Sharing signed download (/sd/{sid}[/*path]) — public, share-verified
-app.MapSharingDownloadApi();
 // 媒体域端点（媒体库 / 扫描 / 刮削 / 个人状态 / 口味 / 字幕 — 由 OpenList.Media 模块挂载）
 app.MapMediaModule();
 // Multipart (chunked) upload — auth'd

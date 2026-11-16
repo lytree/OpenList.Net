@@ -167,35 +167,7 @@ check(
   `code=${extractedBody.code} items=${(extractedBody.data?.content ?? []).length}`,
 )
 
-// ---------- 4. 分享 ----------
-await rowMenu("子目录A", "分享")
-check("分享对话框打开", (await page.locator(".el-dialog:visible .el-dialog__title:has-text('创建分享')").count()) > 0)
-check("分享对话框列出待分享路径", /子目录A/.test(await page.locator(".el-dialog:visible .el-dialog__body").innerText()))
-await page.locator(".el-dialog:visible button:has-text('创建')").first().click()
-await page.waitForTimeout(1200)
-const shareLink = await page.locator(".el-dialog:visible input").first().inputValue().catch(() => "")
-check("分享创建成功并给出 #/s/ 链接", /#\/s\/[\w-]+/.test(shareLink), shareLink)
-await page.locator(".el-dialog:visible button:has-text('关闭')").first().click()
-await page.waitForTimeout(300)
-
-const code = (shareLink.match(/#\/s\/([\w-]+)/) || [])[1]
-if (code) {
-  const resp = await page.request.post(`${BASE}/api/fs/list`, {
-    data: { path: "/", password: "" },
-    headers: { Authorization: code },
-  })
-  const body = await resp.json()
-  // 分享的根就是「子目录A」本身，所以列 "/" 看到的是它内部的内容。
-  check(
-    "分享码可匿名列目录",
-    body.code === 200 && (body.data?.content ?? []).some((o) => o.name === "inner.txt"),
-    `code=${body.code} items=${(body.data?.content ?? []).map((o) => o.name).join(",")}`,
-  )
-} else {
-  check("分享码可匿名列目录", false, "no code")
-}
-
-// ---------- 5. 打包下载（Blob 回退）----------
+// ---------- 4. 打包下载（Blob 回退）----------
 await rowMenu("子目录A", "打包下载")
 check("打包下载对话框打开", (await page.locator(".el-dialog:visible .el-dialog__title:has-text('打包下载')").count()) > 0)
 const downloadPromise = page.waitForEvent("download", { timeout: 30000 }).catch(() => null)

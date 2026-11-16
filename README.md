@@ -42,12 +42,10 @@ dotnet format
 | `AuthEndpoints.cs` | `/api/auth` | Mixed |
 | `FsEndpoints.cs` | `/api/fs` | Mixed |
 | `AdminEndpoints.cs` | `/api/admin` | Admin (`RequireRole("2")`) |
-| `ShareEndpoints.cs` | `/api/share` | Mixed |
 | `TaskEndpoints.cs` | `/api/task` | Auth'd |
 | `MeEndpoints.cs` | `/api/me` | Auth'd |
 | `PublicEndpoints.cs` | `/api/public` | Public |
 | `SignEndpoints.cs` | `/d/`, `/p/`, `/ad/`, `/ap/`, `/ae/` | Public (sign-verified) |
-| `SharingDownloadEndpoints.cs` | `/sd/`, `/sad/` | Public |
 | `S3Endpoints.cs` | `/s3` | Mixed |
 | `WebDavEndpoints.cs` | `/dav` | Mixed |
 
@@ -169,25 +167,16 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
   - [x] `GET /ae/*path` — signed archive extract (501 until driver supports `IFileSystemArchiveDecompress`)
 - [x] Tests: `FileSystemServiceTests` — 17/17 passing (list, get, mkdir, rename, move, copy, remove, put, dirs, search, archive meta, link)
 
-## Phase 5 — Sharing ✅
+## Phase 5 — Sharing（已移除）
 
-- [x] `ISharingService` impl + `SharingService`（按分享 code 查找，非 db 主键）
-- [x] `ShareEndpoints.cs` — `/api/share/*`:
-  - [x] `GET/POST /api/share/list`
-  - [x] `POST /api/share/create`
-  - [x] `GET  /api/share/get?id=`
-  - [x] `POST /api/share/update`
-  - [x] `POST /api/share/delete`
-  - [x] `POST /api/share/enable` / `disable`（对应 Go 的 cancel 语义）
+> 2026-11-16 起项目定位为个人资源管理：用户管理、分享系统、站内信、guest 账号一并移除。
+> `/api/share/*`、`/sd/*`、`/sad/*`、`/api/me/message/*`、`/api/admin/message/*` 不再注册，
+> 相关服务/实体删除，表由迁移 `RemoveSharingAndMessage` 清理。
+
 - [x] `PublicEndpoints.cs` — `/api/public/*`:
   - [x] `GET/POST /api/public/settings`
   - [x] `GET/POST /api/public/archive_extensions`
   - [x] `GET/POST /api/public/offline_download_tools`
-  - > Go 的 `/api/public/files`、`/api/public/share/:id` 未移植——公开分享浏览走 `/api/fs/{list,get,dirs}` 匿名访问
-- [x] `SharingDownloadEndpoints.cs` (`/sd/`, `/sad/`):
-  - [x] `GET/HEAD /sd/:sid[/*path]` — sharing download（验签 + 可选 pwd + 过期/禁用/次数限制，Range 流式）
-  - [x] `GET/HEAD /sad/:sid[/*path]` — sharing archive extract（驱动实现归档时可用，否则 501）
-- [x] Tests: `ShareDownloadEndpointsTests`
 
 ## Phase 6 — Tasks & Offline Download
 
@@ -305,7 +294,6 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 - [x] `IFileSystemArchiveReader` impl — `SharpCompressArchiveSupport` on `LocalDriver`（zip/rar/7z/tar/gz）
 - [x] `IFileSystemArchiveDecompress` impl — 解压到路径（ZipSlip 防护）
 - [x] `/ad/`, `/ap/`, `/ae/` signed archive endpoints
-- [x] `/sad/` sharing archive download
 - [x] Tests: `SignEndpointsTests` / `FsEndpointsTests` 覆盖归档路由
 
 ## Phase 15 — 2FA, WebAuthn, SSO ✅

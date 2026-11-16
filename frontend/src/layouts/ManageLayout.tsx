@@ -11,7 +11,6 @@ import {
   ElTooltip,
 } from "element-plus"
 import {
-  ChatDotRound,
   Coin,
   Collection,
   FolderOpened,
@@ -24,10 +23,8 @@ import {
   Odometer,
   Search,
   Setting,
-  Share,
   Sunny,
   SwitchButton,
-  User,
   VideoCamera,
 } from "@element-plus/icons-vue"
 import { availableLanguages, locale, setLocale, t } from "~/i18n"
@@ -55,12 +52,9 @@ const MODULES: ModuleItem[] = [
   { key: "media", path: "/@manage/media", icon: VideoCamera },
   { key: "settings", path: "/@manage/settings", icon: Setting },
   { key: "tasks", path: "/@manage/tasks", icon: List },
-  { key: "users", path: "/@manage/users", icon: User },
   { key: "storages", path: "/@manage/storages", icon: Coin },
-  { key: "shares", path: "/@manage/shares", icon: Share },
   { key: "metas", path: "/@manage/metas", icon: Collection },
   { key: "indexes", path: "/@manage/indexes", icon: Search },
-  { key: "messenger", path: "/@manage/messenger", icon: ChatDotRound },
   { key: "backup-restore", path: "/@manage/backup-restore", icon: FolderOpened },
   { key: "about", path: "/@manage/about", icon: InfoFilled },
 ]

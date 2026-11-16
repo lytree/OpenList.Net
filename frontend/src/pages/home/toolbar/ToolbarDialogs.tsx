@@ -3,7 +3,6 @@ import NewFileDialog from "./NewFileDialog"
 import RemoveEmptyDirDialog from "./RemoveEmptyDirDialog"
 import RecursiveMoveDialog from "./RecursiveMoveDialog"
 import DecompressDialog from "./DecompressDialog"
-import ShareDialog from "./ShareDialog"
 import OfflineDownloadDialog from "./OfflineDownloadDialog"
 import PackageDownloadDialog from "./PackageDownloadDialog"
 import BatchRenameDialog from "./BatchRenameDialog"
@@ -14,10 +13,10 @@ import type { Obj } from "~/api/types"
  *
  * 7 个操作各写一个 `xxxVisible` ref 会让页面 setup 长出 7 个互不相干的状态，
  * 还得在模板底部摆 7 个组件。这里收敛成「一个 active 键 + 一份 targets」：
- * 页面只负责 `openDialog("share", selected)`，谁该显示由本组件的 `active` 决定。
+ * 页面只负责 `openDialog("package-download", selected)`，谁该显示由本组件的 `active` 决定。
  *
  * `targets` 的语义随 active 变化：
- * - share / package / batch-rename：可以多选；
+ * - package / batch-rename：可以多选；
  * - recursive-move / decompress：调用方保证只传一项（多选时按钮本身就是禁用的）。
  */
 export type DialogKey =
@@ -25,7 +24,6 @@ export type DialogKey =
   | "remove-empty-dir"
   | "recursive-move"
   | "decompress"
-  | "share"
   | "offline-download"
   | "package-download"
   | "batch-rename"
@@ -78,12 +76,6 @@ export default defineComponent({
           target={first()}
           onUpdate:visible={close}
           onDone={done}
-        />
-        <ShareDialog
-          visible={is("share")}
-          dir={props.dir}
-          targets={props.targets}
-          onUpdate:visible={close}
         />
         <OfflineDownloadDialog
           visible={is("offline-download")}

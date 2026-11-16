@@ -12,57 +12,42 @@ import {
 import { Download, Upload } from "@element-plus/icons-vue"
 import {
   createStorage,
-  createUser,
   listMetas,
   listSettings,
   listStorages,
-  listUsers,
   saveMeta,
   saveSettings,
   updateStorage,
-  updateUser,
 } from "~/api/admin"
-import { createShare, listShares, updateShare } from "~/api/shares"
-import { UserRole, type AdminUser, type Meta, type SettingItem, type ShareInfo, type StorageWithDriver } from "~/api/types"
+import type { Meta, SettingItem, StorageWithDriver } from "~/api/types"
 import {
   backupFileName,
   countBackup,
   openBackup,
-  randomPassword,
   reconcile,
-  remapUserIds,
   restorableSettings,
   sealBackup,
-  selfLockoutRisk,
   serializeBackup,
-  stripUserSecrets,
-  userIdToUsername,
-  usernameToId,
   type BackupPayload,
   type BackupSection,
   type OpenFailure,
 } from "~/utils/backup"
 import { useSettingsStore } from "~/stores/settings"
-import { useUserStore } from "~/stores/user"
 import { t } from "~/i18n"
 
 /**
  * 备份 / 恢复 —— `/@manage/backup-restore`（管理台最后一个就绪模块）。
  *
- * **没有后端端点**：和上游一致，备份 = 把五个既有管理端点拉下来拼成一个 JSON，
+ * **没有后端端点**：和上游一致，备份 = 把三个既有管理端点拉下来拼成一个 JSON，
  * 恢复 = 解出 JSON 后逐条走既有 CRUD。好处是零新增接口、两套前端的文件互通；
  * 代价是恢复只能「新增 + 更新」，**永远不删**（删是另一个语义，得单独确认）。
  *
- * 三处和上游不同、但必须不同（理由都写进 §37）：
+ * 两处和上游不同、但必须不同（理由都写进 §37）：
  *
- * 1. **用户凭据不随备份迁移**。本仓库 `/admin/user/list` 返回 `UserPublic`，没有密码哈希；
- *    旧前端的文件里带着 Go 的 `password` 哈希，恢复时一律丢弃 —— 拿哈希当明文再散列一次
- *    只会造出一批登不进去的账号。新建账号用随机口令 + 默认停用，由管理员重置后再启用。
- * 2. **设置项永远合并写入**，不受「覆盖」开关影响：设置是 upsert，不存在「跳过」；
+ * 1. **设置项永远合并写入**，不受「覆盖」开关影响：设置是 upsert，不存在「跳过」；
  *    真按开关处理，在新实例上恢复会出现「几乎什么都没恢复」的假象。开关只作用于
- *    用户 / 挂载 / 元数据 / 分享这四类「对象」。
- * 3. **自锁保护**：文件里的「当前登录管理员」若被降权或停用，整份恢复直接拒绝。
- *    上游没这道检查，恢复完下一次请求就 401，只能走 CLI 救场。
+ *    挂载 / 元数据这两类「对象」。
+ * 2. **单用户产品不备份用户与分享**：旧备份文件里的 `users` / `shares` 数组会被忽略。
  */
 
 type LogType = "success" | "error" | "info" | "warn"
@@ -85,10 +70,8 @@ const zeroResult = (): SectionResult => ({ created: 0, updated: 0, skipped: 0, f
 
 const SECTION_LABEL: Record<BackupSection, string> = {
   settings: "backup.settings",
-  users: "manage.sidemenu.users",
   storages: "manage.sidemenu.storages",
   metas: "manage.sidemenu.metas",
-  shares: "manage.sidemenu.shares",
 }
 
 const FAILURE_TEXT: Record<OpenFailure, string> = {
@@ -103,7 +86,6 @@ export default defineComponent({
   name: "BackupRestorePage",
   setup() {
     const settingsStore = useSettingsStore()
-    const userStore = useUserStore()
 
     const password = ref("")
     const backingUp = ref(false)
@@ -131,31 +113,25 @@ export default defineComponent({
     // 采集 / 备份
     // ---------------------------------------------------------------------
 
-    /** 拉当前五个域；任一失败返回 null（备份不能缺块）。 */
+    /** 拉当前三个域；任一失败返回 null（备份不能缺块）。 */
     async function gather(): Promise<BackupPayload | null> {
-      const [settings, users, storages, metas, shares] = await Promise.all([
+      const [settings, storages, metas] = await Promise.all([
         listSettings(),
-        listUsers(),
         listStorages(),
         listMetas(),
-        listShares(),
       ])
       const failed: string[] = []
       if (settings.code !== 200) failed.push(t("backup.settings"))
-      if (users.code !== 200) failed.push(t("manage.sidemenu.users"))
       if (storages.code !== 200) failed.push(t("manage.sidemenu.storages"))
       if (metas.code !== 200) failed.push(t("manage.sidemenu.metas"))
-      if (shares.code !== 200) failed.push(t("manage.sidemenu.shares"))
       if (failed.length > 0) {
         log("error", t("backup.gather_failed", { names: failed.join(" / ") }))
         return null
       }
       return {
         settings: settings.data ?? [],
-        users: stripUserSecrets(users.data?.content ?? []),
         storages: storages.data?.content ?? [],
         metas: metas.data?.content ?? [],
-        shares: shares.data?.content ?? [],
       }
     }
 
@@ -269,32 +245,16 @@ export default defineComponent({
           return
         }
 
-        // 计划阶段：先算完四个域的对账，再做安全校验 —— 发现要自锁时可以一个字节都不写
-        const userPlan = reconcile(payload.users, current.users, (row) => row.username, override.value)
+        // 计划阶段：先算完三个域的对账，再执行 —— 全部成功前不写任何数据
         const storagePlan = reconcile(payload.storages, current.storages, (row) => row.mount_path, override.value)
         const metaPlan = reconcile(payload.metas, current.metas, (row) => row.path, override.value)
-        const sharePlan = reconcile(payload.shares, current.shares, (row) => row.id, override.value)
-
-        const me = userStore.me
-        const selfRows = userPlan.updates
-          .filter((row) => row.username === me?.username)
-          .map((row) => ({ ...row, id: me?.id ?? 0 }))
-        const risk = selfLockoutRisk(me?.id ?? 0, selfRows)
-        if (risk) {
-          log("error", t("backup.self_lockout", { name: risk }))
-          return
-        }
 
         // 1) 设置：合并写，不删；不受覆盖开关影响（见文件头注释）
         summary.value.push({ section: "settings", result: await applySettings(restorableSettings(payload.settings)) })
-        // 2) 用户
-        summary.value.push({ section: "users", result: await applyUsers(userPlan, current.users) })
-        // 3) 挂载
+        // 2) 挂载
         summary.value.push({ section: "storages", result: await applyStorages(storagePlan, current.storages) })
-        // 4) 元数据（read/write 用户 id 要按用户名重映射 —— 跨实例 id 必然对不上）
-        summary.value.push({ section: "metas", result: await applyMetas(metaPlan, payload.users, current.users) })
-        // 5) 分享
-        summary.value.push({ section: "shares", result: await applyShares(sharePlan) })
+        // 3) 元数据
+        summary.value.push({ section: "metas", result: await applyMetas(metaPlan) })
 
         // 站点名/logo 等设置改完立刻反映到外壳上，否则要等下次刷新
         await settingsStore.load(true)
@@ -315,67 +275,6 @@ export default defineComponent({
         result.failed = rows.length
         log("error", t("backup.result_failed", { names: t("backup.settings"), msg: resp.message }))
       }
-      return result
-    }
-
-    async function applyUsers(
-      plan: { creates: AdminUser[]; updates: AdminUser[]; skipped: AdminUser[] },
-      current: AdminUser[],
-    ): Promise<SectionResult> {
-      const result = zeroResult()
-      result.skipped = plan.skipped.length
-      const builtIn = new Set(current.filter((row) => row.is_built_in).map((row) => row.username))
-      const byName = new Map(current.map((row) => [row.username, row]))
-
-      for (const row of plan.creates) {
-        if (builtIn.has(row.username)) {
-          // 备份里的内置管理员在本实例初始化时一定已经存在，不重复建
-          result.skipped += 1
-          continue
-        }
-        const resp = await createUser({
-          username: row.username,
-          // 口令不随备份迁移：随机值 + 默认停用，由管理员重置后再启用
-          password: randomPassword(),
-          role: row.role ?? UserRole.GENERAL,
-          permission: row.permission ?? 0,
-          base_path: row.base_path ?? null,
-          disabled: true,
-          allow_ldap: row.allow_ldap,
-        })
-        if (resp.code === 200) {
-          result.created += 1
-          log("warn", t("backup.user_created_disabled", { name: row.username }))
-        } else {
-          result.failed += 1
-          log("error", t("backup.result_failed", { names: row.username, msg: resp.message }))
-        }
-      }
-
-      for (const row of plan.updates) {
-        const target = byName.get(row.username)
-        if (!target) {
-          result.failed += 1
-          continue
-        }
-        const resp = await updateUser({
-          id: target.id,
-          // 只覆盖权限相关字段：用户名与密码不动。
-          // `sso_id` 不恢复：它是实例侧的 SSO 绑定（对端身份系统给的），
-          // 跨实例抄过来只会把账号绑到一个不存在的身份上。
-          role: row.role,
-          permission: row.permission,
-          base_path: row.base_path ?? null,
-          disabled: row.disabled,
-          allow_ldap: row.allow_ldap,
-        })
-        if (resp.code === 200) result.updated += 1
-        else {
-          result.failed += 1
-          log("error", t("backup.result_failed", { names: row.username, msg: resp.message }))
-        }
-      }
-      logResult("users", result)
       return result
     }
 
@@ -433,24 +332,18 @@ export default defineComponent({
 
     async function applyMetas(
       plan: { creates: Meta[]; updates: Meta[]; skipped: Meta[] },
-      fileUsers: AdminUser[],
-      currentUsers: AdminUser[],
     ): Promise<SectionResult> {
       const result = zeroResult()
       result.skipped = plan.skipped.length
       const currentMetas = (await listMetas()).data?.content ?? []
       const byPathMap = new Map(currentMetas.map((row) => [row.path, row]))
-      const oldIdToName = userIdToUsername(fileUsers)
-      const nameToNewId = usernameToId(currentUsers)
 
-      const mapIds = (row: Meta): Meta => ({
-        ...row,
-        read_users: remapUserIds(row.read_users, oldIdToName, nameToNewId),
-        write_users: remapUserIds(row.write_users, oldIdToName, nameToNewId),
-      })
+      // 单用户产品没有用户白名单：备份文件里的 read/write users 一律清空，
+      // 否则跨实例恢复会留下指向不存在用户的 id。
+      const stripIds = (row: Meta): Meta => ({ ...row, read_users: [], write_users: [] })
 
       for (const row of plan.creates) {
-        const resp = await saveMeta({ ...mapIds(row), id: 0 })
+        const resp = await saveMeta({ ...stripIds(row), id: 0 })
         if (resp.code === 200) result.created += 1
         else {
           result.failed += 1
@@ -463,7 +356,7 @@ export default defineComponent({
           result.failed += 1
           continue
         }
-        const resp = await saveMeta({ ...mapIds(row), id: target.id })
+        const resp = await saveMeta({ ...stripIds(row), id: target.id })
         if (resp.code === 200) result.updated += 1
         else {
           result.failed += 1
@@ -471,51 +364,6 @@ export default defineComponent({
         }
       }
       logResult("metas", result)
-      return result
-    }
-
-    async function applyShares(plan: {
-      creates: ShareInfo[]
-      updates: ShareInfo[]
-      skipped: ShareInfo[]
-    }): Promise<SectionResult> {
-      const result = zeroResult()
-      result.skipped = plan.skipped.length
-
-      /** 更新时 `accessed` 必须回传原值，否则后端会把访问计数清零（见 api/shares.ts 注释）。 */
-      const toReq = (row: ShareInfo) => ({
-        id: row.id,
-        files: row.files ?? [],
-        expires: row.expires ?? null,
-        pwd: row.pwd ?? null,
-        max_accessed: row.max_accessed ?? 0,
-        disabled: row.disabled ?? false,
-        remark: row.remark ?? null,
-        readme: row.readme ?? null,
-        header: row.header ?? null,
-        order_by: row.order_by ?? null,
-        order_direction: row.order_direction ?? null,
-        extract_folder: row.extract_folder ?? null,
-        accessed: row.accessed ?? 0,
-      })
-
-      for (const row of plan.creates) {
-        const resp = await createShare(toReq(row))
-        if (resp.code === 200) result.created += 1
-        else {
-          result.failed += 1
-          log("error", t("backup.result_failed", { names: row.id, msg: resp.message }))
-        }
-      }
-      for (const row of plan.updates) {
-        const resp = await updateShare(row.id, toReq(row))
-        if (resp.code === 200) result.updated += 1
-        else {
-          result.failed += 1
-          log("error", t("backup.result_failed", { names: row.id, msg: resp.message }))
-        }
-      }
-      logResult("shares", result)
       return result
     }
 
