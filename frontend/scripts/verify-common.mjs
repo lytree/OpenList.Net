@@ -270,8 +270,17 @@ check("语言控件存在", (await langTrigger.count()) > 0)
 const langText = (await langTrigger.innerText().catch(() => "")) || ""
 check("语言控件显示当前语言", langText.trim().length > 0, langText.replace(/\s+/g, " "))
 
-// ---------- A. 退出登录 ----------
-const userMenu = page.locator(".olm-user").first()
+// 媒体门面不显示账户（2026-11 起）：左栏是栏目导航 + 管理台，身份入口只在文件门面。
+check(
+  "媒体顶栏不显示账户",
+  (await page.locator(".olm-shell .olm-user, .olm-user-name").count()) === 0,
+  `olm-user=${await page.locator(".olm-shell .olm-user").count()}`,
+)
+
+// ---------- A. 退出登录（入口在文件门面的账户菜单） ----------
+await goto("/files")
+const userMenu = page.locator(".ol-user").first()
+check("文件门面顶栏显示账户", (await userMenu.count()) === 1, `ol-user=${await userMenu.count()}`)
 if ((await userMenu.count()) > 0) {
   await userMenu.click()
   await page.waitForTimeout(500)
@@ -282,12 +291,11 @@ if ((await userMenu.count()) > 0) {
   }
 }
 const afterLogout = await page.evaluate(() => localStorage.getItem("token"))
-// 退出后停在首页而不是登录页 —— 首页对游客开放（见上），所以「回到游客态」是正确行为；
-// 真正要断言的是凭据被清掉、且 UI 不再呈现已登录身份。
+// 退出后文件门面把自己交给登录页（不再落媒体首页），所以这里断言「凭据被清掉 + 已到登录页」。
 check(
-  "退出登录后清 token 并回到游客态",
-  !afterLogout && (await page.locator(".olm-user").count()) === 0,
-  `${page.url()} token=${afterLogout} user=${await page.locator(".olm-user").count()}`,
+  "退出登录后清 token 并离开文件门面",
+  !afterLogout && /\/@login/.test(page.url()),
+  `${page.url()} token=${afterLogout}`,
 )
 
 check("全程无控制台错误", errors.length === 0, errors.slice(0, 3).join(" | "))

@@ -1,236 +1,158 @@
-import { defineComponent, ref } from "vue"
-import { RouterLink, RouterView, useRouter } from "vue-router"
+import { defineComponent, ref, watch } from "vue"
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import {
-  ElAvatar,
   ElButton,
-  ElDialog,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
   ElIcon,
-  ElInput,
-  ElMessage,
   ElTooltip,
 } from "element-plus"
-import { ArrowDown, Folder, Moon, Setting, Sunny, SwitchButton } from "@element-plus/icons-vue"
+import { Menu, Moon, Setting, Sunny } from "@element-plus/icons-vue"
 import { availableLanguages, locale, setLocale, t } from "~/i18n"
-import { updateMe } from "~/api/auth"
 import { useSettingsStore } from "~/stores/settings"
 import { useUserStore } from "~/stores/user"
 import { useTheme } from "~/composables/useTheme"
 import MediaNav from "~/pages/media/MediaNav"
 
 /**
- * 媒体门面的外壳。
+ * 媒体门面的外壳（版式参照 Peach）。
  *
  * 与文件门面（`FilesLayout`）**完全独立**：不同的组件、不同的导航、不同的守卫。
  * 理由见 `router.ts` 顶部注释 —— 媒体对游客开放、文件要登录，把两者塞进同一个布局，
  * 每一处都要判断「我现在在哪个门面」，而且游客会在公开页面上看到一个自己进不去的
  * 「文件」入口。
  *
- * 版式参照 Peach：一条常驻顶栏（品牌 + 栏目导航 + 账户），内容区宽幅居中，
- * 导航不占用页面内空间 —— 海报墙页面最忌讳顶部再来一条自己会滚走的按钮条。
+ * **形式**（`peach-mitao/peach` 的壳）：**左侧常驻竖导航 + 右侧宽幅内容**。左栏顶上放品牌，
+ * 下面是一列图标 + 文字的栏目，底部是管理台入口；内容区顶部只有一条轻量工具条（语言 /
+ * 主题）。这样排的理由是媒体侧的栏目最多（首页 / 媒体库 / 演员 / 片商 / 系列，登录后还要
+ * 加想看 / 历史 / 播放列表 / 口味 / 任务），横排到十项时必然退化成一条要横向滑动的截断
+ * 列表；竖排则一直挂在那儿，海报墙也不用再让出顶部一整条的高度。
+ *
+ * **不显示账户**：媒体是对外的公开内容门面，不是工作台。原来右上角那套「头像 + 用户名 +
+ * 下拉菜单」既把私人数据摊在公开页面上，又与文件门面互相引流；现在两侧都不越界 —— 登录
+ * 后的身份入口只在文件门面（`/files` 的账户菜单），媒体侧只保留游客态的「登录」按钮，
+ * 管理台入口在左栏底部与页脚，按用户的页面（想看 / 历史 / 播放列表 / 口味 / 任务）走左栏
+ * 导航。窄屏（≤900px）左栏收成抽屉，工具条左侧出现汉堡键。
  */
 export default defineComponent({
   name: "MediaLayout",
   setup() {
+    const route = useRoute()
     const router = useRouter()
     const settings = useSettingsStore()
     const user = useUserStore()
     const { isDark, toggle } = useTheme()
 
-    /** 单用户产品只保留「修改自己的密码」，与文件门面同一套逻辑。 */
-    const passwordVisible = ref(false)
-    const password = ref("")
-    const confirmPassword = ref("")
-    const passwordSaving = ref(false)
-
-    async function submitPassword() {
-      if (password.value.length < 4) {
-        ElMessage.warning(t("global.password_too_short"))
-        return
-      }
-      if (password.value !== confirmPassword.value) {
-        ElMessage.warning(t("global.password_mismatch"))
-        return
-      }
-      passwordSaving.value = true
-      const resp = await updateMe({ password: password.value })
-      passwordSaving.value = false
-      if (resp.code !== 200) {
-        ElMessage.error(resp.message)
-        return
-      }
-      passwordVisible.value = false
-      ElMessage.success(t("global.password_updated"))
-    }
-
-    async function onLogout() {
-      await user.logout()
-      await router.push("/media")
-    }
-
-    function onUserCommand(command: string) {
-      if (command === "logout") void onLogout()
-      if (command === "manage") void router.push("/@manage")
-      if (command === "files") void router.push("/files")
-      if (command === "playlists") void router.push({ name: "media-playlists" })
-      if (command === "taste") void router.push({ name: "media-taste" })
-      if (command === "tasks") void router.push({ name: "media-tasks" })
-      if (command === "password") {
-        password.value = ""
-        confirmPassword.value = ""
-        passwordVisible.value = true
-      }
-    }
+    /** 窄屏抽屉开合。换页自动收起，否则点完导航抽屉还盖着内容。 */
+    const navOpen = ref(false)
+    watch(() => route.fullPath, () => (navOpen.value = false))
 
     return () => (
       <div class="olm-shell">
-        <header class="olm-header">
-          <div class="olm-header-inner">
-            <RouterLink to="/media" class="olm-brand" title={settings.siteTitle}>
-              {settings.logo ? (
-                <img class="olm-logo" src={settings.logo} alt={settings.siteTitle} />
-              ) : (
-                <>
-                  <span class="olm-logo-mark">{(settings.siteTitle || "O").slice(0, 1)}</span>
-                  <span class="olm-site">{settings.siteTitle}</span>
-                </>
-              )}
-            </RouterLink>
+        {/* 窄屏抽屉的遮罩：桌面端 display:none（断点见 styles/media-shell.css）。 */}
+        <div
+          class={["olm-side-mask", navOpen.value && "is-open"]}
+          onClick={() => (navOpen.value = false)}
+        />
 
+        <aside class={["olm-side", navOpen.value && "is-open"]}>
+          <RouterLink to="/media" class="olm-brand" title={settings.siteTitle}>
+            {settings.logo ? (
+              <img class="olm-logo" src={settings.logo} alt={settings.siteTitle} />
+            ) : (
+              <>
+                <span class="olm-logo-mark">{(settings.siteTitle || "O").slice(0, 1)}</span>
+                <span class="olm-site">{settings.siteTitle}</span>
+              </>
+            )}
+          </RouterLink>
+
+          <div class="olm-side-scroll">
             <MediaNav />
+          </div>
 
-            <div class="olm-actions">
-              <ElDropdown
-                trigger="click"
-                onCommand={(code: string) => setLocale(code)}
-                v-slots={{
-                  default: () => (
-                    <ElButton text={true} size="small" class="olm-lang">
-                      {availableLanguages.find((l) => l.code === locale.value)?.name ?? locale.value}
-                    </ElButton>
-                  ),
-                  dropdown: () => (
-                    <ElDropdownMenu>
-                      {availableLanguages.map((lang) => (
-                        <ElDropdownItem command={lang.code} disabled={lang.code === locale.value}>
-                          {lang.name}
-                        </ElDropdownItem>
-                      ))}
-                    </ElDropdownMenu>
-                  ),
-                }}
-              />
+          {user.isLogin && (
+            <div class="olm-side-foot">
+              <RouterLink to="/@manage" class="olm-side-link" title={t("global.nav_manage")}>
+                <ElIcon class="olm-nav-icon">
+                  <Setting />
+                </ElIcon>
+                <span class="olm-nav-label">{t("global.nav_manage")}</span>
+              </RouterLink>
+            </div>
+          )}
+        </aside>
 
-              <ElTooltip content={t("home.toolbar.toggle_theme")} placement="bottom">
-                <ElButton text={true} circle={true} onClick={toggle} class="olm-icon-btn">
-                  <ElIcon>{isDark.value ? <Sunny /> : <Moon />}</ElIcon>
-                </ElButton>
-              </ElTooltip>
+        <div class="olm-main">
+          <header class="olm-header">
+            <div class="olm-header-inner">
+              <ElButton
+                class="olm-menu-btn"
+                text={true}
+                circle={false}
+                onClick={() => (navOpen.value = !navOpen.value)}
+              >
+                <ElIcon>
+                  <Menu />
+                </ElIcon>
+              </ElButton>
 
-              {user.isLogin ? (
+              {/* 窄屏左栏是抽屉，品牌在这条工具条上补一份（桌面隐藏）。 */}
+              <span class="olm-header-brand">{settings.siteTitle}</span>
+
+              <div class="olm-actions">
                 <ElDropdown
                   trigger="click"
-                  onCommand={onUserCommand}
+                  onCommand={(code: string) => setLocale(code)}
                   v-slots={{
                     default: () => (
-                      <span class="olm-user">
-                        <ElAvatar size={26}>
-                          {(user.username || "?").slice(0, 1).toUpperCase()}
-                        </ElAvatar>
-                        <span class="olm-user-name">{user.username}</span>
-                        <ElIcon size={12}>
-                          <ArrowDown />
-                        </ElIcon>
-                      </span>
+                      <ElButton text={true} size="small" class="olm-lang">
+                        {availableLanguages.find((l) => l.code === locale.value)?.name ??
+                          locale.value}
+                      </ElButton>
                     ),
                     dropdown: () => (
                       <ElDropdownMenu>
-                        <ElDropdownItem command="playlists">
-                          {t("media.tab_playlists")}
-                        </ElDropdownItem>
-                        <ElDropdownItem command="taste">{t("media.tab_taste")}</ElDropdownItem>
-                        <ElDropdownItem command="tasks">{t("media.tab_tasks")}</ElDropdownItem>
-                        <ElDropdownItem command="files" divided={true}>
-                          <ElIcon>
-                            <Folder />
-                          </ElIcon>
-                          {t("media.goto_files")}
-                        </ElDropdownItem>
-                        <ElDropdownItem command="manage">
-                          <ElIcon>
-                            <Setting />
-                          </ElIcon>
-                          {t("global.nav_manage")}
-                        </ElDropdownItem>
-                        <ElDropdownItem command="password">
-                          {t("global.change_password")}
-                        </ElDropdownItem>
-                        <ElDropdownItem command="logout" divided={true}>
-                          <ElIcon>
-                            <SwitchButton />
-                          </ElIcon>
-                          {t("global.logout")}
-                        </ElDropdownItem>
+                        {availableLanguages.map((lang) => (
+                          <ElDropdownItem command={lang.code} disabled={lang.code === locale.value}>
+                            {lang.name}
+                          </ElDropdownItem>
+                        ))}
                       </ElDropdownMenu>
                     ),
                   }}
                 />
-              ) : (
-                <ElButton
-                  type="primary"
-                  size="small"
-                  onClick={() => router.push({ name: "login", query: { redirect: "/media" } })}
-                >
-                  {t("login.login")}
-                </ElButton>
-              )}
-            </div>
-          </div>
-        </header>
 
-        <main class="olm-body">
-          <RouterView />
-        </main>
+                <ElTooltip content={t("home.toolbar.toggle_theme")} placement="bottom">
+                  <ElButton text={true} circle={true} onClick={toggle} class="olm-icon-btn">
+                    <ElIcon>{isDark.value ? <Sunny /> : <Moon />}</ElIcon>
+                  </ElButton>
+                </ElTooltip>
 
-        <footer class="olm-footer">
-          <span class="olm-footer-brand">{settings.siteTitle}</span>
-          <span class="olm-footer-sep">·</span>
-          <RouterLink to="/@manage">{t("media.footer_manage")}</RouterLink>
-        </footer>
-
-        <ElDialog v-model={passwordVisible.value} title={t("global.change_password")} width="360px">
-          <ElInput
-            v-model={password.value}
-            type="password"
-            showPassword={true}
-            placeholder={t("global.new_password")}
-          />
-          <div style={{ height: "10px" }} />
-          <ElInput
-            v-model={confirmPassword.value}
-            type="password"
-            showPassword={true}
-            placeholder={t("global.confirm_password")}
-          />
-          {{
-            footer: () => (
-              <div>
-                <ElButton onClick={() => (passwordVisible.value = false)}>
-                  {t("global.cancel")}
-                </ElButton>
-                <ElButton
-                  type="primary"
-                  loading={passwordSaving.value}
-                  onClick={() => void submitPassword()}
-                >
-                  {t("global.confirm")}
-                </ElButton>
+                {!user.isLogin && (
+                  <ElButton
+                    type="primary"
+                    size="small"
+                    onClick={() => router.push({ name: "login", query: { redirect: "/media" } })}
+                  >
+                    {t("login.login")}
+                  </ElButton>
+                )}
               </div>
-            ),
-          }}
-        </ElDialog>
+            </div>
+          </header>
+
+          <main class="olm-body">
+            <RouterView />
+          </main>
+
+          <footer class="olm-footer">
+            <span class="olm-footer-brand">{settings.siteTitle}</span>
+            <span class="olm-footer-sep">·</span>
+            <RouterLink to="/@manage">{t("media.footer_manage")}</RouterLink>
+          </footer>
+        </div>
       </div>
     )
   },

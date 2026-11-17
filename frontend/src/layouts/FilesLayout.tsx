@@ -27,9 +27,11 @@ import { useTheme } from "~/composables/useTheme"
  * 导航（面包屑）、操作按钮和批量选择条都是浮在内容之上的小挂件，不占版面 ——
  * 文件浏览器的主视觉必须是列表本身。
  *
- * **与媒体门面（`MediaLayout`）完全隔离**：这里不再有「媒体 / 首页」并排的双入口。
- * 文件树是需要登录的私人门面，媒体是对外的公开门面，两者的导航语义不同；
- * 返回媒体的入口收在顶栏左侧一个「媒体」链接里，游客则根本看不到本布局。
+ * **与媒体门面（`MediaLayout`）完全隔离**：本布局里**没有任何通往 `/media` 的入口**，
+ * 顶栏只留 logo / 语言 / 主题 / 账户。文件树是需要登录的私人门面，媒体是对外的公开
+ * 门面，两者的导航语义不同 —— 把「媒体」摆进文件页的顶栏，等于在管理界面里塞一个
+ * 内容消费入口，只会让人误以为两者是同一个板块的兄弟页面。媒体门面仍可通过 `/media`
+ * 深链直达（`MediaLayout` 侧那个「文件管理」链接也保留），只是文件页不再主动引流。
  */
 export default defineComponent({
   name: "FilesLayout",
@@ -46,14 +48,17 @@ export default defineComponent({
     const navOpen = ref(false)
     watch(() => route.fullPath, () => (navOpen.value = false))
 
-    /** 顶栏「媒体」入口：媒体是公开门面，登录用户与可访问媒体的游客都看得到。 */
-    const showMediaLink = computed(() => user.isLogin || settings.mediaGuestAccess)
-
     async function onLogout() {
       navOpen.value = false
       await user.logout()
-      // 退出后文件树立刻不可见，落到公开的媒体首页。
-      await router.push("/media")
+      // 退出后文件树立刻不可见（默认要登录）。这里不再落媒体首页 —— 文件门面不引流
+      // 媒体，直接把登录页摆在面前；`redirect` 带上当前路径，重新登录后还能回到原目录。
+      await router.push({ name: "login", query: { redirect: loginRedirect(route.fullPath) } })
+    }
+
+    /** 登录回跳参数：与 router.ts 里的同名逻辑同口径（自己再编一次）。 */
+    function loginRedirect(fullPath: string): string {
+      return encodeURIComponent(fullPath)
     }
 
     function onUserCommand(command: string) {
@@ -126,15 +131,7 @@ export default defineComponent({
               )}
             </RouterLink>
 
-            <nav class="ol-view-links">
-              {/* 只留一个「媒体」出口：文件门面里不需要再确认「你在文件门面」。 */}
-              {showMediaLink.value && (
-                <RouterLink to="/media" class="ol-view-link">
-                  {t("global.nav_media")}
-                </RouterLink>
-              )}
-            </nav>
-
+            {/* 文件门面的顶栏不再挂任何板块链接：品牌之后直接是右侧功能区。 */}
             <div class="ol-view-header-right">
               <ElDropdown
                 trigger="click"
@@ -226,18 +223,6 @@ export default defineComponent({
           onClick={() => (navOpen.value = false)}
         />
         <aside class={["ol-view-drawer", navOpen.value && "is-open"]}>
-          {showMediaLink.value && (
-            <RouterLink
-              to="/media"
-              class="ol-view-drawer-link"
-              onClick={() => (navOpen.value = false)}
-            >
-              {t("global.nav_media")}
-            </RouterLink>
-          )}
-
-          <div class="ol-view-drawer-sep" />
-
           <div class="ol-view-drawer-section">{t("global.language")}</div>
           {availableLanguages.map((lang) => (
             <button

@@ -1,9 +1,10 @@
 /* ==========================================================================
  * 媒体门面外壳（layouts/MediaLayout）
  *
+ * 版式参照 Peach：**左侧常驻竖导航 + 右侧宽幅内容**。
  * 与文件门面（`.ol-view*`，见 layout.css）是两套独立的视觉语言：
  * - 文件门面是「管理工具」：980px 居中列 + 面包屑 + 悬浮操作条，信息密度优先；
- * - 媒体门面是「内容站」：1360px 宽幅 + 常驻顶部栏目导航，海报/封面优先。
+ * - 媒体门面是「内容站」：左栏栏目常驻 + 1360px 宽幅内容，海报/封面优先。
  *
  * 两边共用 tokens.css 的变量，所以切换主题（浅/深）时观感一致，但类名互不重叠 ——
  * 这样改媒体外壳时不会顺手把文件浏览器的顶栏样式带偏。
@@ -11,31 +12,41 @@
 
 .olm-shell {
   display: flex;
-  flex-direction: column;
+  align-items: stretch;
   min-height: 100vh;
   background: transparent;
 }
 
-/* ---------------------------------------------------------------- 顶栏 */
+/* ---------------------------------------------------------------- 左栏 */
 
-.olm-header {
+/* 桌面：常驻、整屏高、导航区自己滚动。窄屏（≤900px）改成抽屉，见文件末尾的媒体查询。 */
+.olm-side {
   position: sticky;
   top: 0;
-  z-index: 100;
-  background: color-mix(in srgb, var(--ol-bg-surface) 88%, transparent);
-  backdrop-filter: saturate(140%) blur(8px);
-  border-bottom: 1px solid var(--el-border-color-light);
+  z-index: 120;
+  flex: none;
+  width: var(--ol-aside-width);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-4);
+  padding: 16px 10px 12px;
+  box-sizing: border-box;
+  border-right: 1px solid var(--el-border-color-light);
+  background: var(--ol-bg-surface);
 }
 
-.olm-header-inner {
-  width: min(98%, var(--ol-content-width-wide));
-  margin: 0 auto;
-  height: 60px;
-  padding: 0 calc(1.5% + 8px);
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: var(--ol-space-6);
+/* 抽屉遮罩：桌面端不参与布局也不可见（窄屏的定位与过渡见文件末尾的媒体查询）。 */
+.olm-side-mask {
+  display: none;
+}
+
+/* 导航区独立滚动：栏目多起来（登录后 9 项）时，底部那条管理台入口不能被顶出屏幕。 */
+.olm-side-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .olm-brand {
@@ -44,12 +55,13 @@
   gap: 10px;
   flex: none;
   min-width: 0;
+  padding: 2px 8px;
   text-decoration: none;
 }
 
 .olm-logo {
   height: 28px;
-  max-width: 140px;
+  max-width: 160px;
   object-fit: contain;
 }
 
@@ -68,7 +80,7 @@
 }
 
 .olm-site {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--ol-text);
   white-space: nowrap;
@@ -76,32 +88,29 @@
   text-overflow: ellipsis;
 }
 
-/* ---------------------------------------------------------------- 栏目导航 */
 
-.olm-nav {
+/* ---------------------------------------------------------------- 栏目导航（竖排） */
+
+.olm-nav,
+.olm-nav-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 一行一项：图标 + 文字，选中是一块圆角胶囊。竖排不需要下划线那种「横向位置」提示。 */
+.olm-nav-link {
   display: flex;
   align-items: center;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-  /* 窄屏时不换行、不撑破顶栏：导航自己横向滚动 */
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.olm-nav::-webkit-scrollbar {
-  display: none;
-}
-
-.olm-nav-link {
-  position: relative;
-  flex: none;
-  padding: 6px 10px;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: var(--ol-radius-md);
   font-size: 14px;
   line-height: 20px;
   color: var(--ol-text-secondary);
   text-decoration: none;
-  border-radius: var(--ol-radius-md);
   transition:
     color var(--ol-dur) var(--ol-ease),
     background var(--ol-dur) var(--ol-ease);
@@ -112,67 +121,125 @@
   background: var(--ol-bg-hover);
 }
 
-/* 高亮用「文字变主色 + 底部 2px 短横线」：栏目多的时候，只有色块会让整条导航很吵。 */
 .olm-nav-link.is-active {
   color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
   font-weight: 600;
 }
 
-.olm-nav-link.is-active::after {
-  content: "";
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: -2px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--el-color-primary);
+.olm-nav-icon {
+  flex: none;
+  font-size: 16px;
 }
 
-/* ---------------------------------------------------------------- 右侧操作 */
+.olm-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 两组之间只用一条细线：三个条目已经能说明下面是「按用户」的那一栏。 */
+.olm-nav-sep {
+  height: 1px;
+  margin: 10px 4px;
+  background: var(--el-border-color-lighter);
+}
+
+/* 左栏底部（管理台）：与导航同一种行，靠一条上边框和上面隔开。 */
+.olm-side-foot {
+  flex: none;
+  padding-top: 8px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.olm-side-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: var(--ol-radius-md);
+  font-size: 14px;
+  color: var(--ol-text-secondary);
+  text-decoration: none;
+  transition:
+    color var(--ol-dur) var(--ol-ease),
+    background var(--ol-dur) var(--ol-ease);
+}
+
+.olm-side-link:hover {
+  color: var(--ol-text);
+  background: var(--ol-bg-hover);
+}
+
+/* ---------------------------------------------------------------- 内容区工具条 */
+
+/* 只放语言 / 主题（以及游客态的登录键）：媒体的身份与导航都在左栏，这条条不再承担导航。 */
+.olm-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.olm-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--ol-bg-surface) 88%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+.olm-header-inner {
+  width: min(100%, calc(var(--ol-content-width-wide) + 3%));
+  margin: 0 auto;
+  height: 52px;
+  padding: 0 calc(1.5% + 8px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-3);
+}
+
+/* 汉堡键与工具条上的品牌都只在窄屏出现（左栏在那一档收成抽屉）。
+   选择器要带上 `.olm-header`：Element Plus 的 `.el-button` 也是 0,1,0，只写单个类
+   谁生效取决于样式注入顺序 —— 桌面上就会冒出一个点了没用的汉堡键。 */
+.olm-header .olm-menu-btn {
+  display: none;
+}
+
+.olm-header-brand {
+  display: none;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .olm-actions {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--ol-space-2);
   flex: none;
 }
 
-.olm-user {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px 3px 3px;
-  border-radius: var(--ol-radius-pill);
-  cursor: pointer;
-  color: var(--ol-text);
-  transition: background var(--ol-dur) var(--ol-ease);
-}
-
-.olm-user:hover {
-  background: var(--ol-bg-hover);
-}
-
-.olm-user-name {
-  font-size: 13px;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ---------------------------------------------------------------- 内容区 */
 
 .olm-body {
   flex: 1;
-  width: min(98%, var(--ol-content-width-wide));
+  width: min(100%, var(--ol-content-width-wide));
   margin: 0 auto;
   padding: var(--ol-space-5) calc(1.5% + 8px) var(--ol-space-8);
   box-sizing: border-box;
 }
 
 .olm-footer {
-  width: min(98%, var(--ol-content-width-wide));
+  width: min(100%, var(--ol-content-width-wide));
   margin: 0 auto;
   padding: 18px calc(1.5% + 8px) 28px;
   box-sizing: border-box;
@@ -411,13 +478,52 @@
 /* ---------------------------------------------------------------- 窄屏 */
 
 @media (max-width: 900px) {
-  .olm-header-inner {
-    gap: var(--ol-space-3);
+  /* 左栏在窄屏收成抽屉：常驻 232px 在 900px 以下是硬切内容区的一半。 */
+  .olm-side {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    height: 100dvh;
+    width: 264px;
+    max-width: 82vw;
+    transform: translateX(-100%);
+    transition: transform var(--ol-dur) var(--ol-ease);
+    box-shadow: none;
   }
 
-  /* 顶栏只留品牌 + 导航 + 头像：语言切换收进用户菜单，主题按钮保留（它只有 32px）。 */
-  .olm-lang {
-    display: none;
+  .olm-side.is-open {
+    transform: none;
+    box-shadow: var(--ol-shadow-md);
+  }
+
+  .olm-side-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    background: rgba(0, 0, 0, 0.42);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--ol-dur) var(--ol-ease);
+  }
+
+  .olm-side-mask.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* 同上：带 `.olm-header` 才盖得住 `.el-button` 的 display。 */
+  .olm-header .olm-menu-btn {
+    display: inline-flex;
+  }
+
+  .olm-header-brand {
+    display: block;
+  }
+
+  .olm-header-inner {
+    gap: var(--ol-space-2);
   }
 
   .olm-site {
@@ -426,31 +532,10 @@
 }
 
 @media (max-width: 600px) {
-  /*
-   * 窄屏换成两行：第一行品牌 + 账户，第二行整行导航。
-   * 单行时导航只剩「第一个栏目」的宽度，其余全靠横向滑动 —— 用户看到的是一条被截断的
-   * 导航，不知道右边还有东西；整行给导航之后，滑动区域本身就是提示。
-   */
-  .olm-header-inner {
-    height: auto;
-    padding: 8px 10px 0;
-    flex-wrap: wrap;
-    row-gap: 2px;
-  }
-
-  .olm-brand {
-    order: 1;
-    flex: 1;
-  }
-
-  .olm-actions {
-    order: 2;
-  }
-
-  .olm-nav {
-    order: 3;
-    flex: 1 0 100%;
-    padding-bottom: 6px;
+  /* 工具条上位置很紧：语言切换收起来（它是低频动作），主题按钮只占 32px，留着。
+     带 `.olm-header` 才盖得住 Element Plus 的 `.el-button`。 */
+  .olm-header .olm-lang {
+    display: none;
   }
 
   .olm-body {
@@ -459,11 +544,6 @@
 
   .olm-footer {
     padding: 14px 10px 24px;
-  }
-
-  /* 品牌退化成首字母方块（与文件门面同样的取舍）：≤600px 时站点名会挤掉导航。 */
-  .olm-site {
-    display: none;
   }
 
   .olm-history-thumb {
