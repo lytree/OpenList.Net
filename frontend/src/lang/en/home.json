@@ -356,5 +356,11 @@
     "skip_existing": "Skip existing files",
     "merge": "Only Copy new files and subdirectories"
   },
-  "empty_dir": "This folder is empty"
+  "empty_dir": "This folder is empty",
+  "tree_title": "Folders",
+  "tree_hide": "Hide folder tree",
+  "up": "Parent folder",
+  "empty_hint": "Drag files here, or upload from this device.",
+  "empty_upload": "Upload files",
+  "empty_mkdir": "New folder"
 }

@@ -84,13 +84,19 @@
     gap: var(--ol-space-2);
   }
 
-  .ol-files-bar > .el-space {
+  .ol-files-bar > .ol-bar-right {
     flex: 1 1 auto;
     justify-content: flex-start;
   }
 
   .ol-files-search {
     width: 100% !important;
+    flex: 1 1 100%;
+  }
+
+  /* 计数在窄屏是纯噪声：一行只有 4 个格子，它会被挤到单独一行占掉整行高度 */
+  .ol-count-tag {
+    display: none;
   }
 
   /* 面包屑在窄屏可横向滚动，避免深路径把工具条撑破 */

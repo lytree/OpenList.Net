@@ -14,8 +14,6 @@ import {
   ElInput,
   ElMessage,
   ElMessageBox,
-  ElOption,
-  ElSelect,
   ElSpace,
   ElTag,
   ElTooltip,
@@ -30,9 +28,11 @@ import {
   Folder,
   FolderAdd,
   Fold,
+  FolderOpened,
   MoreFilled,
   Refresh,
   Search,
+  Sort,
   SortDown,
   SortUp,
   Upload,
@@ -480,6 +480,18 @@ export default defineComponent({
       <div class="ol-home-split">
         {treeVisible.value && files.state.value !== "file" && (
           <aside class="ol-home-aside">
+            {/* 面板标题栏：没有它时树是一块没有任何边界的白板（空挂载时尤其明显），
+                也少了一个「收起树」的落点 —— 工具栏里那个折叠键在列表很长时会滚出视野。 */}
+            <div class="ol-aside-head">
+              <span class="ol-aside-title">{t("home.tree_title")}</span>
+              <ElTooltip content={t("home.tree_hide")} placement="right">
+                <ElButton text={true} size="small" onClick={() => (treeVisible.value = false)}>
+                  <ElIcon>
+                    <Fold />
+                  </ElIcon>
+                </ElButton>
+              </ElTooltip>
+            </div>
             <FolderTree
               current={files.path.value}
               password={files.password.value}
@@ -516,7 +528,10 @@ export default defineComponent({
               </ElBreadcrumb>
             </div>
 
-            <ElSpace size={8} wrap={true}>
+            {/* 右半区按「找 → 建 → 看」分三段，段间一条 1px 竖线：
+                原来十个控件平铺成一行，视觉上没有主次（上传和「排序方向」一样重）。
+                分组之后主按钮只剩一个（上传），其余是图标或菜单。 */}
+            <div class="ol-bar-right">
               {files.state.value === "folder" && (
                 <ElInput
                   v-model={files.keyword.value}
@@ -547,13 +562,17 @@ export default defineComponent({
                   ))}
                 </ElButtonGroup>
               )}
+
+              {writable.value && files.state.value === "folder" && <span class="ol-bar-sep" />}
+
               {writable.value && files.state.value === "folder" && (
-                <ElButton size="small" type="primary" plain={true} onClick={promptMkdir}>
-                  <ElIcon style={{ marginRight: "4px" }}>
-                    <FolderAdd />
-                  </ElIcon>
-                  {t("ops.new_folder")}
-                </ElButton>
+                <ElTooltip content={t("ops.new_folder")} placement="bottom">
+                  <ElButton size="small" onClick={promptMkdir}>
+                    <ElIcon>
+                      <FolderAdd />
+                    </ElIcon>
+                  </ElButton>
+                </ElTooltip>
               )}
               {writable.value && files.state.value === "folder" && (
                 <ElButton size="small" type="primary" onClick={() => (uploadVisible.value = true)}>
@@ -570,7 +589,7 @@ export default defineComponent({
                   v-slots={{
                     default: () => (
                       <ElButton size="small">
-                        更多
+                        {t("home.toolbar.more")}
                         <ElIcon class="el-icon--right">
                           <ArrowDown />
                         </ElIcon>
@@ -588,42 +607,79 @@ export default defineComponent({
                   }}
                 />
               )}
-              <ElButton
-                size="small"
-                disabled={files.path.value === "/"}
-                onClick={() => void files.goUp()}
-              >
-                <ElIcon>
-                  <ArrowLeft />
-                </ElIcon>
-              </ElButton>
-              <ElButton size="small" onClick={() => void files.refresh()}>
-                <ElIcon>
-                  <Refresh />
-                </ElIcon>
-              </ElButton>
-              <ElSelect
-                modelValue={files.sortKey.value}
-                class="ol-files-sort"
-                size="small"
-                onUpdate:modelValue={(v: SortKey) => (files.sortKey.value = v)}
-              >
-                {sortOptions.map((opt) => (
-                  <ElOption key={opt.value} label={opt.label} value={opt.value} />
-                ))}
-              </ElSelect>
-              <ElButton
-                size="small"
-                onClick={() =>
-                  (files.sortOrder.value = files.sortOrder.value === "asc" ? "desc" : "asc")
-                }
-              >
-                <ElIcon>{files.sortOrder.value === "asc" ? <SortUp /> : <SortDown />}</ElIcon>
-              </ElButton>
+
+              <ElTooltip content={t("home.up")} placement="bottom">
+                <ElButton
+                  size="small"
+                  disabled={files.path.value === "/"}
+                  onClick={() => void files.goUp()}
+                >
+                  <ElIcon>
+                    <ArrowLeft />
+                  </ElIcon>
+                </ElButton>
+              </ElTooltip>
+              <ElTooltip content={t("home.toolbar.refresh")} placement="bottom">
+                <ElButton size="small" onClick={() => void files.refresh()}>
+                  <ElIcon>
+                    <Refresh />
+                  </ElIcon>
+                </ElButton>
+              </ElTooltip>
+
+              {files.state.value === "folder" && <span class="ol-bar-sep" />}
+
+              {/* 排序：字段 + 方向合成一个下拉（原来是「下拉 + 一个箭头按钮」两件套，
+                  两个控件的状态互相依赖，却长得像两件不相干的事）。 */}
+              {files.state.value === "folder" && (
+                <ElDropdown
+                  trigger="click"
+                  onCommand={(cmd: string) => {
+                    const [key, order] = cmd.split(":")
+                    files.sortKey.value = key as SortKey
+                    files.sortOrder.value = order === "desc" ? "desc" : "asc"
+                  }}
+                  v-slots={{
+                    default: () => (
+                      <ElButton size="small" class="ol-sort-btn">
+                        <ElIcon style={{ marginRight: "4px" }}>
+                          <Sort />
+                        </ElIcon>
+                        {sortOptions.find((opt) => opt.value === files.sortKey.value)?.label}
+                        <ElIcon class="el-icon--right">
+                          {files.sortOrder.value === "asc" ? <SortUp /> : <SortDown />}
+                        </ElIcon>
+                      </ElButton>
+                    ),
+                    dropdown: () => (
+                      <ElDropdownMenu>
+                        {sortOptions.flatMap((opt, index) =>
+                          (["asc", "desc"] as const).map((order, sub) => (
+                            <ElDropdownItem
+                              key={`${opt.value}:${order}`}
+                              command={`${opt.value}:${order}`}
+                              divided={index > 0 && sub === 0}
+                              class={
+                                files.sortKey.value === opt.value &&
+                                files.sortOrder.value === order
+                                  ? "is-active"
+                                  : undefined
+                              }
+                            >
+                              {opt.label} {order === "asc" ? "升序" : "降序"}
+                            </ElDropdownItem>
+                          )),
+                        )}
+                      </ElDropdownMenu>
+                    ),
+                  }}
+                />
+              )}
+
               {/* 挂载点驱动信息（Local/S3/…）不再单列一个标签：参考前端这一行只有
                   面包屑 + 计数，多一个标签就会把控件挤到第二行。 */}
               {files.state.value === "folder" && (
-                <ElTag size="small">
+                <ElTag size="small" class="ol-count-tag">
                   {files.pagedObjs.value.total === files.total.value
                     ? `共 ${files.total.value} 项`
                     : `显示 ${files.pagedObjs.value.total} / ${files.total.value} 项`}
@@ -639,7 +695,7 @@ export default defineComponent({
                   {clipboard.value.mode === "move" ? "✂" : "⧉"} {clipboard.value.objs.length}
                 </ElTag>
               )}
-            </ElSpace>
+            </div>
           </div>
 
           {ops.selected.value.length > 0 && (
@@ -753,7 +809,35 @@ export default defineComponent({
             />
           )}
 
-          {isEmpty.value && <ElEmpty description={t("home.empty_dir")} />}
+          {isEmpty.value && (
+            <div class="ol-files-empty">
+              <div class="ol-files-empty-art">
+                <ElIcon size={26}>
+                  <FolderOpened />
+                </ElIcon>
+              </div>
+              <div class="ol-files-empty-title">{t("home.empty_dir")}</div>
+              <div class="ol-files-empty-hint">
+                {writable.value ? t("home.empty_hint") : t("home.empty_dir")}
+              </div>
+              {writable.value && (
+                <div class="ol-files-empty-actions">
+                  <ElButton type="primary" onClick={() => (uploadVisible.value = true)}>
+                    <ElIcon style={{ marginRight: "4px" }}>
+                      <Upload />
+                    </ElIcon>
+                    {t("home.empty_upload")}
+                  </ElButton>
+                  <ElButton onClick={promptMkdir}>
+                    <ElIcon style={{ marginRight: "4px" }}>
+                      <FolderAdd />
+                    </ElIcon>
+                    {t("home.empty_mkdir")}
+                  </ElButton>
+                </div>
+              )}
+            </div>
+          )}
 
           {noMatch.value && (
             <ElEmpty description={`没有匹配「${files.keyword.value}」的条目`} />

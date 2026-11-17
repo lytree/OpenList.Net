@@ -356,5 +356,11 @@
     "skip_existing": "跳过已有文件",
     "merge": "仅复制新增的文件与子目录"
   },
-  "empty_dir": "此目录为空"
+  "empty_dir": "此目录为空",
+  "tree_title": "目录",
+  "tree_hide": "收起目录树",
+  "up": "上一级",
+  "empty_hint": "把文件拖到这里，或从本机上传。",
+  "empty_upload": "上传文件",
+  "empty_mkdir": "新建文件夹"
 }

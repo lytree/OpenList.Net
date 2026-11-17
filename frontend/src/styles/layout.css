@@ -536,16 +536,82 @@
   padding: 0;
 }
 
-/* 右侧控件组吃掉剩余宽度并靠右：控件多到换行时，第二行也是右对齐的，
- * 不会像默认那样从左边重新开始（看起来像漏了一排按钮）。 */
-.ol-files-bar > .el-space {
-  flex: 1 1 auto;
+/* 右半区控件按「找 / 建 / 看」分段：段之间一条 1px 竖线，段内 6px 间距。
+ * 原来十个控件由一个 ElSpace 平铺，上传主按钮与「排序方向」等重，眼睛没有落点。 */
+.ol-bar-right {
+  display: flex;
+  align-items: center;
   justify-content: flex-end;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-/* 工具条搜索框 / 排序下拉：桌面固定宽，手机端由 responsive.css 改成占满。 */
-.ol-files-search {
-  width: 140px;
+.ol-bar-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--el-border-color-light);
+}
+
+/* 排序下拉的常态：主文字是当前字段（不是「排序」两个字），方向用尾部箭头表达 */
+.ol-sort-btn > .el-icon:first-child {
+  color: var(--ol-text-secondary);
+}
+
+/* 计数标签退成弱信息：透明底、无描边，不做成一颗抢眼的胶囊 */
+.ol-count-tag {
+  --el-tag-bg-color: transparent;
+  --el-tag-border-color: transparent;
+  --el-tag-text-color: var(--ol-text-secondary);
+}
+
+/* 空目录：自绘（图标 + 标题 + 说明 + CTA），不用 ElEmpty 那张大灰盒子 ——
+ * 那张图在深色主题下几乎看不见，而且没有「现在能做什么」的出口。 */
+.ol-files-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 56px 16px 64px;
+  text-align: center;
+}
+
+.ol-files-empty-art {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: var(--ol-bg-subtle);
+  color: var(--el-color-primary);
+}
+
+.ol-files-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-files-empty-hint {
+  font-size: 13px;
+  color: var(--ol-text-secondary);
+}
+
+.ol-files-empty-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 工具条搜索框 / 排序下拉：桌面固定宽，手机端由 responsive.css 改成占满。
+ * 选择器要压过 EP 的 `.el-input { width: 100% }`（同权重时后者后注入 → 会赢），
+ * 否则输入框在 flex 行里被撑成整条宽度，把后面的按钮全挤到第二行。 */
+.ol-files-bar .ol-files-search {
+  width: 160px;
+  flex: 0 0 160px;
 }
 
 .ol-files-sort {
@@ -1706,6 +1772,25 @@
   display: flex;
   flex-direction: column;
   gap: var(--ol-space-3);
+}
+
+/* 目录树面板的标题行：给这块白板一个起点，也给「收起」一个常驻落点
+ * （工具栏里那个折叠键会随列表滚走）。 */
+.ol-aside-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 2px 2px 6px 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+.ol-aside-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ol-text-secondary);
 }
 
 /* 容器 1040 + 两侧留白 < 196+20 时藏起目录树：宁可少一个面板，也不压住列表 */
