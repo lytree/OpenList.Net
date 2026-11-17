@@ -92,6 +92,8 @@ export default defineComponent({
     let lastSeenSeconds = 0
     let lastSavedSeconds = 0
     let lastSavedAt = 0
+    /** 当前这一片的片长（秒），0 表示还没拿到。比例类度量靠它当分母。 */
+    let lastSeenDuration = 0
 
     /**
      * 观看会话：一次播放一段。换文件/下一条 = tracker 里换 token；
@@ -249,19 +251,32 @@ export default defineComponent({
       if (!id) return
       lastSavedSeconds = seconds
       lastSavedAt = Date.now()
-      // 心跳与进度同频：一个记"看到哪"，一个记"看了多久"
-      watchSession.beat(seconds)
+      // 心跳与进度同频：一个记"看到哪"，一个记"看了多久"。
+      // 片长搭这趟车送出去——服务端算最远/离开比例要用它当分母。
+      watchSession.beat(seconds, lastSeenDuration)
       // 进度是后台写：失败不弹错（下一次节流还会再写一次），但也不静默吞掉状态
       await mediaUpdateState(id, { progress_seconds: Math.floor(seconds) })
     }
 
-    function onProgress(seconds: number) {
+    function onProgress(seconds: number, duration = 0) {
       if (!playingItemId.value || switching.value) return
+      if (duration > 0) lastSeenDuration = duration
       lastSeenSeconds = seconds
       const now = Date.now()
       const moved = Math.abs(seconds - lastSavedSeconds) >= SAVE_INTERVAL_SECONDS
       if (!moved || now - lastSavedAt < SAVE_INTERVAL_SECONDS * 1000) return
       void saveProgress(seconds)
+    }
+
+    /** 片长一到手就交给跟踪器：续播起播那一发上报还没有分母，补这一发比例才准。 */
+    function onDuration(duration: number) {
+      lastSeenDuration = duration > 0 ? duration : 0
+      if (watchSession.active) watchSession.setDuration(duration)
+    }
+
+    /** 用户拖进度条：只计数，搭下一次心跳的车送出去。 */
+    function onSeek() {
+      watchSession.seek()
     }
 
     async function onEnded() {
@@ -453,6 +468,8 @@ export default defineComponent({
                   : active.title
               }
               onProgress={onProgress}
+              onDuration={onDuration}
+              onSeek={onSeek}
               onEnded={() => void onEnded()}
               onClose={closePlayer}
             />

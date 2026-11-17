@@ -26,8 +26,17 @@ export default defineComponent({
     title: { type: String, default: "" },
   },
   emits: {
-    /** 节流后的进度回调（父组件决定写回频率）。 */
-    progress: (_seconds: number) => true,
+    /**
+     * 节流后的进度回调（父组件决定写回频率）。
+     *
+     * 第二个参数是片长：比例类度量（最远/离开位置）要拿它当分母，而
+     * `files.duration_seconds` 是扫描期探测的，远程挂载常常探不出来 —— 播放器自己知道的是最准的。
+     */
+    progress: (_seconds: number, _duration: number) => true,
+    /** 元数据加载完，片长已知。父组件据此尽早把片长交给会话跟踪器。 */
+    duration: (_seconds: number) => true,
+    /** 用户拖了一次进度条。父组件只计数，不单独发请求。 */
+    seek: () => true,
     ended: () => true,
     close: () => true,
   },
@@ -38,10 +47,18 @@ export default defineComponent({
     /** startAt 只消费一次：续播 seek 之后用户再拖回开头不该再被拽走。 */
     const startAtConsumed = ref(false)
 
+    /** `video.duration` 在元数据到位前是 NaN，统一在这里挡掉。 */
+    function knownDuration(video: HTMLVideoElement): number {
+      return Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0
+    }
+
     function onLoadedMetadata() {
       const video = videoRef.value
-      if (!video || startAtConsumed.value) return
-      if (props.startAt > 5 && Number.isFinite(video.duration) && props.startAt < video.duration - 10) {
+      if (!video) return
+      const duration = knownDuration(video)
+      if (duration > 0) emit("duration", duration)
+      if (startAtConsumed.value) return
+      if (props.startAt > 5 && duration > 0 && props.startAt < duration - 10) {
         video.currentTime = props.startAt
       }
       startAtConsumed.value = true
@@ -50,7 +67,12 @@ export default defineComponent({
     function onTimeUpdate() {
       const video = videoRef.value
       if (!video || !video.currentTime) return
-      emit("progress", video.currentTime)
+      emit("progress", video.currentTime, knownDuration(video))
+    }
+
+    /** 拖动：换源（`emptied`）与元数据回填引起的 seek 不算用户拖动，这里不区分 —— 见调用方口径。 */
+    function onSeeking() {
+      emit("seek")
     }
 
     function onEnded() {
@@ -73,7 +95,7 @@ export default defineComponent({
     onUnmounted(() => {
       // 关页面/关播放器前把最后位置交出去，别丢最近几秒
       const video = videoRef.value
-      if (video && video.currentTime > 0) emit("progress", video.currentTime)
+      if (video && video.currentTime > 0) emit("progress", video.currentTime, knownDuration(video))
     })
 
     return () => (
@@ -113,6 +135,7 @@ export default defineComponent({
             preload="metadata"
             onLoadedmetadata={onLoadedMetadata}
             onTimeupdate={onTimeUpdate}
+            onSeeking={onSeeking}
             onEnded={onEnded}
             onError={onError}
           />

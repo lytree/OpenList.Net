@@ -299,6 +299,29 @@
   font-weight: 400;
 }
 
+/* 进度线：条目级的「看到哪儿了」。刻意做得很薄 —— 它是 meta 里的一个读数，
+   不该抢标题的注意力。宽度用百分比内联，0% 时只剩底槽。 */
+.olm-history-track {
+  height: 3px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--ol-border);
+  overflow: hidden;
+}
+
+.olm-history-track-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--el-color-primary);
+  transition: width 0.2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .olm-history-track-fill {
+    transition: none;
+  }
+}
+
 .olm-history-meta {
   display: flex;
   align-items: center;

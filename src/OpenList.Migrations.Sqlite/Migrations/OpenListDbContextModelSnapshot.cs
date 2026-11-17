@@ -810,6 +810,10 @@ namespace OpenList.Migrations.Sqlite.Migrations
                     b.Property<bool>("Completed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<long?>("DurationSeconds")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("duration_seconds");
+
                     b.Property<DateTimeOffset?>("EndedAt")
                         .HasColumnType("TEXT")
                         .HasJsonPropertyName("ended_at");
@@ -830,9 +834,21 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasJsonPropertyName("last_position_seconds");
 
+                    b.Property<double?>("LeaveRatio")
+                        .HasColumnType("REAL")
+                        .HasJsonPropertyName("leave_ratio");
+
                     b.Property<long>("MaxPositionSeconds")
                         .HasColumnType("INTEGER")
                         .HasJsonPropertyName("max_position_seconds");
+
+                    b.Property<double>("MaxReached")
+                        .HasColumnType("REAL")
+                        .HasJsonPropertyName("max_reached");
+
+                    b.Property<int>("SeekCount")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("seek_count");
 
                     b.Property<long>("StartPositionSeconds")
                         .HasColumnType("INTEGER")
@@ -873,6 +889,10 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<long?>("DurationSeconds")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("duration_seconds");
+
                     b.Property<bool>("Favorite")
                         .HasColumnType("INTEGER");
 
@@ -892,9 +912,29 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT")
                         .HasJsonPropertyName("last_played_at");
 
+                    b.Property<double?>("LeaveRatio")
+                        .HasColumnType("REAL")
+                        .HasJsonPropertyName("leave_ratio");
+
+                    b.Property<double>("MaxReached")
+                        .HasColumnType("REAL")
+                        .HasJsonPropertyName("max_reached");
+
+                    b.Property<int>("PlayCount")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("play_count");
+
+                    b.Property<long>("PlaySeconds")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("play_seconds");
+
                     b.Property<long>("ProgressSeconds")
                         .HasColumnType("INTEGER")
                         .HasJsonPropertyName("progress_seconds");
+
+                    b.Property<int>("SeekCount")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("seek_count");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");

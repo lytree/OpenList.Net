@@ -849,6 +849,10 @@ namespace OpenList.Migrations.Postgres.Migrations
                     b.Property<bool>("Completed")
                         .HasColumnType("boolean");
 
+                    b.Property<long?>("DurationSeconds")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("duration_seconds");
+
                     b.Property<DateTimeOffset?>("EndedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasJsonPropertyName("ended_at");
@@ -869,9 +873,21 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .HasColumnType("bigint")
                         .HasJsonPropertyName("last_position_seconds");
 
+                    b.Property<double?>("LeaveRatio")
+                        .HasColumnType("double precision")
+                        .HasJsonPropertyName("leave_ratio");
+
                     b.Property<long>("MaxPositionSeconds")
                         .HasColumnType("bigint")
                         .HasJsonPropertyName("max_position_seconds");
+
+                    b.Property<double>("MaxReached")
+                        .HasColumnType("double precision")
+                        .HasJsonPropertyName("max_reached");
+
+                    b.Property<int>("SeekCount")
+                        .HasColumnType("integer")
+                        .HasJsonPropertyName("seek_count");
 
                     b.Property<long>("StartPositionSeconds")
                         .HasColumnType("bigint")
@@ -914,6 +930,10 @@ namespace OpenList.Migrations.Postgres.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("DurationSeconds")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("duration_seconds");
+
                     b.Property<bool>("Favorite")
                         .HasColumnType("boolean");
 
@@ -933,9 +953,29 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasJsonPropertyName("last_played_at");
 
+                    b.Property<double?>("LeaveRatio")
+                        .HasColumnType("double precision")
+                        .HasJsonPropertyName("leave_ratio");
+
+                    b.Property<double>("MaxReached")
+                        .HasColumnType("double precision")
+                        .HasJsonPropertyName("max_reached");
+
+                    b.Property<int>("PlayCount")
+                        .HasColumnType("integer")
+                        .HasJsonPropertyName("play_count");
+
+                    b.Property<long>("PlaySeconds")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("play_seconds");
+
                     b.Property<long>("ProgressSeconds")
                         .HasColumnType("bigint")
                         .HasJsonPropertyName("progress_seconds");
+
+                    b.Property<int>("SeekCount")
+                        .HasColumnType("integer")
+                        .HasJsonPropertyName("seek_count");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");

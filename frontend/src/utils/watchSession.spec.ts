@@ -93,4 +93,71 @@ describe("watchSession tracker", () => {
     expect(() => tracker.start(7, 70, 0)).not.toThrow()
     expect(() => tracker.beat(10)).not.toThrow()
   })
+
+  it("片长随心跳送出，供服务端算最远/离开比例", () => {
+    const { sent, tracker } = setup()
+    tracker.start(7, 70, 0)
+    tracker.beat(10, 5400)
+
+    expect(sent[0].duration_seconds).toBeUndefined() // 起播时元数据还没到
+    expect(sent[1].duration_seconds).toBe(5400)
+  })
+
+  it("setDuration 后，下一次上报就带上片长（不必等心跳参数）", () => {
+    const { sent, tracker } = setup()
+    tracker.start(7, 70, 120)
+    tracker.setDuration(5400.4)
+    tracker.beat(130)
+
+    expect(sent[1].duration_seconds).toBe(5400) // 取整，别把小数写进库
+  })
+
+  it("片长只在拿到正数时覆盖（NaN / 0 不能抹掉已知值）", () => {
+    const { sent, tracker } = setup()
+    tracker.start(7, 70, 0)
+    tracker.setDuration(5400)
+    tracker.beat(10, Number.NaN)
+    tracker.beat(20, 0)
+
+    expect(sent[1].duration_seconds).toBe(5400)
+    expect(sent[2].duration_seconds).toBe(5400)
+  })
+
+  it("拖动次数按增量上报，并在送出后清零", () => {
+    const { sent, tracker } = setup()
+    tracker.start(7, 70, 0)
+    tracker.seek()
+    tracker.seek()
+    tracker.beat(10)
+
+    expect(sent[0].seeks).toBeUndefined() // 起播那一发还没有拖动
+    expect(sent[1].seeks).toBe(2)
+
+    tracker.beat(20)
+    expect(sent[2].seeks).toBeUndefined() // 上一发的 2 次已经送走了
+  })
+
+  it("换文件时，上一段的拖动跟着收尾那一发走，新段从零开始", () => {
+    const { sent, tracker } = setup()
+    tracker.start(7, 70, 0)
+    // 先走一段：位置为 0 就换文件的话，收尾那一发本来就会被"不留空会话"的规则跳过
+    tracker.beat(300)
+    tracker.seek()
+    tracker.start(7, 71, 0)
+
+    // 0: 起播 t1 / 1: 心跳 / 2: t1 收尾（带走 1 次拖动）/ 3: t2 起播（干净）
+    expect(sent[2]).toMatchObject({ token: "t1", closing: true, seeks: 1 })
+    expect(sent[3]).toMatchObject({ token: "t2", closing: false })
+    expect(sent[3].seeks).toBeUndefined()
+  })
+
+  it("没有活动会话时的拖动不计数", () => {
+    const { sent, tracker } = setup()
+    tracker.seek()
+    tracker.start(7, 70, 0)
+    tracker.beat(10)
+
+    expect(sent[0].seeks).toBeUndefined()
+    expect(sent[1].seeks).toBeUndefined()
+  })
 })

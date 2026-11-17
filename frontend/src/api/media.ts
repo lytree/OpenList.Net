@@ -303,6 +303,10 @@ export interface WatchReportPayload {
   item_id: number
   file_id?: number | null
   position_seconds: number
+  /** 当前片长（秒）。比例类度量（最远/离开位置）靠它当分母，缺省时服务端不更新这些列。 */
+  duration_seconds?: number
+  /** 自上次上报以来新增的拖动次数。传增量不传累计：丢一发只少记一次，不会把已有数据算错。 */
+  seeks?: number
   closing?: boolean
   completed?: boolean
 }
@@ -310,14 +314,37 @@ export interface WatchReportPayload {
 export const mediaReportWatch = (payload: WatchReportPayload): Promise<Resp<unknown>> =>
   http.post<unknown>("/media/watch/report", payload) as Promise<Resp<unknown>>
 
+/**
+ * 观看历史的一条（按条目聚合）。
+ *
+ * 字段分两层，别混着读：`last_at` / `watched_seconds` / `completed` 只统计**当前时间窗**内的会话；
+ * `play_count` / `max_reached` / `leave_ratio` / `seek_count` / `skimmed` 是**条目级**的
+ * （来自用户状态表），切时间窗不会让续播点和划水判定跟着变。
+ */
 export interface WatchHistoryEntry {
   item_id: number
   title: string
   poster_path?: string | null
   year?: number | null
   last_at: string
+  /** 窗口内累计观看秒数。 */
   watched_seconds: number
+  /** 窗口内是否有一次看到结尾。 */
   completed: boolean
+  /** 播放次数（条目级）。 */
+  play_count?: number
+  /** 累计观看秒数（条目级，跨会话累加）。 */
+  play_seconds?: number
+  /** 最近一次上报的片长（秒）。比例类度量的分母。 */
+  duration_seconds?: number | null
+  /** 到过的最远位置比例 0–1（条目级）。 */
+  max_reached?: number
+  /** 最近一次离开位置比例 0–1（条目级），播完为 1；续播点用它。 */
+  leave_ratio?: number | null
+  /** 累计拖动次数（条目级）。 */
+  seek_count?: number
+  /** 是否划水：到过 60% 以上，但真实观看比最远位置少 25% 以上。 */
+  skimmed?: boolean
 }
 
 export interface WatchDailyStat {

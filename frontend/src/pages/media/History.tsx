@@ -86,6 +86,28 @@ export default defineComponent({
       return t("media.history_summary", { count: entries.value.length, minutes })
     })
 
+    /**
+     * 这一行画到百分之几。
+     *
+     * 优先用 `leave_ratio`（离开位置，播完是 100%），没有就退回 `max_reached`（到过的最远位置）。
+     * 两者都是**条目级**的：切时间窗不会让进度线跟着跳，因为它描述的是"这部片我看成什么样了"，
+     * 不是"这段时间看了多少"。
+     */
+    function percentOf(entry: WatchHistoryEntry): number {
+      const ratio = entry.leave_ratio ?? entry.max_reached ?? 0
+      return Math.max(0, Math.min(100, Math.round(ratio * 100)))
+    }
+
+    /** 划水提示里要报的两个百分比：拖到了多少、真正看了多少。 */
+    function skimHint(entry: WatchHistoryEntry): string {
+      const reached = Math.round((entry.max_reached ?? 0) * 100)
+      const watched =
+        entry.duration_seconds && entry.duration_seconds > 0
+          ? Math.round(((entry.play_seconds ?? 0) / entry.duration_seconds) * 100)
+          : 0
+      return t("media.history_skimmed_hint", { reached, watched: Math.max(0, watched) })
+    }
+
     return () => (
       <div class="ol-media">
         <div class="ol-media-toolbar">
@@ -138,6 +160,12 @@ export default defineComponent({
                         {entry.title}
                         {entry.year ? <span class="olm-history-year">{entry.year}</span> : null}
                       </div>
+                      <div class="olm-history-track" aria-hidden="true">
+                        <div
+                          class="olm-history-track-fill"
+                          style={{ width: `${percentOf(entry)}%` }}
+                        />
+                      </div>
                       <div class="olm-history-meta">
                         <span>{formatTime(entry.last_at).slice(11)}</span>
                         <span>·</span>
@@ -146,6 +174,8 @@ export default defineComponent({
                             minutes: Math.max(1, Math.round(entry.watched_seconds / 60)),
                           })}
                         </span>
+                        <span>·</span>
+                        <span>{t("media.history_progress", { percent: percentOf(entry) })}</span>
                         {entry.completed ? (
                           <ElTag size="small" type="success">
                             {t("media.history_completed")}
@@ -155,6 +185,13 @@ export default defineComponent({
                             {t("media.history_unfinished")}
                           </ElTag>
                         )}
+                        {entry.skimmed ? (
+                          <span title={skimHint(entry)}>
+                            <ElTag size="small" type="warning">
+                              {t("media.history_skimmed")}
+                            </ElTag>
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                     <ElButton size="small" text={true} class="olm-history-play">

@@ -178,25 +178,43 @@ export default defineComponent({
       playingSign.value = ""
     }
 
-    function onProgress(seconds: number) {
+    function onProgress(seconds: number, duration = 0) {
       if (!playing.value) return
       // 游客没有进度可写（也没有个人状态可读），连节流判断都省了
       if (!user.isLogin) return
       const now = Date.now()
       const moved = Math.abs(seconds - lastSavedSeconds) >= SAVE_INTERVAL_SECONDS
       if (!moved || now - lastSavedAt < SAVE_INTERVAL_SECONDS * 1000) return
-      void saveProgress(seconds)
+      void saveProgress(seconds, duration)
     }
 
-    async function saveProgress(seconds: number) {
+    async function saveProgress(seconds: number, duration = 0) {
       lastSavedSeconds = seconds
       lastSavedAt = Date.now()
-      // 会话心跳与进度写回同频：一个记"看到哪"，一个记"看了多久"
-      watchSession.beat(seconds)
+      // 会话心跳与进度写回同频：一个记"看到哪"，一个记"看了多久"。
+      // 片长搭这趟车送出去——比例类度量（最远/离开位置）要靠它当分母。
+      watchSession.beat(seconds, duration)
       const resp = await mediaUpdateState(itemId.value, {
         progress_seconds: Math.floor(seconds),
       })
       if (resp.code === 200 && resp.data) state.value = resp.data
+    }
+
+    /**
+     * 片长一到手就交给会话跟踪器，不等下一个心跳。
+     *
+     * 续播位置大于 0 时，起播那一发上报发生在元数据加载**之前**，服务端那时还没有分母，
+     * 这一段的最远比例只能是 0；补这一发才能让"看到百分之多少"从第一秒就准。
+     */
+    function onDuration(duration: number) {
+      if (!user.isLogin) return
+      watchSession.setDuration(duration)
+    }
+
+    /** 用户拖进度条：只计数，搭下一次心跳的车送出去。 */
+    function onSeek() {
+      if (!user.isLogin) return
+      watchSession.seek()
     }
 
     function onEnded() {
@@ -477,6 +495,8 @@ export default defineComponent({
               poster={playerPoster.value}
               title={`${current.title} · ${playing.value.path.split("/").pop()}`}
               onProgress={onProgress}
+              onDuration={onDuration}
+              onSeek={onSeek}
               onEnded={onEnded}
               onClose={closePlayer}
             />

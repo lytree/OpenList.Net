@@ -214,8 +214,215 @@ public class WatchSessionTests
     }
 
     // ------------------------------------------------------------------
+    // Peach 口径的度量：播放次数、最远/离开比例、拖动次数、划水
+    // ------------------------------------------------------------------
+
+    /// <summary>播放次数按**会话**计，不按心跳计 —— 一条两小时的片子只有一次播放。</summary>
+    [Test]
+    public async Task Play_Count_Counts_Sessions_Not_Heartbeats()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+
+        await Report(svc, "t1", a.Id, 0);
+        await Report(svc, "t1", a.Id, 10);
+        await Report(svc, "t1", a.Id, 20);
+
+        await Assert.That((await StateOf(ctx, a.Id)).PlayCount).IsEqualTo(1);
+
+        // 换一个 token 才是"又点了一次播放"
+        await Report(svc, "t2", a.Id, 0);
+        await Assert.That((await StateOf(ctx, a.Id)).PlayCount).IsEqualTo(2);
+    }
+
+    /// <summary>拖动次数按增量累加：客户端每发只报"这一段新增几次"，服务端相加。</summary>
+    [Test]
+    public async Task Seek_Count_Accumulates_From_Increments()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+
+        await Report(svc, "t1", a.Id, 0);
+        await ReportFull(svc, "t1", a.Id, 5, seeks: 3);
+        await ReportFull(svc, "t1", a.Id, 9, seeks: 2);
+
+        var session = await ctx.MediaWatchSessions.AsNoTracking().SingleAsync(s => s.Token == "t1");
+        await Assert.That(session.SeekCount).IsEqualTo(5);
+        await Assert.That((await StateOf(ctx, a.Id)).SeekCount).IsEqualTo(5);
+    }
+
+    /// <summary>最远/离开比例拿客户端上报的片长当分母，写进会话与条目两层。</summary>
+    [Test]
+    public async Task Max_Reached_And_Leave_Ratio_Use_Reported_Duration()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+
+        var resp = await ReportFull(svc, "t1", a.Id, 500, duration: 1000);
+
+        await Assert.That(resp.Data!.MaxReached).IsEqualTo(0.5);
+        // 会话还开着：离开位置没定稿，只有最远比例在跟着走
+        await Assert.That(resp.Data.LeaveRatio).IsNull();
+
+        var state = await StateOf(ctx, a.Id);
+        await Assert.That(state.MaxReached).IsEqualTo(0.5);
+        await Assert.That(state.LeaveRatio).IsEqualTo(0.5);
+        await Assert.That(state.DurationSeconds).IsEqualTo(1000L);
+    }
+
+    /// <summary>播完记 100%，而不是"最后一发心跳的位置" —— 最后一发未必落在片尾。</summary>
+    [Test]
+    public async Task Completed_Session_Records_Full_Leave_Ratio()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+
+        await ReportFull(svc, "t1", a.Id, 500, duration: 1000);
+        var resp = await ReportFull(svc, "t1", a.Id, 500, duration: 1000, closing: true, completed: true);
+
+        await Assert.That(resp.Data!.LeaveRatio).IsEqualTo(1.0);
+        await Assert.That((await StateOf(ctx, a.Id)).LeaveRatio).IsEqualTo(1.0);
+    }
+
+    /// <summary>片长未知时比例整体不算：宁可留空，也不拿别的长度凑一个分母。</summary>
+    [Test]
+    public async Task Unknown_Duration_Leaves_Ratios_Untouched()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+
+        var resp = await Report(svc, "t1", a.Id, 100);
+
+        await Assert.That(resp.Data!.MaxReached).IsEqualTo(0.0);
+        await Assert.That(resp.Data.LeaveRatio).IsNull();
+        var state = await StateOf(ctx, a.Id);
+        await Assert.That(state.LeaveRatio).IsNull();
+        await Assert.That(state.DurationSeconds).IsNull();
+    }
+
+    /// <summary>划水：拖到 70% 却只真看了 30%，是找片段不是看片。</summary>
+    [Test]
+    public async Task Skimmed_Flags_Jumped_But_Not_Watched()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+
+        await ReportFull(svc, "t1", a.Id, 0, duration: 1000);
+        await ReportFull(svc, "t1", a.Id, 100, duration: 1000);
+        await ReportFull(svc, "t1", a.Id, 200, duration: 1000);
+        await ReportFull(svc, "t1", a.Id, 300, duration: 1000);
+        // 向前拖到 70%：不计入观看时长，但最远位置到了
+        await ReportFull(svc, "t1", a.Id, 700, duration: 1000);
+
+        var state = await StateOf(ctx, a.Id);
+        await Assert.That(state.PlaySeconds).IsEqualTo(300L);
+        await Assert.That(state.MaxReached).IsEqualTo(0.7);
+        await Assert.That(state.Skimmed).IsTrue();
+    }
+
+    /// <summary>老实看完前 70% 不算划水 —— 判据比的是"真看的比例"和"最远位置"的差。</summary>
+    [Test]
+    public async Task Steady_Watching_Through_The_Same_Point_Is_Not_Skimmed()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+
+        await ReportFull(svc, "t1", a.Id, 0, duration: 1000);
+        for (var position = 100; position <= 700; position += 100)
+            await ReportFull(svc, "t1", a.Id, position, duration: 1000);
+
+        var state = await StateOf(ctx, a.Id);
+        await Assert.That(state.MaxReached).IsEqualTo(0.7);
+        await Assert.That(state.Skimmed).IsFalse();
+    }
+
+    /// <summary>度量按用户隔离：同一部片子两个人各记各的。</summary>
+    [Test]
+    public async Task Metrics_Are_Isolated_Per_User()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+        var bob = new User { Id = 2, Username = "bob" };
+
+        await ReportFull(svc, "t1", a.Id, 900, duration: 1000);
+        await ReportFull(svc, "t1", a.Id, 900, duration: 1000, closing: true, completed: true);
+        await ReportFull(svc, "b1", a.Id, 100, duration: 1000, user: bob);
+
+        var admin = await StateOf(ctx, a.Id);
+        var other = await StateOf(ctx, a.Id, bob.Id);
+
+        await Assert.That(admin.PlayCount).IsEqualTo(1);
+        await Assert.That(admin.LeaveRatio).IsEqualTo(1.0);
+        await Assert.That(other.PlayCount).IsEqualTo(1);
+        await Assert.That(other.LeaveRatio).IsEqualTo(0.1);
+    }
+
+    /// <summary>历史行同时带窗口内与会话级两层读数：切时间窗不该让续播位置跟着变。</summary>
+    [Test]
+    public async Task History_Exposes_Item_Level_Metrics()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+
+        await ReportFull(svc, "t1", a.Id, 0, duration: 1000);
+        // 分两步走：单步上限 300 秒，一次跨 400 秒会被当成拖进度条而不计入观看时长
+        await ReportFull(svc, "t1", a.Id, 200, duration: 1000);
+        await ReportFull(svc, "t1", a.Id, 400, duration: 1000, seeks: 2);
+        await ReportFull(svc, "t1", a.Id, 400, duration: 1000, closing: true);
+
+        var rows = (await svc.ListHistoryAsync(30, 12, Admin)).Data!;
+        await Assert.That(rows.Count).IsEqualTo(1);
+
+        var row = rows[0];
+        await Assert.That(row.WatchedSeconds).IsEqualTo(400L);   // 窗口内真的看了多久
+        await Assert.That(row.PlayCount).IsEqualTo(1);
+        await Assert.That(row.PlaySeconds).IsEqualTo(400L);
+        await Assert.That(row.MaxReached).IsEqualTo(0.4);
+        await Assert.That(row.LeaveRatio).IsEqualTo(0.4);
+        await Assert.That(row.SeekCount).IsEqualTo(2);
+        await Assert.That(row.Skimmed).IsFalse();
+    }
+
+    /// <summary>
+    /// 心跳不能写续播进度：前端播完时会单独把 `progress_seconds` 清 0，
+    /// 心跳若也写一列，两个请求谁后到谁说了算，表现为「看完了下次还从 40 分钟续播」。
+    /// </summary>
+    [Test]
+    public async Task Heartbeat_Does_Not_Touch_Resume_Progress()
+    {
+        using var ctx = BuildContext();
+        var (a, _, _) = await SeedItemsAsync(ctx);
+        var svc = NewService(ctx);
+
+        ctx.UserMediaStates.Add(new UserMediaState
+        {
+            UserId = Admin.Id, ItemId = a.Id, ProgressSeconds = 0, UpdatedAt = Now,
+        });
+        await ctx.SaveChangesAsync();
+
+        await ReportFull(svc, "t1", a.Id, 2400, duration: 5400);
+
+        var state = await StateOf(ctx, a.Id);
+        await Assert.That(state.ProgressSeconds).IsEqualTo(0L);
+        await Assert.That(state.LeaveRatio).IsNotNull();
+    }
+
+    // ------------------------------------------------------------------
     // 装置
     // ------------------------------------------------------------------
+
+    private static async Task<UserMediaState> StateOf(OpenListDbContext ctx, long itemId, long userId = 1)
+        => await ctx.UserMediaStates.AsNoTracking()
+            .SingleAsync(s => s.UserId == userId && s.ItemId == itemId);
 
     private static MediaWatchSession Session(long itemId, string token, DateTimeOffset startedAt, long watched, bool completed)
         => new()
@@ -236,6 +443,21 @@ public class WatchSessionTests
     private static Task<Resp<MediaWatchSession>> Report(
         IWatchSessionService svc, string token, long itemId, long position)
         => svc.ReportAsync(new ReportWatchReq { Token = token, ItemId = itemId, PositionSeconds = position }, Admin);
+
+    /// <summary>带上片长/拖动/收尾标志的完整上报（度量类用例用）。</summary>
+    private static Task<Resp<MediaWatchSession>> ReportFull(
+        IWatchSessionService svc, string token, long itemId, long position,
+        long? duration = null, int seeks = 0, bool closing = false, bool completed = false, User? user = null)
+        => svc.ReportAsync(new ReportWatchReq
+        {
+            Token = token,
+            ItemId = itemId,
+            PositionSeconds = position,
+            DurationSeconds = duration,
+            Seeks = seeks,
+            Closing = closing,
+            Completed = completed,
+        }, user ?? Admin);
 
     private static WatchSessionService NewService(OpenListDbContext ctx)
         => new(ctx, new FakeLibraryService(), new FixedTime(Now));

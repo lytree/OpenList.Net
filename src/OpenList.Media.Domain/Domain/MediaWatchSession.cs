@@ -60,4 +60,47 @@ public sealed class MediaWatchSession
     public long WatchedSeconds { get; set; }
     /// <summary>是否播完（整个条目，不是单个文件）。</summary>
     public bool Completed { get; set; }
+
+    /// <summary>
+    /// 本次会话上报的片长（秒），可为空。
+    ///
+    /// <para>
+    /// 单独存一列而不是每次去查 <see cref="MediaFile.DurationSeconds"/>：后者是扫描期探测的，
+    /// 远程挂载可能探不出来（null），而客户端 `video.duration` 一定有值。比例类度量全靠它当分母，
+    /// 分母缺失时宁可不算，也不能拿另一份长度凑数 —— 那会让同一部片子的比例前后不一致。
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("duration_seconds")]
+    public long? DurationSeconds { get; set; }
+    /// <summary>
+    /// 本次会话的拖动次数（客户端 `seeking` 事件计数，按增量上报累加）。
+    ///
+    /// <para>
+    /// 和 <see cref="WatchedSeconds"/> 合起来才说明问题：只看 3 分钟却拖了 40 次，
+    /// 是"找片段"而不是"看片"。单看任一项都分不出来。
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("seek_count")]
+    public int SeekCount { get; set; }
+    /// <summary>
+    /// 到达过的最远位置占片长的比例（0–1）。片长未知时为 0。
+    ///
+    /// <para>
+    /// 与 <see cref="MaxPositionSeconds"/> 的区别是分母：绝对值要跟片长一起看才知道"到哪了"，
+    /// 比例可以直接排序、直接和阈值比。这就是 Peach 的 `max_reached`。
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("max_reached")]
+    public double MaxReached { get; set; }
+    /// <summary>
+    /// 结束时的位置比例（0–1）；播完记 1.0，会话还没收尾或片长未知时为空。
+    ///
+    /// <para>
+    /// 这个字段只在收尾那一刻定稿：中途每次心跳都覆盖它的话，"离开位置"就退化成
+    /// "最后一次心跳的位置"，关播放器前那几秒的拖动会被后面的心跳冲掉。
+    /// 对应 Peach 的 `leave_ratio`。
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("leave_ratio")]
+    public double? LeaveRatio { get; set; }
 }
