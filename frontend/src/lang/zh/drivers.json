@@ -19,7 +19,8 @@
     },
     "qrcode_token": "二维码 token",
     "qrcode_token-tips": "二维码 token 与 Cookie 至少要有一个",
-    "root_folder_id": "根目录 ID"
+    "root_folder_id": "根目录 ID",
+    "root_folder_id-tips": "根目录 ID（0 表示网盘根目录）"
   },
   "115 Open": {
     "access_token": "Access Token",
@@ -292,11 +293,13 @@
   },
   "AliyundriveOpen": {
     "alipan_type": "阿里云盘类型",
+    "alipan_type-tips": "阿里云盘客户端类型",
     "alipan_types": {
       "alipanTV": "AlipanTV",
       "default": "默认"
     },
     "api_url_address": "API 地址",
+    "api_url_address-tips": "用于续期令牌的在线 API 地址",
     "callback_concurrency": "回调并发数",
     "callback_concurrency-tips": "阿里云用户共享的最大同时代理下载数",
     "client_id": "Client ID",
@@ -304,6 +307,7 @@
     "client_secret": "Client Secret",
     "client_secret-tips": "没有就留空",
     "drive_type": "网盘类型",
+    "drive_type-tips": "使用的网盘类型",
     "drive_types": {
       "backup": "备份",
       "default": "默认",
@@ -312,11 +316,13 @@
     "internal_upload": "内部上传",
     "internal_upload-tips": "如果阿里云 ECS 位于北京，可以开启以提升上传速度",
     "livp_download_format": "Live Photo 下载格式",
+    "livp_download_format-tips": "livp 文件的下载格式",
     "livp_download_formats": {
       "jpeg": "JPEG",
       "mov": "Mov"
     },
     "order_by": "排序字段",
+    "order_by-tips": "默认排序字段",
     "order_bys": {
       "created_at": "创建于",
       "name": "名称",
@@ -324,6 +330,7 @@
       "updated_at": "更新于"
     },
     "order_direction": "排序方向",
+    "order_direction-tips": "默认排序方向",
     "order_directions": {
       "ASC": "升序",
       "DESC": "降序"
@@ -331,13 +338,17 @@
     "rapid_upload": "秒传",
     "rapid_upload-tips": "开启后文件会先传到服务器，因此进度不准确",
     "refresh_token": "Refresh Token",
+    "refresh_token-tips": "OAuth 刷新令牌",
     "remove_way": "移除方式",
+    "remove_way-tips": "删除文件的方式",
     "remove_ways": {
       "delete": "删除",
       "trash": "回收站"
     },
     "root_folder_id": "根目录 ID",
-    "use_online_api": "使用在线 API"
+    "root_folder_id-tips": "",
+    "use_online_api": "使用在线 API",
+    "use_online_api-tips": "使用在线 API 刷新令牌"
   },
   "AliyundriveShare": {
     "order_by": "排序字段",
@@ -652,12 +663,15 @@
     "host": "主机",
     "host-tips": "FTP 服务器地址",
     "password": "密码",
+    "password-tips": "",
     "port": "端口",
     "port-tips": "FTP 服务器端口",
     "root_folder_path": "根目录路径",
+    "root_folder_path-tips": "服务器上的根路径",
     "use_tls": "启用 TLS",
     "use_tls-tips": "使用 FTPS（TLS 加密）",
-    "username": "用户名"
+    "username": "用户名",
+    "username-tips": ""
   },
   "FebBox": {
     "client_id": "Client ID",
@@ -867,6 +881,7 @@
     "recycle_bin_path": "回收站路径",
     "recycle_bin_path-tips": "回收站路径；留空即永久删除，也可以保留「永久删除」",
     "root_folder_path": "根目录路径",
+    "root_folder_path-tips": "服务器文件系统上的根路径",
     "show_hidden": "显示隐藏文件",
     "show_hidden-tips": "显示隐藏的目录与文件",
     "thumb_cache_folder": "缩略图缓存目录",
@@ -1036,6 +1051,7 @@
     "limit_rate": "限速",
     "limit_rate-tips": "每秒请求数上限（0 表示不限）",
     "password": "密码",
+    "password-tips": "PikPak 密码",
     "platform": "平台",
     "platforms": {
       "android": "Android",
@@ -1043,10 +1059,13 @@
       "web": "网页"
     },
     "refresh_token": "Refresh Token",
+    "refresh_token-tips": "OAuth 刷新令牌（首次登录后自动填入）",
     "root_folder_id": "根目录 ID",
+    "root_folder_id-tips": "根目录 ID（留空表示网盘根目录）",
     "skip_verification": "跳过校验",
     "skip_verification-tips": "忽略验证码 API 返回的人机验证链接而不是直接失败；开启可能触发 PikPak 风控",
-    "username": "用户名"
+    "username": "用户名",
+    "username-tips": "PikPak 账号（邮箱或手机号）"
   },
   "PikPakShare": {
     "device_id": "设备 ID",
@@ -1137,14 +1156,17 @@
   },
   "S3": {
     "access_key_id": "访问密钥 ID",
+    "access_key_id-tips": "Access Key ID",
     "add_filename_to_disposition": "在 disposition 中附加文件名",
     "add_filename_to_disposition-tips": "在 Content-Disposition 头里附加文件名。",
     "bucket": "存储桶",
+    "bucket-tips": "存储桶名称",
     "custom_host": "自定义主机",
     "direct_upload_host": "直传主机",
     "enable_custom_host_presign": "自定义主机也参与签名",
     "enable_direct_upload": "启用直传",
     "endpoint": "端点",
+    "endpoint-tips": "S3 服务端点地址（例如 https://s3.amazonaws.com）",
     "force_path_style": "强制 path style",
     "list_object_version": "列出对象版本",
     "list_object_versions": {
@@ -1153,11 +1175,15 @@
     },
     "placeholder": "占位符",
     "region": "区域",
+    "region-tips": "区域（Region）",
     "remove_bucket": "去掉存储桶名",
     "remove_bucket-tips": "使用自定义主机时，从路径中去掉存储桶名。",
     "root_folder_path": "根目录路径",
+    "root_folder_path-tips": "桶内根路径（例如 /photos）",
     "secret_access_key": "访问密钥 Secret",
+    "secret_access_key-tips": "Secret Access Key",
     "session_token": "会话令牌",
+    "session_token-tips": "临时会话令牌（可选）",
     "sign_url_expire": "签名链接有效期",
     "use_ssl": "使用 SSL",
     "use_ssl-tips": "使用 HTTPS",
@@ -1171,13 +1197,17 @@
     "ignore_symlink_error": "忽略软链接错误",
     "passphrase": "口令",
     "password": "密码",
+    "password-tips": "密码（密码与私钥二选一）",
     "port": "端口",
     "port-tips": "SFTP 服务器端口",
     "private_key": "私钥",
+    "private_key-tips": "私钥文件路径（密码与私钥二选一）",
     "private_key_passphrase": "私钥密码",
     "private_key_passphrase-tips": "加密私钥的密码",
     "root_folder_path": "根目录路径",
-    "username": "用户名"
+    "root_folder_path-tips": "服务器上的根路径",
+    "username": "用户名",
+    "username-tips": ""
   },
   "SMB": {
     "address": "地址",
@@ -1186,13 +1216,16 @@
     "host": "主机",
     "host-tips": "SMB 服务器地址",
     "password": "密码",
+    "password-tips": "",
     "port": "端口",
     "port-tips": "SMB 服务器端口（默认 445）",
     "root_folder_path": "根目录路径",
+    "root_folder_path-tips": "共享目录内的根路径",
     "share": "共享名",
     "share-tips": "共享名",
     "share_name": "分享名称",
-    "username": "用户名"
+    "username": "用户名",
+    "username-tips": ""
   },
   "Seafile": {
     "address": "地址",
@@ -1523,11 +1556,14 @@
     "endpoint": "端点",
     "endpoint-tips": "WebDAV 服务器地址（如 https://dav.example.com）",
     "password": "密码",
+    "password-tips": "认证密码",
     "root_folder_path": "根目录路径",
+    "root_folder_path-tips": "服务器上的根路径",
     "tls_insecure_skip_verify": "TLS 跳过证书校验",
     "use_basic_auth": "使用 Basic 认证",
     "use_basic_auth-tips": "使用 Basic 认证",
     "username": "用户名",
+    "username-tips": "认证用户名",
     "vendor": "厂商",
     "vendors": {
       "other": "其它",
