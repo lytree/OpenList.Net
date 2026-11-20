@@ -511,5 +511,6 @@ public class MediaCodeDomainTests
             => Task.FromResult(Resp<List<MediaFile>>.Fail("not implemented", 500));
         public bool CanSeeLibrary(User user, MediaLibrary library) => true;
         public bool CanSeeItem(User user, MediaItem item) => true;
+        public Task<bool> CanSeeItemAsync(User user, MediaItem item, CancellationToken ct = default) => Task.FromResult(CanSeeItem(user, item));
     }
 }

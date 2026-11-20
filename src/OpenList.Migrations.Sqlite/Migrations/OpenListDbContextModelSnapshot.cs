@@ -602,6 +602,10 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("Private")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("private");
+
                     b.Property<int>("Type")
                         .HasColumnType("INTEGER");
 

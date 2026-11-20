@@ -1,12 +1,14 @@
 import { computed, defineComponent, h, type Component } from "vue"
-import { RouterLink, useRoute } from "vue-router"
+import { RouterLink, useRoute, useRouter } from "vue-router"
 import { ElIcon } from "element-plus"
 import {
   Clock,
   Collection,
   Film,
+  FolderOpened,
   HomeFilled,
   List,
+  Lock,
   Odometer,
   OfficeBuilding,
   Star,
@@ -30,17 +32,29 @@ interface NavEntry {
  * 长到十几项时会退化成「一条要横向滑动的截断列表」，而媒体侧恰恰是栏目最多的一侧；
  * 竖排在桌面还能一直挂着分类，不占内容区的上部宽度。
  *
- * 入口分级：**浏览类**（首页 / 媒体库 / 演员 / 片商 / 系列）恒在；**按用户**的想看 / 历史
- * 只在登录后出现 —— 给游客一个点进去就被弹回登录页的假入口，比没有入口更让人困惑。
+ * 入口分级：**浏览类**（首页 / 媒体库 / 资源库 / 演员 / 片商 / 系列）恒在；**按用户**的想看 /
+ * 历史只在登录后出现 —— 给游客一个点进去就被弹回登录页的假入口，比没有入口更让人困惑。
+ * 「资源库」同理只在登录后出现：它指向的文件门面默认要登录（`home_guest_access=false`）。
+ *
+ * **「资源库」是唯一一个跨门面的入口**：媒体库回答「刮削后的条目」，资源库回答「磁盘上
+ * 原本是什么样」，两者都需要，但文件树自带面包屑 / 批量操作 / 上传浮条，塞进媒体外壳会
+ * 让两套版式互相将就。所以这里只做导航转发（`/files`，整个外壳换成 `FilesLayout`），
+ * 不内嵌渲染。代价是点进去之后左栏消失，回媒体靠浏览器后退。
  *
  * 播放列表 / 口味 / 任务中心放在**第二组**（按用户、低频）：它们原来是右上角账户菜单里的
  * 条目，账户区拿掉之后必须有地方接住，否则三个页面变成只能手打地址。分组用的是另一个
  * 容器（`.olm-nav-extra`）而不是同一组后面追加 —— 顶层的「浏览」与「我的」在语义上是两栏。
+ *
+ * **公开 / 私有**：媒体内容按「库」分区，公开库对所有人（含游客）默认显示，私有库
+ * （`MediaLibrary.Private`）只对登录用户可见 —— 后端在 `MediaLibraryService.CanSeeLibrary`
+ * 一处收口，所以游客这里的列表里根本不会出现私有库的条目。游客态额外给一个带锁的
+ * 「私有资源」入口：它不是假入口，而是一句明确的「这边要登录」，点了直接去登录页并回跳。
  */
 export default defineComponent({
   name: "MediaNav",
   setup() {
     const route = useRoute()
+    const router = useRouter()
     const user = useUserStore()
 
     /**
@@ -52,6 +66,11 @@ export default defineComponent({
     const browse = computed<NavEntry[]>(() => [
       { prefix: "/media", label: t("media.tab_home"), icon: HomeFilled, exact: true },
       { prefix: "/media/library", label: t("media.tab_libraries"), icon: Film },
+      // 资源库：现有的文件树（`/files`），紧跟媒体库 —— 两者是同一批内容的两种视角。
+      // 只对登录用户渲染，因为文件门面默认要登录；游客看到的是一个进不去的入口。
+      ...(user.isLogin
+        ? [{ prefix: "/files", label: t("media.tab_resources"), icon: FolderOpened }]
+        : []),
       { prefix: "/media/persons", label: t("media.persons"), icon: User },
       { prefix: "/media/studios", label: t("media.studios"), icon: OfficeBuilding },
       { prefix: "/media/series", label: t("media.series"), icon: Collection },
@@ -93,7 +112,26 @@ export default defineComponent({
 
     return () => (
       <>
-        <nav class="olm-nav">{browse.value.map(link)}</nav>
+        <nav class="olm-nav">
+          {browse.value.map(link)}
+
+          {/* 游客态：私有资源不是「点进去会被弹回登录页的假入口」，而是一个明确的
+              「这里需要登录」提示 —— 锁图标 + 悬停说明，点了直接去登录页并回跳媒体首页。
+              登录后这一项消失（私有库自己会出现在下面的列表里）。 */}
+          {!user.isLogin && (
+            <button
+              type="button"
+              class="olm-nav-link olm-nav-locked"
+              title={t("media.private_login_hint")}
+              onClick={() => void router.push({ name: "login", query: { redirect: "/media" } })}
+            >
+              <ElIcon class="olm-nav-icon">
+                <Lock />
+              </ElIcon>
+              <span class="olm-nav-label">{t("media.tab_private")}</span>
+            </button>
+          )}
+        </nav>
 
         {mine.value.length > 0 && (
           <>

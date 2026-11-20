@@ -627,6 +627,10 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool>("Private")
+                        .HasColumnType("boolean")
+                        .HasJsonPropertyName("private");
+
                     b.Property<int>("Type")
                         .HasColumnType("integer");
 

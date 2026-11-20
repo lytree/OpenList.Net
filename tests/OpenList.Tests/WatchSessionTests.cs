@@ -510,5 +510,6 @@ public class WatchSessionTests
         public bool CanSeeLibrary(User user, MediaLibrary library) => true;
         public bool CanSeeItem(User user, MediaItem item)
             => !item.DirectoryPath.StartsWith("/secret", StringComparison.Ordinal);
+        public Task<bool> CanSeeItemAsync(User user, MediaItem item, CancellationToken ct = default) => Task.FromResult(CanSeeItem(user, item));
     }
 }

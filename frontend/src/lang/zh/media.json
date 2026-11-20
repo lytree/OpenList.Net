@@ -4,6 +4,9 @@
   "new_library": "新建媒体库",
   "tab_home": "媒体首页",
   "tab_libraries": "媒体库",
+  "tab_resources": "资源库",
+  "tab_private": "私有资源",
+  "private_login_hint": "私有资源需要登录后查看",
   "tab_favorites": "收藏",
   "tab_in_progress": "继续观看",
   "tab_later": "想看",
@@ -193,6 +196,11 @@
 
   "manage": {
     "title": "媒体库",
+    "col_visibility": "可见性",
+    "visibility_public": "公开",
+    "visibility_private": "私有",
+    "field_private": "私有库",
+    "field_private_hint": "私有库只对登录用户可见：游客在列表、首页和聚合统计里都看不到它",
     "hint": "媒体库是全局的：扫描会把库路径下的视频文件发现为条目。",
     "col_state": "扫描状态",
     "state_idle": "空闲",

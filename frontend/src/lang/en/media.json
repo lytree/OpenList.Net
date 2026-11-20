@@ -4,6 +4,9 @@
   "new_library": "New library",
   "tab_home": "Media home",
   "tab_libraries": "Libraries",
+  "tab_resources": "File library",
+  "tab_private": "Private",
+  "private_login_hint": "Private resources require signing in",
   "tab_favorites": "Favorites",
   "tab_in_progress": "In progress",
   "tab_later": "Watch later",
@@ -193,6 +196,11 @@
 
   "manage": {
     "title": "Media Libraries",
+    "col_visibility": "Visibility",
+    "visibility_public": "Public",
+    "visibility_private": "Private",
+    "field_private": "Private library",
+    "field_private_hint": "Private libraries are visible to signed-in users only: guests never see them in lists, the home page or aggregate stats",
     "hint": "Libraries are global: scanning discovers video files under the library path and builds items.",
     "col_state": "Scan state",
     "state_idle": "Idle",

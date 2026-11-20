@@ -127,6 +127,24 @@
   font-weight: 600;
 }
 
+/* 游客态的「私有资源」：语义上是按钮（点了去登录），视觉上要跟其他导航项一模一样。
+   只把浏览器给 <button> 的默认样式清掉，其余全部继承 .olm-nav-link。 */
+.olm-nav-locked {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* 与「按用户」的分组区别开：私有入口比公开栏目弱一级，用虚线暗示「另一侧」。 */
+  border-top: 1px dashed var(--el-border-color-lighter);
+  border-radius: 0 0 var(--ol-radius-md) var(--ol-radius-md);
+  margin-top: 6px;
+  padding-top: 6px;
+  height: 42px;
+  color: var(--ol-text-muted, var(--ol-text-secondary));
+}
+
 .olm-nav-icon {
   flex: none;
   font-size: 16px;

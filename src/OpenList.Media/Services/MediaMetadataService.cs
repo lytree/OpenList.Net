@@ -332,7 +332,9 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
     {
         var item = await _db.MediaItems.AsNoTracking().FirstOrDefaultAsync(i => i.Id == itemId, ct);
         if (item is null) return Resp<List<MediaItemPersonCredit>>.Fail("item not found", RespCodes.NotFound);
-        if (!_libraries.CanSeeItem(user, item)) return Resp<List<MediaItemPersonCredit>>.Fail("permission denied", 403);
+        // 私有库对游客按「不存在」处理（口径同 GetItemAsync）：演员表也是元数据。
+        if (!await _libraries.CanSeeItemAsync(user, item, ct))
+            return Resp<List<MediaItemPersonCredit>>.Fail("item not found", RespCodes.NotFound);
 
         var rows = await (from r in _db.MediaItemPersons.AsNoTracking()
                           join p in _db.MediaPersons.AsNoTracking() on r.PersonId equals p.Id
@@ -362,7 +364,12 @@ public sealed partial class MediaMetadataService : IMediaMetadataService
                           orderby i.Year descending, i.Title
                           select new { Item = i, r.Role, r.Character }).ToListAsync(ct);
 
-        var visible = rows.Where(x => _libraries.CanSeeItem(user, x.Item))
+        // 人物页是匿名可看的：先取一次「可见库 id 集合」，再在内存里筛，避免逐行回表
+        // （一个人可能挂着上百条条目，逐条问库就是上百次查询）。
+        var visibleLibs = (await _libraries.ListAsync(user, ct)).Data?
+            .Select(l => l.Id).ToHashSet() ?? [];
+        var visible = rows
+            .Where(x => visibleLibs.Contains(x.Item.LibraryId) && _libraries.CanSeeItem(user, x.Item))
             .Select(x => new PersonAggregateItem { Item = x.Item, Role = x.Role, Character = x.Character })
             .ToList();
         return Resp<PersonAggregate>.Ok(new PersonAggregate { Person = person, Items = visible });

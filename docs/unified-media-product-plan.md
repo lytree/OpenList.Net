@@ -4023,3 +4023,86 @@ return false                                // 公开页
 - **任务中心的写操作**（暂停/取消/重试）：现在只读，操作留在管理台。
 
 以上三项都不影响本轮的路由与门面边界，属于媒体域下一阶段的能力。
+
+## 61. 媒体资源分区：公开默认显示、私有用登录解锁（2026-11-20）
+
+媒体门面从「整站要么公开要么全锁」变成**按库分区的两级可见性**：公开库游客默认就能看，
+私有库（含其下全部条目、海报、文件清单）只对已登录用户存在。
+
+### 61.1 为什么开关在「库」这一级
+
+媒体库天然就是「一批资源的集合」——家庭录像、私人收藏、某个需要上锁的分区。逐条打勾既
+没有界面承载（详情页上放一个开关，谁来找得到？），也会造出「同一个库里公开一半私有一半」
+这种谁也说不清的口径。放库里还带来一个免费的好处：扫描/刮削/统计都以库为单位，隐私边界
+与运维边界重合。
+
+`MediaLibrary.Private`（`[JsonPropertyName("private")]`，DB 列 `Private`，默认 `false`）：
+默认公开与站点「媒体门面默认对外开放」的定位一致，升级后既有库的行为不变。
+
+### 61.2 收口在一处：`CanSeeLibrary`
+
+```csharp
+public bool CanSeeLibrary(User user, MediaLibrary library) => !library.Private || user.Id != 0;
+```
+
+匿名访客的 `User.Id` 恒为 0（`ClaimsPrincipal.ToUser()`），登录用户 > 0。判定放在
+`MediaLibraryService` 而不是端点过滤器里，是因为**所有**读路径最后都汇到
+`IMediaLibraryService.ListAsync`：
+
+| 入口 | 收口方式 |
+|---|---|
+| `GET /media/libraries` | `ListAsync` 直接筛掉 |
+| `GET /media/items`（跨库 `library_id=0`） | 先取可见库 id 集合再过滤 |
+| `GET /media/items?library_id=N` | 单库不可见 → **404** |
+| `GET /media/items/{id}`、`/files`、`/image` | `CanSeeItemAsync`（回表查所属库）→ **404** |
+| `/media/home`、`/facets`、`/stats`、`/persons`、`/studios`、`/series` | 共用 `LoadVisibleItemsAsync` → `ListAsync` |
+| `/media/items/{id}/credits`、`/media/persons/{id}` | 私有库条目从聚合里剔除（人数/计数一起变） |
+
+**一律 404，不用 403**：403 等于确认「这个 id 确实存在」，猜 id 的枚举者据此就能把私有库
+的规模摸出来。与图片端点「读不到就是 404」、站内信越权同一口径。
+
+同步的 `CanSeeItem` 只判路径（它没有库信息可查），所以凡是「手里只有条目」的读接口都必须
+走新加的 `CanSeeItemAsync` —— 接口文档里写明了这条分工，避免以后有人顺手用错。
+
+### 61.3 前端：分区在导航上就能读出来
+
+- **管理台**（`pages/manage/media/MediaLibraries.tsx`）新建/编辑表单加「私有库」开关
+  （开启后提示「游客在列表、首页和聚合统计里都看不到它」），列表多一列可见性
+  （公开 = 绿、私有 = 橙）。
+- **媒体库页**（`pages/media/index.tsx`）的筛选条上，私有库名字后面带一把锁：登录用户
+  得知道这一格不是公开的那部分，否则「同一个站点换个设备就少了几个库」会被当成同步故障。
+- **游客态导航**（`pages/media/MediaNav.tsx`）在公开栏目下面多一个带锁的「私有资源」按钮，
+  悬停说明「私有资源需要登录后查看」，点击直接去登录页并在登录后回跳 `/media`。它不是
+  「点进去被弹回登录页的假入口」，而是一句明确的提示 —— 游客看不到私有库本身，连名字
+  都不会出现（后端就筛掉了）。
+- 登录后这一项消失：私有库自己会出现在库列表里。
+
+### 61.4 同时落地的两处门面调整
+
+1. **`资源库` 进左栏**（登录后可见）：媒体库回答「刮削后的条目」，资源库回答「磁盘上原本
+   是什么样」，两者是同一批内容的两种视角。入口排在媒体库之后，指向现有的文件树
+   （`/files`）—— **只做导航转发，不内嵌**：文件树自带面包屑/批量操作/上传浮条，塞进
+   媒体外壳会让两套版式互相将就。代价是点进去后左栏消失，回媒体靠浏览器后退。
+   它只对登录用户渲染（`home_guest_access` 默认 false）。
+2. **桌面端「打开网页」显式落到 `/media`**（`DashboardViewModel.OpenWeb`）：根路由虽然也会
+   重定向到媒体首页，但那是前端的实现细节；桌面端要的是「打开就是内容」，不该依赖一条
+   重定向。游客态因此直接看到公开的那部分，不会被挡在登录页。
+
+### 61.5 迁移与验收
+
+- 迁移两份：`AddMediaLibraryPrivacy`（Sqlite `INTEGER` / Postgres `boolean`，
+  `defaultValue: false`），既有库升级后全是公开。
+- `dotnet`：新增 `MediaLibraryPrivacyTests`（7 条）覆盖库列表 / 单库 / 单条 / 文件清单 /
+  首页 / facets / create-update 往返；`Media*` 全量 84 条通过。
+- 前端：`pnpm typecheck`、`pnpm test`（267 条，新增 `MediaNav.spec.ts` 5 条）、`pnpm build`
+  全绿；`verify-media-dimensions.mjs` 的导航计数从 7 改为 8。
+- 真机冒烟（临时库 + 端口 5399）：匿名建库前后 `GET /api/media/libraries` 只回公开库；
+  匿名 `GET /api/media/libraries/1`（私有）→ `404 library not found`，公开库 → 200；
+  匿名 `GET /api/media/items?library_id=1` → 404；带 token 两者都正常。
+
+### 61.6 已知边界
+
+- **游客播放公开媒体仍受 `home_guest_access` 约束**：播放走 `/p?path=…&sign=…`，签名来自
+  `/api/fs/get`，而该端点默认要登录。也就是说游客今天能看到公开库的海报和元数据，但点播
+  会失败。要打通得给媒体域加一个「按条目 id 取流」的匿名端点（校验条目可见性后再读 VFS），
+  属于下一步，不在本轮范围内。

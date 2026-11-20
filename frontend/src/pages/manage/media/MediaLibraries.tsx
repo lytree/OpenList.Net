@@ -70,11 +70,12 @@ interface LibraryForm {
   path: string
   type: number
   autoScan: boolean
+  isPrivate: boolean
   language: string
 }
 
 function emptyForm(): LibraryForm {
-  return { name: "", path: "", type: 2, autoScan: true, language: "" }
+  return { name: "", path: "", type: 2, autoScan: true, isPrivate: false, language: "" }
 }
 
 export default defineComponent({
@@ -176,6 +177,7 @@ export default defineComponent({
         path: row.path,
         type: row.type,
         autoScan: row.auto_scan,
+        isPrivate: row.private === true,
         language: row.metadata_language ?? "",
       })
       dialogVisible.value = true
@@ -194,6 +196,7 @@ export default defineComponent({
         name: form.name.trim(),
         type: form.type,
         auto_scan: form.autoScan,
+        private: form.isPrivate,
         metadata_language: form.language.trim() || undefined,
       }
       saving.value = true
@@ -373,6 +376,25 @@ export default defineComponent({
                 default: ({ row }) => {
                   const r = row as MediaLibrary
                   return <ElTag size="small">{t(`media.type_${libraryTypeKey(r.type)}`)}</ElTag>
+                },
+              }}
+            </VexColumn>
+            {/* 可见性紧跟类型：它和「这是电影库还是剧集库」是同一层的描述，
+                而不是扫描状态那种运行时信息。公开用绿、私有用警示色 —— 私有库的
+                后果是「游客完全看不到」，扫一眼表格就能确认分区对不对。 */}
+            <VexColumn label={t("media.manage.col_visibility")} width={90}>
+              {{
+                default: ({ row }) => {
+                  const r = row as MediaLibrary
+                  return r.private ? (
+                    <ElTag size="small" type="warning">
+                      {t("media.manage.visibility_private")}
+                    </ElTag>
+                  ) : (
+                    <ElTag size="small" type="success">
+                      {t("media.manage.visibility_public")}
+                    </ElTag>
+                  )
                 },
               }}
             </VexColumn>
@@ -616,6 +638,19 @@ export default defineComponent({
                           onUpdate:modelValue={(v: boolean | string | number) => (form.autoScan = !!v)}
                         />
                         <span class="ol-field-help">{t("media.manage.field_auto_scan_hint")}</span>
+                      </div>
+                    ),
+                  }}
+                </ElFormItem>
+                <ElFormItem label={t("media.manage.field_private")}>
+                  {{
+                    default: () => (
+                      <div class="ol-field-col">
+                        <ElSwitch
+                          modelValue={form.isPrivate}
+                          onUpdate:modelValue={(v: boolean | string | number) => (form.isPrivate = !!v)}
+                        />
+                        <span class="ol-field-help">{t("media.manage.field_private_hint")}</span>
                       </div>
                     ),
                   }}

@@ -247,7 +247,10 @@ public partial class DashboardViewModel : ViewModelBase
     private void OpenWeb()
     {
         if (!IsRunning) return;
-        UpdateChecker.OpenUrl(_core.BaseUrl);
+        // 落点显式写成 `/media`：根路由虽然也会重定向到媒体首页，但那是前端的实现细节 ——
+        // 桌面端才是「打开就是内容」的那一侧，别依赖一条重定向。显式给出之后，即便将来
+        // 根路由的默认落地页再变（比如某天想落到管理台），桌面端也不会跟着漂。
+        UpdateChecker.OpenUrl($"{_core.BaseUrl}/media");
     }
 
     // ---------------- 首次初始化 / 登录凭据 ----------------

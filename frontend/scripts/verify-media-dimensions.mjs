@@ -254,9 +254,10 @@ await page.waitForSelector(".ol-media-facets", { timeout: 10000 })
 const facetChips = await page.locator(".ol-media-facets .ol-media-chip-tag").count()
 check("媒体库页渲染 facets 筛选条", facetChips > 3, `${facetChips} chips`)
 
-// 登录态下导航是 7 项：首页 / 媒体库 / 演员 / 片商 / 系列 + 想看 / 历史（游客只有前 5 项）
+// 登录态下导航是 8 项：首页 / 媒体库 / 资源库 / 演员 / 片商 / 系列 + 想看 / 历史
+// （游客只有前 5 项：资源库与想看/历史都要登录）
 const navCount = await page.locator(".olm-nav .olm-nav-link").count()
-check("媒体外壳导航 7 项（5 浏览 + 想看/历史）", navCount === 7, `${navCount} links`)
+check("媒体外壳导航 8 项（6 浏览 + 想看/历史）", navCount === 8, `${navCount} links`)
 
 const cardsBefore = await page.locator(".ol-media-grid .ol-media-card").count()
 await page.locator(".ol-media-facets .ol-media-chip-tag", { hasText: "Blade Runner" }).count()

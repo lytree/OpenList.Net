@@ -31,6 +31,8 @@ export interface MediaLibrary {
   path: string
   type: MediaLibraryType
   auto_scan: boolean
+  /** 私有库：只对登录用户可见，游客在列表 / 首页 / 聚合里都看不到。 */
+  private: boolean
   metadata_language?: string | null
   created_by: number
   last_scan_at?: string | null
@@ -148,6 +150,8 @@ export type CreateMediaLibraryReq = {
   path: string
   type: MediaLibraryType
   auto_scan?: boolean
+  /** 私有库：只对登录用户可见。 */
+  private?: boolean
   metadata_language?: string
 }
 

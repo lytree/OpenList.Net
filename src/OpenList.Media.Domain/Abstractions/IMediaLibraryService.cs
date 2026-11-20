@@ -26,10 +26,18 @@ public interface IMediaLibraryService
     Task<Resp<MediaItem>> GetItemAsync(long itemId, User user, CancellationToken ct = default);
     /// <summary>列出条目下的媒体文件。</summary>
     Task<Resp<List<MediaFile>>> ListItemFilesAsync(long itemId, User user, CancellationToken ct = default);
-    /// <summary>校验指定用户对某媒体库路径是否可见。</summary>
+    /// <summary>校验指定用户对某媒体库路径是否可见（私有库只对登录用户可见）。</summary>
     bool CanSeeLibrary(User user, MediaLibrary library);
-    /// <summary>校验指定用户对某媒体条目是否可见（库可见 + 条目路径在用户根目录范围内）。</summary>
+    /// <summary>
+    /// 校验指定用户对某媒体条目是否可见（库可见 + 条目路径在用户根目录范围内）。
+    /// <para>
+    /// 同步版**只看路径**：库里是否私有要回表查，所以凡是「拿到的只有条目」的接口
+    /// （单条详情 / 文件清单 / 创作者）都应该用 <see cref="CanSeeItemAsync"/>。
+    /// </para>
+    /// </summary>
     bool CanSeeItem(User user, MediaItem item);
+    /// <summary>条目可见性（含所属媒体库的公开/私有）。游客对私有库的条目一律不可见。</summary>
+    Task<bool> CanSeeItemAsync(User user, MediaItem item, CancellationToken ct = default);
 }
 
 /// <summary>创建媒体库请求。</summary>
@@ -44,6 +52,9 @@ public sealed class CreateMediaLibraryReq
     /// <summary>是否参与定时增量扫描。</summary>
     [JsonPropertyName("auto_scan")]
     public bool AutoScan { get; set; } = true;
+    /// <summary>是否私有（私有库只对登录用户可见，游客看不到）。</summary>
+    [JsonPropertyName("private")]
+    public bool Private { get; set; }
     /// <summary>刮削语言（可选）。</summary>
     [JsonPropertyName("metadata_language")]
     public string? MetadataLanguage { get; set; }
@@ -59,6 +70,9 @@ public sealed class UpdateMediaLibraryReq
     /// <summary>是否参与定时增量扫描。</summary>
     [JsonPropertyName("auto_scan")]
     public bool? AutoScan { get; set; }
+    /// <summary>是否私有（null 表示不修改）。</summary>
+    [JsonPropertyName("private")]
+    public bool? Private { get; set; }
     /// <summary>刮削语言。</summary>
     [JsonPropertyName("metadata_language")]
     public string? MetadataLanguage { get; set; }

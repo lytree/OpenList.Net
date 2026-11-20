@@ -46,6 +46,7 @@ public sealed class MediaLibraryService : IMediaLibraryService
             Path = path,
             Type = req.Type,
             AutoScan = req.AutoScan,
+            Private = req.Private,
             MetadataLanguage = req.MetadataLanguage,
             CreatedBy = user.Id,
             CreatedAt = now,
@@ -66,6 +67,7 @@ public sealed class MediaLibraryService : IMediaLibraryService
         if (req.Name is not null) lib.Name = req.Name.Trim();
         if (req.Type is not null) lib.Type = req.Type.Value;
         if (req.AutoScan is not null) lib.AutoScan = req.AutoScan.Value;
+        if (req.Private is not null) lib.Private = req.Private.Value;
         if (req.MetadataLanguage is not null) lib.MetadataLanguage = req.MetadataLanguage;
         lib.UpdatedAt = _time.GetUtcNow();
         await _db.SaveChangesAsync(ct);
@@ -110,9 +112,10 @@ public sealed class MediaLibraryService : IMediaLibraryService
     {
         var lib = await _db.MediaLibraries.AsNoTracking().FirstOrDefaultAsync(l => l.Id == id, ct);
         if (lib is null) return Resp<MediaLibrary>.Fail("library not found", RespCodes.NotFound);
+        // 私有库对游客同样按「不存在」处理（口径见 GetItemAsync / ListItemsAsync）。
         return CanSeeLibrary(user, lib)
             ? Resp<MediaLibrary>.Ok(lib)
-            : Resp<MediaLibrary>.Fail("permission denied", 403);
+            : Resp<MediaLibrary>.Fail("library not found", RespCodes.NotFound);
     }
 
     /// <inheritdoc />
@@ -131,7 +134,10 @@ public sealed class MediaLibraryService : IMediaLibraryService
         {
             var lib = await _db.MediaLibraries.AsNoTracking().FirstOrDefaultAsync(l => l.Id == query.LibraryId, ct);
             if (lib is null) return Resp<PageResp<MediaItem>>.Fail("library not found", RespCodes.NotFound);
-            if (!CanSeeLibrary(user, lib)) return Resp<PageResp<MediaItem>>.Fail("permission denied", 403);
+            // 私有库对游客按「不存在」处理（口径同 GetItemAsync）：列库时它本来就不在列表里，
+            // 直接带 id 访问也不该得到「permission denied」这种存在性信号。
+            if (!CanSeeLibrary(user, lib))
+                return Resp<PageResp<MediaItem>>.Fail("library not found", RespCodes.NotFound);
             q = _db.MediaItems.AsNoTracking().Where(i => i.LibraryId == query.LibraryId);
         }
 
@@ -274,7 +280,10 @@ public sealed class MediaLibraryService : IMediaLibraryService
     {
         var item = await _db.MediaItems.AsNoTracking().FirstOrDefaultAsync(i => i.Id == itemId, ct);
         if (item is null) return Resp<MediaItem>.Fail("item not found", RespCodes.NotFound);
-        if (!IsPathVisible(user, item.DirectoryPath)) return Resp<MediaItem>.Fail("permission denied", 403);
+        // 私有库里的条目对游客按「不存在」处理：403 等于确认这条 id 是真的，
+        // 猜 id 的枚举者就能据此把私有库的规模摸出来（与图片端点同一口径）。
+        if (!await CanSeeItemAsync(user, item, ct))
+            return Resp<MediaItem>.Fail("item not found", RespCodes.NotFound);
         return Resp<MediaItem>.Ok(item);
     }
 
@@ -283,7 +292,9 @@ public sealed class MediaLibraryService : IMediaLibraryService
     {
         var item = await _db.MediaItems.AsNoTracking().FirstOrDefaultAsync(i => i.Id == itemId, ct);
         if (item is null) return Resp<List<MediaFile>>.Fail("item not found", RespCodes.NotFound);
-        if (!IsPathVisible(user, item.DirectoryPath)) return Resp<List<MediaFile>>.Fail("permission denied", 403);
+        // 文件清单带的是真实 VFS 路径，比元数据更敏感：私有库对游客同样按「不存在」处理。
+        if (!await CanSeeItemAsync(user, item, ct))
+            return Resp<List<MediaFile>>.Fail("item not found", RespCodes.NotFound);
 
         var files = await _db.MediaFiles.AsNoTracking()
             .Where(f => f.ItemId == itemId)
@@ -292,11 +303,35 @@ public sealed class MediaLibraryService : IMediaLibraryService
         return Resp<List<MediaFile>>.Ok(files);
     }
 
-    /// <inheritdoc />
-    public bool CanSeeLibrary(User user, MediaLibrary library) => true;
+    /// <summary>
+    /// 库可见性：**私有库只对已登录用户开放**，其余（单用户产品下就是「所有已登录用户」）全部可见。
+    /// <para>
+    /// 判定放在服务层而不是端点过滤器里，是因为所有读路径（条目列表、首页聚合、facets、人物 /
+    /// 片商 / 系列、统计）最后都会汇到 <see cref="ListAsync"/> —— 在这一处收口，游客不可能
+    /// 从任何一条聚合口径里看到私有库的影子（例如「题材计数里多出 12 条私有条目」）。
+    /// </para>
+    /// </summary>
+    public bool CanSeeLibrary(User user, MediaLibrary library) => !library.Private || user.Id != 0;
 
     /// <summary>判断条目路径是否在用户根目录范围内（单用户产品下恒可见）。</summary>
     public bool CanSeeItem(User user, MediaItem item) => IsPathVisible(user, item.DirectoryPath);
+
+    /// <summary>
+    /// 条目级可见性：库可见性与路径可见性都要满足。
+    /// <para>
+    /// 单条 / 文件清单 / 海报这些接口拿到的只有 <c>item.LibraryId</c>，必须先回到库上问一句
+    /// —— 否则一个私有库里的条目 id 被猜到（或从旧收藏、旧分享链接里留下）就能绕开列表
+    /// 直接读元数据与文件路径。
+    /// </para>
+    /// </summary>
+    public async Task<bool> CanSeeItemAsync(User user, MediaItem item, CancellationToken ct = default)
+    {
+        if (!IsPathVisible(user, item.DirectoryPath)) return false;
+        // 已登录用户不需要再查库：CanSeeLibrary 对登录态恒真，省掉一次往返。
+        if (user.Id != 0) return true;
+        var lib = await _db.MediaLibraries.AsNoTracking().FirstOrDefaultAsync(l => l.Id == item.LibraryId, ct);
+        return lib is not null && CanSeeLibrary(user, lib);
+    }
 
     /// <summary>判断条目路径是否在用户根目录范围内（单用户产品下恒可见）。</summary>
     internal static bool IsPathVisible(User user, string path) => true;

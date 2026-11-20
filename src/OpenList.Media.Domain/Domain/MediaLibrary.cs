@@ -33,6 +33,18 @@ public sealed class MediaLibrary
     /// <summary>是否参与定时增量扫描。</summary>
     [JsonPropertyName("auto_scan")]
     public bool AutoScan { get; set; } = true;
+    /// <summary>
+    /// 是否私有：私有库（含其下全部条目、海报、文件清单）**只对已登录用户可见**，
+    /// 游客在列表 / 首页 / 聚合统计里都看不到它，直接访问条目 id 也给 404。
+    /// <para>
+    /// 为什么把开关放在「库」这一级而不是单个条目：媒体库天然就是「一批资源的集合」
+    /// （家庭录像 / 私人收藏 / 需要上锁的分区），逐个条目打勾既没有界面承载，也会出现
+    /// 「同一个库里公开一半私有一半」这种谁也说不清的口径。默认 false = 公开，
+    /// 与站点「媒体门面默认对外开放」的定位一致，升级后既有库的行为不变。
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("private")]
+    public bool Private { get; set; }
     /// <summary>刮削元数据语言（如 "zh-CN"），为空时使用全局设置。</summary>
     [JsonPropertyName("metadata_language")]
     public string? MetadataLanguage { get; set; }

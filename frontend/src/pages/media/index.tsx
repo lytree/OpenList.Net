@@ -1,7 +1,7 @@
 import { computed, defineComponent, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ElButton, ElEmpty, ElInput, ElOption, ElSelect, ElTag } from "element-plus"
-import { Search } from "@element-plus/icons-vue"
+import { ElButton, ElEmpty, ElIcon, ElInput, ElOption, ElSelect, ElTag } from "element-plus"
+import { Lock, Search } from "@element-plus/icons-vue"
 import {
   mediaBatchStates,
   mediaFacets,
@@ -268,6 +268,14 @@ export default defineComponent({
                 onClick={() => (libraryId.value = lib.id)}
               >
                 {lib.name}
+                {/* 私有库在筛选条上带一把锁：游客看不到它（后端已过滤），登录后得知道
+                    这一格的内容不是公开的那部分 —— 否则「同一个站点，换个设备就少了几个库」
+                    会被当成同步出问题。 */}
+                {lib.private && (
+                  <ElIcon style={{ marginLeft: "4px" }}>
+                    <Lock />
+                  </ElIcon>
+                )}
               </ElButton>
             ))}
           </div>
