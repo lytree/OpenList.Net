@@ -105,7 +105,7 @@ jobs:
       # 14 days: main-branch artifacts are for testers, not for shipping.
       retention-days: 14
 
-  # Framework-dependent bundle: app/ + frontend/dist/ + launchers + README,
+  # Framework-dependent bundle: app/ + frontend/ + launchers + README,
   # packaged as tar.gz and kept as a downloadable CI artifact. Small and
   # platform-agnostic — the RID bundles above each carry their own dotnet/ runtime,
   # this one is a few MB when you already have the .NET 10 runtime.
@@ -141,8 +141,8 @@ jobs:
           set -euo pipefail
           BUNDLE="${BUNDLE_NAME}-${SEMVER}"
           echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
-          mkdir -p "$BUNDLE/frontend/dist"
-          cp -a frontend/dist/. "$BUNDLE/frontend/dist/"
+          mkdir -p "$BUNDLE/frontend"
+          cp -a frontend/index.html frontend/favicon.svg frontend/assets frontend/ruffle "$BUNDLE/frontend/"
 
       - name: Publish server (framework-dependent)
         run: |
@@ -178,7 +178,7 @@ jobs:
           cat > run.sh <<'EOF'
           #!/usr/bin/env sh
           cd "$(dirname "$0")/app" || exit 1
-          export OpenList__DistDir="../frontend/dist"
+          export OpenList__DistDir="../frontend"
           : "${ASPNETCORE_URLS:=http://0.0.0.0:5244}"
           export ASPNETCORE_URLS
           exec dotnet OpenList.Server.dll
@@ -188,7 +188,7 @@ jobs:
           cat > run.bat <<'EOF'
           @echo off
           cd /d "%~dp0app"
-          set OpenList__DistDir=../frontend/dist
+          set OpenList__DistDir=../frontend
           if not defined ASPNETCORE_URLS set ASPNETCORE_URLS=http://0.0.0.0:5244
           dotnet OpenList.Server.dll
           EOF
@@ -202,7 +202,7 @@ jobs:
 
           Layout:
             app/             .NET server (framework-dependent publish output; needs the .NET 10 runtime)
-            frontend/dist/   OpenList SPA (Vue 3, built from this repo)
+            frontend/        OpenList SPA (Vue 3, built from this repo)
             run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
             README.txt       This file
 
@@ -211,12 +211,36 @@ jobs:
             Windows:      run.bat
 
           Requires the .NET 10 runtime on the host. The launcher exports
-          OpenList__DistDir=../frontend/dist (relative to app/) so the server finds the SPA
+          OpenList__DistDir=../frontend (relative to app/) so the server finds the SPA
           without editing appsettings.json. Default port: http://0.0.0.0:5244
 
           Data is stored under app/data/ by default. Configure via OpenList__ environment
           variables (e.g. OpenList__Database__Type=postgres).
           EOF
+
+      # 前端产物现在直接落在 frontend/ 根（没有 dist/ 那一层），这条路径只有真正起一次
+      # 进程才验证得了：run.sh 里的 OpenList__DistDir、静态中间件、SPA 回落三者必须同时成立。
+      # 一个 hashed asset 也要 200 —— 外壳能出但 assets 404 是这套布局最可能的坏法。
+      - name: Smoke-test the bundle layout
+        run: |
+          set -euo pipefail
+          # 在副本里跑，别让这次启动写出来的 data/、日志进最终发布的 tar。
+          rm -rf /tmp/smoke && cp -a "$BUNDLE" /tmp/smoke && cd /tmp/smoke
+          sh ./run.sh > server.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -sf -m 1 http://127.0.0.1:5244/ping >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -sf -m 5 http://127.0.0.1:5244/ping
+          shell_html=$(curl -sf -m 5 http://127.0.0.1:5244/)
+          echo "$shell_html" | grep -q '<div id="app">' || { echo "!! SPA shell not served"; tail -30 server.log; exit 1; }
+          asset=$(echo "$shell_html" | grep -o '/assets/[^"]*\.js' | head -1 || true)
+          [ -n "$asset" ] || { echo "!! no hashed asset in shell html"; exit 1; }
+          curl -sf -m 5 "http://127.0.0.1:5244$asset" -o /dev/null
+          echo "bundle layout ok: shell + $asset"
+          kill "$pid"
 
       - name: Package bundle
         run: tar -czf "$BUNDLE.tar.gz" "$BUNDLE"

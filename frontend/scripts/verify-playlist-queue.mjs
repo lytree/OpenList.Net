@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 /**
  * 播放列表「整单连播」的真机验收（docs §39）。
  *
- * 用法（前置：隔离后端 + DistDir 指向 $PWD/dist + /ping 可用）：
+ * 用法（前置：隔离后端 + DistDir 指向 $PWD + /ping 可用）：
  *   BASE=http://127.0.0.1:5011 ADMIN_PASS=e2e12345 node scripts/verify-playlist-queue.mjs
  *
  * 装置自带（临时目录里两个目录各一个 mp4 + NFO），不依赖 gen_fixtures.py ——

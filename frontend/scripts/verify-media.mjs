@@ -4,7 +4,7 @@ import { chromium } from "playwright"
  * 媒体域第一片（浏览 / 详情 / 播放 / 进度）的真机验收。
  *
  * 用法：`BASE=http://127.0.0.1:5001 node scripts/verify-media.mjs`
- * 前置：隔离后端（临时库 + AdminPassword=e2e12345 + DistDir=dist），
+ * 前置：隔离后端（临时库 + AdminPassword=e2e12345 + DistDir=frontend），
  *       挂载 /e2e → `G:\Share\ol-v2-media`，且已建库（E2E Movies）并完成一次扫描：
  *       Budapest/（NFO + poster.jpg + fanart.jpg + video.mp4）、NoSidecar/（只有 mp4）。
  * 装置由生成脚本创建，见 `docs/unified-media-product-plan.md` §27。

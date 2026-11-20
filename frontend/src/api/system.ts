@@ -24,7 +24,7 @@ export interface SystemPaths {
   data_dir: string
   /** 前端产物目录的绝对路径。 */
   dist_dir: string
-  /** `dist/index.html` 的写入时间（≈ 前端构建时间）；取不到为空串。 */
+  /** 前端产物 `index.html`（在 `frontend/` 根）的写入时间（≈ 前端构建时间）；取不到为空串。 */
   dist_built_at: string
   temp_dir: string
   /** 文件日志路径；未启用日志时为空串。 */

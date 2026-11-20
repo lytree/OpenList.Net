@@ -323,18 +323,20 @@ public sealed class OpenListCoreService : IDisposable
             psi.Environment["OpenList__Scheme__HttpPort"] = _settings.HttpPort.ToString();
             psi.Environment["ASPNETCORE_URLS"] = $"http://0.0.0.0:{_settings.HttpPort}";
 
-            // 发布形态：把前端 dist 的绝对路径注入给核心，覆盖 appsettings.json 里的相对
+            // 发布形态：把前端产物的绝对路径注入给核心，覆盖 appsettings.json 里的相对
             // DistDir（核心的工作目录是 data 目录，相对路径会解析错）。
-            // 两种布局都要认：
-            //   扁平布局（当前发布形态）—— exe 与 frontend/ 同级；
-            //   旧布局（server/ 子目录）—— 老版本发行包直接升级上来时仍能跑。
+            // 产物现在直接在 frontend/ 根（没有 dist/ 这一层），但 beta.5 及更早的包是
+            // frontend/dist/，所以两种都要认；判断标准是「里面有没有 index.html」，
+            // 不能只看目录存在 —— 旧包里的 frontend/ 存在但没有 index.html。
             var exeDir = Path.GetDirectoryName(exe)!;
             var distDir = new[]
                 {
-                    Path.Combine(exeDir, "frontend", "dist"),
+                    Path.Combine(exeDir, "frontend"),                  // 扁平布局（当前）
+                    Path.Combine(exeDir, "frontend", "dist"),          // 扁平布局（旧包）
+                    Path.GetFullPath(Path.Combine(exeDir, "..", "frontend")),
                     Path.GetFullPath(Path.Combine(exeDir, "..", "frontend", "dist")),
                 }
-                .FirstOrDefault(Directory.Exists);
+                .FirstOrDefault(dir => Directory.Exists(dir) && File.Exists(Path.Combine(dir, "index.html")));
             if (distDir is not null)
                 psi.Environment["OpenList__DistDir"] = distDir;
 

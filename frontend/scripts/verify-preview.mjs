@@ -4,7 +4,7 @@ import { chromium } from "playwright"
  * 预览器（archive / url / docx / xlsx / asciinema）的真机验收。
  *
  * 用法：`BASE=http://127.0.0.1:5001 TARGET=/e2e node scripts/verify-preview.mjs`
- * 前提：后端托管 `dist`，TARGET 目录是 `verify-preview.mjs` 配套装置
+ * 前提：后端托管 `frontend/`（产物在仓库 frontend/ 根），TARGET 目录是 `verify-preview.mjs` 配套装置
  *      （bundle.zip / book.xlsx / notes.docx / demo.cast / shortcut.url）。
  * 装置由 `.e2e-prev` 的构建脚本生成，见 `docs/unified-media-product-plan.md` §23。
  */

@@ -5,7 +5,7 @@ import { chromium } from "playwright"
  * 种子预览 + 拖入 .torrent 的真机验收。
  *
  * 用法：`BASE=http://127.0.0.1:5001 TARGET=/e2e EXPECT=.e2e-torrent/expected.json node scripts/verify-torrent.mjs`
- * 前提：后端托管 `dist`；TARGET 挂载到装置目录，里面有
+ * 前提：后端托管 `frontend/`（产物在仓库 frontend/ 根）；TARGET 挂载到装置目录，里面有
  *      `bundle.torrent`（多文件）/ `single.torrent`（单文件）/ `notes.txt`（非种子）。
  * 期望值（info_hash、文件数、行数）由装置的生成脚本写出，这里只做比对 ——
  * 哈希在测试侧另算一遍，避免「前端自己算、自己验」的自证循环。

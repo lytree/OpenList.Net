@@ -8,7 +8,7 @@ import { join } from "node:path"
  * 用法：
  *   BASE=http://127.0.0.1:5011 ADMIN_PASS=e2e12345 node scripts/verify-media-dimensions.mjs
  *
- * 前置：隔离后端（临时库 + DistDir=$PWD/dist）。装置由脚本自己生成到
+ * 前置：隔离后端（临时库 + DistDir=$PWD）。装置由脚本自己生成到
  * `.e2e/dim-fixture`（每个条目一个目录：占位 .mp4 + Kodi NFO）。
  * 为什么用 NFO 而不是 TMDB：人物/片商/系列三个维度只有刮削后才有数据，
  * 离线装置走 local NFO 才能稳定复现（在线刮削依赖外网，且结果会变）。

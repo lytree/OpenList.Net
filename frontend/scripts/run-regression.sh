@@ -14,7 +14,7 @@
 # 前置：`dotnet build`、`pnpm -C frontend build`、`.e2e/venv`（openpyxl/python-docx/Pillow）、
 #      ffmpeg 在 PATH 里。
 #      phone / playlist-queue 两轮额外要 Microsoft Edge（脚本钉 `channel: "msedge"`，
-#      本机没有 Playwright 自管 Chromium）与已构建的 `frontend/dist`。
+#      本机没有 Playwright 自管 Chromium）与已构建的前端产物（`frontend/` 根）。
 set -uo pipefail
 
 # Windows 上 `pwd` 给的是 /f/... 形式，而 node / dotnet / python 拿到的是原生路径；
@@ -76,7 +76,7 @@ start_server() {
   # 于是 echo 仍在**调用者**的 cwd 里执行 —— pid 文件落到仓库根，stop_server 拿不到 PID，
   # 服务一轮轮泄漏，下一轮只剩「端口被旧进程占着」这一种症状。
   pushd "$dir" >/dev/null || return 1
-  AdminPassword="$PASS" ASPNETCORE_URLS="$BASE" DistDir="$FE/dist" \
+  AdminPassword="$PASS" ASPNETCORE_URLS="$BASE" DistDir="$FE" \
     dotnet "$SERVER" >server.log 2>&1 &
   SERVER_PID=$!
   popd >/dev/null || true
@@ -140,7 +140,7 @@ finish_round() { # <label> <code>
   if [ "$2" -eq 0 ]; then SUMMARY+=("PASS  $1"); else SUMMARY+=("FAIL  $1"); FAILED=1; fi
 }
 
-# 两个跑浏览器的新轮都钉死了 `channel: "msedge"`，且直接打开 `frontend/dist` 里的 SPA。
+# 两个跑浏览器的新轮都钉死了 `channel: "msedge"`，且直接打开 `frontend/` 根里的 SPA。
 # 缺条件时在这里给出可操作的报错并记 FAIL —— 否则现象是脚本在 `chromium.launch` 处抛异常
 # 或页面一直等到超时，看起来像「功能坏了」。
 require_msedge() {
@@ -156,13 +156,13 @@ require_msedge() {
 }
 
 require_dist() {
-  if [ ! -f "$FE/dist/index.html" ]; then
-    echo "!! frontend/dist 未构建：该轮直接打开 dist 里的 SPA，先跑 pnpm -C frontend build"
+  if [ ! -f "$FE/index.html" ]; then
+    echo "!! 前端未构建：该轮直接打开 frontend/index.html，先跑 pnpm -C frontend build"
     return 1
   fi
   # 只查「存在」不够：旧产物里没有新组件时，症状是选择器一直等不到（很像功能坏了）。
-  if find "$FE/src" -type f -newer "$FE/dist/index.html" -print -quit 2>/dev/null | grep -q .; then
-    echo "!! frontend/dist 比 frontend/src 旧：先跑 pnpm -C frontend build 再重跑本轮"
+  if find "$FE/src" -type f -newer "$FE/index.html" -print -quit 2>/dev/null | grep -q .; then
+    echo "!! frontend/index.html 比 frontend/src 旧：先跑 pnpm -C frontend build 再重跑本轮"
     return 1
   fi
   return 0

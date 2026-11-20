@@ -13,6 +13,25 @@ import ElementPlus from "unplugin-element-plus/vite"
 //   3) 目标文件命名为 *.vapor.tsx
 export default defineConfig(() => {
   return {
+    // 源码根是 `src/`（入口 html 也就是 `src/index.html`），**构建产物直接落在
+    // `frontend/` 根**：`index.html` + `assets/` + `public/` 的副本与源码同级，
+    // 不再有 `frontend/dist/` 这一层。这样发布包里就是 `frontend/index.html`，
+    // 后端 `DistDir` 指到 `frontend` 即可，包内少一层无意义的目录。
+    //
+    // 代价是产物与源码混在一个目录里，所以：
+    //   · `emptyOutDir` 必须是 false（父目录里全是源码，清空就没了）；
+    //   · 每次构建前先跑 `scripts/clean-out.mjs` 删掉上一次的产物（否则旧 hash 的
+    //     assets 会一直堆着，打包体积只增不减）。
+    root: "src",
+    publicDir: "../public",
+    // root 挪进 src/ 后，envDir 默认也跟着变成 src/ —— .env 一直是在 frontend/ 放的，
+    // 这里显式改回来，免得以后加 .env 时静默读不到。
+    envDir: "..",
+    build: {
+      outDir: "..",
+      emptyOutDir: false,
+      assetsDir: "assets",
+    },
     resolve: {
       alias: [
         // { find: /^vue$/, replacement: "vue/dist/vue.runtime-with-vapor.esm-browser.prod.js" },

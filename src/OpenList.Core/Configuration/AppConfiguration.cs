@@ -34,8 +34,11 @@ public sealed class AppConfiguration
     public string AdminPassword { get; set; } = string.Empty;
     /// <summary>数据库配置。</summary>
     public DatabaseConfig Database { get; set; } = new();
-    /// <summary>前端静态文件目录（SPA）。</summary>
-    public string DistDir { get; set; } = "../../frontend/dist";
+    /// <summary>
+    /// 前端静态文件目录（SPA）。产物直接落在 <c>frontend/</c> 根（没有 <c>dist/</c> 这一层），
+    /// 相对路径按 ContentRoot（<c>src/OpenList.Server</c>）解析。
+    /// </summary>
+    public string DistDir { get; set; } = "../../frontend";
     /// <summary>临时目录。</summary>
     public string TempDir { get; set; } = "data/temp";
     /// <summary>监听方案（地址/端口）配置。</summary>

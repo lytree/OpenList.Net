@@ -4,7 +4,7 @@ import { chromium } from "playwright"
  * M1 浏览体验（目录树 / 视图切换 / 分页 / 过滤 / README）的真机验收。
  *
  * 用法：`BASE=http://127.0.0.1:5001 TARGET=/e2e node scripts/verify-v2.mjs`
- * 前提：后端托管 `dist`，TARGET 目录是 `verify-ops.mjs` 造的那份固定装置
+ * 前提：后端托管 `frontend/`（产物在仓库 frontend/ 根），TARGET 目录是 `verify-ops.mjs` 造的那份固定装置
  *      （40 txt + 子目录A + 空目录B + bundle.zip + README.md = 44 项，无图片）。
  *      **先跑本脚本、再跑 verify-ops**：后者会重建装置，顺序反了断言会漂。
  */

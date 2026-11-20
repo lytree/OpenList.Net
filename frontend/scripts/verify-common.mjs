@@ -11,7 +11,7 @@ import { chromium } from "playwright"
  * 后端 + 数据库不划算，所以挂在「管理台页签全开」这一轮里（见 F 段）。
  *
  * 用法：`BASE=http://127.0.0.1:5055 ADMIN_PASS=e2e12345 node scripts/verify-common.mjs`
- * 前置：隔离后端托管 dist（临时库），无需任何挂载/装置。
+ * 前置：隔离后端托管前端产物 frontend/（临时库），无需任何挂载/装置。
  */
 
 const BASE = process.env.BASE || "http://127.0.0.1:5055"

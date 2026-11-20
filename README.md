@@ -63,7 +63,7 @@ dotnet format
 - **FTP/SFTP servers**: hosted services, disabled by default (`FTP.Enable`/`SFTP.Enable` in config).
 - **Kestrel body limit**: 10 GB (for WebDAV uploads).
 - **Swagger + Scalar**: at `/swagger` and `/scalar` (Development only).
-- **SPA fallback**: serves `index.html` from `DistDir` (`../../frontend/dist` by default).
+- **SPA fallback**: serves `index.html` from `DistDir` (`../../frontend` by default).
 - **Environment variables**: use `OpenList__` prefix (e.g. `OpenList__Database__Type=postgres`).
 
 ## Not Yet Implemented (from Go reference)
@@ -313,7 +313,7 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 ## Phase 17 — Frontend Contract Alignment ✅
 
 - [x] `/api/*` 响应与前端 TS 类型对齐（对照 `Openlist-Frontend` v4.2.5，git submodule `feae2d0`）
-- [x] SPA fallback 服务 `frontend/dist`（`MapFallback` + 静态文件）
+- [x] SPA fallback 服务 `frontend/`（产物落在 frontend 根，`MapFallback` + 静态文件）
 - [x] Dev proxy（`frontend/` `pnpm dev` → `localhost:5244`）
 - [x] End-to-end smoke：登录 → list → 上传 → 分享（2026-08-16 运行时冒烟验证）
 

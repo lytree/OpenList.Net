@@ -7,7 +7,7 @@ import CryptoJS from "crypto-js"
  * 管理台备份 / 恢复（§37）的真机验收。
  *
  * 用法：`BASE=http://127.0.0.1:5055 ADMIN_PASS=e2e12345 node scripts/verify-backup.mjs`
- * 前置：隔离后端（临时库 + AdminPassword + DistDir=frontend/dist）。
+ * 前置：隔离后端（临时库 + AdminPassword + DistDir=frontend）。
  *
  * 这个页面**没有后端端点**：导出 = 拉三个既有管理端点拼 JSON，恢复 = 解 JSON 后逐条走 CRUD。
  * 所以断言全部落在「文件内容」与「恢复后服务端的状态」上，而不是某个接口。

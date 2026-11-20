@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
  * M4 管理台「整库刮削」按钮的真机验收。
  *
  * 用法：`BASE=http://127.0.0.1:5013 ADMIN_PASS=e2e12345 node scripts/verify-scrape.mjs`
- * 前置：隔离后端（临时库 + AdminPassword + DistDir=frontend/dist）。
+ * 前置：隔离后端（临时库 + AdminPassword + DistDir=frontend）。
  *
  * 装置由脚本自建到 `G:/Share/ol-v2-scrape`：
  *   - `Movie One (2001)/movie.mp4` 等 3 个目录（**不带 NFO** → 扫描后条目是 Pending）

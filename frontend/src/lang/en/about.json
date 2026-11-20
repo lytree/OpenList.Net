@@ -30,7 +30,7 @@
   "tip_uptime": "Time since the server process started.",
   "tip_skew": "Server time minus this browser's clock. A large gap means the two machines disagree about time.",
   "tip_built_at": "Write time of the server assembly - roughly when the backend was built.",
-  "tip_dist_built_at": "Write time of dist/index.html - roughly when the frontend bundle was built. A pair of very different timestamps usually means one side was redeployed without the other.",
+  "tip_dist_built_at": "Write time of the frontend index.html (frontend/ root) - roughly when the frontend bundle was built. A pair of very different timestamps usually means one side was redeployed without the other.",
   "tip_max_conn": "0 means unlimited.",
   "link_repo": "Repository",
   "link_issues": "Issues",

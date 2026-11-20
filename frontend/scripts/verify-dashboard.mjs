@@ -5,7 +5,7 @@ import { chromium } from "playwright"
  *
  * 用法：`BASE=http://127.0.0.1:5055 ADMIN_PASS=e2e12345 FIXTURE=G:/Share/ol-v2-dash \
  *        node scripts/verify-dashboard.mjs`
- * 前置：隔离后端（临时库 + AdminPassword + DistDir=frontend/dist）+ `gen_fixtures.py media`
+ * 前置：隔离后端（临时库 + AdminPassword + DistDir=frontend）+ `gen_fixtures.py media`
  *       生成的装置（`Budapest/` 带 Kodi NFO、`NoSidecar/` 只有 mp4）。
  *
  * 断言的是**真实数字**而不是「有没有渲染」：仪表盘的价值全在数字对不对，

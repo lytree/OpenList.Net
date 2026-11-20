@@ -16,10 +16,10 @@
 //   --configuration=Release    MSBuild configuration
 //   --output=artifacts         Artifact root
 //   --app=server|desktop       What to publish (default: server). desktop = three exes in the
-//                              bundle root + frontend/dist; requires --rid
+//                              bundle root + frontend/; requires --rid
 //   --rid=<rid>                Target runtime; empty = framework-dependent (server only)
 //   --dest=<path>              Only for --target=Runtime: where to create the framework/ root
-//   --frontend-dist=<path>     Frontend dist source (default: frontend/dist, built from this repo)
+//   --frontend-dist=<path>     Frontend output dir (default: frontend/, built from this repo)
 //   --frontend-version=<tag>   Legacy escape hatch: download an upstream OpenList-Frontend release
 //   --archive=zip|tar.gz       Package format (Package target)
 //   --semver=<x.y.z>           Pre-computed semver (skips local GitVersion; CI uses this)
@@ -37,8 +37,8 @@
 //       OpenList.Server[.exe]   ─┼─→ framework/  app/appsettings.json     ─┼─→ ../framework
 //       openlist[.exe]          ─┘          cli/openlist[.exe]         ┘
 //       config/appsettings.json             framework/
-//       framework/                             frontend/dist/
-//       frontend/dist/
+//       framework/                             frontend/
+//       frontend/
 //
 //   单文件是"根目录干净"的前提：三个发布输出合并到同一目录原本会留下 ~150 个散落的
 //   .dll/.pdb，现在每个 app 只剩一个 exe（程序集已在里面），根目录只有三个可执行文件。
@@ -70,8 +70,10 @@ const string ServerProject   = "src/OpenList.Server/OpenList.Server.csproj";
 const string CliProject      = "src/OpenList.Cli/OpenList.Cli.csproj";
 const string DesktopProject  = "src/OpenList.Desktop/OpenList.Desktop.csproj";
 const string UpstreamRepo    = "OpenListTeam/OpenList-Frontend";
-// The SPA is ours since M5: it is built from `frontend/` (Vue 3) and lands in `frontend/dist`.
-const string RepoFrontendDist = "frontend/dist";
+// The SPA is ours since M5: it is built from `frontend/` (Vue 3). vite writes its output straight
+// into `frontend/` — `index.html`, `assets/` and the copies of `public/` sit next to the sources,
+// there is no `dist/` level any more (see frontend/vite.config.ts).
+const string RepoFrontendOut = "frontend";
 // Bundle-relative folder holding the single shared .NET install layout (see the header).
 const string RuntimeRootName = "framework";
 
@@ -79,10 +81,10 @@ const string RuntimeRootName = "framework";
 // meaningful "GUI without a runtime" bundle, so --rid stays mandatory.
 bool IsDesktopApp() => app.Equals("desktop", StringComparison.OrdinalIgnoreCase);
 
-// Where the SPA dist comes from. Default is the in-repo build output (`frontend/dist`), because
+// Where the SPA output comes from. Default is the in-repo build output (`frontend/`), because
 // since M5 the frontend ships from this repository. `--frontend-dist` points elsewhere;
 // `--frontend-version` opts into the legacy behaviour of downloading an upstream release tarball.
-string FeDistDir() => string.IsNullOrEmpty(frontendDist) ? RepoFrontendDist : frontendDist;
+string FeOutDir() => string.IsNullOrEmpty(frontendDist) ? RepoFrontendOut : frontendDist;
 
 // Computed by the Version task. Empty until that task runs; consumers (Build/Publish/Bundle/Package)
 // treat empty as "no versioning" so local dev builds don't require GitVersion to be installed.
@@ -432,14 +434,49 @@ void FetchFrontend(string ver, string dest)
     System.IO.File.WriteAllText(System.IO.Path.Combine(dest, "VERSION"), ver);
 }
 
+// Stage the SPA output into a bundle.
+//
+// The build writes index.html + assets/ + the copies of public/ straight into `frontend/`, next to
+// package.json / src/ / node_modules — so copying the directory wholesale would drag the sources
+// (and ~700 MB of node_modules) into every release archive. Copy exactly what vite produces;
+// `public/` is the authoritative list of the "extra static files" half of that contract.
+//
+// `--frontend-dist=<upstream tarball>` is the one case where the source is already a clean dist —
+// it has no public/ beside it, so there the whole directory *is* the output.
+void CopyFrontendOut(string dest)
+{
+    var src = FeOutDir();
+    if (!FileExists($"{src}/index.html"))
+        throw new InvalidOperationException(
+            $"'{src}/index.html' not found — build the SPA first: pnpm -C frontend build");
+
+    EnsureDirectoryExists(dest);
+
+    if (!DirectoryExists($"{src}/public"))
+    {
+        CopyTree(src, dest);
+        return;
+    }
+
+    CopyFile($"{src}/index.html", $"{dest}/index.html");
+    if (FileExists($"{src}/VERSION"))
+        CopyFile($"{src}/VERSION", $"{dest}/VERSION");
+    if (DirectoryExists($"{src}/assets"))
+        CopyTree($"{src}/assets", $"{dest}/assets");
+    foreach (var dir in GetDirectories($"{src}/public"))
+        CopyTree(dir.FullPath, $"{dest}/{dir.GetFilename()}");
+    foreach (var file in GetFiles($"{src}/public/*"))
+        CopyFile(file, $"{dest}/{file.GetFilename()}");
+}
+
 // Emit platform-appropriate launchers that fix OpenList__DistDir for the bundle layout
-// (app/ + frontend/dist/). The published appsettings.json sets DistDir="../../frontend"
+// (app/ + frontend/). The published appsettings.json sets DistDir="../../frontend"
 // which is only correct for dev runs from src/OpenList.Server/.
 void WriteRunScripts(string bundleRoot)
 {
     var isWindowsRid = !string.IsNullOrEmpty(rid) && rid.StartsWith("win", StringComparison.OrdinalIgnoreCase);
     var isFdd = string.IsNullOrEmpty(rid);
-    const string distDir = "../frontend/dist";
+    const string distDir = "../frontend";
 
     if (!isWindowsRid) // unix RIDs and framework-dependent
     {
@@ -495,7 +532,7 @@ void WriteReadme(string bundleRoot)
     .Concat(isFdd ? Array.Empty<string>() : new[] { "  framework/          Shared .NET runtime — used by app/ and cli/" })
     .Concat(new[]
     {
-        "  frontend/dist/   OpenList SPA (Vue 3, built from this repo)",
+        "  frontend/        OpenList SPA (Vue 3, built from this repo)",
         "  run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server",
         "  README.txt       This file",
         "",
@@ -513,7 +550,7 @@ void WriteReadme(string bundleRoot)
     })
     .Concat(new[]
     {
-        "The launcher exports OpenList__DistDir=../frontend/dist (relative to app/) so the",
+        "The launcher exports OpenList__DistDir=../frontend (relative to app/) so the",
         "server finds the SPA without editing appsettings.json. Default port: http://0.0.0.0:5244",
         "",
         "Lost the admin password? The built-in admin cannot be deleted, renamed or demoted,",
@@ -542,7 +579,7 @@ void WriteDesktopReadme(string bundleRoot)
     var coreName = isWindowsRid ? "OpenList.Server.exe" : "OpenList.Server";
     var cliLabel = isWindowsRid ? "openlist.exe" : "openlist";
     var runtimeLabel = RuntimeRootName + "/";
-    var feLabel = "frontend/dist/";
+    var feLabel = "frontend/";
     System.IO.File.WriteAllLines(System.IO.Path.Combine(bundleRoot, "README.txt"), new[]
     {
         $"{name}",
@@ -572,7 +609,7 @@ void WriteDesktopReadme(string bundleRoot)
         "Port, database and log paths live in config/appsettings.json (the desktop settings",
         "page writes them too). Remove the file and the built-in defaults apply.",
         "",
-        "The desktop app injects OpenList__DistDir to point the server at frontend/dist,",
+        "The desktop app injects OpenList__DistDir to point the server at frontend/,",
         "so the web UI is served on the same port as the API. Default port: 5244.",
         "",
         "Note (macOS/Linux): the desktop app is not wrapped in an .app/.desktop bundle —",
@@ -666,13 +703,13 @@ Task("Test")
 });
 
 Task("Frontend")
-    .Description("Stage the SPA dist (default: frontend/dist, built from this repo)")
+    .Description("Stage the SPA output (default: frontend/, built from this repo)")
     .Does(() =>
 {
-    var dest = FeDistDir();
+    var dest = FeOutDir();
     if (FileExists($"{dest}/index.html"))
     {
-        Information($"Using frontend dist '{dest}'.");
+        Information($"Using frontend output '{dest}'.");
         return;
     }
 
@@ -777,7 +814,7 @@ void PublishServer()
     PublishApp(ServerProject, publishDir, BundleAppRelativeDotNet());
 
     // Drop a VERSION file alongside the assembly so deployments can surface build metadata
-    // (matching the frontend's frontend/dist/VERSION convention).
+    // (matching the frontend's frontend/VERSION convention).
     WriteVersionMetadata(publishDir);
 }
 
@@ -868,7 +905,7 @@ Task("Bundle")
         //   openlist.exe           ops CLI (password recovery, storage admin)
         //   appsettings.json       the one file you may want to edit by hand
         //   framework/                ONE shared .NET runtime for all three
-        //   frontend/dist/         the SPA
+        //   frontend/              the SPA (index.html + assets/ + ruffle/)
         //
         // Every exe is a single-file framework-dependent apphost: the managed assemblies and the
         // native libraries live inside the exe, so nothing else has to sit next to it. Before
@@ -876,7 +913,7 @@ Task("Bundle")
         if (string.IsNullOrEmpty(rid))
             throw new InvalidOperationException("Desktop bundle requires --rid=<rid>.");
         EnsureDirectoryExists(bundleRoot);
-        EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
+        EnsureDirectoryExists($"{bundleRoot}/frontend");
 
         var suffix = ExeSuffix();
         CopyFile($"{output}/publish/OpenList.Server{suffix}", $"{bundleRoot}/OpenList.Server{suffix}");
@@ -887,7 +924,7 @@ Task("Bundle")
         EnsureDirectoryExists($"{bundleRoot}/config");
         CopyFile($"{output}/publish/appsettings.json", $"{bundleRoot}/config/appsettings.json");
 
-        CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
+        CopyFrontendOut($"{bundleRoot}/frontend");
         // All three apphosts say AppHostRelativeDotNet=dotnet — the root is right here.
         CopyTree($"{output}/{RuntimeRootName}", $"{bundleRoot}/{RuntimeRootName}");
 
@@ -897,7 +934,7 @@ Task("Bundle")
     {
         EnsureDirectoryExists($"{bundleRoot}/app");
         EnsureDirectoryExists($"{bundleRoot}/cli");
-        EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
+        EnsureDirectoryExists($"{bundleRoot}/frontend");
 
         if (string.IsNullOrEmpty(rid))
         {
@@ -917,7 +954,7 @@ Task("Bundle")
             CopyTree($"{output}/{RuntimeRootName}", $"{bundleRoot}/{RuntimeRootName}");
         }
 
-        CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
+        CopyFrontendOut($"{bundleRoot}/frontend");
 
         WriteRunScripts(bundleRoot);
         WriteReadme(bundleRoot);

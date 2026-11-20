@@ -18,6 +18,12 @@ RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build
 
+# 产物直接落在 /fe 根（index.html + assets/ + public/ 的副本），和 package.json、src/、
+# node_modules 同级 —— 运行阶段只需要产物，所以先按清单收进 /fe-out，再做一次干净的 COPY，
+# 免得把源码与依赖打进运行镜像。
+RUN mkdir -p /fe-out \
+ && cp -a index.html favicon.svg assets ruffle /fe-out/
+
 # === Stage 2: Restore + publish .NET server ===
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
@@ -87,15 +93,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev ffmp
 # .NET publish output
 COPY --from=build /app/publish .
 
-# Frontend dist → /frontend/dist.
-# DistDir default ("../../frontend/dist" relative to /app) resolves here, but we
+# Frontend output → /frontend (index.html + assets/ + ruffle/, no dist/ level).
+# DistDir default ("../../frontend" relative to /app) resolves here, but we
 # also set it explicitly via env to be unambiguous.
-COPY --from=frontend-build /fe/dist /frontend/dist
+COPY --from=frontend-build /fe-out /frontend
 
 RUN mkdir -p /app/data
 
 ENV ASPNETCORE_URLS=http://0.0.0.0:5244
-ENV OpenList__DistDir=/frontend/dist
+ENV OpenList__DistDir=/frontend
 EXPOSE 5244
 
 VOLUME ["/app/data"]

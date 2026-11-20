@@ -83,7 +83,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: frontend/dist
+          path: |
+            frontend/index.html
+            frontend/favicon.svg
+            frontend/assets
+            frontend/ruffle
           if-no-files-found: error
           retention-days: ${{ inputs.retention-days }}
 
@@ -220,8 +224,8 @@ jobs:
       - name: Stage SPA into bundle
         run: |
           set -euo pipefail
-          mkdir -p "$BUNDLE/frontend/dist"
-          cp -a fe-dist/. "$BUNDLE/frontend/dist/"
+          mkdir -p "$BUNDLE/frontend"
+          cp -a fe-dist/. "$BUNDLE/frontend/"
 
       - name: Write launchers and README
         env:
@@ -235,7 +239,7 @@ jobs:
               cat > run.bat <<'EOF'
           @echo off
           cd /d "%~dp0app"
-          set OpenList__DistDir=../frontend/dist
+          set OpenList__DistDir=../frontend
           if not defined ASPNETCORE_URLS set ASPNETCORE_URLS=http://0.0.0.0:5244
           OpenList.Server.exe
           EOF
@@ -244,7 +248,7 @@ jobs:
               cat > run.sh <<'EOF'
           #!/usr/bin/env sh
           cd "$(dirname "$0")/app" || exit 1
-          export OpenList__DistDir="../frontend/dist"
+          export OpenList__DistDir="../frontend"
           : "${ASPNETCORE_URLS:=http://0.0.0.0:5244}"
           export ASPNETCORE_URLS
           exec ./OpenList.Server
@@ -267,7 +271,7 @@ jobs:
             app/             OpenList.Server (single exe) + appsettings.json + VERSION
             cli/             openlist (single exe) — password recovery, storage admin
             framework/       Shared .NET runtime — used by app/ and cli/
-            frontend/dist/   OpenList SPA (Vue 3, built from this repo)
+            frontend/        OpenList SPA (Vue 3, built from this repo)
             run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
             README.txt       This file
 
@@ -279,7 +283,7 @@ jobs:
           (AppHostRelativeDotNet), so nothing has to be installed on the host — but that
           folder must stay next to app/. Moving app/ on its own will make it fail to start.
 
-          The launcher exports OpenList__DistDir=../frontend/dist (relative to app/) so the
+          The launcher exports OpenList__DistDir=../frontend (relative to app/) so the
           server finds the SPA without editing appsettings.json. Default port: http://0.0.0.0:5244
 
           Lost the admin password? The built-in admin cannot be deleted, renamed or demoted,
@@ -321,7 +325,7 @@ jobs:
   # Desktop control app (Avalonia GUI managing the server as a child process).
   # One bundle per GUI-capable RID: desktop exe, server exe and the ops CLI all at the
   # bundle root (ResolveCorePath probes <base>/OpenList.Server[.exe], so no sub-folder),
-  # one shared framework/ runtime next to them, frontend/dist alongside (injected as
+  # one shared framework/ runtime next to them, frontend/ alongside (injected as
   # OpenList__DistDir at launch).
   # No musl RIDs — the GUI targets glibc desktops.
   binaries-desktop:
@@ -462,8 +466,8 @@ jobs:
       - name: Stage SPA into bundle
         run: |
           set -euo pipefail
-          mkdir -p "$BUNDLE/frontend/dist"
-          cp -a fe-dist/. "$BUNDLE/frontend/dist/"
+          mkdir -p "$BUNDLE/frontend"
+          cp -a fe-dist/. "$BUNDLE/frontend/"
 
       - name: Write README
         run: |
@@ -485,7 +489,7 @@ jobs:
 
           Directories:
             framework/              Shared .NET runtime — used by all three exes
-            frontend/dist/          OpenList SPA (Vue 3, built from this repo)
+            frontend/               OpenList SPA (Vue 3, built from this repo)
             config/                 Editable settings (appsettings.json)
 
           The three executables are single-file: the assemblies they need are inside each exe,
@@ -497,7 +501,7 @@ jobs:
             server automatically (port configurable in settings), shows a tray icon and a
             live log viewer. Data is stored under data/ by default.
 
-          The desktop app injects OpenList__DistDir so the server serves frontend/dist on
+          The desktop app injects OpenList__DistDir so the server serves frontend/ on
           the same port as the API. Default port: http://0.0.0.0:5244.
 
           Note (macOS/Linux): the desktop app is not wrapped in an .app/.desktop bundle —

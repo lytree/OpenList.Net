@@ -1,7 +1,16 @@
 node_modules
-dist
 *.local
 .DS_Store
+
+# 构建产物：vite 直接输出到本目录根（没有 dist/ 这一层），
+# 清单与 scripts/clean-out.mjs 一致 —— index.html + assets/ + public/ 的副本。
+/index.html
+/assets/
+/ruffle/
+/favicon.svg
+
+# 旧布局残留：产物曾经落在 dist/。留着这行，免得本地旧目录在改布局后变成未跟踪文件。
+/dist/
 
 # 本地验收现场（playwright 页面快照 / 截图 / 临时登录态），非源码
 .playwright-cli/
