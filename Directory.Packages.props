@@ -51,6 +51,16 @@
          PDF 只有在修 PDFium CVE 或遇到线性化 PDF 打不开时才值得付这个代价 —— 届时升到
          5.4.0 并在 Docker 里实测一遍缩略图即可。 -->
     <PackageVersion Include="PDFtoImage" Version="5.2.0" />
+    <!-- SkiaSharp 全家桶钉死在同一个补丁号：桌面包里 desktop / server / cli 三个 exe 与运行时
+         放在同一个目录（共用 dotnet/），一个目录只能有一份 SkiaSharp.dll + 一份 native，
+         而 Avalonia 要 3.119.4、PDFtoImage 5.2.0 只要求 >= 3.119.1 —— 对齐到 3.119.4 让两边
+         用同一份 managed+native 配对（in-process Skia 对 managed/native 版本不一致是会直接
+         报错的）。改这里就等于同时改桌面端的渲染和 PDF 缩略图的 native，缩略图有
+         ThumbnailPdfTests 与 verify-thumb.mjs 兜底。 -->
+    <PackageVersion Include="SkiaSharp" Version="3.119.4" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.macOS" Version="3.119.4" />
     <PackageVersion Include="MonoTorrent" Version="3.0.2" />
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />

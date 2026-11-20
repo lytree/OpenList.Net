@@ -128,7 +128,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Publish server (self-contained)
+      # All executables in a bundle are RID-specific *framework-dependent* publishes: they
+      # carry an apphost but no runtime. AppHostDotNetSearch/AppHostRelativeDotNet are baked
+      # into that apphost so it resolves `dotnet/` (staged below, one copy for the whole
+      # bundle) instead of a machine-wide install. Layout:
+      #   app/  + cli/  →  ../dotnet
+      - name: Publish server
         run: |
           set -euo pipefail
           BUNDLE="openlist-net-${SEMVER}-${{ matrix.rid }}"
@@ -137,7 +142,9 @@ jobs:
             -c "$CONFIGURATION" \
             -o "$BUNDLE/app" \
             -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
+            -p:SelfContained=false \
+            -p:AppHostDotNetSearch=AppRelative \
+            -p:AppHostRelativeDotNet=../dotnet \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -151,21 +158,31 @@ jobs:
             echo "sha=$SHA"
           } > "$BUNDLE/app/VERSION"
 
-      # Ops CLI — the recovery path for a locked-out admin. Self-contained for the same
-      # reason the server is: you can't install a runtime before you can reset the password.
-      - name: Publish ops CLI (self-contained)
+      # Ops CLI — the recovery path for a locked-out admin. It shares the bundle's runtime
+      # for the same reason the server does: you can't install a runtime before you can
+      # reset the password.
+      - name: Publish ops CLI
         run: |
           set -euo pipefail
           dotnet publish src/OpenList.Cli/OpenList.Cli.csproj \
             -c "$CONFIGURATION" \
             -o "$BUNDLE/cli" \
             -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
+            -p:SelfContained=false \
+            -p:AppHostDotNetSearch=AppRelative \
+            -p:AppHostRelativeDotNet=../dotnet \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA"
+
+      # The single .NET install layout both of the above point at. Built by the Cake script
+      # so the pack→install-layout mapping exists exactly once (see build/build.cs).
+      - name: Stage shared .NET runtime root
+        run: |
+          set -euo pipefail
+          dotnet run build/build.cs -- --target=Runtime --rid="${{ matrix.rid }}" --dest="$BUNDLE"
 
       - name: Download SPA dist
         uses: actions/download-artifact@v4
@@ -216,8 +233,9 @@ jobs:
           Self-contained build — no .NET runtime required on the host.
 
           Layout:
-            app/             .NET server (self-contained publish output)
+            app/             .NET server (app + apphost, framework-dependent)
             cli/             Ops CLI (openlist) — password recovery, storage admin
+            dotnet/          Shared .NET runtime — used by app/ and cli/
             frontend/dist/   OpenList SPA (Vue 3, built from this repo)
             run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
             README.txt       This file
@@ -225,6 +243,10 @@ jobs:
           Run:
             Linux/macOS:  ./run.sh
             Windows:      run.bat
+
+          The executables find dotnet/ through a relative path embedded in their apphost
+          (AppHostRelativeDotNet), so nothing has to be installed on the host — but that
+          folder must stay next to app/. Moving app/ on its own will make it fail to start.
 
           The launcher exports OpenList__DistDir=../frontend/dist (relative to app/) so the
           server finds the SPA without editing appsettings.json. Default port: http://0.0.0.0:5244
@@ -266,9 +288,10 @@ jobs:
           retention-days: ${{ inputs.retention-days }}
 
   # Desktop control app (Avalonia GUI managing the server as a child process).
-  # One bundle per GUI-capable RID: desktop exe at the bundle root, server under
-  # server/ (probed by OpenListCoreService.ResolveCorePath), frontend/dist alongside
-  # (injected as OpenList__DistDir at launch).
+  # One bundle per GUI-capable RID: desktop exe, server exe and the ops CLI all at the
+  # bundle root (ResolveCorePath probes <base>/OpenList.Server[.exe], so no sub-folder),
+  # one shared dotnet/ runtime next to them, frontend/dist alongside (injected as
+  # OpenList__DistDir at launch).
   # No musl RIDs — the GUI targets glibc desktops.
   binaries-desktop:
     needs: frontend
@@ -305,30 +328,38 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Publish server core (self-contained)
+      # Every executable here is a RID-specific framework-dependent publish; the single
+      # runtime lives in dotnet/ and is referenced from each apphost's embedded relative
+      # path. Layout: OpenList.Desktop / OpenList.Server / openlist all land in the bundle
+      # root next to dotnet/ — all three embed AppHostRelativeDotNet=dotnet.
+      - name: Publish server core
         run: |
           set -euo pipefail
           BUNDLE="openlist-net-desktop-${SEMVER}-${{ matrix.rid }}"
           echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
           dotnet publish src/OpenList.Server/OpenList.Server.csproj \
             -c "$CONFIGURATION" \
-            -o "$BUNDLE/server" \
+            -o "$BUNDLE" \
             -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
+            -p:SelfContained=false \
+            -p:AppHostDotNetSearch=AppRelative \
+            -p:AppHostRelativeDotNet=dotnet \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA"
 
-      - name: Publish desktop app (self-contained)
+      - name: Publish desktop app
         run: |
           set -euo pipefail
           dotnet publish src/OpenList.Desktop/OpenList.Desktop.csproj \
             -c "$CONFIGURATION" \
             -o "$BUNDLE" \
             -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
+            -p:SelfContained=false \
+            -p:AppHostDotNetSearch=AppRelative \
+            -p:AppHostRelativeDotNet=dotnet \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -343,21 +374,29 @@ jobs:
           } > "$BUNDLE/VERSION"
 
       # Ops CLI inside the desktop bundle too — the GUI has no password-recovery path
-      # of its own, and a locked-out admin must not be stuck. (README advertises
-      # cli/ — keep the promise.)
-      - name: Publish ops CLI (self-contained)
+      # of its own, and a locked-out admin must not be stuck. (README advertises it —
+      # keep the promise.)
+      - name: Publish ops CLI
         run: |
           set -euo pipefail
           dotnet publish src/OpenList.Cli/OpenList.Cli.csproj \
             -c "$CONFIGURATION" \
-            -o "$BUNDLE/cli" \
+            -o "$BUNDLE" \
             -r "${{ matrix.rid }}" \
-            -p:SelfContained=true \
+            -p:SelfContained=false \
+            -p:AppHostDotNetSearch=AppRelative \
+            -p:AppHostRelativeDotNet=dotnet \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA"
+
+      # One runtime for all three executables (desktop + server + cli).
+      - name: Stage shared .NET runtime root
+        run: |
+          set -euo pipefail
+          dotnet run build/build.cs -- --target=Runtime --rid="${{ matrix.rid }}" --dest="$BUNDLE"
 
       - name: Download SPA dist
         uses: actions/download-artifact@v4
@@ -383,10 +422,11 @@ jobs:
 
           Self-contained build — no .NET runtime required on the host.
 
-          Layout:
+          Layout (everything in this directory):
             OpenList.Desktop[.exe]  Avalonia desktop control app (start this)
-            server/OpenList.Server  Self-contained server (managed child process)
-            cli/openlist[.exe]      Ops CLI — password recovery, storage admin
+            OpenList.Server[.exe]   Server core (managed child process)
+            openlist[.exe]          Ops CLI — password recovery, storage admin
+            dotnet/                 Shared .NET runtime — used by all three exes
             frontend/dist/          OpenList SPA (Vue 3, built from this repo)
             README.txt              This file
 
@@ -394,6 +434,11 @@ jobs:
             Start OpenList.Desktop (double-click on Windows). The desktop app launches the
             server automatically (port configurable in settings), shows a tray icon and a
             live log viewer. Data is stored under data/ next to the desktop executable.
+
+          No .NET runtime has to be installed on the host: all three executables find the one
+          in dotnet/ through a relative path embedded in their apphost
+          (AppHostRelativeDotNet). Keep dotnet/ next to them — copy the exes away from it and
+          they will not start.
 
           The desktop app injects OpenList__DistDir so the server serves frontend/dist on
           the same port as the API. Default port: http://0.0.0.0:5244.

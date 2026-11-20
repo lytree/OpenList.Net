@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a v* tag cuts a formal release: 8 self-contained platform bundles,
+# Pushing a v* tag cuts a formal release: 8 server platform bundles,
 # 6 desktop bundles, a multi-arch container image, and a GitHub Release with
 # generated notes.
 #
@@ -97,7 +97,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # 8 self-contained server bundles + 6 desktop bundles (matrix lives in the
+  # 8 server bundles + 6 desktop bundles (matrix lives in the
   # reusable workflow, shared with ci.yml).
   bundles:
     needs: [resolve-version, build-test]

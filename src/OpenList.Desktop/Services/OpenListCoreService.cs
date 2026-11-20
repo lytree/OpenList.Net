@@ -323,10 +323,19 @@ public sealed class OpenListCoreService : IDisposable
             psi.Environment["OpenList__Scheme__HttpPort"] = _settings.HttpPort.ToString();
             psi.Environment["ASPNETCORE_URLS"] = $"http://0.0.0.0:{_settings.HttpPort}";
 
-            // 发布形态（桌面程序根目录 + server/ + frontend/dist/）：把前端 dist 的绝对路径
-            // 注入给核心，覆盖 appsettings.json 里的相对 DistDir（核心的工作目录是 data 目录）。
-            var distDir = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(exe)!, "..", "frontend", "dist"));
-            if (Directory.Exists(distDir))
+            // 发布形态：把前端 dist 的绝对路径注入给核心，覆盖 appsettings.json 里的相对
+            // DistDir（核心的工作目录是 data 目录，相对路径会解析错）。
+            // 两种布局都要认：
+            //   扁平布局（当前发布形态）—— exe 与 frontend/ 同级；
+            //   旧布局（server/ 子目录）—— 老版本发行包直接升级上来时仍能跑。
+            var exeDir = Path.GetDirectoryName(exe)!;
+            var distDir = new[]
+                {
+                    Path.Combine(exeDir, "frontend", "dist"),
+                    Path.GetFullPath(Path.Combine(exeDir, "..", "frontend", "dist")),
+                }
+                .FirstOrDefault(Directory.Exists);
+            if (distDir is not null)
                 psi.Environment["OpenList__DistDir"] = distDir;
 
             var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };

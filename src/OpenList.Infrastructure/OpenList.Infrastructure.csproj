@@ -20,6 +20,13 @@
     <PackageReference Include="Novell.Directory.Ldap.NETStandard" />
     <PackageReference Include="Fido2" />
     <PackageReference Include="PDFtoImage" />
+    <!-- 显式引用 SkiaSharp 全家桶，只为把 PDFtoImage 的传递依赖从 3.119.1 顶到 3.119.4，
+         与 Avalonia（桌面端）用同一份 managed + native（版本号见 Directory.Packages.props）。
+         代码里只用 PDFtoImage 的 API，不直接碰 Skia types。 -->
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OpenList.Tests" />

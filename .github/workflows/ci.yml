@@ -1,9 +1,9 @@
 name: CI
 
-# Every commit on main is built for ALL platforms (8 self-contained server bundles
-# + 6 desktop bundles + the lightweight framework-dependent bundle) and kept as
-# downloadable Actions Artifacts. CI never publishes to GitHub Releases — that
-# only happens in release.yml when a v* tag is pushed.
+# Every commit on main is built for ALL platforms (8 server bundles + 6 desktop
+# bundles + the lightweight framework-dependent bundle) and kept as downloadable
+# Actions Artifacts. CI never publishes to GitHub Releases — that only happens in
+# release.yml when a v* tag is pushed.
 #
 # The platform matrix itself lives in build-bundles.yml (a reusable workflow) so
 # ci.yml and release.yml cannot drift apart.
@@ -107,7 +107,7 @@ jobs:
 
   # Framework-dependent bundle: app/ + frontend/dist/ + launchers + README,
   # packaged as tar.gz and kept as a downloadable CI artifact. Small and
-  # platform-agnostic — the self-contained bundles above cost ~1 GB in total,
+  # platform-agnostic — the RID bundles above each carry their own dotnet/ runtime,
   # this one is a few MB when you already have the .NET 10 runtime.
   # Skipped on pull_request — PRs only need to prove build + test pass.
   bundle:
