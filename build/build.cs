@@ -18,7 +18,7 @@
 //   --app=server|desktop       What to publish (default: server). desktop = three exes in the
 //                              bundle root + frontend/dist; requires --rid
 //   --rid=<rid>                Target runtime; empty = framework-dependent (server only)
-//   --dest=<path>              Only for --target=Runtime: where to create the dotnet/ root
+//   --dest=<path>              Only for --target=Runtime: where to create the framework/ root
 //   --frontend-dist=<path>     Frontend dist source (default: frontend/dist, built from this repo)
 //   --frontend-version=<tag>   Legacy escape hatch: download an upstream OpenList-Frontend release
 //   --archive=zip|tar.gz       Package format (Package target)
@@ -29,22 +29,22 @@
 //   managed assemblies and native libraries are inside the exe, the runtime is not — and the
 //   host is taught where to look with AppHostDotNetSearch=AppRelative + AppHostRelativeDotNet.
 //   One .NET install layout (host/fxr/<ver>/ + shared/Microsoft.NETCore.App|Microsoft.
-//   AspNetCore.App/<ver>) is staged once per bundle as `dotnet/` and shared by every
+//   AspNetCore.App/<ver>) is staged once per bundle as `framework/` and shared by every
 //   executable in it:
 //
 //     desktop bundle (--app=desktop)      headless bundle (--app=server)
 //       OpenList.Desktop[.exe]  ─┐          app/OpenList.Server[.exe] ─┐
-//       OpenList.Server[.exe]   ─┼─→ dotnet/  app/appsettings.json     ─┼─→ ../dotnet
+//       OpenList.Server[.exe]   ─┼─→ framework/  app/appsettings.json     ─┼─→ ../framework
 //       openlist[.exe]          ─┘          cli/openlist[.exe]         ┘
-//       config/appsettings.json             dotnet/
-//       dotnet/                             frontend/dist/
+//       config/appsettings.json             framework/
+//       framework/                             frontend/dist/
 //       frontend/dist/
 //
 //   单文件是"根目录干净"的前提：三个发布输出合并到同一目录原本会留下 ~150 个散落的
 //   .dll/.pdb，现在每个 app 只剩一个 exe（程序集已在里面），根目录只有三个可执行文件。
-//   运行时仍然只有一份 —— 每个 exe 按自己相对位置解析 `dotnet`（桌面端三个都在根）。
+//   运行时仍然只有一份 —— 每个 exe 按自己相对位置解析 `framework`（桌面端三个都在根）。
 //   Before the shared root existed, every folder carried its own ~106 MB runtime
-//   (desktop bundle: three copies / 494 MB). `--target=Runtime` builds just the `dotnet/`
+//   (desktop bundle: three copies / 494 MB). `--target=Runtime` builds just the `framework/`
 //   root, which is what CI calls per matrix leg.
 
 using System;
@@ -73,9 +73,9 @@ const string UpstreamRepo    = "OpenListTeam/OpenList-Frontend";
 // The SPA is ours since M5: it is built from `frontend/` (Vue 3) and lands in `frontend/dist`.
 const string RepoFrontendDist = "frontend/dist";
 // Bundle-relative folder holding the single shared .NET install layout (see the header).
-const string RuntimeRootName = "dotnet";
+const string RuntimeRootName = "framework";
 
-// Desktop bundles ship a GUI whose only runtime is the shared `dotnet/` root — there is no
+// Desktop bundles ship a GUI whose only runtime is the shared `framework/` root — there is no
 // meaningful "GUI without a runtime" bundle, so --rid stays mandatory.
 bool IsDesktopApp() => app.Equals("desktop", StringComparison.OrdinalIgnoreCase);
 
@@ -247,14 +247,14 @@ void CopyTree(string src, string dst)
 }
 
 //////////////////////////////////////////////////////////////////////
-// SHARED RUNTIME ROOT (dotnet/)
+// SHARED RUNTIME ROOT (framework/)
 //////////////////////////////////////////////////////////////////////
 
 // 一个 bundle 里所有可执行文件（desktop / server / cli）共用同一份 .NET 安装布局：
 //
-//   dotnet/host/fxr/<coreVer>/hostfxr.<dll|so|dylib>
-//   dotnet/shared/Microsoft.NETCore.App/<coreVer>/...
-//   dotnet/shared/Microsoft.AspNetCore.App/<aspVer>/...
+//   framework/host/fxr/<coreVer>/hostfxr.<dll|so|dylib>
+//   framework/shared/Microsoft.NETCore.App/<coreVer>/...
+//   framework/shared/Microsoft.AspNetCore.App/<aspVer>/...
 //
 // 这正是 apphost 在 AppHostRelativeDotNet 指向的目录里要找的东西（先 hostfxr，再由它按
 // shared/<framework>/<version> 解析框架），与 `dotnet-install` 装出来的目录同构。
@@ -492,7 +492,7 @@ void WriteReadme(string bundleRoot)
             ? "  cli/             Ops CLI (openlist) — password recovery, storage admin"
             : "  cli/             openlist (single exe) — password recovery, storage admin",
     }
-    .Concat(isFdd ? Array.Empty<string>() : new[] { "  dotnet/          Shared .NET runtime — used by app/ and cli/" })
+    .Concat(isFdd ? Array.Empty<string>() : new[] { "  framework/          Shared .NET runtime — used by app/ and cli/" })
     .Concat(new[]
     {
         "  frontend/dist/   OpenList SPA (Vue 3, built from this repo)",
@@ -507,7 +507,7 @@ void WriteReadme(string bundleRoot)
     .Concat(isFdd ? Array.Empty<string>() : new[]
     {
         "No .NET runtime has to be installed on the host: the executables find the one in",
-        "dotnet/ through a relative path embedded in them (AppHostRelativeDotNet). Keep that",
+        "framework/ through a relative path embedded in them (AppHostRelativeDotNet). Keep that",
         "folder next to app/ — moving app/ on its own will make it fail to start.",
         "",
     })
@@ -695,10 +695,10 @@ Task("Frontend")
 });
 
 // Publish one app as "RID-specific framework-dependent": the apphost is produced, but the
-// runtime is not copied — the exe consumes the bundle's single shared `dotnet/` root instead.
+// runtime is not copied — the exe consumes the bundle's single shared `framework/` root instead.
 //
 // appRelativeDotNet is the path from the apphost to that root (e.g. `dotnet` for the desktop
-// exe at the bundle root, `../dotnet` for server/ and cli/). It is embedded into the apphost at
+// exe at the bundle root, `../framework` for server/ and cli/). It is embedded into the apphost at
 // publish time only (the SDK rewrites the apphost on publish, not on build), so the inner dev
 // loop — `dotnet run`, F5, bin/Debug — keeps resolving the machine-wide runtime as before.
 //
@@ -730,7 +730,7 @@ void PublishApp(string project, string publishDir, string appRelativeDotNet, boo
         if (singleFile)
         {
             // 单文件 + 框架依赖：托管程序集（含 Avalonia / SkiaSharp 的托管半边）和 native 库
-            // 全部捆进 exe，运行时仍然只用 bundle 里那一份 dotnet/ —— 于是发布目录里只剩
+            // 全部捆进 exe，运行时仍然只用 bundle 里那一份 framework/ —— 于是发布目录里只剩
             // 一个可执行文件，桌面包的根目录才可能"只有三个 exe"。
             //
             // IncludeNativeLibrariesForSelfExtract 是必须的：不加的话 libSkiaSharp / libHarfBuzz
@@ -782,14 +782,14 @@ void PublishServer()
 }
 
 // CLI publish: the ops CLI (admin / storage / cancel2fa) ships next to the server so
-// password recovery works without the web layer. It shares the very same `dotnet/` root —
+// password recovery works without the web layer. It shares the very same `framework/` root —
 // a locked-out admin still does not have to install a runtime first.
 void PublishCli()
 {
     PublishApp(CliProject, $"{output}/publish-cli", BundleAppRelativeDotNet());
 }
 
-// Desktop publish: Avalonia GUI at the bundle root, so its runtime root is `dotnet/` itself.
+// Desktop publish: Avalonia GUI at the bundle root, so its runtime root is `framework/` itself.
 void PublishDesktop()
 {
     if (string.IsNullOrEmpty(rid))
@@ -809,7 +809,7 @@ Task("Publish")
 {
     if (IsDesktopApp())
     {
-        // 桌面包 = GUI + 服务端 + CLI 全在 bundle 根（三个 exe 同目录，共用 dotnet/）。
+        // 桌面包 = GUI + 服务端 + CLI 全在 bundle 根（三个 exe 同目录，共用 framework/）。
         // Bundle 的桌面分支三个都要拷，所以这里必须都发布：只发 GUI 的话
         // `--app=desktop --target=Bundle/Package` 会在拷 `publish/` 时直接抛
         // DirectoryNotFoundException。
@@ -841,7 +841,7 @@ Task("PublishCli")
 // only piece that needs NuGet's runtime packs, so the workflow does not have to re-implement
 // the pack→install-layout mapping in bash.
 Task("Runtime")
-    .Description("Stage the shared .NET install layout (dotnet/) for --rid into --dest")
+    .Description("Stage the shared .NET install layout (framework/) for --rid into --dest")
     .Does(() =>
 {
     var target = string.IsNullOrEmpty(dest) ? $"{output}/{RuntimeRootName}" : $"{dest}/{RuntimeRootName}";
@@ -867,7 +867,7 @@ Task("Bundle")
         //   OpenList.Server.exe    server core (managed child process)
         //   openlist.exe           ops CLI (password recovery, storage admin)
         //   appsettings.json       the one file you may want to edit by hand
-        //   dotnet/                ONE shared .NET runtime for all three
+        //   framework/                ONE shared .NET runtime for all three
         //   frontend/dist/         the SPA
         //
         // Every exe is a single-file framework-dependent apphost: the managed assemblies and the
@@ -913,7 +913,7 @@ Task("Bundle")
             CopyFile($"{output}/publish/appsettings.json", $"{bundleRoot}/app/appsettings.json");
             CopyFile($"{output}/publish/VERSION", $"{bundleRoot}/app/VERSION");
             CopyFile($"{output}/publish-cli/openlist{suffix}", $"{bundleRoot}/cli/openlist{suffix}");
-            // Same sharing for the headless bundle: app/ + cli/ → `../dotnet`.
+            // Same sharing for the headless bundle: app/ + cli/ → `../framework`.
             CopyTree($"{output}/{RuntimeRootName}", $"{bundleRoot}/{RuntimeRootName}");
         }
 

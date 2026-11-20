@@ -130,7 +130,7 @@ jobs:
 
       # All executables in a bundle are RID-specific *framework-dependent* publishes: they
       # carry an apphost but no runtime. AppHostDotNetSearch/AppHostRelativeDotNet are baked
-      # into that apphost so it resolves `dotnet/` (staged below, one copy for the whole
+      # into that apphost so it resolves `framework/` (staged below, one copy for the whole
       # bundle) instead of a machine-wide install. Layout:
       #   app/  + cli/  →  ../dotnet
       #
@@ -139,10 +139,13 @@ jobs:
       # false), so app/ holds OpenList.Server + appsettings.json and cli/ holds openlist.
       - name: Publish server
         run: |
-          set -euo pipefail
+          set -uo pipefail
           BUNDLE="openlist-net-${SEMVER}-${{ matrix.rid }}"
           echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
-          dotnet publish src/OpenList.Server/OpenList.Server.csproj \
+          # 失败时把真正的错误行顶到 step 的 annotation 上：这套 matrix 的 publish 只在
+          # Unix runner 上挂过，而 gating 用的账号读不到完整 job 日志，annotation 是唯一
+          # 能看到的通道。
+          if ! dotnet publish src/OpenList.Server/OpenList.Server.csproj \
             -c "$CONFIGURATION" \
             -o "$BUNDLE/app" \
             -r "${{ matrix.rid }}" \
@@ -152,12 +155,17 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=../dotnet \
+            -p:AppHostRelativeDotNet=../framework \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
             -p:InformationalVersion="$INFO_VER" \
-            -p:SourceRevisionId="$SHA"
+            -p:SourceRevisionId="$SHA" > /tmp/publish.log 2>&1; then
+            echo "::error title=publish failed (${{ matrix.rid }})::$(grep -m1 -iE '(error|NETSDK|NU[0-9]{4})' /tmp/publish.log | tr -d '\r' | head -c 900)"
+            echo "----- last 40 lines -----"
+            tail -40 /tmp/publish.log
+            exit 1
+          fi
           # content files the exe cannot swallow (and that this bundle does not use)
           rm -f "$BUNDLE/app/appsettings.Development.json" "$BUNDLE/app/web.config"
           {
@@ -184,7 +192,7 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=../dotnet \
+            -p:AppHostRelativeDotNet=../framework \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -247,13 +255,13 @@ jobs:
           Build: $SEMVER (sha $SHA)
           Frontend: built from source in this repo (frontend/)
 
-          Self-contained in the sense that matters: the .NET runtime ships in dotnet/,
+          Self-contained in the sense that matters: the .NET runtime ships in framework/,
           one copy shared by app/ and cli/. Nothing has to be installed on the host.
 
           Layout:
             app/             OpenList.Server (single exe) + appsettings.json + VERSION
             cli/             openlist (single exe) — password recovery, storage admin
-            dotnet/          Shared .NET runtime — used by app/ and cli/
+            framework/       Shared .NET runtime — used by app/ and cli/
             frontend/dist/   OpenList SPA (Vue 3, built from this repo)
             run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
             README.txt       This file
@@ -262,7 +270,7 @@ jobs:
             Linux/macOS:  ./run.sh
             Windows:      run.bat
 
-          The executables find dotnet/ through a relative path embedded in their apphost
+          The executables find framework/ through a relative path embedded in their apphost
           (AppHostRelativeDotNet), so nothing has to be installed on the host — but that
           folder must stay next to app/. Moving app/ on its own will make it fail to start.
 
@@ -308,7 +316,7 @@ jobs:
   # Desktop control app (Avalonia GUI managing the server as a child process).
   # One bundle per GUI-capable RID: desktop exe, server exe and the ops CLI all at the
   # bundle root (ResolveCorePath probes <base>/OpenList.Server[.exe], so no sub-folder),
-  # one shared dotnet/ runtime next to them, frontend/dist alongside (injected as
+  # one shared framework/ runtime next to them, frontend/dist alongside (injected as
   # OpenList__DistDir at launch).
   # No musl RIDs — the GUI targets glibc desktops.
   binaries-desktop:
@@ -347,10 +355,10 @@ jobs:
           dotnet-version: '10.0.x'
 
       # Every executable here is a RID-specific framework-dependent *single-file* publish: the
-      # managed assemblies ride inside the exe, the .NET runtime is the one shared dotnet/.
+      # managed assemblies ride inside the exe, the .NET runtime is the one shared framework/.
       # Publish into .stage/ first — `dotnet publish` also drops appsettings.json / web.config /
       # pdb, and the bundle root is supposed to end up with nothing but the three exes.
-      # All three apphosts embed AppHostRelativeDotNet=dotnet (the root is right there).
+      # All three apphosts embed AppHostRelativeDotNet=framework (the root is right there).
       - name: Publish server core
         run: |
           set -euo pipefail
@@ -366,7 +374,7 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=dotnet \
+            -p:AppHostRelativeDotNet=framework \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -387,7 +395,7 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=dotnet \
+            -p:AppHostRelativeDotNet=framework \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -410,7 +418,7 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=dotnet \
+            -p:AppHostRelativeDotNet=framework \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -418,7 +426,7 @@ jobs:
             -p:SourceRevisionId="$SHA"
 
       # Bundle root = the three exes, nothing else. Settings go to config/, the runtime and the
-      # SPA are staged by the steps below into dotnet/ and frontend/.
+      # SPA are staged by the steps below into framework/ and frontend/.
       - name: Assemble bundle root
         env:
           RID: ${{ matrix.rid }}
@@ -462,7 +470,7 @@ jobs:
           Build: $SEMVER (sha $SHA)
           Frontend: built from source in this repo (frontend/)
 
-          Framework-dependent build: the .NET runtime ships in dotnet/, one copy shared by
+          Framework-dependent build: the .NET runtime ships in framework/, one copy shared by
           all three executables. No runtime has to be installed on the host.
 
           Layout — only the three executables live in the bundle root:
@@ -471,12 +479,12 @@ jobs:
             openlist[.exe]          Ops CLI — password recovery, storage admin
 
           Directories:
-            dotnet/                 Shared .NET runtime — used by all three exes
+            framework/              Shared .NET runtime — used by all three exes
             frontend/dist/          OpenList SPA (Vue 3, built from this repo)
             config/                 Editable settings (appsettings.json)
 
           The three executables are single-file: the assemblies they need are inside each exe,
-          nothing else has to sit beside them. The runtime is the shared copy in dotnet/,
+          nothing else has to sit beside them. The runtime is the shared copy in framework/,
           found through AppHostRelativeDotNet — copy a bare exe elsewhere and it will not run.
 
           Run:
