@@ -466,7 +466,7 @@ void CopyFrontendOut(string dest)
     foreach (var dir in GetDirectories($"{src}/public"))
         CopyTree(dir.FullPath, $"{dest}/{dir.GetFilename()}");
     foreach (var file in GetFiles($"{src}/public/*"))
-        CopyFile(file, $"{dest}/{file.GetFilename()}");
+        CopyFile(file.FullPath, $"{dest}/{file.GetFilename()}");
 }
 
 // Emit platform-appropriate launchers that fix OpenList__DistDir for the bundle layout
