@@ -105,7 +105,7 @@ string BundleName()
             ? "openlist-net-desktop" // unversioned placeholder; Bundle/Package guard on missing --rid
             : $"openlist-net-desktop-{rid}";
     return string.IsNullOrEmpty(rid)
-        ? "openlist-net-framework-dependent"
+        ? "openlist-net-framework"
         : $"openlist-net-{rid}";
 }
 

@@ -161,9 +161,14 @@ jobs:
             -p:FileVersion="$FILE_VER" \
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA" > /tmp/publish.log 2>&1; then
-            echo "::error title=publish failed (${{ matrix.rid }})::$(grep -m1 -iE '(error|NETSDK|NU[0-9]{4})' /tmp/publish.log | tr -d '\r' | head -c 900)"
             echo "----- last 40 lines -----"
             tail -40 /tmp/publish.log
+            # 每一条真实错误单独顶一个 annotation（日志下载需要 admin 权限，annotation 不用）
+            grep -iE '(: error|error [A-Z]+[0-9]{3,4}|NETSDK[0-9]{4}|MSB[0-9]{4})' /tmp/publish.log \
+              | head -6 \
+              | while IFS= read -r line; do
+                  echo "::error title=publish ${{ matrix.rid }}::${line:0:900}"
+                done
             exit 1
           fi
           # content files the exe cannot swallow (and that this bundle does not use)
