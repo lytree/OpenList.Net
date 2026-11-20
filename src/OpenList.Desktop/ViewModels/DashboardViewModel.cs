@@ -513,9 +513,10 @@ public partial class DashboardViewModel : ViewModelBase
 
     private static string? FindCoreSettingsFile()
     {
-        // 桌面 exe 与核心 exe 常在同目录；开发模式下在 Server 输出目录
+        // 桌面 exe 与核心 exe 常在同目录；发布包把配置收在 config/ 下；开发模式下在 Server 输出目录
         string[] candidates =
         [
+            Path.Combine(AppContext.BaseDirectory, "config", "appsettings.json"),
             Path.Combine(AppContext.BaseDirectory, "appsettings.json"),
             Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
                 "..", "..", "..", "..", "OpenList.Server", "bin", "Debug", "net10.0", "appsettings.json")),

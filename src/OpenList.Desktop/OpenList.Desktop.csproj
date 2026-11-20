@@ -8,6 +8,12 @@
     <RootNamespace>OpenList.Desktop</RootNamespace>
     <Version>0.1.0</Version>
     <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
+    <!-- 桌面端对 Server 的引用只是「构建顺序 + 取程序集路径」（见下方 ProjectReference），
+         运行时并不会加载它 —— Server 永远是独立子进程。SDK 默认会校验「引用的可执行项目
+         必须和被引用项目同为 self-contained」，而两者的发布形态本来就不同（桌面端是
+         Avalonia WinExe，服务端是 Web SDK），这条校验在这里只产生噪音：
+         NETSDK1151 会在框架依赖发布时误报「被引用的项目是自包含的」。 -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
   </PropertyGroup>
 
   <ItemGroup>

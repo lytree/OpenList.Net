@@ -15,9 +15,8 @@
 // Arguments:
 //   --configuration=Release    MSBuild configuration
 //   --output=artifacts         Artifact root
-//   --app=server|desktop       What to publish (default: server). desktop = Avalonia GUI
-//                              (bundle root) + server under server/ + frontend/dist;
-//                              requires --rid
+//   --app=server|desktop       What to publish (default: server). desktop = three exes in the
+//                              bundle root + frontend/dist; requires --rid
 //   --rid=<rid>                Target runtime; empty = framework-dependent (server only)
 //   --dest=<path>              Only for --target=Runtime: where to create the dotnet/ root
 //   --frontend-dist=<path>     Frontend dist source (default: frontend/dist, built from this repo)
@@ -26,23 +25,27 @@
 //   --semver=<x.y.z>           Pre-computed semver (skips local GitVersion; CI uses this)
 //
 // Runtime layout (RID builds only):
-//   Every app in a bundle is published **framework-dependent, RID-specific** — it produces
-//   an apphost but carries no runtime of its own — and the host is taught where to look with
-//   AppHostDotNetSearch=AppRelative + AppHostRelativeDotNet. One .NET install layout
-//   (host/fxr/<ver>/ + shared/Microsoft.NETCore.App|Microsoft.AspNetCore.App/<ver>) is staged
-//   once per bundle as `dotnet/` and shared by every executable in it:
+//   Every app in a bundle is published **framework-dependent, RID-specific, single-file** — the
+//   managed assemblies and native libraries are inside the exe, the runtime is not — and the
+//   host is taught where to look with AppHostDotNetSearch=AppRelative + AppHostRelativeDotNet.
+//   One .NET install layout (host/fxr/<ver>/ + shared/Microsoft.NETCore.App|Microsoft.
+//   AspNetCore.App/<ver>) is staged once per bundle as `dotnet/` and shared by every
+//   executable in it:
 //
 //     desktop bundle (--app=desktop)      headless bundle (--app=server)
 //       OpenList.Desktop[.exe]  ─┐          app/OpenList.Server[.exe] ─┐
-//       OpenList.Server[.exe]   ─┼─→ dotnet/  cli/openlist[.exe]        ─┼─→ ../dotnet
-//       openlist[.exe]          ─┘          dotnet/
+//       OpenList.Server[.exe]   ─┼─→ dotnet/  app/appsettings.json     ─┼─→ ../dotnet
+//       openlist[.exe]          ─┘          cli/openlist[.exe]         ┘
+//       config/appsettings.json             dotnet/
 //       dotnet/                             frontend/dist/
 //       frontend/dist/
 //
-//   The three desktop-bundle exes sit in the same directory on purpose (a normal portable
-//   app layout); each one resolves `dotnet` next to itself. Before this, every folder carried
-//   its own ~106 MB self-contained runtime (desktop bundle: three copies / 494 MB).
-//   `--target=Runtime` builds just the `dotnet/` root, which is what CI calls per matrix leg.
+//   单文件是"根目录干净"的前提：三个发布输出合并到同一目录原本会留下 ~150 个散落的
+//   .dll/.pdb，现在每个 app 只剩一个 exe（程序集已在里面），根目录只有三个可执行文件。
+//   运行时仍然只有一份 —— 每个 exe 按自己相对位置解析 `dotnet`（桌面端三个都在根）。
+//   Before the shared root existed, every folder carried its own ~106 MB runtime
+//   (desktop bundle: three copies / 494 MB). `--target=Runtime` builds just the `dotnet/`
+//   root, which is what CI calls per matrix leg.
 
 using System;
 using System.Linq;
@@ -447,6 +450,10 @@ void WriteRunScripts(string bundleRoot)
             "#!/usr/bin/env sh",
             "cd \"$(dirname \"$0\")/app\" || exit 1",
             $"export OpenList__DistDir=\"{distDir}\"",
+            // Kestrel 的监听地址只认 ASPNETCORE_URLS（appsettings 里的 Scheme.HttpPort 仅参与
+            // 校验）—— 不设它就会退到 Kestrel 默认的 5000，与 README 承诺的 5244 不符。
+            ": \"${ASPNETCORE_URLS:=http://0.0.0.0:5244}\"",
+            "export ASPNETCORE_URLS",
             $"exec {unixCmd}",
         });
         if (!IsRunningOnWindows())
@@ -461,6 +468,7 @@ void WriteRunScripts(string bundleRoot)
             "@echo off",
             "cd /d \"%~dp0app\"",
             $"set OpenList__DistDir={distDir}",
+            "if not defined ASPNETCORE_URLS set ASPNETCORE_URLS=http://0.0.0.0:5244",
             winCmd,
         });
     }
@@ -472,13 +480,17 @@ void WriteReadme(string bundleRoot)
     var isFdd = string.IsNullOrEmpty(rid);
     var runUnix = isFdd ? "sh run.sh" : "./run.sh";
 
-    // RID bundles carry one shared runtime; the portable one deliberately carries none and is
-    // started through `dotnet` from the host.
+    // RID bundles carry one shared runtime and one exe per folder; the portable one deliberately
+    // carries neither and is started through `dotnet` from the host.
     var layout = new[]
     {
         "Layout:",
-        "  app/             .NET server (publish output)",
-        "  cli/             Ops CLI (openlist) — password recovery, storage admin",
+        isFdd
+            ? "  app/             .NET server (publish output, started via `dotnet`)"
+            : "  app/             OpenList.Server (single exe) + appsettings.json",
+        isFdd
+            ? "  cli/             Ops CLI (openlist) — password recovery, storage admin"
+            : "  cli/             openlist (single exe) — password recovery, storage admin",
     }
     .Concat(isFdd ? Array.Empty<string>() : new[] { "  dotnet/          Shared .NET runtime — used by app/ and cli/" })
     .Concat(new[]
@@ -521,7 +533,7 @@ void WriteReadme(string bundleRoot)
 }
 
 // Desktop bundle README: the GUI is the entry point, the server is a managed child
-// process placed under server/ so OpenListCoreService.ResolveCorePath finds it.
+// process sitting right next to it in the bundle root.
 void WriteDesktopReadme(string bundleRoot)
 {
     var name = BundleNameVersioned();
@@ -531,30 +543,34 @@ void WriteDesktopReadme(string bundleRoot)
     var cliLabel = isWindowsRid ? "openlist.exe" : "openlist";
     var runtimeLabel = RuntimeRootName + "/";
     var feLabel = "frontend/dist/";
-    var readmeLabel = "README.txt";
     System.IO.File.WriteAllLines(System.IO.Path.Combine(bundleRoot, "README.txt"), new[]
     {
         $"{name}",
         "================",
         "",
-        "Layout (everything in this directory):",
+        "Layout — only the three executables live in this directory:",
         $"  {exeName,-26} Avalonia desktop control app (start this)",
         $"  {coreName,-26} Server core (managed child process)",
         $"  {cliLabel,-26} Ops CLI — password recovery, storage admin",
+        "",
+        "Directories:",
         $"  {runtimeLabel,-26} Shared .NET runtime — used by all three exes",
         $"  {feLabel,-26} OpenList SPA (Vue 3, built from this repo)",
-        $"  {readmeLabel,-26} This file",
+        $"  {"config/",-26} Editable settings (appsettings.json)",
+        "",
+        "Each executable is single-file and framework-dependent: the assemblies it needs are",
+        "inside the exe, and the .NET runtime is the one shared copy in",
+        $"{RuntimeRootName}/ (found through AppHostRelativeDotNet). Keep the folders in place —",
+        "copying a bare exe elsewhere will not run.",
         "",
         "Run:",
         $"  Start {exeName} from a terminal or double-click it (Windows).",
         "  The desktop app launches the server automatically (port configurable in settings),",
-        "  shows the tray icon and live log viewer. Data is stored under data/ next to the",
-        "  desktop executable by default (configurable in settings).",
+        "  shows the tray icon and live log viewer. Data is stored under data/ by default",
+        "(configurable in settings).",
         "",
-        "No .NET runtime has to be installed on the host: all three executables find the one",
-        $"in {RuntimeRootName}/ through a relative path embedded in their apphost",
-        $"(AppHostRelativeDotNet). Keep {RuntimeRootName}/ next to them — copy the exes away",
-        "from it and they will not start.",
+        "Port, database and log paths live in config/appsettings.json (the desktop settings",
+        "page writes them too). Remove the file and the built-in defaults apply.",
         "",
         "The desktop app injects OpenList__DistDir to point the server at frontend/dist,",
         "so the web UI is served on the same port as the API. Default port: 5244.",
@@ -688,7 +704,7 @@ Task("Frontend")
 //
 // Without --rid there is no apphost at all (UseAppHost=false ⇒ `dotnet X.dll`), so nothing is
 // embedded and the global runtime is used; that path is unchanged.
-void PublishApp(string project, string publishDir, string appRelativeDotNet)
+void PublishApp(string project, string publishDir, string appRelativeDotNet, bool singleFile = true)
 {
     var msbuild = new DotNetMSBuildSettings()
         .WithProperty("SelfContained", "false")
@@ -709,6 +725,22 @@ void PublishApp(string project, string publishDir, string appRelativeDotNet)
         {
             msbuild.WithProperty("AppHostDotNetSearch", "AppRelative")
                    .WithProperty("AppHostRelativeDotNet", appRelativeDotNet);
+        }
+
+        if (singleFile)
+        {
+            // 单文件 + 框架依赖：托管程序集（含 Avalonia / SkiaSharp 的托管半边）和 native 库
+            // 全部捆进 exe，运行时仍然只用 bundle 里那一份 dotnet/ —— 于是发布目录里只剩
+            // 一个可执行文件，桌面包的根目录才可能"只有三个 exe"。
+            //
+            // IncludeNativeLibrariesForSelfExtract 是必须的：不加的话 libSkiaSharp / libHarfBuzz
+            // 会以独立 .dll 落在 exe 旁边（同样是根目录污染），加了才会打进 bundle 并在首次
+            // 运行时解压到 %TEMP%\.net\<app>\<hash>\。
+            msbuild.WithProperty("PublishSingleFile", "true")
+                   .WithProperty("IncludeNativeLibrariesForSelfExtract", "true")
+                   // 调试符号默认以 .pdb 落在 exe 旁边 —— 那又是根目录里的散文件。
+                   .WithProperty("DebugType", "none")
+                   .WithProperty("DebugSymbols", "false");
         }
     }
     WithVersionProps(msbuild);
@@ -733,6 +765,9 @@ void PublishApp(string project, string publishDir, string appRelativeDotNet)
 //   desktop bundle — all three exes share the bundle root, so everybody says `dotnet`
 //   server bundle  — server and cli live in app/ and cli/, i.e. one level down
 string BundleAppRelativeDotNet() => IsDesktopApp() ? RuntimeRootName : $"../{RuntimeRootName}";
+
+// `.exe` only for Windows RIDs — the bundle is staged on any host, so this cannot ask the OS.
+string ExeSuffix() => rid.StartsWith("win", StringComparison.OrdinalIgnoreCase) ? ".exe" : "";
 
 // Server publish. In the desktop bundle it lands *next to* the GUI (OpenListCoreService
 // probes `<base>/OpenList.Server.exe` first); in the headless bundle it goes into app/.
@@ -826,23 +861,32 @@ Task("Bundle")
 
     if (IsDesktopApp())
     {
-        // Desktop layout: OpenList.Desktop[.exe] + OpenList.Server[.exe] + openlist[.exe] all
-        // in the bundle root, one shared dotnet/ next to them, SPA under frontend/dist.
-        // ResolveCorePath probes `<base>/OpenList.Server[.exe]` first, so the GUI finds the
-        // core without any sub-folder; the desktop app injects OpenList__DistDir at launch.
+        // Desktop layout — the bundle root holds nothing but the three executables:
         //
-        // 三个 app 的发布输出合并到同一目录：共有的程序集来自同一套源码/同一份中央版本号，
-        // 内容逐字节相同（SkiaSharp 是唯一的例外，已在 Directory.Packages.props 里钉成同一
-        // 补丁号，否则这里只能留下一份、另一个 app 就会加载到版本不匹配的 managed/native）。
+        //   OpenList.Desktop.exe   Avalonia GUI (start this)
+        //   OpenList.Server.exe    server core (managed child process)
+        //   openlist.exe           ops CLI (password recovery, storage admin)
+        //   appsettings.json       the one file you may want to edit by hand
+        //   dotnet/                ONE shared .NET runtime for all three
+        //   frontend/dist/         the SPA
+        //
+        // Every exe is a single-file framework-dependent apphost: the managed assemblies and the
+        // native libraries live inside the exe, so nothing else has to sit next to it. Before
+        // this, merging the three publish outputs dropped ~150 loose .dll/.pdb files in the root.
         if (string.IsNullOrEmpty(rid))
             throw new InvalidOperationException("Desktop bundle requires --rid=<rid>.");
         EnsureDirectoryExists(bundleRoot);
         EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
 
-        // server first (it owns appsettings.json / web.config), then the GUI, then the CLI.
-        CopyTree($"{output}/publish", bundleRoot);
-        CopyTree($"{output}/publish-desktop", bundleRoot);
-        CopyTree($"{output}/publish-cli", bundleRoot);
+        var suffix = ExeSuffix();
+        CopyFile($"{output}/publish/OpenList.Server{suffix}", $"{bundleRoot}/OpenList.Server{suffix}");
+        CopyFile($"{output}/publish-desktop/OpenList.Desktop{suffix}", $"{bundleRoot}/OpenList.Desktop{suffix}");
+        CopyFile($"{output}/publish-cli/openlist{suffix}", $"{bundleRoot}/openlist{suffix}");
+        // appsettings.json 进 config/：桌面包根目录只允许有可执行文件，而配置又要可编辑
+        // （端口、数据库、日志路径）。服务器在启动时会额外读 <exe>/config/appsettings.json。
+        EnsureDirectoryExists($"{bundleRoot}/config");
+        CopyFile($"{output}/publish/appsettings.json", $"{bundleRoot}/config/appsettings.json");
+
         CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
         // All three apphosts say AppHostRelativeDotNet=dotnet — the root is right here.
         CopyTree($"{output}/{RuntimeRootName}", $"{bundleRoot}/{RuntimeRootName}");
@@ -855,12 +899,25 @@ Task("Bundle")
         EnsureDirectoryExists($"{bundleRoot}/cli");
         EnsureDirectoryExists($"{bundleRoot}/frontend/dist");
 
-        CopyTree($"{output}/publish", $"{bundleRoot}/app");
-        CopyTree($"{output}/publish-cli", $"{bundleRoot}/cli");
-        CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
-        // Same sharing for the headless bundle: app/ + cli/ → `../dotnet`.
-        if (!string.IsNullOrEmpty(rid))
+        if (string.IsNullOrEmpty(rid))
+        {
+            // Portable bundle: no apphost at all, so app/ is the raw publish output.
+            CopyTree($"{output}/publish", $"{bundleRoot}/app");
+            CopyTree($"{output}/publish-cli", $"{bundleRoot}/cli");
+        }
+        else
+        {
+            // Same single-file treatment as the desktop bundle: one exe per folder.
+            var suffix = ExeSuffix();
+            CopyFile($"{output}/publish/OpenList.Server{suffix}", $"{bundleRoot}/app/OpenList.Server{suffix}");
+            CopyFile($"{output}/publish/appsettings.json", $"{bundleRoot}/app/appsettings.json");
+            CopyFile($"{output}/publish/VERSION", $"{bundleRoot}/app/VERSION");
+            CopyFile($"{output}/publish-cli/openlist{suffix}", $"{bundleRoot}/cli/openlist{suffix}");
+            // Same sharing for the headless bundle: app/ + cli/ → `../dotnet`.
             CopyTree($"{output}/{RuntimeRootName}", $"{bundleRoot}/{RuntimeRootName}");
+        }
+
+        CopyTree(FeDistDir(), $"{bundleRoot}/frontend/dist");
 
         WriteRunScripts(bundleRoot);
         WriteReadme(bundleRoot);

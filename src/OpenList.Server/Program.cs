@@ -47,6 +47,14 @@ try
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 发布包把可编辑配置收在 config/ 下（桌面包的根目录只留三个 exe），而 ASP.NET Core 的
+// 默认加载只看 ContentRoot —— 这里补一条可选路径，让 config/appsettings.json 也能生效。
+// 顺序上它在默认 appsettings.json 之后，所以同名的键以 config/ 为准；两种布局都支持的
+// 意思是：源码运行 / Docker（appsettings.json 就在 ContentRoot）与发行包（config/）都能用。
+var configDirSettings = Path.Combine(AppContext.BaseDirectory, "config", "appsettings.json");
+if (File.Exists(configDirSettings))
+    builder.Configuration.AddJsonFile(configDirSettings, optional: true, reloadOnChange: false);
+
 // Add environment variables with OpenList__ prefix (overrides appsettings.json)
 builder.Configuration.AddEnvironmentVariables("OpenList__");
 

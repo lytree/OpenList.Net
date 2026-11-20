@@ -133,6 +133,10 @@ jobs:
       # into that apphost so it resolves `dotnet/` (staged below, one copy for the whole
       # bundle) instead of a machine-wide install. Layout:
       #   app/  + cli/  →  ../dotnet
+      #
+      # PublishSingleFile keeps each folder down to one executable: the managed assemblies and
+      # the native libraries go inside the exe (not into the runtime — SelfContained stays
+      # false), so app/ holds OpenList.Server + appsettings.json and cli/ holds openlist.
       - name: Publish server
         run: |
           set -euo pipefail
@@ -143,6 +147,10 @@ jobs:
             -o "$BUNDLE/app" \
             -r "${{ matrix.rid }}" \
             -p:SelfContained=false \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
             -p:AppHostRelativeDotNet=../dotnet \
             -p:Version="$SEMVER" \
@@ -150,6 +158,8 @@ jobs:
             -p:FileVersion="$FILE_VER" \
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA"
+          # content files the exe cannot swallow (and that this bundle does not use)
+          rm -f "$BUNDLE/app/appsettings.Development.json" "$BUNDLE/app/web.config"
           {
             echo "semver=$SEMVER"
             echo "assemblyVer=$ASM_VER"
@@ -169,6 +179,10 @@ jobs:
             -o "$BUNDLE/cli" \
             -r "${{ matrix.rid }}" \
             -p:SelfContained=false \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
             -p:AppHostRelativeDotNet=../dotnet \
             -p:Version="$SEMVER" \
@@ -209,6 +223,7 @@ jobs:
           @echo off
           cd /d "%~dp0app"
           set OpenList__DistDir=../frontend/dist
+          if not defined ASPNETCORE_URLS set ASPNETCORE_URLS=http://0.0.0.0:5244
           OpenList.Server.exe
           EOF
               ;;
@@ -217,6 +232,8 @@ jobs:
           #!/usr/bin/env sh
           cd "$(dirname "$0")/app" || exit 1
           export OpenList__DistDir="../frontend/dist"
+          : "${ASPNETCORE_URLS:=http://0.0.0.0:5244}"
+          export ASPNETCORE_URLS
           exec ./OpenList.Server
           EOF
               chmod +x run.sh
@@ -230,11 +247,12 @@ jobs:
           Build: $SEMVER (sha $SHA)
           Frontend: built from source in this repo (frontend/)
 
-          Self-contained build — no .NET runtime required on the host.
+          Self-contained in the sense that matters: the .NET runtime ships in dotnet/,
+          one copy shared by app/ and cli/. Nothing has to be installed on the host.
 
           Layout:
-            app/             .NET server (app + apphost, framework-dependent)
-            cli/             Ops CLI (openlist) — password recovery, storage admin
+            app/             OpenList.Server (single exe) + appsettings.json + VERSION
+            cli/             openlist (single exe) — password recovery, storage admin
             dotnet/          Shared .NET runtime — used by app/ and cli/
             frontend/dist/   OpenList SPA (Vue 3, built from this repo)
             run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
@@ -328,10 +346,11 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # Every executable here is a RID-specific framework-dependent publish; the single
-      # runtime lives in dotnet/ and is referenced from each apphost's embedded relative
-      # path. Layout: OpenList.Desktop / OpenList.Server / openlist all land in the bundle
-      # root next to dotnet/ — all three embed AppHostRelativeDotNet=dotnet.
+      # Every executable here is a RID-specific framework-dependent *single-file* publish: the
+      # managed assemblies ride inside the exe, the .NET runtime is the one shared dotnet/.
+      # Publish into .stage/ first — `dotnet publish` also drops appsettings.json / web.config /
+      # pdb, and the bundle root is supposed to end up with nothing but the three exes.
+      # All three apphosts embed AppHostRelativeDotNet=dotnet (the root is right there).
       - name: Publish server core
         run: |
           set -euo pipefail
@@ -339,9 +358,13 @@ jobs:
           echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
           dotnet publish src/OpenList.Server/OpenList.Server.csproj \
             -c "$CONFIGURATION" \
-            -o "$BUNDLE" \
+            -o "$BUNDLE/.stage/server" \
             -r "${{ matrix.rid }}" \
             -p:SelfContained=false \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
             -p:AppHostRelativeDotNet=dotnet \
             -p:Version="$SEMVER" \
@@ -349,15 +372,20 @@ jobs:
             -p:FileVersion="$FILE_VER" \
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA"
+          rm -f "$BUNDLE/.stage/server/appsettings.Development.json" "$BUNDLE/.stage/server/web.config"
 
       - name: Publish desktop app
         run: |
           set -euo pipefail
           dotnet publish src/OpenList.Desktop/OpenList.Desktop.csproj \
             -c "$CONFIGURATION" \
-            -o "$BUNDLE" \
+            -o "$BUNDLE/.stage/desktop" \
             -r "${{ matrix.rid }}" \
             -p:SelfContained=false \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
             -p:AppHostRelativeDotNet=dotnet \
             -p:Version="$SEMVER" \
@@ -365,13 +393,6 @@ jobs:
             -p:FileVersion="$FILE_VER" \
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA"
-          {
-            echo "semver=$SEMVER"
-            echo "assemblyVer=$ASM_VER"
-            echo "fileVer=$FILE_VER"
-            echo "informationalVer=$INFO_VER"
-            echo "sha=$SHA"
-          } > "$BUNDLE/VERSION"
 
       # Ops CLI inside the desktop bundle too — the GUI has no password-recovery path
       # of its own, and a locked-out admin must not be stuck. (README advertises it —
@@ -381,9 +402,13 @@ jobs:
           set -euo pipefail
           dotnet publish src/OpenList.Cli/OpenList.Cli.csproj \
             -c "$CONFIGURATION" \
-            -o "$BUNDLE" \
+            -o "$BUNDLE/.stage/cli" \
             -r "${{ matrix.rid }}" \
             -p:SelfContained=false \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
             -p:AppHostRelativeDotNet=dotnet \
             -p:Version="$SEMVER" \
@@ -391,6 +416,23 @@ jobs:
             -p:FileVersion="$FILE_VER" \
             -p:InformationalVersion="$INFO_VER" \
             -p:SourceRevisionId="$SHA"
+
+      # Bundle root = the three exes, nothing else. Settings go to config/, the runtime and the
+      # SPA are staged by the steps below into dotnet/ and frontend/.
+      - name: Assemble bundle root
+        env:
+          RID: ${{ matrix.rid }}
+        run: |
+          set -euo pipefail
+          cd "$BUNDLE"
+          suffix=""
+          case "$RID" in win-*) suffix=".exe" ;; esac
+          mv ".stage/server/OpenList.Server${suffix}" .
+          mv ".stage/desktop/OpenList.Desktop${suffix}" .
+          mv ".stage/cli/openlist${suffix}" .
+          mkdir -p config
+          mv .stage/server/appsettings.json config/
+          rm -rf .stage
 
       # One runtime for all three executables (desktop + server + cli).
       - name: Stage shared .NET runtime root
@@ -420,25 +462,27 @@ jobs:
           Build: $SEMVER (sha $SHA)
           Frontend: built from source in this repo (frontend/)
 
-          Self-contained build — no .NET runtime required on the host.
+          Framework-dependent build: the .NET runtime ships in dotnet/, one copy shared by
+          all three executables. No runtime has to be installed on the host.
 
-          Layout (everything in this directory):
+          Layout — only the three executables live in the bundle root:
             OpenList.Desktop[.exe]  Avalonia desktop control app (start this)
             OpenList.Server[.exe]   Server core (managed child process)
             openlist[.exe]          Ops CLI — password recovery, storage admin
+
+          Directories:
             dotnet/                 Shared .NET runtime — used by all three exes
             frontend/dist/          OpenList SPA (Vue 3, built from this repo)
-            README.txt              This file
+            config/                 Editable settings (appsettings.json)
+
+          The three executables are single-file: the assemblies they need are inside each exe,
+          nothing else has to sit beside them. The runtime is the shared copy in dotnet/,
+          found through AppHostRelativeDotNet — copy a bare exe elsewhere and it will not run.
 
           Run:
             Start OpenList.Desktop (double-click on Windows). The desktop app launches the
             server automatically (port configurable in settings), shows a tray icon and a
-            live log viewer. Data is stored under data/ next to the desktop executable.
-
-          No .NET runtime has to be installed on the host: all three executables find the one
-          in dotnet/ through a relative path embedded in their apphost
-          (AppHostRelativeDotNet). Keep dotnet/ next to them — copy the exes away from it and
-          they will not start.
+            live log viewer. Data is stored under data/ by default.
 
           The desktop app injects OpenList__DistDir so the server serves frontend/dist on
           the same port as the API. Default port: http://0.0.0.0:5244.

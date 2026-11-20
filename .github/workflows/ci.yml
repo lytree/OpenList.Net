@@ -179,6 +179,8 @@ jobs:
           #!/usr/bin/env sh
           cd "$(dirname "$0")/app" || exit 1
           export OpenList__DistDir="../frontend/dist"
+          : "${ASPNETCORE_URLS:=http://0.0.0.0:5244}"
+          export ASPNETCORE_URLS
           exec dotnet OpenList.Server.dll
           EOF
           chmod +x run.sh
@@ -187,6 +189,7 @@ jobs:
           @echo off
           cd /d "%~dp0app"
           set OpenList__DistDir=../frontend/dist
+          if not defined ASPNETCORE_URLS set ASPNETCORE_URLS=http://0.0.0.0:5244
           dotnet OpenList.Server.dll
           EOF
 
