@@ -464,7 +464,7 @@ void CopyFrontendOut(string dest)
     if (DirectoryExists($"{src}/assets"))
         CopyTree($"{src}/assets", $"{dest}/assets");
     foreach (var dir in GetDirectories($"{src}/public"))
-        CopyTree(dir.FullPath, $"{dest}/{dir.GetFilename()}");
+        CopyTree(dir.FullPath, $"{dest}/{System.IO.Path.GetFileName(dir.FullPath)}");
     foreach (var file in GetFiles($"{src}/public/*"))
         CopyFile(file.FullPath, $"{dest}/{file.GetFilename()}");
 }
