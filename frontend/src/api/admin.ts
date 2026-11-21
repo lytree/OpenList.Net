@@ -1,5 +1,6 @@
 import { http } from "./client"
 import type {
+  AdminUser,
   CreateStorageReq,
   DriverInfo,
   DriverMap,
@@ -12,6 +13,7 @@ import type {
   ScanStartReq,
   SettingItem,
   StorageWithDriver,
+  UpdateUserReq,
 } from "./types"
 
 /**
@@ -61,6 +63,18 @@ export const disableStorage = (id: number): PResp<Record<string, never>> =>
 /** `POST /admin/storage/load_all` → Resp<{}>（重新加载全部非禁用挂载）。 */
 export const loadAllStorages = (): PResp<Record<string, never>> =>
   http.post<Record<string, never>>("/admin/storage/load_all")
+
+// ---------------------------------------------------------------------------
+// 用户管理（只有列表 + 编辑；新建 / 删除账号由产品定位刻意不提供）
+// ---------------------------------------------------------------------------
+
+/** `GET /admin/user/list` → Resp<{ content, total }>（元素为 UserPublic，不含密码哈希）。 */
+export const listUsers = (): PResp<PageResp<AdminUser>> =>
+  http.get<PageResp<AdminUser>>("/admin/user/list")
+
+/** `POST /admin/user/update` — 部分更新：只提交改过的字段。 */
+export const updateUser = (req: UpdateUserReq): PResp<Record<string, never>> =>
+  http.post<Record<string, never>>("/admin/user/update", req)
 
 // ---------------------------------------------------------------------------
 // 路径元数据

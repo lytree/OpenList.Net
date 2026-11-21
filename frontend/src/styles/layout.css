@@ -999,14 +999,6 @@
   color: var(--ol-text);
 }
 
-.ol-manage-extra {
-  flex: none;
-  padding: 0 8px 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .ol-manage-item {
   display: flex;
   align-items: center;
@@ -1038,19 +1030,16 @@
   flex: none;
 }
 
-.ol-manage-sep {
-  height: 1px;
-  margin: 8px 10px;
-  background: var(--ol-border);
-}
-
+/* 侧栏底部（媒体库 / 资源库）：`margin-top: auto` 把它顶到栏底，与媒体左栏的
+   `.olm-side-foot` 同一处位置 —— 内容少时贴底，内容多到要滚动时自然被推到最后。 */
 .ol-manage-side-foot {
   flex: none;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 4px 8px 10px;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding: 8px;
+  border-top: 1px solid var(--el-border-color-lighter);
 }
 
 .ol-manage-content {
@@ -1099,6 +1088,14 @@
 
   .ol-manage-content {
     padding: var(--ol-space-4);
+  }
+}
+
+/* 手机：标题栏只剩「汉堡 + 管理 + 主题 + 退出」，语言切换收起来（低频，且名称长度不可控）。
+   带 `.ol-manage-header` 才盖得住 Element Plus 的 `.el-button`。 */
+@media (max-width: 600px) {
+  .ol-manage-header .ol-manage-lang {
+    display: none;
   }
 }
 

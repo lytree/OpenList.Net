@@ -32,14 +32,21 @@ interface NavEntry {
  * 长到十几项时会退化成「一条要横向滑动的截断列表」，而媒体侧恰恰是栏目最多的一侧；
  * 竖排在桌面还能一直挂着分类，不占内容区的上部宽度。
  *
- * 入口分级：**浏览类**（首页 / 媒体库 / 资源库 / 演员 / 片商 / 系列）恒在；**按用户**的想看 /
- * 历史只在登录后出现 —— 给游客一个点进去就被弹回登录页的假入口，比没有入口更让人困惑。
- * 「资源库」同理只在登录后出现：它指向的文件门面默认要登录（`home_guest_access=false`）。
+ * 入口分级：**浏览类**（首页 / 资源库 / 媒体库 / 演员 / 片商 / 系列）恒在，其中资源库
+ * 只在登录后出现 —— 它指向 `/files`，而文件门面默认要登录（`home_guest_access=false`），
+ * 给游客一个点进去就被弹回登录页的假入口比没有入口更让人困惑。**按用户**的想看 / 历史
+ * 也只在登录后出现。
  *
- * **「资源库」是唯一一个跨门面的入口**：媒体库回答「刮削后的条目」，资源库回答「磁盘上
- * 原本是什么样」，两者都需要，但文件树自带面包屑 / 批量操作 / 上传浮条，塞进媒体外壳会
- * 让两套版式互相将就。所以这里只做导航转发（`/files`，整个外壳换成 `FilesLayout`），
- * 不内嵌渲染。代价是点进去之后左栏消失，回媒体靠浏览器后退。
+ * **「资源库」为什么排在首页之后、媒体库之前**：首页是落地页，出去看内容的第一跳是它；
+ * 资源库（磁盘原貌）与媒体库（刮削后的条目）是同一批内容的两种视角，必须相邻。三者
+ * 排成「首页 → 资源库 → 媒体库」，两个约束同时满足。
+ *
+ * 资源库是**唯一一个跨门面的入口**（`/files`，整个外壳换成 `FilesLayout`），这里只做
+ * 导航转发、不内嵌渲染：文件树自带面包屑 / 批量操作 / 上传浮条，塞进媒体外壳会让两套
+ * 版式互相将就。代价是点进去之后左栏消失，回媒体靠浏览器后退。
+ *
+ * 左栏**底部**只放「管理」（`layouts/MediaLayout` 的 `.olm-side-foot`）：那是去改配置，
+ * 与「去看内容」不同类，所以不和栏目混成一列。
  *
  * 播放列表 / 口味 / 任务中心放在**第二组**（按用户、低频）：它们原来是右上角账户菜单里的
  * 条目，账户区拿掉之后必须有地方接住，否则三个页面变成只能手打地址。分组用的是另一个
@@ -65,12 +72,11 @@ export default defineComponent({
      */
     const browse = computed<NavEntry[]>(() => [
       { prefix: "/media", label: t("media.tab_home"), icon: HomeFilled, exact: true },
-      { prefix: "/media/library", label: t("media.tab_libraries"), icon: Film },
-      // 资源库：现有的文件树（`/files`），紧跟媒体库 —— 两者是同一批内容的两种视角。
-      // 只对登录用户渲染，因为文件门面默认要登录；游客看到的是一个进不去的入口。
+      // 资源库：紧跟首页（出去看内容的第一跳），又紧邻媒体库（两种视角）。登录后才渲染。
       ...(user.isLogin
         ? [{ prefix: "/files", label: t("media.tab_resources"), icon: FolderOpened }]
         : []),
+      { prefix: "/media/library", label: t("media.tab_libraries"), icon: Film },
       { prefix: "/media/persons", label: t("media.persons"), icon: User },
       { prefix: "/media/studios", label: t("media.studios"), icon: OfficeBuilding },
       { prefix: "/media/series", label: t("media.series"), icon: Collection },

@@ -5,13 +5,19 @@ namespace OpenList.Core.Interfaces;
 
 /// <summary>
 /// 账号服务接口：查询、资料更新、初始管理员创建与密码重置。
-/// 单用户产品只保留一个内置管理员，不提供用户列表 / 新建 / 删除能力；
+/// 单用户产品：库里通常只有一个内置管理员，因此**不提供新建 / 删除**能力；
+/// 只保留只读列表与按 id 更新（管理台「用户管理」页只放行「编辑」）。
 /// SSH 公钥由 <c>ISshKeyService</c> 负责。
 /// </summary>
 public interface IUserService
 {
     /// <summary>按用户 id 获取用户。</summary>
     Task<Resp<User>> GetAsync(long id, CancellationToken ct = default);
+    /// <summary>
+    /// 列出全部账号（按 id 升序），返回不含密码哈希的公开视图。
+    /// 供管理台「用户管理」页展示 —— 单用户产品里它通常只有一行。
+    /// </summary>
+    Task<Resp<List<UserPublic>>> ListAsync(CancellationToken ct = default);
     /// <summary>按用户名获取用户。</summary>
     Task<Resp<User>> GetByNameAsync(string username, CancellationToken ct = default);
     /// <summary>

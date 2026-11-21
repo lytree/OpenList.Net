@@ -233,6 +233,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "manage.sidemenu.dashboard" },
       },
       {
+        path: "users",
+        name: "users",
+        component: () => import("~/pages/manage/users/Users"),
+        meta: { title: "manage.sidemenu.users" },
+      },
+      {
         path: "storages",
         name: "storages",
         component: () => import("~/pages/manage/storages/Storages"),

@@ -114,10 +114,11 @@ await page.reload({ waitUntil: "networkidle" })
 await page.waitForTimeout(1200)
 check("刷新后保持登录", (await page.locator(".ol-auth").count()) === 0, page.url())
 
-// ---------- E. 管理台 9 个模块都能打开 ----------
-// （单用户产品已移除 users / shares / messenger 三页；about 是最后一个，见 §38）
+// ---------- E. 管理台 10 个模块都能打开 ----------
+// （share / messenger 两页已移除；users 只留「列表 + 编辑」，见 §38）
 const ADMIN_PAGES = [
   ["/@manage/dashboard", "Dashboard"],
+  ["/@manage/users", "Users"],
   ["/@manage/storages", "Storages"],
   ["/@manage/metas", "Metas"],
   ["/@manage/indexes", "Indexes"],
@@ -138,6 +139,71 @@ for (const [hash, label] of ADMIN_PAGES) {
     hasSurface && errors.length === before,
     `surface=${hasSurface} newErrors=${errors.length - before}`,
   )
+}
+
+// ---------- E2. 用户管理：只留「编辑」，且编辑真的落库 ----------
+// 后端只有 list + update（产品是个人资源管理，刻意不提供新建 / 禁用 / 删除），
+// 所以这里既要验证接口契约，也要验证页面上确实没有多余入口。
+await goto("/@manage/users")
+await page.waitForSelector(".vxe-body--row", { timeout: 15000 })
+const userRowCount = await page.locator(".vxe-body--row").count()
+check("用户列表只有内置管理员一行", userRowCount === 1, `rows=${userRowCount}`)
+
+const rowOps = await page
+  .locator(".vxe-body--row")
+  .first()
+  .locator(".ol-manage-row-ops button")
+  .allInnerTexts()
+check("行操作只有「编辑」", rowOps.length === 1 && /edit/i.test(rowOps[0]), rowOps.join("|"))
+
+const userToolbar = await page
+  .locator(".ol-manage-page .ol-manage-toolbar button.el-button")
+  .allInnerTexts()
+check(
+  "工具栏只有刷新（没有「添加」）",
+  userToolbar.length === 1 && /refresh/i.test(userToolbar[0]),
+  userToolbar.join("|"),
+)
+await page.screenshot({ path: `${SHOT.replace(/\.png$/, "")}-users.png` }).catch(() => {})
+
+const usersResp = await page.request
+  .get(`${BASE}/api/admin/user/list`, { headers: { Authorization: token } })
+  .then((r) => r.json())
+const adminUser = usersResp?.data?.content?.[0]
+check(
+  "列表下发 UserPublic（不含密码 / 哈希）",
+  Boolean(adminUser) && !("password" in adminUser) && !("passwordHash" in adminUser),
+  JSON.stringify(Object.keys(adminUser ?? {})),
+)
+
+// 走一遍真实的「编辑」闭环：改用户名 → 列表刷新 → 用接口改回原名。
+const origName = adminUser?.username ?? ""
+const renamed = `${origName}-e2e`
+if (origName) {
+  await page.locator(".vxe-body--row").first().locator(".ol-manage-row-ops button").first().click()
+  await page.waitForSelector(".el-dialog:visible", { timeout: 10000 })
+  // 弹窗有 300ms 的展开动画，等它落位再截图（否则截到半透明的空框）。
+  await page.waitForTimeout(700)
+  await page.screenshot({ path: `${SHOT.replace(/\.png$/, "")}-users-edit.png` }).catch(() => {})
+  await page.locator(".el-dialog:visible .el-input__inner").first().fill(renamed)
+  await page.locator(".el-dialog:visible .el-button--primary").last().click()
+  await page.waitForTimeout(1500)
+  const renamedRows = await page.locator(".vxe-body--row", { hasText: renamed }).count()
+  const renamedOnDisk = await page.request
+    .get(`${BASE}/api/admin/user/list`, { headers: { Authorization: token } })
+    .then((r) => r.json())
+    .then((r) => r?.data?.content?.[0]?.username)
+  check("弹窗编辑用户名后列表与接口都更新", renamedRows === 1 && renamedOnDisk === renamed,
+    `rows=${renamedRows} api=${renamedOnDisk}`)
+
+  // 改回原名：后面的轮次 / 手工排查都假定管理员还叫 admin。
+  const restored = await page.request
+    .post(`${BASE}/api/admin/user/update`, {
+      headers: { Authorization: token },
+      data: { id: adminUser.id, username: origName },
+    })
+    .then((r) => r.json())
+  check("改回原名成功", restored.code === 200, JSON.stringify(restored))
 }
 
 // ---------- F. 关于页：每个数字都要和接口对得上 ----------
@@ -225,10 +291,10 @@ check(
   JSON.stringify(links[0]),
 )
 
-// 导航：9 项、全部可点（单用户产品已移除 users / shares / messenger）
+// 导航：10 项、全部可点（share / messenger 已移除；users 只剩列表 + 编辑）
 const navTexts = await page.locator(".ol-manage-menu .el-menu-item").allInnerTexts()
 const navDisabled = await page.locator(".ol-manage-menu .el-menu-item.is-disabled").count()
-check("导航 9 项", navTexts.length === 9, navTexts.join("|"))
+check("导航 10 项", navTexts.length === 10, navTexts.join("|"))
 check("没有 (soon) 条目", !navTexts.some((t) => t.includes("(soon)")), navTexts.filter((t) => t.includes("soon")).join("|"))
 check("没有禁用项", navDisabled === 0, `disabled=${navDisabled}`)
 

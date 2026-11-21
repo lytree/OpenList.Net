@@ -1,0 +1,10 @@
+{
+  "username": "Username",
+  "password": "Password",
+  "password_tips": "Leave blank to keep the current password",
+  "status": "Status",
+  "available": "Active",
+  "allow_ldap": "Allow LDAP Login",
+  "created_at": "Created At",
+  "tips": "This site has a single built-in administrator account. Only editing is available here: you can change the username, password and LDAP login switch; creating, disabling or deleting accounts is not available yet."
+}

@@ -1,0 +1,10 @@
+{
+  "username": "用户名",
+  "password": "密码",
+  "password_tips": "留空则不修改密码",
+  "status": "状态",
+  "available": "正常",
+  "allow_ldap": "允许 LDAP 登录",
+  "created_at": "创建时间",
+  "tips": "当前站点只有一个内置管理员账号。此页只提供「编辑」：可以修改用户名、密码与 LDAP 登录开关；新增 / 禁用 / 删除账号暂未开放。"
+}

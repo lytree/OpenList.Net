@@ -11,11 +11,11 @@ import MediaNav from "~/pages/media/MediaNav"
  * 媒体左栏导航的条目集合。
  *
  * 守两件事：
- * 1. **「资源库」只在登录后出现**。它指向 `/files`，而文件门面默认要登录
- *    （`home_guest_access=false`）；给游客摆一个点进去就被弹回登录页的入口，
- *    比没有入口更让人困惑。
- * 2. **它紧跟媒体库**。两者是同一批内容的两个视角（刮削后的条目 / 磁盘上的原貌），
- *    排在一起才不会被当成两个互不相干的板块。
+ * 1. **「资源库」只在登录后出现，且紧挨首页**。它指向 `/files`，文件门面默认要登录；
+ *    位置在首页之后、媒体库之前 —— 既满足"出去看内容的第一跳就在首页旁边"，也保证
+ *    它与媒体库（同一批内容的两种视角）仍然相邻。
+ * 2. **登录后才出现按用户的栏目**。想看 / 历史 / 播放列表 / 口味 / 任务都要求登录；
+ *    给游客摆一个点进去就被弹回登录页的入口，比没有入口更让人困惑。
  *
  * 这里只断言「渲染了哪些条目、跳到哪」，不断言样式 —— 版式归 e2e 管。
  */
@@ -81,16 +81,23 @@ describe("媒体左栏导航", () => {
     expect(router.currentRoute.value.query.redirect).toBe("/media")
   })
 
-  it("登录后：资源库排在媒体库之后，指向 /files", async () => {
+  it("登录后：资源库紧挨首页，排在媒体库之前，指向 /files", async () => {
     const wrapper = await mountNav(true)
     const labels = labelsOf(wrapper)
 
-    expect(labels).toHaveLength(8)
-    expect(labels.slice(0, 3)).toEqual(["Media home", "Libraries", "File library"])
-    expect(labels.slice(3)).toEqual(["People", "Studios", "Series", "Watch later", "History"])
+    expect(labels).toEqual([
+      "Media home",
+      "File library",
+      "Libraries",
+      "People",
+      "Studios",
+      "Series",
+      "Watch later",
+      "History",
+    ])
 
-    const resources = wrapper.findAll(".olm-nav a.olm-nav-link")[2]!
-    expect(resources.attributes("href")).toBe("/files")
+    const links = wrapper.findAll(".olm-nav a.olm-nav-link")
+    expect(links[1]!.attributes("href")).toBe("/files")
   })
 
   it("登录后第二组只有按用户的三项", async () => {

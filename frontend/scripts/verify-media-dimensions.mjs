@@ -254,10 +254,23 @@ await page.waitForSelector(".ol-media-facets", { timeout: 10000 })
 const facetChips = await page.locator(".ol-media-facets .ol-media-chip-tag").count()
 check("媒体库页渲染 facets 筛选条", facetChips > 3, `${facetChips} chips`)
 
-// 登录态下导航是 8 项：首页 / 媒体库 / 资源库 / 演员 / 片商 / 系列 + 想看 / 历史
-// （游客只有前 5 项：资源库与想看/历史都要登录）
+// 登录态下导航列是 8 项：首页 / 资源库 / 媒体库 / 演员 / 片商 / 系列 + 想看 / 历史
+// （游客只有前 5 项：资源库与想看/历史都要登录）。资源库紧挨首页、排在媒体库之前；
+// 左栏底部只剩「管理」（去管理台，与"看内容"不同类）。
 const navCount = await page.locator(".olm-nav .olm-nav-link").count()
-check("媒体外壳导航 8 项（6 浏览 + 想看/历史）", navCount === 8, `${navCount} links`)
+const navTexts = (await page.locator(".olm-nav .olm-nav-link").allTextContents()).map((s) =>
+  s.trim(),
+)
+const footLinks = (await page.locator(".olm-side-foot .olm-side-link").allTextContents()).map((s) =>
+  s.trim(),
+)
+check(
+  "媒体外壳导航 8 项，资源库紧跟首页，底部只有管理",
+  navCount === 8 &&
+    navTexts.slice(0, 3).join("|") === "Media home|File library|Libraries" &&
+    footLinks.join("|") === "Management",
+  `${navCount} links, head=${JSON.stringify(navTexts.slice(0, 3))}, foot=${JSON.stringify(footLinks)}`,
+)
 
 const cardsBefore = await page.locator(".ol-media-grid .ol-media-card").count()
 await page.locator(".ol-media-facets .ol-media-chip-tag", { hasText: "Blade Runner" }).count()

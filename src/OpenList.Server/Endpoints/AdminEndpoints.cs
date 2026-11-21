@@ -15,7 +15,8 @@ namespace OpenList.Server.Endpoints;
 
 /// <summary>
 /// 管理端点：存储 CRUD、驱动列表、设置、元数据、扫描、搜索索引。
-/// 用户方面只保留只读列表（元数据白名单用）与内置管理员密码重置。
+/// 用户方面只保留只读列表 + 按 id 更新（管理台「用户管理」页只放行「编辑」）
+/// 与内置管理员密码重置；不提供新建 / 删除账号。
 /// 对应 OpenList Go <c>server/handles/admin</c>。所有端点均要求 admin 角色。
 /// 路由位于 <c>/api/admin</c> 下，整体 <c>RequireAuthorization("admin")</c>。
 /// </summary>
@@ -63,6 +64,21 @@ public static class AdminEndpoints
 
         g.MapGet("/driver/info", async (string driver, IStorageService svc) =>
             Results.Ok(await svc.GetDriverInfoAsync(driver)));
+
+        // --- 用户管理 ---
+        // GET /admin/user/list -> { content, total }（元素是 UserPublic，不含密码哈希）
+        g.MapGet("/user/list", async (IUserService users) =>
+        {
+            var r = await users.ListAsync();
+            if (r.Code != 200) return Results.Ok(r);
+            return Results.Ok(Resp<object>.Ok(new { content = r.Data!, total = r.Data!.Count }));
+        });
+
+        // POST /admin/user/update — **部分更新**：只覆盖请求体里出现的字段（其余保持原值）。
+        // 单用户产品只保留这一个写入口；新建 / 删除账号仍是刻意不提供的（产品定位是个人
+        // 资源管理，多账号会牵动「谁能看到什么」的整套语义）。
+        g.MapPost("/user/update", async (UpdateUserReq req, IUserService users) =>
+            Results.Ok(await users.UpdateAsync(req.Id, req)));
 
         // POST /admin/user/reset_admin_password — 重置内置管理员的密码。
         // 单用户产品里这是「忘记密码后由已登录客户端 / 桌面端恢复」的通道（网页端改密走 /api/me/update）。

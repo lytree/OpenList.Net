@@ -8,7 +8,7 @@ namespace OpenList.Infrastructure.Services;
 
 /// <summary>
 /// 账号查询、资料更新、初始管理员创建与密码重置。密码使用 SHA256 加盐哈希（带固定后缀）。
-/// 单用户产品：库里只有一个内置管理员，因此没有用户列表 / 新建 / 删除接口。
+/// 单用户产品：库里通常只有一个内置管理员，因此只有只读列表与按 id 更新，没有新建 / 删除接口。
 /// 对应 Go 参考实现 <c>internal/op/user.go</c>。
 /// </summary>
 public sealed class UserService : IUserService
@@ -38,6 +38,19 @@ public sealed class UserService : IUserService
     {
         var u = await _db.Users.FindAsync([id], ct);
         return u is null ? Resp<User>.Fail("user not found", RespCodes.NotFound) : Resp<User>.Ok(u);
+    }
+
+    /// <summary>
+    /// 列出全部账号（按 Id 升序）。对外只暴露 <see cref="UserPublic"/>：
+    /// <see cref="User"/> 上带着 PasswordHash / TwoFactorSecret，直接序列化出去等于把
+    /// 哈希与两步验证密钥一起发给浏览器。
+    /// </summary>
+    public async Task<Resp<List<UserPublic>>> ListAsync(CancellationToken ct = default)
+    {
+        var list = await _db.Users.AsNoTracking()
+            .OrderBy(u => u.Id)
+            .ToListAsync(ct);
+        return Resp<List<UserPublic>>.Ok(list.Select(ToPublic).ToList());
     }
 
     /// <summary>

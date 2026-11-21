@@ -69,6 +69,47 @@ public class UserServiceTests
     }
 
     [Test]
+    public async Task ListAsync_Returns_Public_Users_Ordered_ById()
+    {
+        // 管理台「用户管理」页的唯一数据源：只读列表，元素是 UserPublic（没有密码哈希）。
+        await using var ctx = BuildContext();
+        var svc = NewUserService(ctx);
+        await svc.CreateInitialAdminAsync("only", "pw");
+
+        var r = await svc.ListAsync();
+        await Assert.That(r.Code).IsEqualTo(200);
+        await Assert.That(r.Data!.Count).IsEqualTo(1);
+        await Assert.That(r.Data[0].Username).IsEqualTo("only");
+        await Assert.That(r.Data[0].Id > 0).IsTrue();
+        // 返回值类型本身就是保证：UserPublic 上没有 PasswordHash 字段可泄漏。
+        await Assert.That(r.Data[0].GetType()).IsEqualTo(typeof(OpenList.Core.Models.UserPublic));
+    }
+
+    [Test]
+    public async Task ListAsync_Returns_Empty_List_Before_Setup()
+    {
+        await using var ctx = BuildContext();
+        var svc = NewUserService(ctx);
+        var r = await svc.ListAsync();
+        await Assert.That(r.Code).IsEqualTo(200);
+        await Assert.That(r.Data!.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task UpdateAsync_Renames_User()
+    {
+        await using var ctx = BuildContext();
+        var svc = NewUserService(ctx);
+        var created = await svc.CreateInitialAdminAsync("old", "pw");
+        var r = await svc.UpdateAsync(created.Data!.Id, new UpdateUserReq { Username = "new" });
+        await Assert.That(r.Code).IsEqualTo(200);
+        var u = (await svc.GetAsync(created.Data.Id)).Data!;
+        await Assert.That(u.Username).IsEqualTo("new");
+        // 只改用户名不该动密码
+        await Assert.That(UserService.VerifyPassword("pw", u.PasswordHash)).IsTrue();
+    }
+
+    [Test]
     public async Task CreateInitialAdminAsync_Rejects_Second_Creation()
     {
         await using var ctx = BuildContext();

@@ -1,6 +1,7 @@
 {
   "sidemenu": {
     "dashboard": "仪表盘",
+    "users": "用户管理",
     "settings": "设置",
     "site": "站点",
     "style": "外观",

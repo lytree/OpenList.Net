@@ -169,9 +169,11 @@ The core `/api/fs/*` surface — list, mkdir, rename, copy, move, delete, upload
 
 ## Phase 5 — Sharing（已移除）
 
-> 2026-11-16 起项目定位为个人资源管理：用户管理、分享系统、站内信、guest 账号、角色/权限位/BasePath 一并移除。
-> `/api/share/*`、`/sd/*`、`/sad/*`、`/api/me/message/*`、`/api/admin/message/*`、`/api/admin/user/list` 不再注册，
+> 2026-11-16 起项目定位为个人资源管理：分享系统、站内信、guest 账号、角色/权限位/BasePath 一并移除。
+> `/api/share/*`、`/sd/*`、`/sad/*`、`/api/me/message/*`、`/api/admin/message/*` 不再注册，
 > 相关服务/实体删除，表由迁移 `RemoveSharingAndMessage` / `RemoveMultiUserColumns` 清理。
+> 用户方面只有管理台的「用户管理」页：列表 + 编辑（`/admin/user/list`、`/admin/user/update`），
+> 新增 / 禁用 / 删除账号仍未开放。
 
 - [x] `PublicEndpoints.cs` — `/api/public/*`:
   - [x] `GET/POST /api/public/settings`

@@ -83,6 +83,33 @@ export interface User {
 
 export type Me = User & { otp: boolean }
 
+/**
+ * 管理台「用户管理」列表的元素：后端 `UserPublic` 的公开视图。
+ * 没有 password / passwordHash / twoFactorSecret —— 列表接口刻意不下发这些字段。
+ */
+export interface AdminUser {
+  id: number
+  username: string
+  disabled: boolean
+  otp: boolean
+  sso_id?: string
+  allow_ldap: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * `POST /admin/user/update` 的请求体（后端 `UpdateUserReq`）。**部分更新**语义：
+ * 没传的字段保持原值；`password` 留空即不改密码。
+ */
+export interface UpdateUserReq {
+  id: number
+  username?: string
+  password?: string
+  disabled?: boolean
+  allow_ldap?: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Admin / Storage / Driver（M2 管理台）
 // 字段名以 `OpenList.Infrastructure/Services/StorageService.cs` 为真源：

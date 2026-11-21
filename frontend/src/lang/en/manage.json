@@ -1,6 +1,7 @@
 {
   "sidemenu": {
     "dashboard": "Dashboard",
+    "users": "Users",
     "settings": "Settings",
     "site": "Site",
     "style": "Style",

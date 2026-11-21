@@ -72,7 +72,7 @@ export default defineComponent({
       }
     }
 
-    /** 单用户产品只保留「修改自己的密码」，不再有用户管理页。 */
+    /** 文件门面的账户菜单只做「改自己的密码」；管理台另有「用户管理」页（只放行编辑）。 */
     const passwordVisible = ref(false)
     const password = ref("")
     const confirmPassword = ref("")
