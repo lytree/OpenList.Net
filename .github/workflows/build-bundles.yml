@@ -134,9 +134,9 @@ jobs:
 
       # All executables in a bundle are RID-specific *framework-dependent* publishes: they
       # carry an apphost but no runtime. AppHostDotNetSearch/AppHostRelativeDotNet are baked
-      # into that apphost so it resolves `framework/` (staged below, one copy for the whole
-      # bundle) instead of a machine-wide install. Layout:
-      #   app/  + cli/  →  ../dotnet
+      # into that apphost so it resolves the shared `host/` + `shared/` layout staged below
+      # (one copy for the whole bundle) instead of a machine-wide install. Layout:
+      #   app/  + cli/  →  ..
       #
       # PublishSingleFile keeps each folder down to one executable: the managed assemblies and
       # the native libraries go inside the exe (not into the runtime — SelfContained stays
@@ -159,7 +159,7 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=../framework \
+            -p:AppHostRelativeDotNet=.. \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -201,7 +201,7 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=../framework \
+            -p:AppHostRelativeDotNet=.. \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -264,13 +264,14 @@ jobs:
           Build: $SEMVER (sha $SHA)
           Frontend: built from source in this repo (frontend/)
 
-          Self-contained in the sense that matters: the .NET runtime ships in framework/,
+          Self-contained in the sense that matters: the .NET runtime ships as host/ + shared/,
           one copy shared by app/ and cli/. Nothing has to be installed on the host.
 
           Layout:
             app/             OpenList.Server (single exe) + appsettings.json + VERSION
             cli/             openlist (single exe) — password recovery, storage admin
-            framework/       Shared .NET runtime — used by app/ and cli/
+            host/            Shared .NET runtime (hostfxr) — used by app/ and cli/
+            shared/          Shared .NET runtime (frameworks) — used by app/ and cli/
             frontend/        OpenList SPA (Vue 3, built from this repo)
             run.sh / run.bat Launcher that sets OpenList__DistDir and starts the server
             README.txt       This file
@@ -279,9 +280,9 @@ jobs:
             Linux/macOS:  ./run.sh
             Windows:      run.bat
 
-          The executables find framework/ through a relative path embedded in their apphost
-          (AppHostRelativeDotNet), so nothing has to be installed on the host — but that
-          folder must stay next to app/. Moving app/ on its own will make it fail to start.
+          The executables find host/ + shared/ through a relative path embedded in their
+          apphost (AppHostRelativeDotNet), so nothing has to be installed on the host — but
+          those folders must stay next to app/. Moving app/ on its own will make it fail to start.
 
           The launcher exports OpenList__DistDir=../frontend (relative to app/) so the
           server finds the SPA without editing appsettings.json. Default port: http://0.0.0.0:5244
@@ -325,7 +326,7 @@ jobs:
   # Desktop control app (Avalonia GUI managing the server as a child process).
   # One bundle per GUI-capable RID: desktop exe, server exe and the ops CLI all at the
   # bundle root (ResolveCorePath probes <base>/OpenList.Server[.exe], so no sub-folder),
-  # one shared framework/ runtime next to them, frontend/ alongside (injected as
+  # one shared host/ + shared/ runtime next to them, frontend/ alongside (injected as
   # OpenList__DistDir at launch).
   # No musl RIDs — the GUI targets glibc desktops.
   binaries-desktop:
@@ -364,10 +365,11 @@ jobs:
           dotnet-version: '10.0.x'
 
       # Every executable here is a RID-specific framework-dependent *single-file* publish: the
-      # managed assemblies ride inside the exe, the .NET runtime is the one shared framework/.
-      # Publish into .stage/ first — `dotnet publish` also drops appsettings.json / web.config /
-      # pdb, and the bundle root is supposed to end up with nothing but the three exes.
-      # All three apphosts embed AppHostRelativeDotNet=framework (the root is right there).
+      # managed assemblies ride inside the exe, the .NET runtime is the shared host/ + shared/
+      # layout staged by --target=Runtime below (no `framework/` wrapper folder).
+      # Publish into .stage/ first — `dotnet publish` also drops appsettings.json / web.config,
+      # and the bundle root is supposed to end up with nothing but the three exes.
+      # All three apphosts embed AppHostRelativeDotNet=. (host/ and shared/ are right there).
       - name: Publish server core
         run: |
           set -euo pipefail
@@ -383,7 +385,7 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=framework \
+            -p:AppHostRelativeDotNet=. \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -404,7 +406,7 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=framework \
+            -p:AppHostRelativeDotNet=. \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -427,7 +429,7 @@ jobs:
             -p:DebugType=none \
             -p:DebugSymbols=false \
             -p:AppHostDotNetSearch=AppRelative \
-            -p:AppHostRelativeDotNet=framework \
+            -p:AppHostRelativeDotNet=. \
             -p:Version="$SEMVER" \
             -p:AssemblyVersion="$ASM_VER" \
             -p:FileVersion="$FILE_VER" \
@@ -435,7 +437,7 @@ jobs:
             -p:SourceRevisionId="$SHA"
 
       # Bundle root = the three exes, nothing else. Settings go to config/, the runtime and the
-      # SPA are staged by the steps below into framework/ and frontend/.
+      # SPA are staged by the steps below into host/ + shared/ and frontend/.
       - name: Assemble bundle root
         env:
           RID: ${{ matrix.rid }}
@@ -479,21 +481,22 @@ jobs:
           Build: $SEMVER (sha $SHA)
           Frontend: built from source in this repo (frontend/)
 
-          Framework-dependent build: the .NET runtime ships in framework/, one copy shared by
-          all three executables. No runtime has to be installed on the host.
+          Framework-dependent build: the .NET runtime ships as host/ + shared/, one copy shared
+          by all three executables. No runtime has to be installed on the host.
 
-          Layout — only the three executables live in the bundle root:
+          Layout — the three executables live in the bundle root:
             OpenList.Desktop[.exe]  Avalonia desktop control app (start this)
             OpenList.Server[.exe]   Server core (managed child process)
             openlist[.exe]          Ops CLI — password recovery, storage admin
 
           Directories:
-            framework/              Shared .NET runtime — used by all three exes
+            host/                   Shared .NET runtime (hostfxr) — used by all three exes
+            shared/                 Shared .NET runtime (frameworks) — used by all three exes
             frontend/               OpenList SPA (Vue 3, built from this repo)
             config/                 Editable settings (appsettings.json)
 
           The three executables are single-file: the assemblies they need are inside each exe,
-          nothing else has to sit beside them. The runtime is the shared copy in framework/,
+          nothing else has to sit beside them. The runtime is the shared copy in host/ + shared/,
           found through AppHostRelativeDotNet — copy a bare exe elsewhere and it will not run.
 
           Run:

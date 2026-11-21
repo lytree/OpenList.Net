@@ -5,4 +5,25 @@
     <Nullable>enable</Nullable>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
+
+  <!--
+    Publish output carries no .pdb at all.
+
+    `DebugType=none` / `DebugSymbols=false` (set per publish in build/build.cs and in
+    .github/workflows/build-bundles.yml) only suppress the symbols of *our* managed
+    assemblies. A native NuGet package hands its own .pdb over as a `ResolvedFileToPublish`
+    item, so libSkiaSharp.pdb (84 MB) and libHarfBuzzSharp.pdb (20 MB) are copied into the
+    publish folder regardless — and CI publishes straight into `<bundle>/app`, which drags
+    them into the shipped archive. They are useless in a single-file build: the native
+    library itself rides inside the exe, and nothing loads a pdb at run time.
+
+    Dropping them from the publish list (after it is computed, before files are copied) keeps
+    every publish path clean — Cake, `dotnet publish` in CI, and the Dockerfile alike. Build
+    output is untouched; this target only runs for `dotnet publish`.
+  -->
+  <Target Name="StripPdbsFromPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
 </Project>
