@@ -399,7 +399,28 @@ if (Directory.Exists(distFullPath))
     app.UseStaticFiles(new StaticFileOptions
     {
         FileProvider = new PhysicalFileProvider(distFullPath),
-        RequestPath = ""
+        RequestPath = "",
+        // 静态文件默认**不带任何 Cache-Control**，浏览器会按 Last-Modified 做启发式缓存：
+        // 前端重建后 index.html 仍是旧的，于是继续引用旧 hash 的 chunk —— 表现为「代码明明
+        // 改了、页面上还是旧版，甚至少了一个入口」。这里按文件性质分两档：
+        //   /assets/*   文件名带内容 hash，内容变则名字变 → 长缓存 + immutable；
+        //   其余        index.html、favicon、public 下的原样资源 → 每次回源校验。
+        // SPA fallback（下面的 MapFallback）本来就给 index.html 设了 no-store，两处口径一致。
+        OnPrepareResponse = ctx =>
+        {
+            var path = ctx.Context.Request.Path.Value ?? "";
+            var headers = ctx.Context.Response.Headers;
+            if (path.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                headers.CacheControl = "public, max-age=31536000, immutable";
+            }
+            else
+            {
+                headers.CacheControl = "no-cache, no-store, must-revalidate";
+                headers.Pragma = "no-cache";
+                headers.Expires = "0";
+            }
+        }
     });
 }
 
