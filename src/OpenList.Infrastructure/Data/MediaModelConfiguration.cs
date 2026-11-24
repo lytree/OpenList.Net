@@ -123,5 +123,50 @@ internal static class MediaModelConfiguration
             e.HasIndex(s => s.Name).IsUnique();
             e.Property(s => s.Name).HasMaxLength(256);
         });
+        b.Entity<MediaFollow>(e =>
+        {
+            e.ToTable(prefix + "media_follows");
+            e.HasKey(f => f.Id);
+            // 一个人只关注一次：重复点「关注」走幂等，不靠前端判断。
+            e.HasIndex(f => f.PersonId).IsUnique();
+        });
+        b.Entity<MediaFollowEntry>(e =>
+        {
+            e.ToTable(prefix + "media_follow_entries");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.FollowId);
+            // 检查任务做差集的依据：同一人物同一外部作品只落一行。
+            e.HasIndex(x => new { x.PersonId, x.ExternalId }).IsUnique();
+            // 更新流按「首次见到」倒序翻页。
+            e.HasIndex(x => x.FirstSeenAt);
+            e.Property(x => x.MediaType).HasMaxLength(16);
+            e.Property(x => x.ExternalId).HasMaxLength(64);
+            e.Property(x => x.Title).HasMaxLength(512);
+            e.Property(x => x.ReleaseDate).HasMaxLength(32);
+        });
+        b.Entity<MediaDownload>(e =>
+        {
+            e.ToTable(prefix + "media_downloads");
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => d.ItemId);
+            e.HasIndex(d => d.WantId);
+            // 轮询任务只扫「还在下载器里」的行。
+            e.HasIndex(d => d.Status);
+            e.Property(d => d.Tool).HasMaxLength(32);
+            e.Property(d => d.TaskId).HasMaxLength(128);
+            e.Property(d => d.Title).HasMaxLength(512);
+        });
+        b.Entity<MediaWant>(e =>
+        {
+            e.ToTable(prefix + "media_wants");
+            e.HasKey(w => w.Id);
+            // 同一部作品只想看一次：重复点「想看」幂等。
+            e.HasIndex(w => new { w.MediaType, w.ExternalId }).IsUnique();
+            e.HasIndex(w => w.ItemId);
+            e.Property(w => w.MediaType).HasMaxLength(16);
+            e.Property(w => w.ExternalId).HasMaxLength(64);
+            e.Property(w => w.Title).HasMaxLength(512);
+            e.Property(w => w.ReleaseDate).HasMaxLength(32);
+        });
     }
 }

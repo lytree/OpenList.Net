@@ -417,6 +417,86 @@ namespace OpenList.Migrations.Postgres.Migrations
                     b.ToTable("x_authn_credentials", (string)null);
                 });
 
+            modelBuilder.Entity("OpenList.Media.Domain.MediaDownload", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("created_at");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("IngestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("ingested_at");
+
+                    b.Property<long?>("ItemId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("item_id");
+
+                    b.Property<long>("LibraryId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("library_id");
+
+                    b.Property<double>("Progress")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TargetDirectory")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasJsonPropertyName("target_directory");
+
+                    b.Property<string>("TaskId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasJsonPropertyName("task_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Tool")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("updated_at");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("WantId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("want_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("WantId");
+
+                    b.ToTable("x_media_downloads", (string)null);
+                });
+
             modelBuilder.Entity("OpenList.Media.Domain.MediaFile", b =>
                 {
                     b.Property<long>("Id")
@@ -454,6 +534,99 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .IsUnique();
 
                     b.ToTable("x_media_files", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Media.Domain.MediaFollow", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("created_at");
+
+                    b.Property<DateTimeOffset?>("LastCheckedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("last_checked_at");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text")
+                        .HasJsonPropertyName("last_error");
+
+                    b.Property<long>("PersonId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("person_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PersonId")
+                        .IsUnique();
+
+                    b.ToTable("x_media_follows", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Media.Domain.MediaFollowEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasJsonPropertyName("external_id");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("first_seen_at");
+
+                    b.Property<long>("FollowId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("follow_id");
+
+                    b.Property<string>("MediaType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasJsonPropertyName("media_type");
+
+                    b.Property<long>("PersonId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("person_id");
+
+                    b.Property<string>("PosterPath")
+                        .HasColumnType("text")
+                        .HasJsonPropertyName("poster_path");
+
+                    b.Property<string>("ReleaseDate")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasJsonPropertyName("release_date");
+
+                    b.Property<string>("Role")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FirstSeenAt");
+
+                    b.HasIndex("FollowId");
+
+                    b.HasIndex("PersonId", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("x_media_follow_entries", (string)null);
                 });
 
             modelBuilder.Entity("OpenList.Media.Domain.MediaItem", b =>
@@ -630,6 +803,10 @@ namespace OpenList.Migrations.Postgres.Migrations
                     b.Property<bool>("Private")
                         .HasColumnType("boolean")
                         .HasJsonPropertyName("private");
+
+                    b.Property<string>("TrashDirectory")
+                        .HasColumnType("text")
+                        .HasJsonPropertyName("trash_directory");
 
                     b.Property<int>("Type")
                         .HasColumnType("integer");
@@ -840,6 +1017,64 @@ namespace OpenList.Migrations.Postgres.Migrations
                         .IsUnique();
 
                     b.ToTable("x_media_studios", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Media.Domain.MediaWant", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasJsonPropertyName("created_at");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasJsonPropertyName("external_id");
+
+                    b.Property<long?>("ItemId")
+                        .HasColumnType("bigint")
+                        .HasJsonPropertyName("item_id");
+
+                    b.Property<string>("MediaType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasJsonPropertyName("media_type");
+
+                    b.Property<string>("Overview")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PosterPath")
+                        .HasColumnType("text")
+                        .HasJsonPropertyName("poster_path");
+
+                    b.Property<string>("ReleaseDate")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasJsonPropertyName("release_date");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("MediaType", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("x_media_wants", (string)null);
                 });
 
             modelBuilder.Entity("OpenList.Media.Domain.MediaWatchSession", b =>

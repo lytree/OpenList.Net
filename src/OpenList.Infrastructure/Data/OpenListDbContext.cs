@@ -61,6 +61,14 @@ public sealed class OpenListDbContext : DbContext
     public DbSet<MediaStudio> MediaStudios => Set<MediaStudio>();
     /// <summary>系列表（番号域聚合维度）。</summary>
     public DbSet<MediaSeries> MediaSeries => Set<MediaSeries>();
+    /// <summary>关注创作者表（一人一行）。</summary>
+    public DbSet<MediaFollow> MediaFollows => Set<MediaFollow>();
+    /// <summary>关注更新流条目表（一人多行，首次见到的作品各一行）。</summary>
+    public DbSet<MediaFollowEntry> MediaFollowEntries => Set<MediaFollowEntry>();
+    /// <summary>想看条目的资源下载记录表。</summary>
+    public DbSet<MediaDownload> MediaDownloads => Set<MediaDownload>();
+    /// <summary>库外想看作品表（找资源 → 下载 → 入库的起点）。</summary>
+    public DbSet<MediaWant> MediaWants => Set<MediaWant>();
     /// <summary>后台任务持久化记录表。</summary>
     public DbSet<BackgroundTask> BackgroundTasks => Set<BackgroundTask>();
 

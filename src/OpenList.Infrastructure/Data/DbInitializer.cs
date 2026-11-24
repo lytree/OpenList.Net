@@ -661,6 +661,15 @@ public static class DbInitializer
         // 观看会话留存天数（x_media_watch_sessions）；0 表示永久保留。
         // 默认 3650 与 TasteWindow.MaxDays 对齐 —— 口味页 ?days= 可查到的会话默认一条都不会被清掉。
         ("media_watch_retention_days", "3650", SettingValueType.Number, SettingFlag.Private, 12, null),
+        // 外部播放器（JSON 数组 [{id,name,scheme,platforms}]；空 = 前端用内置预设）。
+        // Public：游客也能播公开媒体，播放器菜单位置要一致。
+        ("media_external_players", "", SettingValueType.String, SettingFlag.Public, 12, null),
+        // 「找资源」站点列表（JSON 数组 [{name,url,format}]；空 = 不显示找资源入口）。
+        ("media_resource_search_sites", "", SettingValueType.String, SettingFlag.Private, 12, null),
+        // 关注更新检查间隔（小时）；0 = 关闭自动检查，只能在页面上手动点「检查更新」。
+        ("media_follow_check_interval_hours", "0", SettingValueType.Number, SettingFlag.Private, 12, null),
+        // 库回收站（MediaLibrary.TrashDirectory）里文件的留存天数，到期由后台任务清空。
+        ("media_trash_retention_days", "7", SettingValueType.Number, SettingFlag.Private, 12, null),
 
         // --- Group 13: ACCESS（媒体与首页各自的访客开关） ---
         // 两个门面分开管：媒体是公开门面（默认放行游客），首页是文件浏览（默认要求登录）。

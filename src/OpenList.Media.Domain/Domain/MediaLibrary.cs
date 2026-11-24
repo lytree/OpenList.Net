@@ -45,6 +45,13 @@ public sealed class MediaLibrary
     /// </summary>
     [JsonPropertyName("private")]
     public bool Private { get; set; }
+    /// <summary>
+    /// 回收站目录（VFS 路径，可为空 = 直接删除）。开启后，从这个库里删除**文件**默认走
+    /// <c>移动</c> 而不是 <c>删除</c>，由留存任务按 <c>media_trash_retention_days</c> 定期清空。
+    /// 只影响文件操作；数据库行的删除不受它约束。
+    /// </summary>
+    [JsonPropertyName("trash_directory")]
+    public string? TrashDirectory { get; set; }
     /// <summary>刮削元数据语言（如 "zh-CN"），为空时使用全局设置。</summary>
     [JsonPropertyName("metadata_language")]
     public string? MetadataLanguage { get; set; }

@@ -400,6 +400,84 @@ namespace OpenList.Migrations.Sqlite.Migrations
                     b.ToTable("x_authn_credentials", (string)null);
                 });
 
+            modelBuilder.Entity("OpenList.Media.Domain.MediaDownload", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("created_at");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("IngestedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("ingested_at");
+
+                    b.Property<long?>("ItemId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("item_id");
+
+                    b.Property<long>("LibraryId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("library_id");
+
+                    b.Property<double>("Progress")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TargetDirectory")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("target_directory");
+
+                    b.Property<string>("TaskId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("task_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Tool")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("updated_at");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("WantId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("want_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("WantId");
+
+                    b.ToTable("x_media_downloads", (string)null);
+                });
+
             modelBuilder.Entity("OpenList.Media.Domain.MediaFile", b =>
                 {
                     b.Property<long>("Id")
@@ -435,6 +513,95 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.ToTable("x_media_files", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Media.Domain.MediaFollow", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("created_at");
+
+                    b.Property<DateTimeOffset?>("LastCheckedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("last_checked_at");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("last_error");
+
+                    b.Property<long>("PersonId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("person_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PersonId")
+                        .IsUnique();
+
+                    b.ToTable("x_media_follows", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Media.Domain.MediaFollowEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("external_id");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("first_seen_at");
+
+                    b.Property<long>("FollowId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("follow_id");
+
+                    b.Property<string>("MediaType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("media_type");
+
+                    b.Property<long>("PersonId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("person_id");
+
+                    b.Property<string>("PosterPath")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("poster_path");
+
+                    b.Property<string>("ReleaseDate")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("release_date");
+
+                    b.Property<string>("Role")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FirstSeenAt");
+
+                    b.HasIndex("FollowId");
+
+                    b.HasIndex("PersonId", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("x_media_follow_entries", (string)null);
                 });
 
             modelBuilder.Entity("OpenList.Media.Domain.MediaItem", b =>
@@ -605,6 +772,10 @@ namespace OpenList.Migrations.Sqlite.Migrations
                     b.Property<bool>("Private")
                         .HasColumnType("INTEGER")
                         .HasJsonPropertyName("private");
+
+                    b.Property<string>("TrashDirectory")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("trash_directory");
 
                     b.Property<int>("Type")
                         .HasColumnType("INTEGER");
@@ -803,6 +974,62 @@ namespace OpenList.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.ToTable("x_media_studios", (string)null);
+                });
+
+            modelBuilder.Entity("OpenList.Media.Domain.MediaWant", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("created_at");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("external_id");
+
+                    b.Property<long?>("ItemId")
+                        .HasColumnType("INTEGER")
+                        .HasJsonPropertyName("item_id");
+
+                    b.Property<string>("MediaType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("media_type");
+
+                    b.Property<string>("Overview")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PosterPath")
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("poster_path");
+
+                    b.Property<string>("ReleaseDate")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasJsonPropertyName("release_date");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("MediaType", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("x_media_wants", (string)null);
                 });
 
             modelBuilder.Entity("OpenList.Media.Domain.MediaWatchSession", b =>
