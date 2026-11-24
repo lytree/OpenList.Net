@@ -50,7 +50,7 @@ export default defineComponent({
 
     return () => (
       <div class="olm-shell">
-        {/* 窄屏抽屉的遮罩：桌面端 display:none（断点见 styles/media-shell.css）。 */}
+        {/* 窄屏抽屉的遮罩：桌面端 display:none（断点见 styles/media-shell.scss）。 */}
         <div
           class={["olm-side-mask", navOpen.value && "is-open"]}
           onClick={() => (navOpen.value = false)}

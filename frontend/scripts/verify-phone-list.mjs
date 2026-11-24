@@ -25,7 +25,7 @@ const MOUNT = process.env.MOUNT ?? "/e2e-phone"
 const MOUNT_ROOT = process.env.MOUNT_ROOT ?? "F:/Code/github/OpenList.Net/.e2e/phone/storage"
 const SHOT_DIR = process.env.SHOT_DIR ?? "F:/Code/github/OpenList.Net/.e2e/phone/shots"
 
-/** 手机断点（与 src/composables/useIsPhone.ts / styles/responsive.css 一致）。 */
+/** 手机断点（与 src/composables/useIsPhone.ts / styles/responsive.scss 一致）。 */
 const PHONE = { width: 390, height: 844 }
 const DESKTOP = { width: 1024, height: 800 }
 
