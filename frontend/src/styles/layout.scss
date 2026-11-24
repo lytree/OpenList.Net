@@ -1,7 +1,7 @@
 /* 外壳布局样式。
  *
  * 只放「EP 组件属性表达不了」的结构性样式（高度、粘性、间距）。
- * 颜色一律走 tokens.css 的 --ol-* / --el-*，保证深浅色自动跟随。
+ * 颜色一律走 tokens.scss 的 --ol-* / --el-*，保证深浅色自动跟随。
  *
  * 两套外壳都对齐 OpenList-Frontend：
  * - 浏览侧（`.ol-view*`）：顶栏只有一条 logo 栏 + 居中定宽内容列（980px）+ 页脚。
@@ -140,7 +140,7 @@
   font-size: 14px;
 }
 
-/* 手机端汉堡按钮：桌面隐藏，断点见 styles/responsive.css（对齐 .ol-manage-burger） */
+/* 手机端汉堡按钮：桌面隐藏，断点见 styles/responsive.scss（对齐 .ol-manage-burger） */
 .ol-view-menu-btn {
   display: none;
 }
@@ -606,7 +606,7 @@
   margin-top: 12px;
 }
 
-/* 工具条搜索框 / 排序下拉：桌面固定宽，手机端由 responsive.css 改成占满。
+/* 工具条搜索框 / 排序下拉：桌面固定宽，手机端由 responsive.scss 改成占满。
  * 选择器要压过 EP 的 `.el-input { width: 100% }`（同权重时后者后注入 → 会赢），
  * 否则输入框在 flex 行里被撑成整条宽度，把后面的按钮全挤到第二行。 */
 .ol-files-bar .ol-files-search {

@@ -1,7 +1,7 @@
 import { onScopeDispose, ref, type Ref } from "vue"
 
 /**
- * 手机断点（与 `styles/responsive.css` 的 `@media (max-width: 767px)` 保持一致）。
+ * 手机断点（与 `styles/responsive.scss` 的 `@media (max-width: 767px)` 保持一致）。
  *
  * 断点写在两处是刻意的：CSS 负责「同结构、改尺寸」，JS 负责「换结构」（如文件列表
  * 从表格换成卡片行）。共用同一个数值，改一处就要同步另一处。

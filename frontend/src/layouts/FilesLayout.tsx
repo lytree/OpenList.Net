@@ -217,7 +217,7 @@ export default defineComponent({
           </RouterLink>
         </footer>
 
-        {/* 手机端汉堡抽屉（断点见 styles/responsive.css）。桌面端这两个节点 display:none。 */}
+        {/* 手机端汉堡抽屉（断点见 styles/responsive.scss）。桌面端这两个节点 display:none。 */}
         <div
           class={["ol-view-drawer-mask", navOpen.value && "is-open"]}
           onClick={() => (navOpen.value = false)}
