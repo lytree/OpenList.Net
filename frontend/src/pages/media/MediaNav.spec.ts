@@ -93,6 +93,7 @@ describe("媒体左栏导航", () => {
       "Studios",
       "Series",
       "Watch later",
+      "Following",
       "History",
     ])
 
@@ -100,10 +101,10 @@ describe("媒体左栏导航", () => {
     expect(links[1]!.attributes("href")).toBe("/files")
   })
 
-  it("登录后第二组只有按用户的三项", async () => {
+  it("登录后第二组是「我的」四项（待下载 / 播放列表 / 口味 / 任务）", async () => {
     const wrapper = await mountNav(true)
     const extra = wrapper.findAll(".olm-nav-extra .olm-nav-link").map((link) => link.text())
 
-    expect(extra).toEqual(["Playlists", "Taste", "Tasks"])
+    expect(extra).toEqual(["Wanted", "Playlists", "Taste", "Tasks"])
   })
 })

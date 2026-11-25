@@ -7,8 +7,9 @@
 
 OpenList.Net 今天已经是一个「**OpenList 的文件/驱动/协议底座 + Peach 形态的媒体门面**」的合体，
 两边重叠的部分（媒体库、海报墙、播放、历史、想看、播放列表、口味、任务）已经做完；
-**真正还缺的是 Peach 的四块产品能力**（关注更新流、想看→搜资源→云下载→入库、数据清理、任务中心写操作）
-与 **OpenList 的两块底座能力**（云驱动、云离线下载工具）。
+**Peach 的四块产品能力里已有三块落地**（关注更新流 §62、想看→下载→入库 §62、数据清理 §63）；
+**还差的是**想看链路里的「搜资源」、任务中心的写操作，以及回收站的留存清理。
+此外还有 **OpenList 的两块底座能力**（云驱动、云离线下载工具）。
 两者的交点只有一个：**Peach 的「想看→下载→整理入库」流水线要跑在 OpenList 的 `IOfflineDownloadTool` 之上**。
 
 ## 1. 现状盘点
@@ -43,10 +44,10 @@ OpenList.Net 今天已经是一个「**OpenList 的文件/驱动/协议底座 + 
 | 继续观看 / 历史 / 想看 / 收藏 / 标记 / 未看 | ✗ | ✓ | 后端 ✓；前端只有想看 / 历史 / 收藏，**标记 / 未看无页面** | §3.4 |
 | 播放列表 | ✗ | ✓ | ✓ | 保持 |
 | 口味画像 / 统计 | ✗ | ✓（独立 `/stats`：库·存储·观看） | 口味页内含统计；`/media/stats` 已有接口无独立页 | §3.4 |
-| 关注演员 / 作者更新流 | ✗ | ✓（RSS/站点连接器 + 聚合） | ✗ | §3.5 |
+| 关注演员 / 作者更新流 | ✗ | ✓（RSS/站点连接器 + 聚合） | ✓ 关注 / 更新流 / 检查（TMDB `combined_credits`；RSS 未做） | §3.5 |
 | 人物 / 片商 / 系列页 | ✗ | performers / studios / creators / agencies / series / tags | persons / studios / series | §3.6 补标签 |
 | 标签管理 / 实体合并 / 别名 | ✗ | ✓ | ✗ | §3.6 |
-| 数据清理（重复文件 / 孤儿记录 / 回收站 / 垃圾文件） | ✗ | ✓ | ✗ | §3.1 |
+| 数据清理（重复文件 / 孤儿记录 / 回收站 / 垃圾文件） | ✗ | ✓ | ✓ 孤儿 / 重复 / 单条删除 / 清空回收站（`/@manage/media-cleanup`） | §3.1 |
 | 任务中心 | ✓（`/api/task` 增删改查） | ✓ 暂停 / 恢复 / 取消 + 资源占用 | 只读（扫描 stop/cancel 后端已有） | §3.1 |
 | 游客播放公开媒体 | — | — | ✗（§61.6 已知边界：`/p` 签名要登录） | §3.1 |
 | 桌面端 | OpenList-Desktop | 托盘 / 自启 / macOS 应用内更新 | Avalonia 托盘宿主 | 保持 |
@@ -107,7 +108,12 @@ OpenList.Net 今天已经是一个「**OpenList 的文件/驱动/协议底座 + 
 
 ### P1-1 数据清理：重复文件 / 孤儿记录 / 回收站
 
-- **现状**：条目删除只删 DB 行；文件层面的重复与孤儿没有视图。
+- **现状**：**已落地（2026-11-25，见主计划 §63）**。孤儿、重复、单条删除、清空回收站四件都在
+  `IMediaCleanupService` 里，管理台 `/@manage/media-cleanup` 提供「先预览再执行」两步操作。
+  与本节方案的差异：① 重复确认只比对前 1 MB SHA-256（不读整文件）；② 回收站按**原路径镜像**
+  （`/trash` + 源路径）而不是平铺，同名文件不会互相覆盖；③ **回收站留存任务没做** ——
+  `media_trash_retention_days` 仍无消费方，目前只能手动「清空回收站」；④ 孤儿删除同时清
+  观看会话与播放列表成员，并把想看 / 下载记录里指向该条目的 `ItemId` 置空。
 - **方案**（对齐 Peach `/data-cleanup/*`，但只做我们用得上的三件）：
   1. **孤儿记录**：`GET /api/media/cleanup/orphans` — 扫描每库，列出 `MediaFile.Path` 已不存在的条目；`POST .../orphans/delete` 删行（保留观看记录）；
   2. **重复文件**：`GET /api/media/cleanup/duplicates?library=` — 按 `(Size, DurationSeconds)` 分组初筛，再对前 1 MB 做哈希确认；结果页给「保留此条 / 删除文件 + 行」；
@@ -119,7 +125,8 @@ OpenList.Net 今天已经是一个「**OpenList 的文件/驱动/协议底座 + 
 
 这是唯一需要 **OpenList 底座 + Peach 产品形态** 同时出力的项。
 
-- **现状**：想看列表只有标题；离线下载是文件门面的「给个链接下到某目录」；扫描要手动触发。
+- **现状**：想看清单与「提交下载 → 轮询 → 扫描入库」已落地（2026-11-25，主计划 §62）；**资源搜索仍是空的**
+  —— 用户要自己粘磁力/直链，`IResourceSearchProvider` 与搜索弹层未做。所以本节真正的剩余项是第 1 步。
 - **方案**：
   1. **资源搜索**（`src/OpenList.Media/Services/ResourceSearchService.cs`）：接口 `IResourceSearchProvider`，首个实现是 **索引站 RSS / JSON**（可配置站点列表，Peach 的「按番号搜种」形态），返回 `{title, size, magnet/url, seeders}`；
   2. **提交下载**：复用 `OfflineDownloadService.AddAsync(tool, targetDir, url)`，目标目录 = 想看条目所属库的目录 + 命名规则（`MediaNaming` 已有）；在 `MediaItem` 上记 `DownloadTaskId`；
@@ -129,13 +136,18 @@ OpenList.Net 今天已经是一个「**OpenList 的文件/驱动/协议底座 + 
 
 ### P1-3 关注演员更新流
 
-- **现状**：人物页无关注；§60.7 列为待做。
-- **方案**：
+- **现状**：**已落地（2026-11-25，见主计划 §62）**。人物页「关注」按钮、`/media/follow`（更新流 + 已关注
+  两个页签）、`/api/media/follow/*` 五组端点、`MediaFollowCheckHostedService`（间隔取
+  `media_follow_check_interval_hours`，默认关闭）都在跑。与本节方案的差异：差集键用 `(PersonId, ExternalId)`
+  而不是 `LastSeenReleaseDate` 快照；更新流按 `Id` 倒序翻页（SQLite 不支持 SQL 层 DateTimeOffset 排序）。
+  **仍未做**：RSS/站点连接器类 provider（只有 TMDB `combined_credits`）；更新流里的「找资源」还只是
+  「加入待下载」，后半段见 P1-2。
+- **原方案**（留档，实际落地见上）：
   1. 新表 `x_media_follows`（`PersonId` 唯一、`CreatedAt`、`LastSeenReleaseDate`），两份迁移；
   2. `IPersonFeedProvider`：首个实现 TMDB `person/{id}/combined_credits` 与上次快照做差集，产出「新作品」；之后可挂 RSS 连接器；
   3. `GET /api/media/follow/feed` 按发布日期倒序返回 `{personId, itemId?/externalTitle, releaseDate, posterUrl}`，已入库的条目带 `itemId` 直达详情，未入库的显示「找资源」（接 P1-2）；
   4. 前端：人物页「关注」按钮；新页 `/media/follow` 以时间线分组展示；左栏登录组追加「关注更新」。
-- **验收**：关注后手动「检查更新」能把新作品列出来；取关后 feed 为空。
+- **验收**：关注后手动「检查更新」能把新作品列出来；取关后 feed 为空。（已由 §62 的 15 条用例覆盖等价语义）
 
 ### P1-4 115 / PikPak 云离线下载工具
 
@@ -194,7 +206,7 @@ OpenList.Net 今天已经是一个「**OpenList 的文件/驱动/协议底座 + 
 | 阶段 | 内容 | 依赖 |
 |---|---|---|
 | **A（P0）** | 任务中心写操作 · 外部播放器 · 游客播放 · 统计页 + 标记/未看 · 美化第一批 | 无 |
-| **B（P1）** | 数据清理 · 想看→下载→入库 · 关注更新流 | P0-1（任务中心）、P0-2（直链） |
+| **B（P1）** | 数据清理 ✓（§63） · 想看→下载→入库 ✓（缺「搜资源」，§62） · 关注更新流 ✓（§62） | P0-1（任务中心）、P0-2（直链） |
 | **C（P2）** | 时间轴预览 · 标签 / 合并 · 字段所有权 · 云驱动（逐个） | B 的下载链路 |
 
 每个 PR 的门槛沿用现状：`dotnet build` + `dotnet tests/OpenList.Tests/bin/Debug/net10.0/OpenList.Tests.dll` 全绿、`pnpm typecheck | test | build` 全绿、涉及页面的 `verify-*.mjs` 通过；新表两份迁移。

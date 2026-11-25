@@ -1,4 +1,4 @@
-import { defineComponent, ref, watch } from "vue"
+import { computed, defineComponent, ref, watch } from "vue"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import {
   ElButton,
@@ -81,6 +81,17 @@ export default defineComponent({
 
     /** 窄屏（< 900px）下侧栏改为抽屉，点菜单项后自动收起。 */
     const asideOpen = ref(false)
+
+    /**
+     * 侧栏高亮项。子页面（如 `/@manage/media-cleanup`）不在 MODULES 里，
+     * 直接拿 `route.path` 会让整个侧栏都没有选中态，所以按「最长前缀」归到父模块。
+     */
+    const activeModule = computed(() => {
+      const hit = MODULES
+        .filter((m) => route.path === m.path || route.path.startsWith(m.path))
+        .sort((a, b) => b.path.length - a.path.length)[0]
+      return hit?.path ?? route.path
+    })
     watch(() => route.fullPath, () => (asideOpen.value = false))
 
     async function onLogout() {
@@ -165,7 +176,7 @@ export default defineComponent({
           <aside class={["ol-manage-side", asideOpen.value && "is-open"]}>
             <ElMenu
               class="ol-manage-menu"
-              defaultActive={route.path}
+              defaultActive={activeModule.value}
               collapse={false}
               router={true}
             >

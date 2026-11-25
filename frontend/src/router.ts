@@ -151,6 +151,21 @@ const routes: RouteRecordRaw[] = [
         component: () => import("~/pages/media/WatchLater"),
         meta: { title: "media.tab_later", wide: true, requiresAuth: true },
       },
+      // 关注更新是**可公开读**的（游客能看更新流，私有库人物/条目自动过滤），
+      // 但关注/取关/检查更新要登录；入口本身只给登录用户看，避免空页面。
+      {
+        path: "follow",
+        name: "media-follow",
+        component: () => import("~/pages/media/Follow"),
+        meta: { title: "media.tab_follow", wide: true },
+      },
+      // 待下载 = 库外作品清单 + 提交离线下载，纯个人数据。
+      {
+        path: "wants",
+        name: "media-wants",
+        component: () => import("~/pages/media/Wants"),
+        meta: { title: "media.tab_wants", wide: true, requiresAuth: true },
+      },
       {
         path: "history",
         name: "media-history",
@@ -273,6 +288,13 @@ const routes: RouteRecordRaw[] = [
         name: "media-libraries",
         component: () => import("~/pages/manage/media/MediaLibraries"),
         meta: { title: "media.manage.title" },
+      },
+      {
+        // 清理页从媒体库页进（侧栏「媒体」只保留一个入口），所以不占侧栏位。
+        path: "media-cleanup",
+        name: "media-cleanup",
+        component: () => import("~/pages/manage/media/MediaCleanup"),
+        meta: { title: "media.cleanup.title" },
       },
       {
         path: "settings",

@@ -51,6 +51,15 @@ public static class MediaModule
         services.AddScoped<ISubtitleProvider, OpenSubtitlesProvider>();
         services.AddScoped<ISubtitleService, SubtitleService>();
 
+        // 关注 → 新作品更新流：provider 是 TMDB combined_credits，换 RSS 连接器时只换这一行。
+        services.AddScoped<IPersonFeedProvider, TmdbPersonFeedProvider>();
+        services.AddScoped<IMediaFollowService, MediaFollowService>();
+        // 想看（库外作品清单）与「想看 → 下载」：下载那层只依赖离线下载底座，不认识具体工具。
+        services.AddScoped<IMediaWantService, MediaWantService>();
+        services.AddScoped<IMediaDownloadService, MediaDownloadService>();
+        // 数据清理：孤儿行 / 重复文件 / 单条删除 / 回收站。文件操作走 IFileSystemService + 内部系统身份。
+        services.AddScoped<IMediaCleanupService, MediaCleanupService>();
+
         // 扫描执行器是 transient：无可释放资源，只借用调用方传入的 DbContext。
         services.AddTransient<MediaLibraryScanner>();
         services.AddSingleton<IMediaScanService, MediaScanService>();
@@ -60,6 +69,10 @@ public static class MediaModule
 
         // 定时增量扫描：间隔取自设置项 media_auto_scan_interval_hours，0 表示关闭（默认）。
         services.AddHostedService<MediaAutoScanHostedService>();
+        // 关注更新检查：间隔取自 media_follow_check_interval_hours，0 表示关闭（默认）。
+        services.AddHostedService<MediaFollowCheckHostedService>();
+        // 下载状态轮询：把下载器任务状态映射回 x_media_downloads，并在完成后触发扫描。
+        services.AddHostedService<MediaDownloadWatchHostedService>();
         // 观看会话留存清理：天数取自 media_watch_retention_days，0 表示永久保留。
         services.AddHostedService<WatchSessionRetentionHostedService>();
 

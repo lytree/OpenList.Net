@@ -33,6 +33,8 @@ export interface MediaLibrary {
   auto_scan: boolean
   /** 私有库：只对登录用户可见，游客在列表 / 首页 / 聚合里都看不到。 */
   private: boolean
+  /** 回收站目录（VFS 路径）：为空表示删除文件时直接删，不做回收。 */
+  trash_directory?: string | null
   metadata_language?: string | null
   created_by: number
   last_scan_at?: string | null
@@ -730,3 +732,275 @@ export function mediaPersonImageLink(personId: number): string {
   const auth = token ? `?access_token=${encodeURIComponent(token)}` : ""
   return `${location.origin}/api/media/persons/${personId}/image${auth}`
 }
+
+// ======================================================================
+// 关注创作者 → 新作品更新流
+// ======================================================================
+
+/**
+ * 关注状态表：`person_id` → 是否已关注。
+ *
+ * 一次问一批（详情页的演职员 chips、人物列表都可能一次要问几十个）。
+ * 后端对游客只返回**可见**人物的状态 —— 私有库里的人物不会出现，不能借这个接口
+ * 确认它存在。
+ */
+export type FollowStateMap = Record<string, boolean>
+
+/** 已关注的创作者（`GET /media/follow`）。 */
+export interface FollowedPerson {
+  person_id: number
+  name: string
+  profile_path?: string | null
+  tmdb_id?: string | null
+  created_at: string
+  /** 最近一次**成功**检查的时间；空表示还没成功检查过。 */
+  last_checked_at?: string | null
+  /** 最近一次检查的失败原因（成功时为空）。 */
+  last_error?: string | null
+  /** 库里还没有的作品数。 */
+  new_count: number
+}
+
+/** 更新流里的一条作品（`GET /media/follow/feed`）。 */
+export interface FollowFeedEntry {
+  id: number
+  person_id: number
+  person_name: string
+  person_profile_path?: string | null
+  /** `movie` / `tv`。 */
+  media_type: string
+  /** TMDB id 字符串。 */
+  external_id: string
+  title: string
+  release_date?: string | null
+  poster_url?: string | null
+  role?: string | null
+  first_seen_at: string
+  /** 已入库且可见的条目 id；空 = 还没入库。 */
+  item_id?: number | null
+  /** 已加入想看（且尚未入库）的想看记录 id；空 = 没加过。 */
+  want_id?: number | null
+}
+
+/** 一次「检查更新」的结果。 */
+export interface FollowCheckResult {
+  /** 本次实际检查的人物数（后台启动时为 0）。 */
+  checked_persons: number
+  /** 本次新增的更新流条目数（后台启动时为 0）。 */
+  new_entries: number
+  /** 是否已转入后台执行（此时上面两个计数无意义）。 */
+  started: boolean
+}
+
+/**
+ * 批量取关注状态。
+ *
+ * 注意后端的键是**字符串**（JSON 对象键只能是字符串），调用方按 `String(id)` 取值。
+ */
+export const mediaFollowState = (personIds: number[]): Promise<Resp<FollowStateMap>> =>
+  http.get<FollowStateMap>("/media/follow/state", {
+    params: { person_ids: personIds.join(",") },
+  }) as Promise<Resp<FollowStateMap>>
+
+/** 已关注的创作者列表。 */
+export const mediaListFollowed = (): Promise<Resp<FollowedPerson[]>> =>
+  http.get<FollowedPerson[]>("/media/follow") as Promise<Resp<FollowedPerson[]>>
+
+/** 关注一位创作者（幂等）；首次关注会立刻检查一次，把他的现有作品落成更新流。 */
+export const mediaFollowPerson = (personId: number): Promise<Resp<unknown>> =>
+  http.post(`/media/follow/${personId}`, {}) as Promise<Resp<unknown>>
+
+/** 取消关注（幂等）：该创作者的更新流条目一并消失。 */
+export const mediaUnfollowPerson = (personId: number): Promise<Resp<unknown>> =>
+  http.delete(`/media/follow/${personId}`) as Promise<Resp<unknown>>
+
+/** 更新流：按「首次见到」倒序分页；`personId` 可只看某一位。 */
+export const mediaFollowFeed = (
+  page = 1,
+  perPage = 30,
+  personId?: number,
+): Promise<Resp<Page<FollowFeedEntry>>> =>
+  http.get<Page<FollowFeedEntry>>("/media/follow/feed", {
+    params: { page, per_page: perPage, person_id: personId ?? undefined },
+  }) as Promise<Resp<Page<FollowFeedEntry>>>
+
+/**
+ * 检查更新。给 `personId` 时同步检查这一位并返回实际结果；不给就后台跑全部，
+ * 返回的 `started` 表示是否真的开跑（已有一轮在跑时是 false）。
+ */
+export const mediaCheckFollow = (personId?: number): Promise<Resp<FollowCheckResult>> =>
+  http.post<FollowCheckResult>("/media/follow/check", {}, {
+    params: { person_id: personId ?? undefined },
+  }) as Promise<Resp<FollowCheckResult>>
+
+// ======================================================================
+// 想看（库外作品）与下载
+// ======================================================================
+
+/** 想看记录（映射 x_media_wants）。 */
+export interface MediaWant {
+  id: number
+  external_id: string
+  media_type: string
+  title: string
+  year?: number | null
+  poster_path?: string | null
+  overview?: string | null
+  release_date?: string | null
+  created_at: string
+  /** 入库后的条目 id；空 = 还没入库。 */
+  item_id?: number | null
+}
+
+/** 加入想看的请求（与更新流里的一条作品同形）。 */
+export interface AddMediaWantReq {
+  external_id: string
+  media_type?: string
+  title: string
+  year?: number | null
+  poster_path?: string | null
+  overview?: string | null
+  release_date?: string | null
+}
+
+/** 下载状态（与后端 MediaDownloadStatus 对齐）。 */
+export enum MediaDownloadStatus {
+  Pending = 0,
+  Downloading = 1,
+  Completed = 2,
+  Failed = 3,
+  Cancelled = 4,
+}
+
+/** 下载记录（映射 x_media_downloads）。 */
+export interface MediaDownload {
+  id: number
+  want_id: number
+  item_id?: number | null
+  library_id: number
+  tool: string
+  task_id?: string | null
+  title: string
+  url: string
+  target_directory: string
+  status: MediaDownloadStatus
+  /** 0–100。 */
+  progress: number
+  error?: string | null
+  created_at: string
+  updated_at: string
+  completed_at?: string | null
+  ingested_at?: string | null
+}
+
+/** 想看列表；`includeIngested` 为 false 时只列还没入库的。 */
+export const mediaListWants = (
+  page = 1,
+  perPage = 30,
+  includeIngested = false,
+): Promise<Resp<Page<MediaWant>>> =>
+  http.get<Page<MediaWant>>("/media/wants", {
+    params: { page, per_page: perPage, include_ingested: includeIngested },
+  }) as Promise<Resp<Page<MediaWant>>>
+
+/** 加入想看（幂等）。 */
+export const mediaAddWant = (req: AddMediaWantReq): Promise<Resp<MediaWant>> =>
+  http.post<MediaWant>("/media/wants", req) as Promise<Resp<MediaWant>>
+
+/** 移出想看（连同它的下载记录）。 */
+export const mediaRemoveWant = (id: number): Promise<Resp<unknown>> =>
+  http.delete(`/media/wants/${id}`) as Promise<Resp<unknown>>
+
+/** 下载记录列表；`wantId` 可限定某条想看。 */
+export const mediaListDownloads = (wantId?: number): Promise<Resp<MediaDownload[]>> =>
+  http.get<MediaDownload[]>("/media/downloads", {
+    params: { want_id: wantId ?? undefined },
+  }) as Promise<Resp<MediaDownload[]>>
+
+/** 提交下载：把资源地址交给离线下载，产物落到指定媒体库目录。 */
+export const mediaSubmitDownload = (req: {
+  want_id: number
+  library_id: number
+  url: string
+  tool?: string
+}): Promise<Resp<MediaDownload>> =>
+  http.post<MediaDownload>("/media/downloads", req) as Promise<Resp<MediaDownload>>
+
+/** 取消下载（下载器那边的任务一并取消）。 */
+export const mediaCancelDownload = (id: number): Promise<Resp<unknown>> =>
+  http.delete(`/media/downloads/${id}`) as Promise<Resp<unknown>>
+
+/**
+ * 库外作品的图片地址。
+ *
+ * 想看 / 更新流里的海报是 TMDB 的相对路径（`/abc.jpg`）或外链；条目海报走的是
+ * `/media/items/{id}/image`，而这两处还没有条目 id，只能直接拼 TMDB 图片基地址。
+ */
+export function mediaExternalImage(path?: string | null): string | null {
+  if (!path) return null
+  if (/^https?:\/\//i.test(path)) return path
+  return `https://image.tmdb.org/t/p/w342${path.startsWith("/") ? "" : "/"}${path}`
+}
+
+// ======================================================================
+// 数据清理：孤儿条目 / 重复文件 / 单条删除 / 回收站
+// ======================================================================
+
+/** 孤儿条目：文件已全部消失、只剩数据库行（`GET /media/cleanup/orphans`）。 */
+export interface OrphanItem {
+  item_id: number
+  title: string
+  directory_path: string
+  library_id: number
+  library_name: string
+  /** 该条目原本有几个文件行（全都不存在）；本来就没文件时为 0。 */
+  missing_files: number
+}
+
+/** 重复组里的一个条目。 */
+export interface DuplicateItem {
+  item_id: number
+  title: string
+  directory_path: string
+  library_id: number
+  /** 命中的那个文件（组内该条目的第一个文件）。 */
+  file_path: string
+  duration_seconds?: number | null
+  resolution?: string | null
+}
+
+/** 一组经哈希确认的重复文件（同库、同大小、同时长、同前 1 MB）。 */
+export interface DuplicateGroup {
+  size_bytes: number
+  /** 组内文件数（同一条目的多版本各算一个）。 */
+  count: number
+  items: DuplicateItem[]
+}
+
+/** 列孤儿条目；`libraryId` 为 0 表示全部可见库。 */
+export const mediaListOrphans = (libraryId = 0): Promise<Resp<OrphanItem[]>> =>
+  http.get<OrphanItem[]>("/media/cleanup/orphans", {
+    params: { library_id: libraryId },
+  }) as Promise<Resp<OrphanItem[]>>
+
+/** 删除孤儿条目：只删数据库行，不碰文件（文件早已不在）。 */
+export const mediaDeleteOrphans = (itemIds: number[]): Promise<Resp<unknown>> =>
+  http.post("/media/cleanup/orphans/delete", { item_ids: itemIds }) as Promise<Resp<unknown>>
+
+/** 列重复文件组；`libraryId` 为 0 表示全部可见库。 */
+export const mediaListDuplicates = (libraryId = 0): Promise<Resp<DuplicateGroup[]>> =>
+  http.get<DuplicateGroup[]>("/media/cleanup/duplicates", {
+    params: { library_id: libraryId },
+  }) as Promise<Resp<DuplicateGroup[]>>
+
+/** 删除重复条目：按所属库的回收站规则处理文件，再删行。 */
+export const mediaDeleteDuplicates = (itemIds: number[]): Promise<Resp<unknown>> =>
+  http.post("/media/cleanup/duplicates/delete", { item_ids: itemIds }) as Promise<Resp<unknown>>
+
+/** 删除单个条目；`deleteFiles` 为 true 时按回收站规则连文件一起处理。 */
+export const mediaDeleteItem = (itemId: number, deleteFiles: boolean): Promise<Resp<unknown>> =>
+  http.post(`/media/cleanup/items/${itemId}/delete`, { delete_files: deleteFiles }) as Promise<Resp<unknown>>
+
+/** 清空某个库的回收站目录（库未配置回收站时后端回 400）。 */
+export const mediaEmptyTrash = (libraryId: number): Promise<Resp<unknown>> =>
+  http.post("/media/cleanup/trash/empty", { library_id: libraryId }) as Promise<Resp<unknown>>

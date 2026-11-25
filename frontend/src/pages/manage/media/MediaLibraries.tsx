@@ -1,3 +1,4 @@
+import { useRouter } from "vue-router"
 import { defineComponent, computed, onMounted, onUnmounted, reactive, ref } from "vue"
 import {
   ElAlert,
@@ -82,6 +83,7 @@ export default defineComponent({
   name: "MediaLibrariesPage",
   setup() {
     const user = useUserStore()
+    const router = useRouter()
 
     const rows = ref<MediaLibrary[]>([])
     const tasks = ref<MediaScanTask[]>([])
@@ -320,6 +322,12 @@ export default defineComponent({
           <div class="ol-manage-toolbar">
             <h2 class="ol-manage-h2">{t("media.manage.title")}</h2>
             <div class="ol-manage-actions">
+              <ElButton size="small" onClick={() => router.push("/@manage/media-cleanup")}>
+                <ElIcon>
+                  <Delete />
+                </ElIcon>
+                {t("media.cleanup.title")}
+              </ElButton>
               <ElButton
                 size="small"
                 loading={loading.value}

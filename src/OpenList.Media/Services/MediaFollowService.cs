@@ -3,7 +3,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpenList.Core.Models;
 using OpenList.Infrastructure.Data;
+using OpenList.Media.Domain;
 using OpenList.Media.Domain.Abstractions;
+using OpenList.Media.Endpoints;
 using OpenList.Media.Providers;
 
 namespace OpenList.Media.Services;
@@ -154,7 +156,12 @@ public sealed class MediaFollowService : IMediaFollowService
     /// <inheritdoc />
     public async Task<Resp<List<FollowedPerson>>> ListFollowedAsync(User user, CancellationToken ct = default)
     {
-        var follows = await _db.MediaFollows.AsNoTracking().OrderBy(f => f.CreatedAt).ThenBy(f => f.Id).ToListAsync(ct);
+        // 关注数量是个位到几十的量级，取回后在内存里排：SQLite 不支持在 SQL 里
+        // 按 DateTimeOffset 排序（EF 会抛 "cannot order by expressions of type
+        // 'DateTimeOffset'"，见方案 §7 待补 6）。
+        var follows = (await _db.MediaFollows.AsNoTracking().ToListAsync(ct))
+            .OrderBy(f => f.CreatedAt).ThenBy(f => f.Id)
+            .ToList();
         if (follows.Count == 0) return Resp<List<FollowedPerson>>.Ok([]);
 
         var personIds = follows.Select(f => f.PersonId).ToList();
@@ -215,10 +222,12 @@ public sealed class MediaFollowService : IMediaFollowService
         var total = await q.LongCountAsync(ct);
         var p = Math.Max(1, page);
         var size = Math.Clamp(perPage, 1, 200);
+        // 为什么按 Id 而不是 FirstSeenAt 翻页：SQLite 不支持 SQL 层 DateTimeOffset 排序。
+        // Id 随插入递增，而 FirstSeenAt 是「插入那一刻」，所以 Id 倒序 = 最新一批在前；
+        // 为了让同一批内仍保持数据源的顺序（代表作在前），差集插入时是**倒序**写入的，
+        // 于是 Id 倒序恰好还原成源顺序（见 CheckFollowAsync 的说明）。
         var rows = await q
-            .OrderByDescending(e => e.FirstSeenAt)
-            // 同一轮检查落下来的条目时间相同：按 id 升序保持数据源给的顺序（代表作在前）。
-            .ThenBy(e => e.Id)
+            .OrderByDescending(e => e.Id)
             .Skip((p - 1) * size)
             .Take(size)
             .ToListAsync(ct);
@@ -265,9 +274,12 @@ public sealed class MediaFollowService : IMediaFollowService
 
         if (personId is null)
         {
-            var started = TryBeginCheckRun();
-            if (started) _ = Task.Run(() => RunBackgroundCheckAsync());
-            return Resp<FollowCheckResult>.Ok(new FollowCheckResult { Started = started });
+            // 名额由 CheckAllAsync 自己抢：这里只判断「是不是已经有一轮在跑」，
+            // 免得前端连点两次看到两个 Started=true 却只跑了一轮。
+            if (IsRunInProgress)
+                return Resp<FollowCheckResult>.Ok(new FollowCheckResult { Started = false });
+            _ = Task.Run(() => RunBackgroundCheckAsync());
+            return Resp<FollowCheckResult>.Ok(new FollowCheckResult { Started = true });
         }
 
         var follow = await _db.MediaFollows.AsNoTracking().FirstOrDefaultAsync(f => f.PersonId == personId.Value, ct);
@@ -280,20 +292,38 @@ public sealed class MediaFollowService : IMediaFollowService
     /// <inheritdoc />
     public async Task<int> CheckAllAsync(CancellationToken ct = default)
     {
-        var ids = await _db.MediaFollows.AsNoTracking().OrderBy(f => f.Id).Select(f => f.Id).ToListAsync(ct);
-        var added = 0;
-        for (var i = 0; i < ids.Count; i++)
+        // 名额在这里抢：宿主定时任务与手动「全部检查」都只会有一条真正在跑。
+        if (!TryBeginCheckRun()) return 0;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            added += await CheckFollowByIdAsync(ids[i], ct);
-            // 最后一个之后不再等：关停时少等 250 ms。
-            if (i < ids.Count - 1) await Task.Delay(_personDelay, ct);
+            var ids = await _db.MediaFollows.AsNoTracking().OrderBy(f => f.Id).Select(f => f.Id).ToListAsync(ct);
+            var added = 0;
+            for (var i = 0; i < ids.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                added += await CheckFollowByIdAsync(ids[i], ct);
+                // 最后一个之后不再等：关停时少等 250 ms。
+                if (i < ids.Count - 1) await Task.Delay(_personDelay, ct);
+            }
+            return added;
         }
-        return added;
+        finally
+        {
+            EndCheckRun();
+        }
     }
 
-    /// <inheritdoc />
-    public static bool TryBeginCheckRun() => false;
+    /// <summary>
+    /// 抢占「整轮检查」的名额（宿主定时任务与手动「全部检查」共用）。
+    /// 非阻塞：已有一轮在跑时直接返回 false，调用方据此告诉前端「已在运行」。
+    /// </summary>
+    public static bool TryBeginCheckRun() => RunGate.Wait(0);
+
+    /// <summary>是否已有一轮整轮检查在跑（只用于给前端一个准确的 <c>started</c>）。</summary>
+    public static bool IsRunInProgress => RunGate.CurrentCount == 0;
+
+    /// <summary>归还「整轮检查」名额。只由拿到名额的一方在 finally 里调用。</summary>
+    private static void EndCheckRun() => RunGate.Release();
 
     /// <summary>
     /// 检查一个人物（按关注行 id）：做差集、落库、更新 <c>LastCheckedAt</c> / <c>LastError</c>。
@@ -331,7 +361,11 @@ public sealed class MediaFollowService : IMediaFollowService
                         .ToHashSet(StringComparer.Ordinal);
 
                     var now = _time.GetUtcNow();
-                    foreach (var w in works)
+                    // **倒序插入**：更新流按 Id 倒序翻页（SQLite 不支持 SQL 层按
+                    // DateTimeOffset 排序），倒序写入才能让「同一批」在页面上回到数据源
+                    // 给的顺序（代表作在前）。改成正序会让每位创作者的作品整体反排，
+                    // 首次关注时最明显。
+                    foreach (var w in works.Reverse())
                     {
                         // 差集键只有 ExternalId（与唯一索引一致）：TMDB 的 movie / tv 是两套 id，
                         // 同一个人名下可能撞号，此时只留先到的那部（cast 在前）。
@@ -372,7 +406,10 @@ public sealed class MediaFollowService : IMediaFollowService
         }
     }
 
-    /// <summary>手动「全部检查」的后台执行体：整轮跑完才归还名额。</summary>
+    /// <summary>
+    /// 手动「全部检查」的后台执行体。名额由 <see cref="CheckAllAsync"/> 自己抢与归还，
+    /// 这里只负责换一个作用域（请求作用域随响应结束就释放了）并兜整轮异常。
+    /// </summary>
     private async Task RunBackgroundCheckAsync()
     {
         try
@@ -390,10 +427,6 @@ public sealed class MediaFollowService : IMediaFollowService
         {
             // 单个人物的失败已在 CheckFollowAsync 里落到 LastError；这里只兜整轮级别的异常。
             _logger?.LogWarning(ex, "media follow background check failed");
-        }
-        finally
-        {
-            EndCheckRun();
         }
     }
 

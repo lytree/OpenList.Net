@@ -4106,3 +4106,128 @@ public bool CanSeeLibrary(User user, MediaLibrary library) => !library.Private |
   `/api/fs/get`，而该端点默认要登录。也就是说游客今天能看到公开库的海报和元数据，但点播
   会失败。要打通得给媒体域加一个「按条目 id 取流」的匿名端点（校验条目可见性后再读 VFS），
   属于下一步，不在本轮范围内。
+
+## 62. 关注 / 想看 / 下载三段接通（2026-11-25）
+
+上一轮（`3c489f5`、`59b6db2`）把「关注人物 → 新作品更新流 → 想看 → 下载 → 入库」的数据模型与服务骨架
+落进了代码：三张表 + 两份迁移（`20261124_AddMediaFollowsWantsAndDownloads`）、`MediaFollowService`、
+`TmdbPersonFeedProvider`、`IMediaCleanupService`。但那一轮**没有接线**，且 `MediaFollowService` 编译不过
+（缺 `using`、`EndCheckRun()` 未定义），`dotnet build` 直接 7 个错误。本轮把这半截补成可用的链路。
+
+### 62.1 交付清单
+
+**后端**
+
+| 改动 | 位置 |
+|---|---|
+| 修复编译并实现「整轮检查」名额 | `Media/Services/MediaFollowService.cs`：`RunGate` + `TryBeginCheckRun` / `IsRunInProgress` / `EndCheckRun`，名额收进 `CheckAllAsync` 自己抢与归还 |
+| 想看服务（新增） | `Media.Domain/Abstractions/IMediaWantService.cs` + `Media/Services/MediaWantService.cs`：幂等加入、分页列出、删除、入库回填 |
+| 下载服务（新增） | `IMediaDownloadService.cs` + `MediaDownloadService.cs`：提交到 `IOfflineDownloadService`、列出、取消、状态轮询 |
+| 下载轮询宿主 | `Media/Hosting/MediaDownloadWatchHostedService.cs`（30s） |
+| 关注检查宿主 | `Media/Hosting/MediaFollowCheckHostedService.cs`（读 `media_follow_check_interval_hours`，0 = 关闭） |
+| 端点（新增） | `Media/Endpoints/FollowEndpoints.cs`：`/follow/state｜/follow｜/follow/feed｜/follow/check｜/follow/{id}`、`/wants`、`/downloads` |
+| DI 与挂载 | `MediaModule.AddMediaModule` 注册 `IPersonFeedProvider` / `IMediaFollowService` / `IMediaWantService` / `IMediaDownloadService` + 两个宿主；`MediaEndpoints` 挂 `MapFollowEndpoints()` |
+| 用例（新增） | `tests/OpenList.Tests/MediaFollowWantDownloadTests.cs`，15 条 |
+
+**前端**
+
+| 改动 | 位置 |
+|---|---|
+| API 与类型 | `api/media.ts`：follow state/list/feed/check、wants CRUD、downloads 提交/列表/取消、`mediaExternalImage` |
+| 关注更新页 | `pages/media/Follow.tsx`（`/media/follow`）：更新流海报墙 + 已关注列表两个页签，加入待下载 / 取关 / 检查更新 |
+| 待下载页 | `pages/media/Wants.tsx`（`/media/wants`）：库外作品清单 + 提交下载对话框（库 / 下载器 / 地址）+ 下载状态 |
+| 人物页关注按钮 | `pages/media/PersonDetail.tsx`：无 TMDB id 时置灰并说明原因 |
+| 导航 / 路由 / 文案 | `MediaNav.tsx`（登录组加「关注更新」，第二组加「待下载」）、`router.ts`、`media.json` 中英各 30+ 键 |
+| 样式 | `styles/media-extra.scss`：`ol-follow-*` / `ol-wants-*` |
+
+### 62.2 四个关键决策
+
+1. **更新流按 `Id` 翻页，且差集倒序插入。** SQLite 不支持在 SQL 层按 `DateTimeOffset` 排序（EF 抛
+   `cannot order by expressions of type 'DateTimeOffset'`，同 §7 待补 6）。改用随插入递增的 `Id` 倒序，
+   同时把 `foreach (var w in works)` 改成 `works.Reverse()` —— 这样同一批内仍回到数据源顺序（代表作在前）。
+   两处必须成对修改，只改一处会让每位创作者的作品整体反排。
+2. **「下载完成」与「已入库」分开。** 离线下载是两段任务（下载 → 转移到库目录），`IOfflineDownloadService`
+   只返回**下载段**的任务 id。因此 `Completed` 只表示「下完了」，真正入库由 `LinkIngestedAsync` 按
+   `TmdbId` + 类型对表确认，回填 `MediaWant.ItemId` 与 `MediaDownload.IngestedAt`；想看页据此自动隐藏该行。
+3. **读开放、写要登录。** 更新流 / 关注列表 / 关注状态与媒体门面同口径 `AllowAnonymous`（私有库人物与条目
+   由服务层过滤，不出现）；关注、想看、下载一律要登录 —— 它们会真的调 TMDB 和下载器。
+4. **目标目录只建一级。** `库根路径 + 清洗后的「标题 (年份)」`，用 `MkdirAsync` 建一层（库根一定存在）。
+   标题里的 `/ \ :` 与非法字符换成下划线、尾部点剪掉（Windows 会静默吞掉尾点），下载器因此不可能写到库外。
+
+### 62.3 验证
+
+- `dotnet build`：Media / Server 0 error（此前 7 个）。
+- `MediaFollowWantDownloadTests` 15/15：首次关注落全部作品且保序、幂等、无 TMDB id 400、取关级联、
+  只增「首次见到」、provider 失败落 `LastError`、想看幂等与入库回填、列表默认隐藏已入库、删除连带下载行、
+  提交建目录并记任务、非法 URL/未知想看/游客被拒、Running→Downloading→Completed→回填、Errored/Canceled 映射。
+- 真机冒烟（临时库 + 5400 端口，登录令牌）：`/follow`、`/follow/feed`、`/follow/state` 匿名 200；
+  `/wants`、`/downloads` 匿名 401、登录 200；重复加入想看只留一行；关注不存在的人物 404；下载指向不存在的库 404。
+- 前端：`pnpm typecheck` 通过；`pnpm test` 272/272（`MediaNav.spec.ts` 按新增两项更新）；`pnpm build` 通过。
+
+### 62.4 遗留
+
+1. **资源搜索仍未做**（P1-2 的前半段）：想看页目前要用户自己粘磁力/直链，`IResourceSearchProvider`
+   与「按番号搜种」弹层还是空的。
+2. **关注检查依赖 TMDB 配额**：`media_follow_check_interval_hours` 默认 0（关闭），开启后每轮按人物
+   250ms 间隔串行请求；RSS/连接器类 provider 未实现。
+3. **没有「已入库」历史视图**：入库后想看行消失，`x_media_downloads` 仍留着记录，但没有页面按时间回看。
+4. **下载不指定子目录/命名规则**：只用「标题 (年份)」，未接 `MediaNaming`；剧集的多文件落盘顺序依赖扫描器。
+5. ~~**`IMediaCleanupService` 仍是空接口**（P1-1 数据清理），本轮未动。~~ 已在 §63 补齐。
+
+## 63. 数据清理：孤儿 / 重复 / 单条删除 / 回收站（2026-11-25）
+
+`IMediaCleanupService` 之前只有接口与 DTO（`OrphanItem` / `DuplicateGroup` / `CleanupItemsReq`），
+没有实现、没有 DI 注册、没有端点，也没有引用方。本轮把它落成可用的一条链路，并补上前端入口。
+
+### 63.1 交付清单
+
+**后端**
+
+| 改动 | 位置 |
+|---|---|
+| 服务实现（新增） | `Media/Services/MediaCleanupService.cs`：四个能力共用一条「先算清单、再按 id 执行」的口径 |
+| 端点（新增） | `Media/Endpoints/CleanupEndpoints.cs`：`/cleanup/orphans`、`/cleanup/orphans/delete`、`/cleanup/duplicates`、`/cleanup/duplicates/delete`、`/cleanup/items/{id}/delete`、`/cleanup/trash/empty` |
+| DI 与挂载 | `MediaModule` 注册 `IMediaCleanupService`；`MediaEndpoints` 挂 `MapCleanupEndpoints()` |
+| 用例（新增） | `tests/OpenList.Tests/MediaCleanupTests.cs`，14 条（内存文件系统挂在 `/test`，断言真实的移动 / 删除） |
+
+**前端**
+
+| 改动 | 位置 |
+|---|---|
+| API 与类型 | `api/media.ts`：`OrphanItem` / `DuplicateGroup` / 6 个函数；`MediaLibrary` 补 `trash_directory` |
+| 清理页（新增） | `pages/manage/media/MediaCleanup.tsx`（`/@manage/media-cleanup`）：库筛选、孤儿表、重复组卡片、清空回收站 |
+| 入口 | `pages/manage/media/MediaLibraries.tsx` 工具栏「数据清理」按钮 + `router.ts` 路由 |
+| 文案 / 样式 | `lang/{zh,en}/media.json` 各 24 键；`styles/layout.scss` 的 `ol-cleanup-*`、`ol-manage-h3` |
+
+### 63.2 五个口径
+
+1. **孤儿 = 文件行全没了；零文件的条目也算。** 判定走 VFS 的 `FileExists`，**逐文件短路**：只要还有一个
+   文件在就跳过这条。云驱动上每条都要发一次 stat，全量遍列会让一次请求变成几百次往返。
+   `MissingFiles` 仍是文件行数（零文件的条目报 0），前端据此区分「曾经有文件」和「本来就没有」。
+2. **孤儿只删行，重复/单条才碰文件。** 文件早就不在的东西去删文件只会得到一串 404；反过来，
+   重复删除如果不处理文件，磁盘会留下扫描器下次又捞回来的孤儿。
+3. **文件操作失败就不删行。** 删掉行却留下文件是最难排查的状态（下次扫描重新入库，用户以为没删掉）。
+   失败条目原样保留，接口回 500 并带上第一条失败原因，其余成功条目照常提交。
+4. **回收站按原路径镜像，不平铺。** 目标是 `回收站根 + 源文件完整 VFS 路径`（`/trash` + `/media/movies/x/a.mkv`）：
+   两个库有同名条目也不会互相覆盖，打开回收站还能看出文件原本在哪。同名已存在时补 `(2)`、`(3)`。
+   回收站指向 `/` 时直接拒绝 —— 一次「清空回收站」会清空整个存储。
+5. **删除条目时清掉全部指向它的行。** 文件 / 演职员关联 / 个人状态 / 观看会话 / 播放列表成员一并删；
+   想看与下载记录**保留**（那是「曾经想要」的历史），只把 `ItemId` 回填写空，避免想看页显示一条
+   点进去 404 的「已入库」。
+
+### 63.3 边界
+
+- 重复确认只比对**前 1 MB 的 SHA-256**，同大小 + 同时长 + 同首段即认定重复；一次请求最多确认
+  **200 组 / 2000 个文件**（按体积倒序取），超大库需要分库跑或后续改成分页/后台任务。
+- 孤儿扫描是**全库文件行**遍历（每库一次查询 + 每条一次短路的 stat），没有增量游标。
+- 回收站留存任务仍未做：`media_trash_retention_days` 依然没有消费方，只能手动清空。
+
+### 63.4 验证
+
+- `dotnet build`：Media / Server 0 error。
+- 后端全量 **648/648**（新增 14 条：孤儿判定与短路、可见库过滤与 404、只删行不动文件、幂等与游客 403、
+  关联行级联与想看回填、重复需同大小同时长同哈希、回收站镜像移动、无回收站直删、单条删除两态、
+  清空回收站保留目录、未配置/指向根 400）。
+- 前端：`pnpm typecheck` 通过、`pnpm test` 272/272、`pnpm build` 通过。
+- 真机冒烟（临时库 + 5401 端口）：匿名 `/cleanup/orphans` 401；登录后孤儿与重复均 200 空列表；
+  空 id 列表 200；未知库清空回收站 404；不存在的条目删除 200（幂等）。

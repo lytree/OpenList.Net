@@ -1,11 +1,14 @@
 import { computed, defineComponent, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { ElButton, ElEmpty, ElIcon, ElTag } from "element-plus"
+import { ElButton, ElEmpty, ElIcon, ElMessage, ElTag } from "element-plus"
 import { ArrowLeft } from "@element-plus/icons-vue"
 import {
+  mediaFollowPerson,
+  mediaFollowState,
   mediaGetPerson,
   mediaListPersonItems,
   mediaListItems,
+  mediaUnfollowPerson,
   mediaUpdateState,
   type MediaItem,
   type PersonAggregate,
@@ -51,6 +54,9 @@ export default defineComponent({
     const page = ref(1)
     const loading = ref(true)
     const favorites = ref<Set<number>>(new Set())
+    /** 是否已关注这位创作者（关注 → 新作品更新流）。 */
+    const following = ref(false)
+    const followBusy = ref(false)
 
     const personId = computed(() => Number(route.params.id))
     const person = computed(() => aggregate.value?.person ?? null)
@@ -97,13 +103,45 @@ export default defineComponent({
       void loadItems()
       // 游客没有「我的收藏」，这个请求对 user_id=0 只会拿到空集，不如不发
       if (user.isLogin) void loadFavorites()
+      void loadFollowState()
     })
     watch(personId, () => {
       page.value = 1
       void loadPerson()
       void loadItems()
+      void loadFollowState()
     })
     watch(page, () => void loadItems())
+
+    /** 关注状态是公开读：游客也能问（私有库里的人物不会出现在结果里，按未关注处理）。 */
+    async function loadFollowState() {
+      const resp = await mediaFollowState([personId.value])
+      following.value = resp.code === 200 ? resp.data?.[String(personId.value)] === true : false
+    }
+
+    /**
+     * 关注 / 取关。没有 TMDB id 的本地人物关注了也永远不会更新，
+     * 后端直接 400 —— 这里把按钮置灰并给出原因，不让用户白点。
+     */
+    async function toggleFollow() {
+      if (!user.isLogin) {
+        void router.push({ name: "login", query: { redirect: route.fullPath } })
+        return
+      }
+      followBusy.value = true
+      try {
+        const resp = following.value
+          ? await mediaUnfollowPerson(personId.value)
+          : await mediaFollowPerson(personId.value)
+        if (resp.code !== 200) {
+          ElMessage.error(resp.message)
+          return
+        }
+        following.value = !following.value
+      } finally {
+        followBusy.value = false
+      }
+    }
 
     const pages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 
@@ -159,6 +197,23 @@ export default defineComponent({
                   </ElTag>
                 ))}
                 {current?.tmdb_id ? <ElTag size="small" type="info">TMDB {current.tmdb_id}</ElTag> : null}
+              </div>
+              <div class="ol-media-detail-tags">
+                {/* 原生 title 挂在 ElButton 上会被 TSX 拒绝，包一层 span 承载提示 */}
+                <span title={current?.tmdb_id ? undefined : t("media.follow_no_tmdb")}>
+                  <ElButton
+                    size="small"
+                    type={following.value ? "info" : "primary"}
+                    loading={followBusy.value}
+                    disabled={!current?.tmdb_id}
+                    onClick={() => void toggleFollow()}
+                  >
+                    {following.value ? t("media.following_person") : t("media.follow_person")}
+                  </ElButton>
+                </span>
+                {!current?.tmdb_id ? (
+                  <span class="ol-media-page-sub">{t("media.follow_no_tmdb")}</span>
+                ) : null}
               </div>
             </div>
           </div>

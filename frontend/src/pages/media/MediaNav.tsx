@@ -2,8 +2,10 @@ import { computed, defineComponent, h, type Component } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
 import { ElIcon } from "element-plus"
 import {
+  Bell,
   Clock,
   Collection,
+  Download,
   Film,
   FolderOpened,
   HomeFilled,
@@ -83,6 +85,7 @@ export default defineComponent({
       ...(user.isLogin
         ? [
             { prefix: "/media/watch-later", label: t("media.tab_later"), icon: Star },
+            { prefix: "/media/follow", label: t("media.tab_follow"), icon: Bell },
             { prefix: "/media/history", label: t("media.tab_history"), icon: Clock },
           ]
         : []),
@@ -91,6 +94,7 @@ export default defineComponent({
     const mine = computed<NavEntry[]>(() =>
       user.isLogin
         ? [
+            { prefix: "/media/wants", label: t("media.tab_wants"), icon: Download },
             { prefix: "/media/playlists", label: t("media.tab_playlists"), icon: List },
             { prefix: "/media/taste", label: t("media.tab_taste"), icon: Odometer },
             { prefix: "/media/tasks", label: t("media.tab_tasks"), icon: Clock },

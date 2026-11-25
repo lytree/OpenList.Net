@@ -664,3 +664,258 @@
 .ol-media-scrape-progress .el-progress {
   width: 100%;
 }
+
+/* ============================================================================
+ * 关注更新 / 待下载
+ * 两张列表共用一套卡片骨架：左图右文，操作钉在右下角。
+ * ========================================================================== */
+
+.ol-media-title-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+}
+
+/* ---- 更新流：海报卡网格 ---- */
+.ol-follow-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--ol-space-4);
+}
+
+.ol-follow-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--ol-bg-surface);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-lg);
+  overflow: hidden;
+  transition: box-shadow var(--ol-dur) var(--ol-ease), transform var(--ol-dur) var(--ol-ease);
+}
+
+.ol-follow-card:hover {
+  box-shadow: var(--ol-shadow-md);
+  transform: translateY(-2px);
+}
+
+.ol-follow-poster {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  padding: 0;
+  border: 0;
+  background: var(--ol-bg-subtle);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.ol-follow-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ol-follow-poster-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--ol-text-muted);
+}
+
+.ol-follow-badge {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 1px 6px;
+  border-radius: var(--ol-radius-pill);
+  font-size: 11px;
+  line-height: 18px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+
+.ol-follow-badge.is-in {
+  background: var(--ol-brand);
+}
+
+.ol-follow-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--ol-space-3);
+}
+
+.ol-follow-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-follow-card-meta,
+.ol-follow-card-date {
+  font-size: 12px;
+  color: var(--ol-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-follow-person-link {
+  color: var(--ol-brand);
+  cursor: pointer;
+}
+
+.ol-follow-person-link:hover {
+  text-decoration: underline;
+}
+
+.ol-follow-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+/* ---- 已关注：一行一个人 ---- */
+.ol-follow-people {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+}
+
+.ol-follow-person {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-3);
+  padding: var(--ol-space-3);
+  background: var(--ol-bg-surface);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-lg);
+}
+
+.ol-follow-person-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.ol-follow-person-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ol-text);
+  cursor: pointer;
+}
+
+.ol-follow-person-name:hover {
+  color: var(--ol-brand);
+}
+
+.ol-follow-person-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ---- 待下载：左图右文的行 ---- */
+.ol-wants-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-2);
+}
+
+.ol-wants-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-3);
+  padding: var(--ol-space-3);
+  background: var(--ol-bg-surface);
+  border: 1px solid var(--ol-border);
+  border-radius: var(--ol-radius-lg);
+}
+
+.ol-wants-poster {
+  position: relative;
+  width: 54px;
+  height: 81px;
+  flex: none;
+  border-radius: var(--ol-radius-sm);
+  overflow: hidden;
+  background: var(--ol-bg-subtle);
+}
+
+.ol-wants-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ol-wants-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.ol-wants-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ol-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ol-wants-year,
+.ol-wants-date {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ol-text-secondary);
+}
+
+.ol-wants-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ol-wants-error {
+  font-size: 12px;
+  color: var(--ol-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+
+.ol-wants-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  flex: none;
+}
+
+/* 对话框内容：与首页离线下载框保持同样的纵向间距 */
+.ol-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-3);
+}

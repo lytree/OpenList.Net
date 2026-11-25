@@ -54,6 +54,8 @@ public static class MediaEndpoints
         g.MapWatchEndpoints();     // 观看会话：心跳上报 / 历史 / 逐日时长
         g.MapPlaylistEndpoints();  // 用户私有播放列表
         g.MapCatalogEndpoints();   // facets / stats / home / persons / tasks
+        g.MapFollowEndpoints();    // 关注更新流 / 想看 / 下载
+        g.MapCleanupEndpoints();   // 孤儿 / 重复 / 单条删除 / 回收站
         g.MapSubtitleEndpoints();  // 字幕搜索与写回
 
         return app;

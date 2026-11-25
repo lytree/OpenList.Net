@@ -3040,3 +3040,59 @@ html.dark .ol-grid-check {
 .el-empty__description p {
   color: var(--ol-text-muted);
 }
+
+/* 媒体清理：两个小节标题 + 重复组卡片 */
+.ol-manage-h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--ol-space-2);
+  margin: var(--ol-space-5) 0 var(--ol-space-3);
+  padding-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ol-text);
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+.ol-cleanup-count {
+  font-weight: 400;
+}
+
+/* 小节内的批量动作靠右，和标题同一条基线 */
+.ol-cleanup-section-action {
+  margin-left: auto;
+}
+
+.ol-cleanup-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-space-4);
+}
+
+.ol-cleanup-group {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--ol-radius-md);
+  padding: var(--ol-space-3);
+}
+
+.ol-cleanup-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-3);
+  margin-bottom: var(--ol-space-2);
+}
+
+.ol-cleanup-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ol-text);
+}
+
+.ol-cleanup-trash {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ol-space-3);
+  flex-wrap: wrap;
+}
